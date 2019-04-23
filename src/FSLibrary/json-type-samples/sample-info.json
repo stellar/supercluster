@@ -1,0 +1,36 @@
+{
+   "info" : {
+      "build" : "v11.0.0",
+      "history_failure_rate" : "0",
+      "ledger" : {
+         "age" : 0,
+         "baseFee" : 100,
+         "baseReserve" : 100000000,
+         "closeTime" : 1556153967,
+         "hash" : "b7f80a1e1915a18cb053710a1ffe19a8fb77f84391b523a9f22c8d8771f2df9e",
+         "maxTxSetSize" : 100,
+         "num" : 14,
+         "version" : 0
+      },
+      "network" : "Private test network 'ssc-3ad18bbb4cef'",
+      "peers" : {
+         "authenticated_count" : 4,
+         "pending_count" : 0
+      },
+      "protocol_version" : 11,
+      "quorum" : {
+         "14" : {
+            "agree" : 5,
+            "delayed" : 0,
+            "disagree" : 0,
+            "fail_at" : 2,
+            "hash" : "06d08f",
+            "missing" : 0,
+            "phase" : "EXTERNALIZE",
+            "validated" : true
+         }
+      },
+      "startedOn" : "2019-04-25T00:58:21Z",
+      "state" : "Synced!"
+   }
+}
