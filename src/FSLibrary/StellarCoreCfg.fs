@@ -63,6 +63,9 @@ type DatabaseURL =
         | SQLite3File s -> sprintf "sqlite3://%s" s
         | PostgreSQL(d, u, p, h) -> sprintf "postgresql://dbname=%s user=%s password=%s host=%s" d u p h
 
+type CatchupMode =
+    | CatchupComplete
+    | CatchupRecent of int
 
 // Represents the contents of a stellar-core.cfg file, along with method to
 // write it out to TOML.
@@ -73,6 +76,13 @@ type StellarCoreCfg =
       nodeIsValidator : bool
       runStandalone : bool
       knownPeers : string array
+      catchupMode: CatchupMode
+      automaticMaintenancePeriod: int
+      automaticMaintenanceCount: int
+      accelerateTime: bool
+      generateLoad: bool
+      manualClose: bool
+      invariantChecks: string list
       unsafeQuorum : bool
       failureSafety : int
       quorumSet : Map<string, KeyPair> }
@@ -99,6 +109,17 @@ type StellarCoreCfg =
         ignore (t.Add("NODE_IS_VALIDATOR", self.nodeIsValidator))
         ignore (t.Add("RUN_STANDALONE", self.runStandalone))
         ignore (t.Add("KNOWN_PEERS", self.knownPeers))
+        ignore (t.Add("CATCHUP_COMPLETE", self.catchupMode = CatchupComplete))
+        ignore (t.Add("CATCHUP_RECENT",
+                      match self.catchupMode with
+                        | CatchupComplete -> 0
+                        | CatchupRecent n -> n))
+        ignore (t.Add("AUTOMATIC_MAINTENANCE_PERIOD", self.automaticMaintenancePeriod))
+        ignore (t.Add("AUTOMATIC_MAINTENANCE_COUNT", self.automaticMaintenanceCount))
+        ignore (t.Add("ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING", self.accelerateTime))
+        ignore (t.Add("ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING", self.generateLoad))
+        ignore (t.Add("MANUAL_CLOSE", self.manualClose))
+        ignore (t.Add("INVARIANT_CHECKS", self.invariantChecks))
         ignore (t.Add("UNSAFE_QUORUM", self.unsafeQuorum))
         ignore (t.Add("FAILURE_SAFETY", self.failureSafety))
         ignore (t.Add("QUORUM_SET", Map.ofSeq [| ("VALIDATORS", qset) |]))
@@ -110,9 +131,11 @@ type StellarCoreCfg =
 
 
 // Extension to the NetworkCfg type to make StellarCoreCfg objects
-// for each of its peers.
+// for each of its peers. This just creates a default; if you want
+// to modify a field, use a copy-and-update record expression like
+// {cfg with accelerateTime = true}
 type NetworkCfg with
-    member self.StellarCoreCfgForPeer(i : int) : StellarCoreCfg =
+    member self.StellarCoreCfgForPeer(i: int) : StellarCoreCfg =
         let numPeers = Array.length self.peerKeys
         { database = SQLite3File CfgVal.databasePath
           networkPassphrase = PrivateNet self.networkNonce
@@ -120,6 +143,13 @@ type NetworkCfg with
           nodeIsValidator = true
           runStandalone = false
           knownPeers = Array.init numPeers (CfgVal.peerDNSName self.networkNonce)
+          catchupMode = CatchupRecent 1024
+          automaticMaintenancePeriod = 30
+          automaticMaintenanceCount = 10000
+          accelerateTime = false
+          generateLoad = true
+          manualClose = false
+          invariantChecks = ["*"]
           unsafeQuorum = true
           failureSafety = (-1)
           quorumSet = Map.ofSeq (Array.mapi (fun (i : int) k -> ((CfgVal.peerShortName i), k)) self.peerKeys) }
