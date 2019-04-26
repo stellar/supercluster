@@ -33,10 +33,20 @@ let WaitForAllReplicasReady (kube:Kubernetes) (statefulSet:V1StatefulSet) =
     printfn "All replicas ready"
 
 
+let ExpandHomeDirTilde (s:string) : string =
+    if s.StartsWith("~/")
+    then
+        let upp = System.Environment.SpecialFolder.UserProfile
+        let home = System.Environment.GetFolderPath(upp)
+        home + s.Substring(1)
+    else
+        s
+
+
 // Loads a config file and builds a Kubernetes client object connected to the
 // cluster described by it.
 let ConnectToCluster (cfgFile:string) : Kubernetes =
-    let cfgFileInfo = System.IO.FileInfo(cfgFile)
+    let cfgFileInfo = System.IO.FileInfo(ExpandHomeDirTilde cfgFile)
     let kCfg = k8s.KubernetesClientConfiguration.BuildConfigFromConfigFile(cfgFileInfo)
     new k8s.Kubernetes(kCfg)
 
@@ -76,3 +86,4 @@ let RunCluster (kube:Kubernetes) (nCfg:NetworkCfg) =
     WaitForAllReplicasReady kube statefulSet
     ReportAllPeerStatus nCfg
     ()
+

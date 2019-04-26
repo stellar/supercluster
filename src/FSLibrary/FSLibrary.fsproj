@@ -1,24 +1,24 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
   </PropertyGroup>
-
-
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <GenerateTailCalls>true</GenerateTailCalls>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <GenerateTailCalls>true</GenerateTailCalls>
+  </PropertyGroup>
   <ItemGroup>
     <!-- For HTTP and JSON access to core. -->
     <PackageReference Include="FSharp.Data" Version="3.1.1" />
-
     <!-- For the k8s API. -->
     <PackageReference Include="KubernetesClient" Version="1.5.17" />
-
     <!-- For writing stellar-core.cfg TOML files. -->
     <PackageReference Include="Nett" Version="0.11.0" />
-
     <!-- For KeyPairs and other core XDR types. -->
     <PackageReference Include="stellar-dotnet-sdk" Version="2.1.25" />
   </ItemGroup>
-
   <ItemGroup>
     <!-- Note to readers: files need to be listed here in dependency
        order, with users of a module declared after the module. Further,
@@ -27,9 +27,9 @@
        in any case, is mandated by most of the ML family, including F#.   -->
     <Compile Include="StellarNetworkCfg.fs" />
     <Compile Include="StellarCoreCfg.fs" />
+    <Compile Include="StellarCorePeer.fs" />
     <Compile Include="StellarCoreHTTP.fs" />
     <Compile Include="StellarKubeSpecs.fs" />
     <Compile Include="StellarSupercluster.fs" />
   </ItemGroup>
-
 </Project>

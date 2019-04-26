@@ -8,7 +8,6 @@ open CommandLine
 open StellarNetworkCfg
 open StellarSupercluster
 
-
 [<Verb("setup", HelpText="Set up a new stellar-core cluster")>]
 type SetupOptions = {
 
