@@ -42,7 +42,7 @@ type LoadGen =
       offset: int
       batchsize: int }
 
-    member self.ToQuery =
+    member self.ToQuery : (string*string) list =
         [
            ("mode", self.mode.ToString())
            ("accounts", self.accounts.ToString());
@@ -68,21 +68,21 @@ let MeterCountOr (def:int) (m:Option<Metrics.GenericMeter>) : int =
 
 type Peer with
 
-    member self.URL (path:string) =
+    member self.URL (path:string) : string =
         sprintf "http://localhost:8080/%s/%s/%s"
             (self.networkCfg.networkNonce.ToString())
             self.ShortName
             path
 
-    member self.GetMetrics =
+    member self.GetMetrics : Metrics.Metrics =
         WebExceptionRetry DefaultRetry
             (fun _ -> Metrics.Load(self.URL "metrics").Metrics)
 
-    member self.GetInfo =
+    member self.GetInfo : Info.Info =
         WebExceptionRetry DefaultRetry
             (fun _ -> Info.Load(self.URL "info").Info)
 
-    member self.GetLedgerNum =
+    member self.GetLedgerNum : int =
         self.GetInfo.Ledger.Num
 
     member self.WaitForLedgerNum (n:int) =
@@ -94,7 +94,7 @@ type Peer with
     member self.WaitForNextLedger() =
         self.WaitForLedgerNum (self.GetLedgerNum + 1)
 
-    member self.GetTestAcc (accName:string) =
+    member self.GetTestAcc (accName:string) : TestAcc.Root =
         WebExceptionRetry DefaultRetry
             (fun _ -> TestAcc.Load(self.URL("testacc") + "?name=" + accName))
 
