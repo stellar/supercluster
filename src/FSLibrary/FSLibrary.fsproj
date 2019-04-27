@@ -25,11 +25,12 @@
        those dependencies must be acyclic. Acyclicality is a bit of a
        bummer for organizing your code but it helps keep things tidy and,
        in any case, is mandated by most of the ML family, including F#.   -->
+    <Compile Include="PollRetry.fs" />
     <Compile Include="StellarNetworkCfg.fs" />
     <Compile Include="StellarCoreCfg.fs" />
     <Compile Include="StellarCorePeer.fs" />
-    <Compile Include="StellarTransaction.fs" />
     <Compile Include="StellarCoreHTTP.fs" />
+    <Compile Include="StellarTransaction.fs" />
     <Compile Include="StellarKubeSpecs.fs" />
     <Compile Include="StellarSupercluster.fs" />
   </ItemGroup>

@@ -16,6 +16,7 @@ type NetworkNonce =
         // "ssc" == "stellar supercluster", just to help group namespaces.
         "ssc-" + (Util.BytesToHex n).ToLower()
 
+
 let MakeNetworkNonce() : NetworkNonce =
     let bytes : byte array = Array.zeroCreate 6
     let rng = System.Security.Cryptography.RNGCryptoServiceProvider.Create()

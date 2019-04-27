@@ -11,6 +11,7 @@ open k8s.Models
 open StellarNetworkCfg
 open StellarCoreCfg
 open StellarKubeSpecs
+open StellarCorePeer
 open StellarCoreHTTP
 
 // Watches the provided StatefulSet until the count of ready replicas equals the
@@ -64,6 +65,7 @@ let PollCluster (kube:Kubernetes) =
                                                          p.Metadata.Name p.Status.Phase
                                                          p.Status.PodIP
 
+
 // Starts a StatefulSet, Service, and Ingress for a given NetworkCfg, then
 // waits for it to be ready.
 let RunCluster (kube:Kubernetes) (nCfg:NetworkCfg) =
@@ -85,5 +87,9 @@ let RunCluster (kube:Kubernetes) (nCfg:NetworkCfg) =
 
     WaitForAllReplicasReady kube statefulSet
     ReportAllPeerStatus nCfg
+    let peer = nCfg.GetPeer 0
+    let lg = { DefaultAccountCreationLoadGen with accounts = 10000 }
+    printfn "Loadgen: %s" (peer.GenerateLoad lg)
+    peer.WaitForLoadGenComplete lg
     ()
 

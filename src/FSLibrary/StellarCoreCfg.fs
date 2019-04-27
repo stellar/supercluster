@@ -149,7 +149,7 @@ type NetworkCfg with
           accelerateTime = false
           generateLoad = true
           manualClose = false
-          invariantChecks = ["*"]
+          invariantChecks = [".*"]
           unsafeQuorum = true
           failureSafety = (-1)
           quorumSet = Map.ofSeq (Array.mapi (fun (i : int) k -> ((CfgVal.peerShortName i), k)) self.peerKeys) }
