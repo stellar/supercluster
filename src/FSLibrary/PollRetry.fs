@@ -5,6 +5,8 @@
 module PollRetry
 
 open System.Threading
+open Logging
+
 
 let DefaultRetry = 5
 
@@ -13,8 +15,8 @@ let rec WebExceptionRetry (n:int) (f:unit->'a) : 'a =
         f()
     with
         | :? System.Net.WebException as w when n > 0 ->
-            printfn "Web exception %s, retrying %d more times"
-                (w.Status.ToString()) n
+            LogWarn "Web exception %s, retrying %d more times"
+                        (w.Status.ToString()) n
             Thread.Sleep(millisecondsTimeout = 1000)
             WebExceptionRetry (n-1) f
 

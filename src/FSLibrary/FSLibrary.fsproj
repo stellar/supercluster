@@ -16,6 +16,8 @@
     <PackageReference Include="KubernetesClient" Version="1.5.17" />
     <!-- For writing stellar-core.cfg TOML files. -->
     <PackageReference Include="Nett" Version="0.11.0" />
+    <PackageReference Include="Serilog" Version="2.8.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="3.1.1" />
     <!-- For KeyPairs and other core XDR types. -->
     <PackageReference Include="stellar-dotnet-sdk" Version="2.1.25" />
   </ItemGroup>
@@ -25,6 +27,7 @@
        those dependencies must be acyclic. Acyclicality is a bit of a
        bummer for organizing your code but it helps keep things tidy and,
        in any case, is mandated by most of the ML family, including F#.   -->
+    <Compile Include="Logging.fs" />
     <Compile Include="PollRetry.fs" />
     <Compile Include="StellarNetworkCfg.fs" />
     <Compile Include="StellarCoreCfg.fs" />

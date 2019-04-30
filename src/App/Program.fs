@@ -4,6 +4,8 @@
 
 open CSLibrary
 open CommandLine
+open Serilog
+open Serilog.Sinks
 
 open StellarNetworkCfg
 open StellarSupercluster
@@ -34,9 +36,12 @@ type PollOptions = {
 [<EntryPoint>]
 let main argv =
 
+  Log.Logger <- LoggerConfiguration()
+                    .MinimumLevel.Debug()
+                    .WriteTo.Console().CreateLogger()
+
   AuxClass.CheckCSharpWorksToo()
   let result = CommandLine.Parser.Default.ParseArguments<SetupOptions, PollOptions>(argv)
-
   match result with
 
   | :? Parsed<obj> as command ->

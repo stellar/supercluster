@@ -8,7 +8,7 @@ open FSharp.Data
 open FSharp.Data.JsonExtensions
 
 open PollRetry
-open StellarCoreCfg
+open Logging
 open StellarNetworkCfg
 open StellarCorePeer
 
@@ -137,7 +137,7 @@ type Peer with
     member self.WaitForLedgerNum (n:int) =
         RetryUntilTrue
             (fun _ -> self.GetLedgerNum = n)
-            (fun _ -> printfn "Waiting for ledger %d on %s"
+            (fun _ -> LogInfo "Waiting for ledger %d on %s"
                               n self.ShortName )
 
     member self.WaitForNextLedger() =
@@ -154,7 +154,7 @@ type Peer with
         if includeTxInternalErrors
         then raiseIfNonzero m.LedgerTransactionInternalError.Count
                  "ledger.transaction.internal-error"
-        printfn "No errors found on %s" self.ShortName
+        LogInfo "No errors found on %s" self.ShortName
 
     member self.CheckConsistencyWith (other:Peer) =
         let rec loop (ours:Map<int,string>) (theirs:Map<int,string>) (n:int) =
@@ -167,7 +167,8 @@ type Peer with
                             match theirs.TryFind k with
                                 | None -> false
                                 | Some w when v = w ->
-                                    printfn "found agreeing ledger %d = %s on %s and %s" k v self.ShortName other.ShortName
+                                    LogInfo "found agreeing ledger %d = %s on %s and %s"
+                                        k v self.ShortName other.ShortName
                                     true
                                 | Some w -> raise (InconsistentPeers (self, other))
                     end
@@ -212,7 +213,7 @@ type Peer with
                      (MeterCountOr 0 m.LoadgenRunComplete))
             (fun _ ->
                 let m = self.GetMetrics
-                printfn "Waiting for loadgen run %d to finish, %d/%d accts, %d/%d txns"
+                LogInfo "Waiting for loadgen run %d to finish, %d/%d accts, %d/%d txns"
                             (MeterCountOr 0 m.LoadgenRunStart)
                             (MeterCountOr 0 m.LoadgenAccountCreated) lg.accounts
                             (MeterCountOr 0 m.LoadgenTxnAttempted) lg.txs)
@@ -224,6 +225,7 @@ let ReportAllPeerStatus (nCfg:NetworkCfg) =
         fun (p:Peer) ->
             let info = p.GetInfo
             let metrics = p.GetMetrics
-            printfn "Peer '%s' startedOn '%s', state '%s', Overlay reading %f bytes/sec"
-                    p.ShortName (info.StartedOn.ToString()) info.State metrics.OverlayByteRead.MeanRate
+            LogInfo "Peer '%s' startedOn '%s', state '%s', Overlay reading %f bytes/sec"
+                      p.ShortName (info.StartedOn.ToString())
+                      info.State metrics.OverlayByteRead.MeanRate
         end

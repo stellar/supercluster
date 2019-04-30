@@ -8,6 +8,7 @@ open stellar_dotnet_sdk
 open k8s
 open k8s.Models
 
+open Logging
 open StellarNetworkCfg
 open StellarCoreCfg
 open StellarKubeSpecs
@@ -23,15 +24,15 @@ let WaitForAllReplicasReady (kube:Kubernetes) (statefulSet:V1StatefulSet) =
     let handler (ety:WatchEventType) (ss:V1StatefulSet) =
         let n = ss.Status.ReadyReplicas.GetValueOrDefault(0)
         let k = ss.Spec.Replicas.GetValueOrDefault(0)
-        printfn "StatefulSet %s/%s: %d/%d replicas ready" ns name n k;
+        LogInfo "StatefulSet %s/%s: %d/%d replicas ready" ns name n k;
         if n = k then event.Set()
     let action = System.Action<WatchEventType, V1StatefulSet>(handler)
     use task = kube.WatchNamespacedStatefulSetAsync(name = name,
                                                     ``namespace`` = ns,
                                                     onEvent = handler)
-    printfn "Waiting for replicas"
+    LogInfo "Waiting for replicas"
     event.Wait()
-    printfn "All replicas ready"
+    LogInfo "All replicas ready"
 
 
 let ExpandHomeDirTilde (s:string) : string =
@@ -56,12 +57,12 @@ let ConnectToCluster (cfgFile:string) : Kubernetes =
 let PollCluster (kube:Kubernetes) =
     let sets = kube.ListStatefulSetForAllNamespaces(labelSelector=CfgVal.labelSelector)
     for s in sets.Items do
-        printfn "StatefulSet: ns=%s name=%s replicas=%d" s.Metadata.NamespaceProperty
+        LogInfo "StatefulSet: ns=%s name=%s replicas=%d" s.Metadata.NamespaceProperty
                                                          s.Metadata.Name s.Status.Replicas
         let pods = kube.ListNamespacedPod(namespaceParameter = s.Metadata.NamespaceProperty,
                                           labelSelector = CfgVal.labelSelector)
         for p in pods.Items do
-            printfn "\tPod ns=%s name=%s phase=%s IP=%s" p.Metadata.NamespaceProperty
+            LogInfo "\tPod ns=%s name=%s phase=%s IP=%s" p.Metadata.NamespaceProperty
                                                          p.Metadata.Name p.Status.Phase
                                                          p.Status.PodIP
 
@@ -89,7 +90,7 @@ let RunCluster (kube:Kubernetes) (nCfg:NetworkCfg) =
     ReportAllPeerStatus nCfg
     let peer = nCfg.GetPeer 0
     let lg = { DefaultAccountCreationLoadGen with accounts = 10000 }
-    printfn "Loadgen: %s" (peer.GenerateLoad lg)
+    LogInfo "Loadgen: %s" (peer.GenerateLoad lg)
     peer.WaitForLoadGenComplete lg
     nCfg.EachPeer
         begin
@@ -97,6 +98,6 @@ let RunCluster (kube:Kubernetes) (nCfg:NetworkCfg) =
                 p.CheckNoErrorMetrics(includeTxInternalErrors=false)
                 p.CheckConsistencyWith peer
         end
-    printfn "Run complete, deleting namespace '%s'" nCfg.NamespaceProperty
-    kube.DeleteNamespace(name = nCfg.NamespaceProperty,
-                         propagationPolicy = "Foreground")
+    LogInfo "Run complete, deleting namespace '%s'" nCfg.NamespaceProperty
+    ignore (kube.DeleteNamespace(name = nCfg.NamespaceProperty,
+                                 propagationPolicy = "Foreground"))
