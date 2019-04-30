@@ -11,3 +11,4 @@ open Serilog
 let LogDebug fmt = Printf.kprintf (fun s -> Log.Debug(s)) fmt
 let LogWarn fmt = Printf.kprintf (fun s -> Log.Warning(s)) fmt
 let LogInfo fmt = Printf.kprintf (fun s -> Log.Information(s)) fmt
+let LogError fmt = Printf.kprintf (fun s -> Log.Error(s)) fmt

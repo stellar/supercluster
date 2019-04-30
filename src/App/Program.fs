@@ -22,6 +22,18 @@ type SetupOptions = {
   numNodes : int
 }
 
+[<Verb("loadgen", HelpText="Run a load generation test")>]
+type LoadgenOptions = {
+
+  [<Option('k', "kubeconfig", HelpText = "Kubernetes config file",
+           Required = false, Default = "~/.kube/config")>]
+  kubeconfig : string
+
+  [<Option('n', "num-nodes", HelpText="Number of nodes in config",
+           Required = false, Default = 5)>]
+  numNodes : int
+}
+
 
 [<Verb("poll", HelpText="Poll a running stellar-core cluster for status")>]
 type PollOptions = {
@@ -41,7 +53,9 @@ let main argv =
                     .WriteTo.Console().CreateLogger()
 
   AuxClass.CheckCSharpWorksToo()
-  let result = CommandLine.Parser.Default.ParseArguments<SetupOptions, PollOptions>(argv)
+  let result = CommandLine.Parser.Default.ParseArguments<SetupOptions,
+                                                         LoadgenOptions,
+                                                         PollOptions>(argv)
   match result with
 
   | :? Parsed<obj> as command ->
@@ -50,7 +64,16 @@ let main argv =
     | :? SetupOptions as setup ->
       let kube = ConnectToCluster setup.kubeconfig
       let nCfg = MakeNetworkCfg setup.numNodes
-      RunCluster kube nCfg
+      use formation = kube.MakeFormation nCfg
+      formation.ReportStatus()
+      0
+
+    | :? LoadgenOptions as loadgen ->
+      let kube = ConnectToCluster loadgen.kubeconfig
+      let nCfg = MakeNetworkCfg loadgen.numNodes
+      use formation = kube.MakeFormation nCfg
+      formation.RunLoadgenAndCheckNoErrors()
+      formation.ReportStatus()
       0
 
     | :? PollOptions as poll ->

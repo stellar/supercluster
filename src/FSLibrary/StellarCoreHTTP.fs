@@ -168,7 +168,7 @@ type Peer with
                                 | None -> false
                                 | Some w when v = w ->
                                     LogInfo "found agreeing ledger %d = %s on %s and %s"
-                                        k v self.ShortName other.ShortName
+                                        k (v.Remove 6) self.ShortName other.ShortName
                                     true
                                 | Some w -> raise (InconsistentPeers (self, other))
                     end
@@ -225,7 +225,7 @@ let ReportAllPeerStatus (nCfg:NetworkCfg) =
         fun (p:Peer) ->
             let info = p.GetInfo
             let metrics = p.GetMetrics
-            LogInfo "Peer '%s' startedOn '%s', state '%s', Overlay reading %f bytes/sec"
+            LogInfo "Peer '%s' startedOn '%s', state '%s', overlay reading %.1f bytes/sec"
                       p.ShortName (info.StartedOn.ToString())
                       info.State metrics.OverlayByteRead.MeanRate
         end

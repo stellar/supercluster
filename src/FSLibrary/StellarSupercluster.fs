@@ -15,26 +15,6 @@ open StellarKubeSpecs
 open StellarCorePeer
 open StellarCoreHTTP
 
-// Watches the provided StatefulSet until the count of ready replicas equals the
-// count of configured replicas. This normally represents "successful startup".
-let WaitForAllReplicasReady (kube:Kubernetes) (statefulSet:V1StatefulSet) =
-    use event = new System.Threading.ManualResetEventSlim(false)
-    let name = statefulSet.Metadata.Name
-    let ns = statefulSet.Metadata.NamespaceProperty
-    let handler (ety:WatchEventType) (ss:V1StatefulSet) =
-        let n = ss.Status.ReadyReplicas.GetValueOrDefault(0)
-        let k = ss.Spec.Replicas.GetValueOrDefault(0)
-        LogInfo "StatefulSet %s/%s: %d/%d replicas ready" ns name n k;
-        if n = k then event.Set()
-    let action = System.Action<WatchEventType, V1StatefulSet>(handler)
-    use task = kube.WatchNamespacedStatefulSetAsync(name = name,
-                                                    ``namespace`` = ns,
-                                                    onEvent = handler)
-    LogInfo "Waiting for replicas"
-    event.Wait()
-    LogInfo "All replicas ready"
-
-
 let ExpandHomeDirTilde (s:string) : string =
     if s.StartsWith("~/")
     then
@@ -67,37 +47,109 @@ let PollCluster (kube:Kubernetes) =
                                                          p.Status.PodIP
 
 
-// Starts a StatefulSet, Service, and Ingress for a given NetworkCfg, then
-// waits for it to be ready.
-let RunCluster (kube:Kubernetes) (nCfg:NetworkCfg) =
-    let nsStr = nCfg.NamespaceProperty
-    let ns = kube.CreateNamespace(nCfg.Namespace())
-    let svc = kube.CreateNamespacedService(body = nCfg.ToService(),
-                                           namespaceParameter = nsStr)
-    let cfgMap = kube.CreateNamespacedConfigMap(body = nCfg.ToConfigMap(),
-                                                namespaceParameter = nsStr)
-    let statefulSet = kube.CreateNamespacedStatefulSet(body = nCfg.ToStatefulSet CfgVal.peerSetName,
-                                                       namespaceParameter = nsStr)
+// Typically you want to instantiate one of these per test scenario, and run methods on it.
+// Unlike other types in this library it's a class type and implements IDisposable: it will
+// tear down the Kubernetes namespace (and all contained cluster-side objects) as it goes.
+type ClusterFormation(networkCfg: NetworkCfg,
+                      kube: Kubernetes,
+                      ns: V1Namespace,
+                      statefulSet: V1StatefulSet,
+                      ingress: Extensionsv1beta1Ingress) =
 
-    for svc in nCfg.ToPerPodServices() do
-        ignore (kube.CreateNamespacedService(namespaceParameter = nsStr,
-                                             body = svc))
-
-    let ingress = kube.CreateNamespacedIngress(namespaceParameter = nsStr,
-                                               body = nCfg.ToIngress())
-
-    WaitForAllReplicasReady kube statefulSet
-    ReportAllPeerStatus nCfg
-    let peer = nCfg.GetPeer 0
-    let lg = { DefaultAccountCreationLoadGen with accounts = 10000 }
-    LogInfo "Loadgen: %s" (peer.GenerateLoad lg)
-    peer.WaitForLoadGenComplete lg
-    nCfg.EachPeer
-        begin
-            fun p ->
-                p.CheckNoErrorMetrics(includeTxInternalErrors=false)
-                p.CheckConsistencyWith peer
-        end
-    LogInfo "Run complete, deleting namespace '%s'" nCfg.NamespaceProperty
-    ignore (kube.DeleteNamespace(name = nCfg.NamespaceProperty,
+    let mutable disposed = false
+    let cleanup(disposing:bool) =
+        if not disposed then
+            disposed <- true
+            if disposing then
+                LogInfo "Disposing formation, deleting namespace '%s'"
+                    networkCfg.NamespaceProperty
+                ignore (kube.DeleteNamespace(name = networkCfg.NamespaceProperty,
                                  propagationPolicy = "Foreground"))
+
+    // implementation of IDisposable
+    interface System.IDisposable with
+        member self.Dispose() =
+            cleanup(true)
+            System.GC.SuppressFinalize(self)
+
+    // override of finalizer
+    override self.Finalize() =
+        cleanup(false)
+
+     member self.networkCfg = networkCfg
+     member self.kube = kube
+     member self.ns = ns
+     member self.statefulSet = statefulSet
+     member self.ingress = ingress
+
+    // Watches the provided StatefulSet until the count of ready replicas equals the
+    // count of configured replicas. This normally represents "successful startup".
+     member self.WaitForAllReplicasReady() =
+        use event = new System.Threading.ManualResetEventSlim(false)
+        let name = self.statefulSet.Metadata.Name
+        let ns = self.statefulSet.Metadata.NamespaceProperty
+        let handler (ety:WatchEventType) (ss:V1StatefulSet) =
+            let n = ss.Status.ReadyReplicas.GetValueOrDefault(0)
+            let k = ss.Spec.Replicas.GetValueOrDefault(0)
+            LogInfo "StatefulSet %s/%s: %d/%d replicas ready" ns name n k;
+            if n = k then event.Set()
+        let action = System.Action<WatchEventType, V1StatefulSet>(handler)
+        use task = self.kube.WatchNamespacedStatefulSetAsync(name = name,
+                                                             ``namespace`` = ns,
+                                                             onEvent = handler)
+        LogInfo "Waiting for replicas"
+        event.Wait()
+        LogInfo "All replicas ready"
+
+    member self.ReportStatus() =
+        ReportAllPeerStatus self.networkCfg
+
+    member self.RunLoadgenAndCheckNoErrors() =
+        let peer = self.networkCfg.GetPeer 0
+        let lg = { DefaultAccountCreationLoadGen with accounts = 10000 }
+        LogInfo "Loadgen: %s" (peer.GenerateLoad lg)
+        peer.WaitForLoadGenComplete lg
+        self.networkCfg.EachPeer
+            begin
+                fun p ->
+                    p.CheckNoErrorMetrics(includeTxInternalErrors=false)
+                    p.CheckConsistencyWith peer
+            end
+
+
+type Kubernetes with
+
+    // Starts a StatefulSet, Service, and Ingress for a given NetworkCfg, then
+    // waits for it to be ready.
+    member self.MakeFormation (nCfg:NetworkCfg) : ClusterFormation =
+        let nsStr = nCfg.NamespaceProperty
+        let ns = self.CreateNamespace(nCfg.Namespace())
+        try
+            let svc = self.CreateNamespacedService(body = nCfg.ToService(),
+                                                   namespaceParameter = nsStr)
+            let cfgMap = self.CreateNamespacedConfigMap(body = nCfg.ToConfigMap(),
+                                                        namespaceParameter = nsStr)
+            let statefulSet = self.CreateNamespacedStatefulSet(body = nCfg.ToStatefulSet CfgVal.peerSetName,
+                                                               namespaceParameter = nsStr)
+
+            for svc in nCfg.ToPerPodServices() do
+                ignore (self.CreateNamespacedService(namespaceParameter = nsStr,
+                                                     body = svc))
+
+            let ingress = self.CreateNamespacedIngress(namespaceParameter = nsStr,
+                                                       body = nCfg.ToIngress())
+            let formation = new ClusterFormation(networkCfg = nCfg,
+                                                 kube = self,
+                                                 ns = ns,
+                                                 statefulSet = statefulSet,
+                                                 ingress = ingress)
+            formation.WaitForAllReplicasReady()
+            formation
+        with
+        | x ->
+            LogError "Exception while building formation, deleting namespace '%s'"
+                         nCfg.NamespaceProperty
+            ignore (self.DeleteNamespace(name = nCfg.NamespaceProperty,
+                                         propagationPolicy = "Foreground"))
+            reraise()
+
