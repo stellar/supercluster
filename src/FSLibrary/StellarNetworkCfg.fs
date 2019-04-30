@@ -40,7 +40,7 @@ type NetworkCfg =
     member self.NumPeers : int =
         Array.length self.peerKeys
 
-    member self.NamespaceProperty() : string =
+    member self.NamespaceProperty : string =
         self.networkNonce.ToString()
 
 

@@ -69,7 +69,7 @@ let PollCluster (kube:Kubernetes) =
 // Starts a StatefulSet, Service, and Ingress for a given NetworkCfg, then
 // waits for it to be ready.
 let RunCluster (kube:Kubernetes) (nCfg:NetworkCfg) =
-    let nsStr = nCfg.NamespaceProperty()
+    let nsStr = nCfg.NamespaceProperty
     let ns = kube.CreateNamespace(nCfg.Namespace())
     let svc = kube.CreateNamespacedService(body = nCfg.ToService(),
                                            namespaceParameter = nsStr)
@@ -91,5 +91,12 @@ let RunCluster (kube:Kubernetes) (nCfg:NetworkCfg) =
     let lg = { DefaultAccountCreationLoadGen with accounts = 10000 }
     printfn "Loadgen: %s" (peer.GenerateLoad lg)
     peer.WaitForLoadGenComplete lg
-    ()
-
+    nCfg.EachPeer
+        begin
+            fun p ->
+                p.CheckNoErrorMetrics(includeTxInternalErrors=false)
+                p.CheckConsistencyWith peer
+        end
+    printfn "Run complete, deleting namespace '%s'" nCfg.NamespaceProperty
+    kube.DeleteNamespace(name = nCfg.NamespaceProperty,
+                         propagationPolicy = "Foreground")

@@ -51,11 +51,11 @@ type NetworkCfg with
 
     member self.Namespace() : V1Namespace =
         V1Namespace(spec = V1NamespaceSpec(),
-                    metadata = V1ObjectMeta(name = self.NamespaceProperty()))
+                    metadata = V1ObjectMeta(name = self.NamespaceProperty))
 
     member self.NamespacedMeta (name:string) : V1ObjectMeta =
         V1ObjectMeta(name = name, labels = CfgVal.labels,
-                     namespaceProperty = self.NamespaceProperty())
+                     namespaceProperty = self.NamespaceProperty)
 
     // Returns a ConfigMap dictionary that names "peer-0.cfg".."peer-N.cfg" to
     // TOML config file data for each such config. Mounting this ConfigMap on a
@@ -68,7 +68,7 @@ type NetworkCfg with
         let peerKeyValPair i = (CfgVal.peerCfgName i, (self.StellarCoreCfgForPeer i).ToString())
         let cfgs = Array.init self.NumPeers peerKeyValPair
         V1ConfigMap(metadata = V1ObjectMeta(name = CfgVal.cfgMapName,
-                                            namespaceProperty = self.NamespaceProperty()),
+                                            namespaceProperty = self.NamespaceProperty),
                     data = Map.ofSeq cfgs)
 
     // Returns a PodTemplate that mounds the ConfigMap on /cfg and an empty data
@@ -91,7 +91,7 @@ type NetworkCfg with
         V1PodTemplateSpec
                 (spec = podSpec,
                  metadata = V1ObjectMeta(labels = CfgVal.labels,
-                                         namespaceProperty = self.NamespaceProperty()))
+                                         namespaceProperty = self.NamespaceProperty))
 
     // Returns a single "headless" (clusterIP=None) Service with the same name
     // as the StatefulSet. This is necessary to coax the DNS service to register
@@ -153,7 +153,7 @@ type NetworkCfg with
         let path (i:int) =
             let pn = CfgVal.peerShortName i
             Extensionsv1beta1HTTPIngressPath(path = sprintf "/%s/%s/(.*)"
-                                                    (self.NamespaceProperty()) pn,
+                                                    (self.NamespaceProperty) pn,
                                              backend = backend pn)
         let paths = Array.init self.NumPeers path
         let rule = Extensionsv1beta1HTTPIngressRuleValue(paths = paths)
@@ -162,6 +162,6 @@ type NetworkCfg with
         let annotation = Map.ofArray [|("nginx.ingress.kubernetes.io/ssl-redirect", "false");
                                        ("nginx.ingress.kubernetes.io/rewrite-target", "/$1")|]
         let meta = V1ObjectMeta(name = "stellar-core-ingress",
-                                namespaceProperty = self.NamespaceProperty(),
+                                namespaceProperty = self.NamespaceProperty,
                                 annotations = annotation)
         Extensionsv1beta1Ingress(spec = spec, metadata = meta)

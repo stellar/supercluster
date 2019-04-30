@@ -61,10 +61,47 @@ let DefaultAccountCreationLoadGen =
       offset = 0
       batchsize = 100 }
 
+
+type UpgradeParameters =
+    { upgradeTime: System.DateTime
+      protocolVersion: Option<int>
+      baseFee: Option<int>
+      maxTxSize: Option<int>
+      baseReserve: Option<int> }
+
+    member self.ToQuery : (string*string) list =
+        let maybe name opt = Option.toList (Option.map (fun v -> (name, v.ToString())) opt)
+        List.concat
+            [|
+                [("mode", "set")];
+                [("upgradetime", self.upgradeTime.ToUniversalTime().ToString("o"))];
+                maybe "protocolversion" self.protocolVersion;
+                maybe "basefee" self.baseFee;
+                maybe "basereserve" self.baseReserve;
+                maybe "maxtxsize" self.maxTxSize;
+            |]
+
+let DefaultUpgradeParameters =
+    { upgradeTime = System.DateTime.Parse("1970-01-01T00:00:00Z")
+      protocolVersion = None
+      baseFee = None
+      maxTxSize = None
+      baseReserve = None }
+
+
 let MeterCountOr (def:int) (m:Option<Metrics.GenericMeter>) : int =
     match m with
         | Some(n) -> n.Count
         | None -> def
+
+
+let ConsistencyCheckIterationCount : int = 5
+
+exception PeerRejectedUpgrades of string
+exception InconsistentPeers of (Peer * Peer)
+exception MaybeInconsistentPeers of (Peer * Peer)
+exception PeerHasNonzeroErrorMetrics of (Peer * string * int)
+
 
 type Peer with
 
@@ -85,6 +122,18 @@ type Peer with
     member self.GetLedgerNum : int =
         self.GetInfo.Ledger.Num
 
+    member self.GetProtocolVersion : int =
+        self.GetInfo.ProtocolVersion
+
+    member self.SetUpgrades (upgrades:UpgradeParameters) =
+        let res =
+            WebExceptionRetry DefaultRetry
+                (fun _ -> Http.RequestString(httpMethod="GET",
+                                             url=self.URL "upgrades",
+                                             query=upgrades.ToQuery))
+        if res.ToLower().Contains("exception")
+        then raise (PeerRejectedUpgrades res)
+
     member self.WaitForLedgerNum (n:int) =
         RetryUntilTrue
             (fun _ -> self.GetLedgerNum = n)
@@ -93,6 +142,51 @@ type Peer with
 
     member self.WaitForNextLedger() =
         self.WaitForLedgerNum (self.GetLedgerNum + 1)
+
+    member self.CheckNoErrorMetrics(includeTxInternalErrors:bool) =
+        let raiseIfNonzero (c:int) (n:string) =
+            if c <> 0
+            then raise (PeerHasNonzeroErrorMetrics (self, n, c))
+        let m:Metrics.Metrics = self.GetMetrics
+        raiseIfNonzero m.ScpEnvelopeInvalidsig.Count "scp.envelope.invalidsig"
+        raiseIfNonzero m.HistoryPublishFailure.Count "history.publish.failure"
+        raiseIfNonzero m.LedgerInvariantFailure.Count "ledger.invariant.failure"
+        if includeTxInternalErrors
+        then raiseIfNonzero m.LedgerTransactionInternalError.Count
+                 "ledger.transaction.internal-error"
+        printfn "No errors found on %s" self.ShortName
+
+    member self.CheckConsistencyWith (other:Peer) =
+        let rec loop (ours:Map<int,string>) (theirs:Map<int,string>) (n:int) =
+            if n < 0
+            then raise (MaybeInconsistentPeers (self, other))
+            else
+                if Map.exists
+                    begin
+                        fun k v ->
+                            match theirs.TryFind k with
+                                | None -> false
+                                | Some w when v = w ->
+                                    printfn "found agreeing ledger %d = %s on %s and %s" k v self.ShortName other.ShortName
+                                    true
+                                | Some w -> raise (InconsistentPeers (self, other))
+                    end
+                        ours
+                then ()
+                else
+                    let ourLedger = self.GetInfo.Ledger
+                    let theirLedger = other.GetInfo.Ledger
+
+                    loop
+                        (Map.add ourLedger.Num ourLedger.Hash ours)
+                        (Map.add theirLedger.Num theirLedger.Hash theirs)
+                        (n-1)
+        loop Map.empty Map.empty ConsistencyCheckIterationCount
+
+    member self.ClearMetrics() =
+        WebExceptionRetry DefaultRetry
+            (fun _ -> Http.RequestString(httpMethod="GET",
+                                         url=self.URL "clearmetrics"))
 
     member self.GetTestAcc (accName:string) : TestAcc.Root =
         WebExceptionRetry DefaultRetry
