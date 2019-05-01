@@ -6,6 +6,7 @@ module StellarCoreHTTP
 
 open FSharp.Data
 open FSharp.Data.JsonExtensions
+open stellar_dotnet_sdk
 
 open PollRetry
 open Logging
@@ -196,7 +197,7 @@ type Peer with
     member self.GetTestAccBalance (accName:string) : int64 =
         self.GetTestAcc(accName).Balance
 
-    member self.GetTestAccSeq (accName:string) : int =
+    member self.GetTestAccSeq (accName:string) : int64 =
         self.GetTestAcc(accName).Seqnum
 
     member self.GenerateLoad (lg:LoadGen) =
@@ -204,6 +205,13 @@ type Peer with
             (fun _ -> Http.RequestString(httpMethod="GET",
                                          url=self.URL "generateload",
                                          query=lg.ToQuery))
+
+    member self.SubmitSignedTransaction (tx:Transaction) =
+        let b64 = tx.ToEnvelopeXdrBase64()
+        WebExceptionRetry DefaultRetry
+            (fun _ -> Http.RequestString(httpMethod="GET",
+                                         url=self.URL "tx",
+                                         query=[("blob", b64)]))
 
     member self.WaitForLoadGenComplete (lg:LoadGen) =
         RetryUntilTrue

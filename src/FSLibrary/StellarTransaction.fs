@@ -4,6 +4,8 @@ open stellar_dotnet_sdk
 
 open StellarNetworkCfg
 open StellarCoreCfg
+open StellarCorePeer
+open StellarCoreHTTP
 
 type Username =
 
@@ -39,16 +41,23 @@ let rec Exactly32BytesStartingFrom (s:string) : byte array =
     then Exactly32BytesStartingFrom (s + (String.replicate (32 - s.Length) "."))
     else System.Text.Encoding.ASCII.GetBytes(s)
 
-
-type NetworkCfg with
+type Peer with
 
     // The Java and .NET SDKs are missing a method for this, perhaps reasonably.
-    member self.RootAccount : Account =
-        let networkId = (PrivateNet self.networkNonce).ToString()
+    member self.RootKeypair : KeyPair =
+        let networkId = (PrivateNet self.networkCfg.networkNonce).ToString()
         let bytes = System.Text.Encoding.UTF8.GetBytes(networkId)
         let netHash = Util.Hash bytes
-        let seq = System.Nullable<int64>(0L)
-        new Account(KeyPair.FromSecretSeed(netHash).AccountId, seq)
+        KeyPair.FromSecretSeed(netHash)
+
+    member self.RootAccount : Account =
+        let seq = self.GetTestAccSeq("root")
+        new Account(self.RootKeypair.AccountId, System.Nullable<int64>(seq))
+
+    member self.GetAccount(u:Username) : Account =
+        let key = self.GetKeypair(u)
+        let seq = self.GetTestAccSeq(u.ToString())
+        Account(key.AccountId, System.Nullable<int64>(seq))
 
     // Deterministically turn a string key-name into an account, using
     // the same "pad with periods" mechanism used on the testacc HTTP
@@ -61,8 +70,30 @@ type NetworkCfg with
     member self.GetKeypair (u:Username) : KeyPair =
         self.GetKeypairByName (u.ToString())
 
+    member self.GetSeqAndBalance (u:Username) : (int64 * int64) =
+        let j = self.GetTestAcc (u.ToString())
+        (j.Seqnum, j.Balance)
+
+    member self.GetNetwork : Network =
+        let phrase = PrivateNet self.networkCfg.networkNonce
+        Network(phrase.ToString())
+
     member self.TxCreateAccount (u:Username) : Transaction =
         let root = self.RootAccount
         let newKey = self.GetKeypair u
         let trb = Transaction.Builder(self.RootAccount)
-        trb.AddOperation(CreateAccountOperation(newKey, "10000")).Build()
+        let tx = trb.AddOperation(CreateAccountOperation(newKey, "10000")).Build()
+        tx.Sign(signer = self.RootKeypair, network = self.GetNetwork)
+        tx
+
+    member self.TxPayment (sender:Username) (recipient:Username) : Transaction =
+        let send = self.GetAccount sender
+        let recv = self.GetKeypair recipient
+        let asset = AssetTypeNative()
+        let amount = "100"
+        let trb = Transaction.Builder(send)
+        let tx = trb.AddOperation(PaymentOperation.Builder(recv, asset, amount)
+                                    .SetSourceAccount(send.KeyPair)
+                                    .Build()).Build()
+        tx.Sign(signer = (self.GetKeypair sender), network = self.GetNetwork)
+        tx

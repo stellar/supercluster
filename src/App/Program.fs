@@ -7,8 +7,10 @@ open CommandLine
 open Serilog
 open Serilog.Sinks
 
+open Logging
 open StellarNetworkCfg
 open StellarSupercluster
+open StellarMission
 
 [<Verb("setup", HelpText="Set up a new stellar-core cluster")>]
 type SetupOptions = {
@@ -34,6 +36,17 @@ type LoadgenOptions = {
   numNodes : int
 }
 
+[<Verb("mission", HelpText="Run one or more named missions")>]
+type MissionOptions = {
+
+  [<Option('k', "kubeconfig", HelpText = "Kubernetes config file",
+           Required = false, Default = "~/.kube/config")>]
+  kubeconfig : string
+
+  [<Value(0, Required = true)>]
+  missions : string seq
+}
+
 
 [<Verb("poll", HelpText="Poll a running stellar-core cluster for status")>]
 type PollOptions = {
@@ -41,7 +54,6 @@ type PollOptions = {
   [<Option('k', "kubeconfig", HelpText = "Kubernetes config file",
            Required = false, Default = "~/.kube/config")>]
   kubeconfig : string
-
 }
 
 
@@ -55,6 +67,7 @@ let main argv =
   AuxClass.CheckCSharpWorksToo()
   let result = CommandLine.Parser.Default.ParseArguments<SetupOptions,
                                                          LoadgenOptions,
+                                                         MissionOptions,
                                                          PollOptions>(argv)
   match result with
 
@@ -75,6 +88,38 @@ let main argv =
       formation.RunLoadgenAndCheckNoErrors()
       formation.ReportStatus()
       0
+
+    | :? MissionOptions as mission ->
+      match Seq.tryFind (fun n -> not (allMissions.ContainsKey n)) mission.missions with
+        | Some e ->
+            begin
+                LogError "Unknown mission: %s" e
+                LogError "Available missions:"
+                Map.iter (fun k _ -> LogError "        %s" k) allMissions
+                1
+            end
+        | None ->
+            begin
+                LogInfo "-----------------------------------"
+                LogInfo "Connecting to Kubernetes cluster"
+                LogInfo "-----------------------------------"
+                let kube = ConnectToCluster mission.kubeconfig
+                for m in mission.missions do
+                    LogInfo "-----------------------------------"
+                    LogInfo "Starting mission: %s" m
+                    LogInfo "-----------------------------------"
+                    try
+                        allMissions.[m](kube)
+                    with
+                    // This looks ridiculous but it's how you coax the .NET runtime
+                    // to actually run the IDisposable Dispose methods on uncaught
+                    // exceptions. Sigh.
+                    | x -> reraise()
+                    LogInfo "-----------------------------------"
+                    LogInfo "Finished mission: %s" m
+                    LogInfo "-----------------------------------"
+                0
+            end
 
     | :? PollOptions as poll ->
       let kube = ConnectToCluster poll.kubeconfig

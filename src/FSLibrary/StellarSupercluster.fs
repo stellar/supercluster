@@ -14,6 +14,7 @@ open StellarCoreCfg
 open StellarKubeSpecs
 open StellarCorePeer
 open StellarCoreHTTP
+open StellarTransaction
 
 let ExpandHomeDirTilde (s:string) : string =
     if s.StartsWith("~/")
@@ -42,9 +43,9 @@ let PollCluster (kube:Kubernetes) =
         let pods = kube.ListNamespacedPod(namespaceParameter = s.Metadata.NamespaceProperty,
                                           labelSelector = CfgVal.labelSelector)
         for p in pods.Items do
-            LogInfo "\tPod ns=%s name=%s phase=%s IP=%s" p.Metadata.NamespaceProperty
-                                                         p.Metadata.Name p.Status.Phase
-                                                         p.Status.PodIP
+            LogInfo "        Pod ns=%s name=%s phase=%s IP=%s" p.Metadata.NamespaceProperty
+                                                               p.Metadata.Name p.Status.Phase
+                                                               p.Status.PodIP
 
 
 // Typically you want to instantiate one of these per test scenario, and run methods on it.
@@ -76,15 +77,20 @@ type ClusterFormation(networkCfg: NetworkCfg,
     override self.Finalize() =
         cleanup(false)
 
-     member self.networkCfg = networkCfg
-     member self.kube = kube
-     member self.ns = ns
-     member self.statefulSet = statefulSet
-     member self.ingress = ingress
+    member self.networkCfg = networkCfg
+    member self.kube = kube
+    member self.ns = ns
+    member self.statefulSet = statefulSet
+    member self.ingress = ingress
+
+    override self.ToString() : string =
+        let name = self.statefulSet.Metadata.Name
+        let ns = self.statefulSet.Metadata.NamespaceProperty
+        sprintf "%s/%s" ns name
 
     // Watches the provided StatefulSet until the count of ready replicas equals the
     // count of configured replicas. This normally represents "successful startup".
-     member self.WaitForAllReplicasReady() =
+    member self.WaitForAllReplicasReady() =
         use event = new System.Threading.ManualResetEventSlim(false)
         let name = self.statefulSet.Metadata.Name
         let ns = self.statefulSet.Metadata.NamespaceProperty
@@ -104,17 +110,43 @@ type ClusterFormation(networkCfg: NetworkCfg,
     member self.ReportStatus() =
         ReportAllPeerStatus self.networkCfg
 
-    member self.RunLoadgenAndCheckNoErrors() =
+    member self.CreateAccount (u:Username) : unit =
         let peer = self.networkCfg.GetPeer 0
-        let lg = { DefaultAccountCreationLoadGen with accounts = 10000 }
-        LogInfo "Loadgen: %s" (peer.GenerateLoad lg)
-        peer.WaitForLoadGenComplete lg
+        let tx = peer.TxCreateAccount u
+        LogInfo "creating account for %O on %O" u self
+        ignore (peer.SubmitSignedTransaction tx)
+        ignore (peer.WaitForNextLedger())
+        let acc = peer.GetAccount(u)
+        LogInfo "created account for %O on %O with seq %d, balance %d"
+            u self acc.SequenceNumber
+            (peer.GetTestAccBalance (u.ToString()))
+
+    member self.Pay (src:Username) (dst:Username) : unit =
+        let peer = self.networkCfg.GetPeer 0
+        let tx = peer.TxPayment src dst
+        LogInfo "paying from account %O to %O on %O" src dst self
+        ignore (peer.SubmitSignedTransaction tx)
+        ignore (peer.WaitForNextLedger())
+        LogInfo "sent payment from %O (%O) to %O (%O) on %O"
+            src (peer.GetSeqAndBalance src)
+            dst (peer.GetSeqAndBalance dst)
+            self
+
+    member self.CheckNoErrorsAndPairwiseConsistency() : unit =
+        let peer = self.networkCfg.GetPeer 0
         self.networkCfg.EachPeer
             begin
                 fun p ->
                     p.CheckNoErrorMetrics(includeTxInternalErrors=false)
                     p.CheckConsistencyWith peer
             end
+
+    member self.RunLoadgenAndCheckNoErrors() : unit =
+        let peer = self.networkCfg.GetPeer 0
+        let lg = { DefaultAccountCreationLoadGen with accounts = 10000 }
+        LogInfo "Loadgen: %s" (peer.GenerateLoad lg)
+        peer.WaitForLoadGenComplete lg
+        self.CheckNoErrorsAndPairwiseConsistency()
 
 
 type Kubernetes with

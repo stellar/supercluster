@@ -36,5 +36,6 @@
     <Compile Include="StellarTransaction.fs" />
     <Compile Include="StellarKubeSpecs.fs" />
     <Compile Include="StellarSupercluster.fs" />
+    <Compile Include="StellarMission.fs" />
   </ItemGroup>
 </Project>
