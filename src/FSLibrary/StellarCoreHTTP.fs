@@ -22,7 +22,8 @@ open StellarCorePeer
 
 type Metrics = JsonProvider<"json-type-samples/sample-metrics.json", SampleIsList=true>
 type Info = JsonProvider<"json-type-samples/sample-info.json">
-type TestAcc = JsonProvider<"json-type-samples/sample-testacc.json">
+type TestAcc = JsonProvider<"json-type-samples/sample-testacc.json", SampleIsList=true>
+type Tx = JsonProvider<"json-type-samples/sample-tx.json", SampleIsList=true>
 
 
 type LoadGenMode =
@@ -102,6 +103,7 @@ exception PeerRejectedUpgrades of string
 exception InconsistentPeers of (Peer * Peer)
 exception MaybeInconsistentPeers of (Peer * Peer)
 exception PeerHasNonzeroErrorMetrics of (Peer * string * int)
+exception TransactionRejected of Transaction
 
 
 type Peer with
@@ -191,14 +193,23 @@ type Peer with
                                          url=self.URL "clearmetrics"))
 
     member self.GetTestAcc (accName:string) : TestAcc.Root =
-        WebExceptionRetry DefaultRetry
-            (fun _ -> TestAcc.Load(self.URL("testacc") + "?name=" + accName))
+        // NB: work around buggy JSON parser upstream, see
+        // https://github.com/fsharp/FSharp.Data/pull/1262
+        let s = WebExceptionRetry DefaultRetry
+                    (fun _ -> Http.RequestString(httpMethod = "GET",
+                                                 url = self.URL("testacc"),
+                                                 query = [("name", accName)]))
+        TestAcc.Parse(if s.Trim().StartsWith("null") then "{}" else s)
 
     member self.GetTestAccBalance (accName:string) : int64 =
-        self.GetTestAcc(accName).Balance
+        RetryUntilSome
+            (fun _ -> self.GetTestAcc(accName).Balance)
+            (fun _ -> LogWarn "Waiting for account %s to exist, to read balance" accName)
 
     member self.GetTestAccSeq (accName:string) : int64 =
-        self.GetTestAcc(accName).Seqnum
+        RetryUntilSome
+            (fun _ -> self.GetTestAcc(accName).Seqnum)
+            (fun _ -> LogWarn "Waiting for account %s to exist, to read seqnum" accName)
 
     member self.GenerateLoad (lg:LoadGen) =
         WebExceptionRetry DefaultRetry
@@ -206,12 +217,31 @@ type Peer with
                                          url=self.URL "generateload",
                                          query=lg.ToQuery))
 
-    member self.SubmitSignedTransaction (tx:Transaction) =
+    member self.SubmitSignedTransaction (tx:Transaction) : Tx.Root =
         let b64 = tx.ToEnvelopeXdrBase64()
-        WebExceptionRetry DefaultRetry
-            (fun _ -> Http.RequestString(httpMethod="GET",
-                                         url=self.URL "tx",
-                                         query=[("blob", b64)]))
+        let uri = (self.URL "tx") + "?blob=" + (System.Uri.EscapeDataString b64)
+        let s = WebExceptionRetry DefaultRetry
+                    (fun  _ ->
+                     // Work around buggy URI-escaping upstream,
+                     // see https://github.com/fsharp/FSharp.Data/issues/1263
+                     LogDebug "Submitting transaction: %s" uri
+                     let req = System.Net.WebRequest.CreateHttp uri
+                     req.Method <- "GET"
+                     use stream = req.GetResponse().GetResponseStream()
+                     use reader = new System.IO.StreamReader(stream)
+                     reader.ReadToEnd())
+        LogDebug "Transaction response: %s" s
+        let res = Tx.Parse(s)
+        if res.Status <> "PENDING"
+        then
+            LogError "Transaction result %s" res.Status
+            match res.Error with
+                | None -> ()
+                | Some(r) ->
+                    let txr = responses.TransactionResult.FromXdr(r)
+                    LogError "Result details: %O" txr
+            raise (TransactionRejected tx)
+        else res
 
     member self.WaitForLoadGenComplete (lg:LoadGen) =
         RetryUntilTrue

@@ -1,0 +1,9 @@
+[
+{
+  "status": "PENDING"
+},
+{
+  "status": "ERROR",
+  "error": "somebase64"
+}
+]

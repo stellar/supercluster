@@ -71,8 +71,9 @@ type Peer with
         self.GetKeypairByName (u.ToString())
 
     member self.GetSeqAndBalance (u:Username) : (int64 * int64) =
-        let j = self.GetTestAcc (u.ToString())
-        (j.Seqnum, j.Balance)
+        let seq = self.GetTestAccSeq (u.ToString())
+        let balance = self.GetTestAccBalance (u.ToString())
+        (seq, balance)
 
     member self.GetNetwork : Network =
         let phrase = PrivateNet self.networkCfg.networkNonce

@@ -30,3 +30,14 @@ let rec RetryUntilTrue (f:unit->bool) (step:unit->unit) =
             Thread.Sleep(millisecondsTimeout = 1000)
             RetryUntilTrue f step
         end
+
+let rec RetryUntilSome (f:unit->'a option) (step:unit->unit) : 'a =
+    let a = f()
+    match a with
+        | Some v -> v
+        | None ->
+            begin
+                step()
+                Thread.Sleep(millisecondsTimeout = 1000)
+                RetryUntilSome f step
+            end
