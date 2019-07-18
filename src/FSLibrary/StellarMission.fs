@@ -4,25 +4,47 @@
 
 module StellarMission
 
-open Logging
-open StellarNetworkCfg
-open StellarCorePeer
-open StellarCoreHTTP
-open StellarTransaction
-open StellarSupercluster
+open MissionSimplePayment
+open MissionComplexTopology
+open MissionLoadGeneration
+open MissionBenchmarkBaseline
+open MissionBenchmarkIncreaseTxRate
+open MissionHistoryGenerateAndCatchup
+open MissionHistoryPubnetMinimumCatchup
+open MissionHistoryPubnetRecentCatchup
+open MissionHistoryPubnetCompleteCatchup
+open MissionHistoryTestnetMinimumCatchup
+open MissionHistoryTestnetRecentCatchup
+open MissionHistoryTestnetCompleteCatchup
+open MissionVersionMixConsensus
+open MissionVersionMixNewCatchupToOld
+open MissionVersionMixOldCatchupToNew
+open MissionProtocolUpgradeTestnet
+open MissionProtocolUpgradePubnet
+open MissionDatabaseInplaceUpgrade
+open StellarMissionContext
 
-open k8s
+type Mission = (MissionContext -> unit)
 
-type Mission = (Kubernetes -> unit)
-
-let simplePayment (kube:Kubernetes) =
-    use f = kube.MakeFormation (MakeNetworkCfg 3)
-    f.CreateAccount UserAlice
-    f.CreateAccount UserBob
-    f.Pay UserAlice UserBob
-    f.CheckNoErrorsAndPairwiseConsistency()
 
 let allMissions : Map<string, Mission> =
     Map.ofSeq [|
         ("SimplePayment", simplePayment)
+        ("ComplexTopology", complexTopology)
+        ("LoadGeneration", loadGeneration)
+        ("BenchmarkBaseline", benchmarkBaseline)
+        ("BenchmarkIncreaseTxRate", benchmarkIncreaseTxRate)
+        ("HistoryGenerateAndCatchup", historyGenerateAndCatchup)
+        ("HistoryPubnetMinimumCatchup", historyPubnetMinimumCatchup)
+        ("HistoryPubnetRecentCatchup", historyPubnetRecentCatchup)
+        ("HistoryPubnetCompleteCatchup", historyPubnetCompleteCatchup)
+        ("HistoryTestnetMinimumCatchup", historyTestnetMinimumCatchup)
+        ("HistoryTestnetRecentCatchup", historyTestnetRecentCatchup)
+        ("HistoryTestnetCompleteCatchup", historyTestnetCompleteCatchup)
+        ("VersionMixConsensus", versionMixConsensus)
+        ("VersionMixNewCatchupToOld", versionMixNewCatchupToOld)
+        ("VersionMixOldCatchupToNew", versionMixOldCatchupToNew)
+        ("ProtocolUpgradeTestnet", protocolUpgradeTestnet)
+        ("ProtocolUpgradePubnet", protocolUpgradePubnet)
+        ("DatabaseInplaceUpgrade", databaseInplaceUpgrade)
     |]

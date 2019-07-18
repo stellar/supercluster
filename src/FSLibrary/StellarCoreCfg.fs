@@ -7,6 +7,7 @@ module StellarCoreCfg
 open stellar_dotnet_sdk
 open Nett
 
+open StellarCoreSet
 open StellarNetworkCfg
 
 // Submodule of short fixed (or lightly parametrized) config values: names,
@@ -22,32 +23,21 @@ module CfgVal =
     let cfgVolumePath = "/cfg"
     let dataVolumeName = "data-volume"
     let dataVolumePath = "/data"
+    let peristentVolumeName ns name = sprintf "%s-pv-%s" ns name
+    let peristentVolumeClaimName ns name = sprintf "pvc-%s" name
     let databasePath = dataVolumePath + "/stellar.db"
     let historyPath = dataVolumePath + "/history"
     let bucketsPath = dataVolumePath + "/buckets"
+    let peerSetName (cs: CoreSet) = sprintf "peer-%s" cs.name
+    let peerShortName cs n = sprintf "%s-%d" (peerSetName cs) n
+    let peerCfgName cs n = sprintf "%s.cfg" (peerShortName cs n)
     let localHistName = "local"
-    let peerSetName = "peer"
-    let peerShortName n = sprintf "%s-%d" peerSetName n
-    let peerCfgName n = sprintf "%s.cfg" (peerShortName n)
     let serviceName = "stellar-core"
-    let peerDNSName (nonce : NetworkNonce) (n : int) =
-        sprintf "%s.%s.%s.svc.cluster.local" (peerShortName n) serviceName (nonce.ToString())
+    let peerDNSName (nonce : NetworkNonce) cs n =
+        sprintf "%s.%s.%s.svc.cluster.local" (peerShortName cs n) serviceName (nonce.ToString())
     let peerNameEnvVarName = "STELLAR_CORE_PEER_SHORT_NAME"
     let peerNameEnvCfgFile = cfgVolumePath + "/$(STELLAR_CORE_PEER_SHORT_NAME).cfg"
-
-
-// Symbolic type for the different sorts of NETWORK_PASSPHRASE that can show up
-// in a stellar-core.cfg file. Usually use PrivateNet, which takes a nonce and
-// will not collide with any other networks.
-type NetworkPassphrase =
-    | SDFTestNet
-    | SDFMainNet
-    | PrivateNet of NetworkNonce
-    override self.ToString() : string =
-        match self with
-        | SDFTestNet -> "Test SDF Network ; September 2015"
-        | SDFMainNet -> "Public Global Stellar Network ; September 2015"
-        | PrivateNet n -> sprintf "Private test network '%s'" (n.ToString())
+    let historyCfgFile = cfgVolumePath + "/nginx.conf"
 
 
 // Symbolic type of the different sorts of DATABASE that can show up in a
@@ -63,19 +53,16 @@ type DatabaseURL =
         | SQLite3File s -> sprintf "sqlite3://%s" s
         | PostgreSQL(d, u, p, h) -> sprintf "postgresql://dbname=%s user=%s password=%s host=%s" d u p h
 
-type CatchupMode =
-    | CatchupComplete
-    | CatchupRecent of int
-
 // Represents the contents of a stellar-core.cfg file, along with method to
 // write it out to TOML.
 type StellarCoreCfg =
-    { database : DatabaseURL
+    { network : NetworkCfg
+      database : DatabaseURL
       networkPassphrase : NetworkPassphrase
       nodeSeed : KeyPair
       nodeIsValidator : bool
       runStandalone : bool
-      knownPeers : string array
+      preferredPeers : string list
       catchupMode: CatchupMode
       automaticMaintenancePeriod: int
       automaticMaintenanceCount: int
@@ -85,7 +72,9 @@ type StellarCoreCfg =
       invariantChecks: string list
       unsafeQuorum : bool
       failureSafety : int
-      quorumSet : Map<string, KeyPair> }
+      quorumSet : Map<string, KeyPair>
+      historyNodes : Map<string, string>
+      historyGetCommands : Map<string, string> }
 
     member self.ToTOML() : TomlTable =
         let t = Toml.Create()
@@ -99,6 +88,10 @@ type StellarCoreCfg =
             Map.ofSeq [| ("get", sprintf "cp %s/{0} {1}" CfgVal.historyPath)
                          ("put", sprintf "cp {0} %s/{1}" CfgVal.historyPath)
                          ("mkdir", sprintf "mkdir -p %s/{0}" CfgVal.historyPath) |]
+        let remoteHist dnsName =
+            Map.ofSeq [| ("get", sprintf "curl -sf %s/{0} -o {1}" dnsName) |]
+        let getHist getCommand = 
+            Map.ofSeq [| ("get", getCommand) |]
 
         ignore (t.Add("DATABASE", self.database.ToString()))
         ignore (t.Add("HTTP_PORT", int64(CfgVal.httpPort)))
@@ -108,7 +101,7 @@ type StellarCoreCfg =
         ignore (t.Add("NODE_SEED", self.nodeSeed.SecretSeed))
         ignore (t.Add("NODE_IS_VALIDATOR", self.nodeIsValidator))
         ignore (t.Add("RUN_STANDALONE", self.runStandalone))
-        ignore (t.Add("KNOWN_PEERS", self.knownPeers))
+        ignore (t.Add("PREFERRED_PEERS", self.preferredPeers))
         ignore (t.Add("CATCHUP_COMPLETE", self.catchupMode = CatchupComplete))
         ignore (t.Add("CATCHUP_RECENT",
                       match self.catchupMode with
@@ -125,25 +118,77 @@ type StellarCoreCfg =
         ignore (t.Add("QUORUM_SET", Map.ofSeq [| ("VALIDATORS", qset) |]))
         let localTab = t.Add("HISTORY", Toml.Create(), TomlObjectFactory.RequireTomlObject()).Added
         ignore (localTab.Add(CfgVal.localHistName, hist))
+        for historyNode in self.historyNodes do
+            localTab.Add(historyNode.Key, remoteHist historyNode.Value) |> ignore
+        for historyGetCommand in self.historyGetCommands do
+            localTab.Add(historyGetCommand.Key, getHist historyGetCommand.Value) |> ignore
         t
 
     override self.ToString() : string = self.ToTOML().ToString()
-
 
 // Extension to the NetworkCfg type to make StellarCoreCfg objects
 // for each of its peers. This just creates a default; if you want
 // to modify a field, use a copy-and-update record expression like
 // {cfg with accelerateTime = true}
 type NetworkCfg with
-    member self.StellarCoreCfgForPeer(i: int) : StellarCoreCfg =
-        let numPeers = Array.length self.peerKeys
-        { database = SQLite3File CfgVal.databasePath
-          networkPassphrase = PrivateNet self.networkNonce
-          nodeSeed = Array.get self.peerKeys i
-          nodeIsValidator = true
+    member self.GetNameKeyList(cs) =
+        let map = Array.mapi (fun i k -> (CfgVal.peerShortName cs i, k))
+        map cs.keys
+
+    member self.GetNameKeyList(csl) =
+        List.map (self.Find >> self.GetNameKeyList) csl |> Array.concat
+
+    member self.GetNameKeyListAll() =
+        List.map self.GetNameKeyList self.coreSets |> Array.concat
+
+    member self.DnsNamesWithKey(cs) =
+        let map = Array.mapi (fun i k -> (CfgVal.peerShortName cs i, CfgVal.peerDNSName self.networkNonce cs i))
+        map cs.keys
+
+    member self.DnsNamesWithKey(csl) =
+        List.map (self.Find >> self.DnsNamesWithKey) csl |> Array.concat
+
+    member self.DnsNamesWithKey() =
+        List.map self.DnsNamesWithKey self.coreSets |> Array.concat
+
+    member self.DnsNames(cs) =
+        let map = Array.mapi (fun i k -> (CfgVal.peerDNSName self.networkNonce cs i))
+        map cs.keys
+
+    member self.DnsNames(csl) =
+        List.map (self.Find >> self.DnsNames) csl |> Array.concat
+
+    member self.DnsNames() =
+        List.map self.DnsNames self.coreSets |> Array.concat
+
+    member self.QuorumSet(o: CoreSetOptions) =
+        let fromQuorumSet = 
+            match o.quorumSet with
+            | None -> self.GetNameKeyListAll()
+            | Some(x) -> self.GetNameKeyList(x)
+
+        List.concat [fromQuorumSet |> List.ofArray; o.quorumSetKeys |> Map.toList] |> Map.ofList
+ 
+    member self.HistoryNodes(o: CoreSetOptions) =
+        match o.historyNodes, o.quorumSet with
+        | None, None -> self.DnsNamesWithKey() |> Map.ofArray
+        | None, Some(x) -> self.DnsNamesWithKey(x) |> Map.ofArray
+        | Some(x), _ -> self.DnsNamesWithKey(x) |> Map.ofArray
+
+    member self.PreferredPeers(o: CoreSetOptions) =
+        match o.peers with
+        | None -> List.concat [self.DnsNames() |> List.ofArray; o.peersDns ]
+        | Some(x) -> List.concat [self.DnsNames(x) |> List.ofArray; o.peersDns ]                
+
+    member self.StellarCoreCfg(c, i) : StellarCoreCfg =
+        { network = self
+          database = SQLite3File CfgVal.databasePath
+          networkPassphrase = self.networkPassphrase
+          nodeSeed = c.keys.[i]
+          nodeIsValidator = c.options.validate
           runStandalone = false
-          knownPeers = Array.init numPeers (CfgVal.peerDNSName self.networkNonce)
-          catchupMode = CatchupRecent 1024
+          preferredPeers = self.PreferredPeers c.options
+          catchupMode = c.options.catchupMode
           automaticMaintenancePeriod = 30
           automaticMaintenanceCount = 10000
           accelerateTime = false
@@ -152,4 +197,6 @@ type NetworkCfg with
           invariantChecks = [".*"]
           unsafeQuorum = true
           failureSafety = (-1)
-          quorumSet = Map.ofSeq (Array.mapi (fun (i : int) k -> ((CfgVal.peerShortName i), k)) self.peerKeys) }
+          quorumSet = self.QuorumSet c.options
+          historyNodes = self.HistoryNodes c.options
+          historyGetCommands = c.options.historyGetCommands }

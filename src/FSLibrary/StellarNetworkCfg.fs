@@ -5,6 +5,7 @@
 module StellarNetworkCfg
 
 open stellar_dotnet_sdk
+open StellarCoreSet
 
 // Random nonce used as both a Kubernetes namespace and a stellar network
 // identifier to qualify the remaining objects we construct.
@@ -23,6 +24,18 @@ let MakeNetworkNonce() : NetworkNonce =
     ignore (rng.GetBytes(bytes))
     NetworkNonce bytes
 
+// Symbolic type for the different sorts of NETWORK_PASSPHRASE that can show up
+// in a stellar-core.cfg file. Usually use PrivateNet, which takes a nonce and
+// will not collide with any other networks.
+type NetworkPassphrase =
+    | SDFTestNet
+    | SDFMainNet
+    | PrivateNet of NetworkNonce
+    override self.ToString() : string =
+        match self with
+        | SDFTestNet -> "Test SDF Network ; September 2015"
+        | SDFMainNet -> "Public Global Stellar Network ; September 2015"
+        | PrivateNet n -> sprintf "Private test network '%s'" (n.ToString())
 
 // A logical group of stellar-core peers (and possibly other resources like
 // horizon peers, if we get there). The network nonce will be used to form a k8s
@@ -35,18 +48,35 @@ let MakeNetworkNonce() : NetworkNonce =
 
 type NetworkCfg =
     { networkNonce : NetworkNonce
-      peerKeys : KeyPair array }
+      networkPassphrase : NetworkPassphrase
+      mutable coreSets : CoreSet list
+      ingressPort : int }
 
-    member self.NumPeers : int =
-        Array.length self.peerKeys
+    member self.Find (n:string) =
+        (List.find (fun x -> (x.name = n)) self.coreSets)
 
     member self.NamespaceProperty : string =
         self.networkNonce.ToString()
 
+    member self.MapCoreSetPeers f cs =
+        Array.mapi (fun i k -> f cs i) cs.keys
+
+    member self.MapAllPeers f =
+        List.map (self.MapCoreSetPeers f) self.coreSets |> Array.concat
+
+    member self.ChangeCount name count =
+        let cs = self.Find(name)
+        cs.SetCurrentCount count
+        let newCoreSets = List.filter (fun x -> (x. name <> name)) self.coreSets
+        self.coreSets <- cs :: newCoreSets
 
 // Generates a fresh network of size n, with fresh keypairs for each node, and a
 // random nonce to isolate the network.
-let MakeNetworkCfg (n:int) : NetworkCfg =
-    { networkNonce = MakeNetworkNonce()
-      peerKeys = Array.init n (fun _ -> KeyPair.Random()) }
-
+let MakeNetworkCfg (c,p,passprhase) : NetworkCfg =
+    let nonce = MakeNetworkNonce()
+    { networkNonce = nonce
+      networkPassphrase = match passprhase with
+                          | None -> PrivateNet nonce
+                          | Some(x) -> x
+      coreSets = c
+      ingressPort = p }

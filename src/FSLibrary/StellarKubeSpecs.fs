@@ -4,12 +4,32 @@
 
 module StellarKubeSpecs
 
-open k8s
 open k8s.Models
 
 open StellarNetworkCfg
 open StellarCoreCfg
+open StellarCoreSet
+open StellarPersistentVolume
 
+let HistoryContainer =
+    V1Container
+        (name = "history",
+         image = "nginx",
+         command = [| "nginx" |],
+         args = [| "-c"; CfgVal.historyCfgFile; |],
+         volumeMounts = [| V1VolumeMount(name = CfgVal.dataVolumeName,
+                                         mountPath = CfgVal.dataVolumePath)
+                           V1VolumeMount(name = CfgVal.cfgVolumeName,
+                                         mountPath = CfgVal.cfgVolumePath) |])
+
+let SqliteContainer =
+    V1Container
+        (name = "sqlite",
+         image = "dockerpinata/sqlite",
+         command = [| "sleep" |],
+         args = [|"356d"|],
+         volumeMounts = [| V1VolumeMount(name = CfgVal.dataVolumeName,
+                                         mountPath = CfgVal.dataVolumePath)|])
 
 // Returns a k8s V1Container object using the stellar-core image, and running
 // stellar-core with the specified sub-command(s) or arguments, passing a final
@@ -20,26 +40,27 @@ open StellarCoreCfg
 //
 // This is admittedly a bit convoluted, but it's the simplest mechanism I could
 // figure out to furnish each stellar-core with a Pod-specific config file.
-let CoreContainerForCommand (subCommands:string array) : V1Container =
+let CoreContainerForCommand image (subCommands:string array) : V1Container =
     let peerNameFieldSel = V1ObjectFieldSelector(fieldPath = "metadata.name")
     let peerNameEnvVarSource = V1EnvVarSource(fieldRef = peerNameFieldSel)
     let peerNameEnvVar = V1EnvVar(name = CfgVal.peerNameEnvVarName,
                                   valueFrom = peerNameEnvVarSource)
     V1Container
         (name = "stellar-core-" + (Array.get subCommands 0),
-         image = CfgVal.stellarCoreImageName,
+         image = image,
          command = [| CfgVal.stellarCoreBinPath |], env = [| peerNameEnvVar |],
+         args = Array.append subCommands [| "--conf"; CfgVal.peerNameEnvCfgFile |],
          volumeMounts = [| V1VolumeMount(name = CfgVal.dataVolumeName,
                                          mountPath = CfgVal.dataVolumePath)
                            V1VolumeMount(name = CfgVal.cfgVolumeName,
-                                         mountPath = CfgVal.cfgVolumePath) |],
-         args = Array.append subCommands [| "--conf"; CfgVal.peerNameEnvCfgFile |])
+                                         mountPath = CfgVal.cfgVolumePath) |])
 
 
-let WithReadinessProbe (container:V1Container) : V1Container =
+let WithReadinessProbe (container:V1Container) probeTimeout : V1Container =
     let httpPortStr = IntstrIntOrString(value = CfgVal.httpPort.ToString())
     let readyProbe = V1Probe(periodSeconds = System.Nullable<int>(5),
                              initialDelaySeconds = System.Nullable<int>(5),
+                             timeoutSeconds = System.Nullable<int>(probeTimeout),
                              httpGet = V1HTTPGetAction(path = "/info",
                                                        port = httpPortStr))
     container.ReadinessProbe <- readyProbe
@@ -57,6 +78,20 @@ type NetworkCfg with
         V1ObjectMeta(name = name, labels = CfgVal.labels,
                      namespaceProperty = self.NamespaceProperty)
 
+    member self.HistoryConfig() =
+        ("nginx.conf", sprintf "
+          error_log /var/log/nginx.error_log debug;\n
+          daemon off;
+          user root root;
+          events {}\n
+          http {\n
+            server {\n
+              autoindex on;\n
+              listen 80;\n
+              root %s;\n
+            }\n
+          }" CfgVal.historyPath)
+
     // Returns a ConfigMap dictionary that names "peer-0.cfg".."peer-N.cfg" to
     // TOML config file data for each such config. Mounting this ConfigMap on a
     // Pod will provide it access to _all_ the configs in the network, but it
@@ -65,29 +100,53 @@ type NetworkCfg with
     // get a node's config to it, and to browse the configuration of the entire
     // network eg. in the k8s dashboard.
     member self.ToConfigMap() : V1ConfigMap =
-        let peerKeyValPair i = (CfgVal.peerCfgName i, (self.StellarCoreCfgForPeer i).ToString())
-        let cfgs = Array.init self.NumPeers peerKeyValPair
+        let peerKeyValPair cs i = (CfgVal.peerCfgName cs i, (self.StellarCoreCfg (cs, i)).ToString())
+        let cfgs = Array.append (self.MapAllPeers peerKeyValPair) [| self.HistoryConfig() |]
         V1ConfigMap(metadata = V1ObjectMeta(name = CfgVal.cfgMapName,
                                             namespaceProperty = self.NamespaceProperty),
                     data = Map.ofSeq cfgs)
 
-    // Returns a PodTemplate that mounds the ConfigMap on /cfg and an empty data
+    // Returns a PodTemplate that mounts the ConfigMap on /cfg and an empty data
     // volume on /data. Then initializes a local stellar-core database in
     // /data/stellar.db with buckets in /data/buckets and history archive in
     // /data/history, forces SCP on next startup, and runs.
-    member self.ToPodTemplateSpec() : V1PodTemplateSpec =
+    member self.ToPodTemplateSpec cs probeTimeout : V1PodTemplateSpec =
         let cfgVol = V1Volume(name = CfgVal.cfgVolumeName,
                               configMap = V1ConfigMapVolumeSource(name = CfgVal.cfgMapName))
-        let dataVol = V1Volume(name = CfgVal.dataVolumeName,
+        let dataVol = 
+            match cs.options.persistentVolume with
+            | None -> V1Volume(name = CfgVal.dataVolumeName,
                                emptyDir = V1EmptyDirVolumeSource())
+            | Some(x) ->
+                let claim = V1PersistentVolumeClaimVolumeSource(claimName = CfgVal.peristentVolumeClaimName self.NamespaceProperty x)
+                V1Volume(name = CfgVal.dataVolumeName,
+                         persistentVolumeClaim = claim)
+
+        let imageName =
+            match cs.options.image with
+            | None -> CfgVal.stellarCoreImageName
+            | Some(x) -> x
+
+        let newDb i = if i.newDb then [| [| "new-db" |] |] else [||]
+        let newHist i = if i.newHist then [| [| "new-hist"; CfgVal.localHistName |] |] else [||]
+        let initialCatchup i = if i.initialCatchup then [| [| "catchup"; "current/0" |] |] else [||]
+        let forceScp i = if i.forceScp then [| [| "force-scp" |] |] else [||]
+
+        let initSequence (i : CoreSetInitialization) =
+            Array.concat [ newDb i; newHist i; initialCatchup i; forceScp i ]
+
+
+        let volumes = [| cfgVol; dataVol |]
+        let initContianers = Array.map (fun p -> CoreContainerForCommand imageName p) (initSequence cs.options.initialization)
+
+        let containers = [| WithReadinessProbe (CoreContainerForCommand imageName [| "run" |]) probeTimeout;
+                            HistoryContainer; SqliteContainer |]
 
         let podSpec =
             V1PodSpec
-                (initContainers = [| CoreContainerForCommand [| "new-db" |];
-                                   CoreContainerForCommand [| "new-hist"; CfgVal.localHistName |];
-                                   CoreContainerForCommand [| "force-scp" |] |],
-                 containers = [| WithReadinessProbe (CoreContainerForCommand [| "run" |]) |],
-                 volumes = [| cfgVol; dataVol |])
+                (initContainers = initContianers,
+                 containers = containers,
+                 volumes = volumes)
         V1PodTemplateSpec
                 (spec = podSpec,
                  metadata = V1ObjectMeta(labels = CfgVal.labels,
@@ -107,14 +166,14 @@ type NetworkCfg with
 
     // Returns a StatefulSet object that will build stellar-core Pods named
     // peer-0 .. peer-N, and bind them to the generic "peer" Service above.
-    member self.ToStatefulSet (setName:string) : V1StatefulSet =
+    member self.ToStatefulSet (cs: CoreSet) count probeTimeout : V1StatefulSet =
         let statefulSetSpec =
             V1StatefulSetSpec
                 (selector = V1LabelSelector(matchLabels = CfgVal.labels),
                  serviceName = CfgVal.serviceName,
-                 template = self.ToPodTemplateSpec(),
-                 replicas = System.Nullable<int>(self.NumPeers))
-        let statefulSet = V1StatefulSet(metadata = self.NamespacedMeta setName,
+                 template = self.ToPodTemplateSpec cs probeTimeout,
+                 replicas = System.Nullable<int>(count))
+        let statefulSet = V1StatefulSet(metadata = self.NamespacedMeta (CfgVal.peerSetName cs),
                                         spec = statefulSetSpec)
         ignore( statefulSet.Validate())
         statefulSet
@@ -129,16 +188,62 @@ type NetworkCfg with
     // separate URL prefixes to separate Pods (which is somewhat the opposite of
     // the load-balancing task Services, Pods, and Ingress systems typically
     // do).
-    member self.ToPerPodServices () : V1Service array =
-        let perPodService i =
-            let name = CfgVal.peerShortName i
-            let dnsName = CfgVal.peerDNSName self.networkNonce i
+    member self.ToPerPodServices : V1Service array =
+        let perPodService cs i =
+            let name = CfgVal.peerShortName cs i
+            let dnsName = CfgVal.peerDNSName self.networkNonce cs i
             let spec = V1ServiceSpec(``type`` = "ExternalName",
-                                     ports = [|V1ServicePort(port = CfgVal.httpPort)|],
+                                     ports =
+                                      [|V1ServicePort(name = "core",
+                                                      port = CfgVal.httpPort);
+                                        V1ServicePort(name = "history",
+                                                      port = 80)|],
                                      externalName = dnsName)
             V1Service(metadata = self.NamespacedMeta name, spec = spec)
-        Array.init self.NumPeers perPodService
+        self.MapAllPeers perPodService
 
+    member self.ToCoreSetPersistentVolumeNames =
+        let withPersistentVolumes = self.coreSets |> List.filter (fun cs -> cs.options.persistentVolume <> None)
+        let getName cs =
+            cs.options.persistentVolume.Value
+        let names = List.map getName withPersistentVolumes
+        names |> List.sort |> List.distinct
+
+    member self.ToPersistentVolumeNames =
+        let getFullName name =
+            CfgVal.peristentVolumeName self.NamespaceProperty name
+        List.map getFullName self.ToCoreSetPersistentVolumeNames
+
+    member self.ToPersistentVolumes (pv: PersistentVolume) =
+        let makePersistentVolume name =
+            let volumeName = CfgVal.peristentVolumeName self.NamespaceProperty name
+            let meta = V1ObjectMeta(name = volumeName)
+            let accessModes = [|"ReadWriteOnce"|]
+            let capacity = dict["storage", ResourceQuantity("1Gi")]
+            pv.Create volumeName
+            let hostPath = V1HostPathVolumeSource(path = pv.FullPath volumeName)
+            let spec = V1PersistentVolumeSpec(accessModes = accessModes,
+                                              storageClassName = volumeName,
+                                              capacity = capacity,
+                                              hostPath = hostPath,
+                                              persistentVolumeReclaimPolicy = "Retain")
+            V1PersistentVolume(metadata = meta, spec = spec)
+        List.map makePersistentVolume self.ToCoreSetPersistentVolumeNames
+
+    member self.ToPersistentVolumeClaims =
+        let makePersistentVolumeClaim name =
+            let volumeName = CfgVal.peristentVolumeName self.NamespaceProperty name
+            let claimName = CfgVal.peristentVolumeClaimName self.NamespaceProperty name
+            let meta = V1ObjectMeta(name = claimName)
+            let accessModes = [|"ReadWriteOnce"|]
+            let requests = dict["storage", ResourceQuantity("1Gi")]
+            let requirements = V1ResourceRequirements(requests = requests)
+
+            let spec = V1PersistentVolumeClaimSpec(accessModes = accessModes,
+                                                   storageClassName = volumeName,
+                                                   resources = requirements)
+            V1PersistentVolumeClaim(metadata = meta, spec = spec)
+        List.map makePersistentVolumeClaim self.ToCoreSetPersistentVolumeNames
 
     // Returns an Ingress object with rules that map URLs /$namespace/peer-N/foo
     // to the per-Pod Service within $namespace named peer-N (which then, via
@@ -147,16 +252,25 @@ type NetworkCfg with
     // cluster.
     member self.ToIngress () : Extensionsv1beta1Ingress =
         let httpPortStr = IntstrIntOrString(value = CfgVal.httpPort.ToString())
-        let backend (pn:string) =
+        let coreBackend (pn:string) =
             Extensionsv1beta1IngressBackend(serviceName = pn,
                                             servicePort = httpPortStr)
-        let path (i:int) =
-            let pn = CfgVal.peerShortName i
-            Extensionsv1beta1HTTPIngressPath(path = sprintf "/%s/%s/(.*)"
+        let historyBackend (pn:string) =
+            Extensionsv1beta1IngressBackend(serviceName = pn,
+                                            servicePort = IntstrIntOrString(value = "80"))
+        let corePath cs i =
+            let pn = CfgVal.peerShortName cs i
+            Extensionsv1beta1HTTPIngressPath(path = sprintf "/%s/%s/core/(.*)"
                                                     (self.NamespaceProperty) pn,
-                                             backend = backend pn)
-        let paths = Array.init self.NumPeers path
-        let rule = Extensionsv1beta1HTTPIngressRuleValue(paths = paths)
+                                             backend = coreBackend pn)
+        let historyPath cs i =
+            let pn = CfgVal.peerShortName cs i
+            Extensionsv1beta1HTTPIngressPath(path = sprintf "/%s/%s/history/(.*)"
+                                                    (self.NamespaceProperty) pn,
+                                             backend = historyBackend pn)
+        let corePaths = self.MapAllPeers corePath
+        let historyPaths = self.MapAllPeers historyPath
+        let rule = Extensionsv1beta1HTTPIngressRuleValue(paths = Array.concat [corePaths; historyPaths])
         let rules = [|Extensionsv1beta1IngressRule(http = rule)|]
         let spec = Extensionsv1beta1IngressSpec(rules = rules)
         let annotation = Map.ofArray [|("nginx.ingress.kubernetes.io/ssl-redirect", "false");

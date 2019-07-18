@@ -4,7 +4,6 @@
 
 module StellarSupercluster
 
-open stellar_dotnet_sdk
 open k8s
 open k8s.Models
 
@@ -15,12 +14,13 @@ open StellarKubeSpecs
 open StellarCorePeer
 open StellarCoreHTTP
 open StellarTransaction
+open System
 
 let ExpandHomeDirTilde (s:string) : string =
     if s.StartsWith("~/")
     then
-        let upp = System.Environment.SpecialFolder.UserProfile
-        let home = System.Environment.GetFolderPath(upp)
+        let upp = Environment.SpecialFolder.UserProfile
+        let home = Environment.GetFolderPath(upp)
         home + s.Substring(1)
     else
         s
@@ -29,7 +29,7 @@ let ExpandHomeDirTilde (s:string) : string =
 // Loads a config file and builds a Kubernetes client object connected to the
 // cluster described by it.
 let ConnectToCluster (cfgFile:string) : Kubernetes =
-    let cfgFileInfo = System.IO.FileInfo(ExpandHomeDirTilde cfgFile)
+    let cfgFileInfo = IO.FileInfo(ExpandHomeDirTilde cfgFile)
     let kCfg = k8s.KubernetesClientConfiguration.BuildConfigFromConfigFile(cfgFileInfo)
     new k8s.Kubernetes(kCfg)
 
@@ -54,18 +54,47 @@ let PollCluster (kube:Kubernetes) =
 type ClusterFormation(networkCfg: NetworkCfg,
                       kube: Kubernetes,
                       ns: V1Namespace,
-                      statefulSet: V1StatefulSet,
-                      ingress: Extensionsv1beta1Ingress) =
+                      statefulSets: V1StatefulSet list,
+                      ingress: Extensionsv1beta1Ingress,
+                      probeTimeout: int) =
+    let networkCfg = networkCfg
+    let kube = kube
+    let ns = ns
+    let ingress = ingress
+    let mutable statefulSets = statefulSets
+    let mutable keepData = false
+    let probeTimeout = probeTimeout
 
     let mutable disposed = false
     let cleanup(disposing:bool) =
         if not disposed then
             disposed <- true
             if disposing then
-                LogInfo "Disposing formation, deleting namespace '%s'"
-                    networkCfg.NamespaceProperty
-                ignore (kube.DeleteNamespace(name = networkCfg.NamespaceProperty,
-                                 propagationPolicy = "Foreground"))
+                if keepData
+                then
+                    LogInfo "Disposing formation, keeping namespace '%s' for debug"
+                        networkCfg.NamespaceProperty
+                else
+                    LogInfo "Disposing formation, deleting namespace '%s'"
+                        networkCfg.NamespaceProperty
+                    ignore (kube.DeleteNamespace(name = networkCfg.NamespaceProperty,
+                                     propagationPolicy = "Foreground"))
+
+                    let deleteVolume persistentVolume = 
+                        try
+                            kube.DeletePersistentVolume(name = persistentVolume) |> ignore
+                        with
+                        | x -> ()
+                        true
+
+                    (List.forall deleteVolume networkCfg.ToPersistentVolumeNames) |> ignore
+
+    member self.StatefulSets = statefulSets
+    member self.NetworkCfg = networkCfg
+    member self.Kube = kube
+
+    member self.KeepData =
+        keepData <- true
 
     // implementation of IDisposable
     interface System.IDisposable with
@@ -77,41 +106,60 @@ type ClusterFormation(networkCfg: NetworkCfg,
     override self.Finalize() =
         cleanup(false)
 
-    member self.networkCfg = networkCfg
-    member self.kube = kube
-    member self.ns = ns
-    member self.statefulSet = statefulSet
-    member self.ingress = ingress
-
     override self.ToString() : string =
-        let name = self.statefulSet.Metadata.Name
-        let ns = self.statefulSet.Metadata.NamespaceProperty
+        let name = statefulSets.[0].Metadata.Name
+        let ns = statefulSets.[0].Metadata.NamespaceProperty
         sprintf "%s/%s" ns name
 
     // Watches the provided StatefulSet until the count of ready replicas equals the
     // count of configured replicas. This normally represents "successful startup".
-    member self.WaitForAllReplicasReady() =
+    member self.WaitForAllReplicasReady (ss : V1StatefulSet) =
         use event = new System.Threading.ManualResetEventSlim(false)
-        let name = self.statefulSet.Metadata.Name
-        let ns = self.statefulSet.Metadata.NamespaceProperty
+        let name = ss.Metadata.Name
+        let ns = ss.Metadata.NamespaceProperty
         let handler (ety:WatchEventType) (ss:V1StatefulSet) =
             let n = ss.Status.ReadyReplicas.GetValueOrDefault(0)
             let k = ss.Spec.Replicas.GetValueOrDefault(0)
             LogInfo "StatefulSet %s/%s: %d/%d replicas ready" ns name n k;
             if n = k then event.Set()
         let action = System.Action<WatchEventType, V1StatefulSet>(handler)
-        use task = self.kube.WatchNamespacedStatefulSetAsync(name = name,
-                                                             ``namespace`` = ns,
-                                                             onEvent = handler)
-        LogInfo "Waiting for replicas"
+        use task = kube.WatchNamespacedStatefulSetAsync(name = name,
+                                                        ``namespace`` = ns,
+                                                        onEvent = handler)
+        LogInfo "Waiting for replicas on %s/%s" ns name
         event.Wait()
-        LogInfo "All replicas ready"
+        LogInfo "All replicas on %s/%s ready" ns name
+
+    // Watches the provided StatefulSet until the count of ready replicas equals the
+    // count of configured replicas. This normally represents "successful startup".
+    member self.WaitForAllReplicasOnAllSetsReady() =
+        LogInfo "Waiting for replicas on %s" (self.ToString())
+        for ss in statefulSets do
+            self.WaitForAllReplicasReady ss
+        LogInfo "All replicas on %s ready" (self.ToString())
+
+    member self.ChangeCount name count =
+        networkCfg.ChangeCount name count
+        let cs = networkCfg.Find name
+        let ss = kube.ReplaceNamespacedStatefulSet(
+                   body = networkCfg.ToStatefulSet cs count probeTimeout,
+                   name = CfgVal.peerSetName cs,
+                   namespaceParameter = networkCfg.NamespaceProperty)
+        let newSets = statefulSets |> List.filter (fun x -> x.Metadata.Name <> CfgVal.peerSetName cs)
+        statefulSets <- ss :: newSets
+        self.WaitForAllReplicasReady ss
+
+    member self.WaitUntilReady =
+        networkCfg.EachPeer (fun p -> p.WaitUntilReady)
+
+    member self.WaitUntilSynced sets =
+        networkCfg.EachPeerInSets (sets |> Array.ofList) (fun p -> p.WaitUntilSynced)
 
     member self.ReportStatus() =
-        ReportAllPeerStatus self.networkCfg
+        ReportAllPeerStatus networkCfg
 
-    member self.CreateAccount (u:Username) : unit =
-        let peer = self.networkCfg.GetPeer 0
+    member self.CreateAccount cs u =
+        let peer = networkCfg.GetPeer cs 0
         let tx = peer.TxCreateAccount u
         LogInfo "creating account for %O on %O" u self
         ignore (peer.SubmitSignedTransaction tx)
@@ -121,8 +169,8 @@ type ClusterFormation(networkCfg: NetworkCfg,
             u self acc.SequenceNumber
             (peer.GetTestAccBalance (u.ToString()))
 
-    member self.Pay (src:Username) (dst:Username) : unit =
-        let peer = self.networkCfg.GetPeer 0
+    member self.Pay cs src dst =
+        let peer = networkCfg.GetPeer cs 0
         let tx = peer.TxPayment src dst
         LogInfo "paying from account %O to %O on %O" src dst self
         ignore (peer.SubmitSignedTransaction tx)
@@ -132,39 +180,63 @@ type ClusterFormation(networkCfg: NetworkCfg,
             dst (peer.GetSeqAndBalance dst)
             self
 
-    member self.CheckNoErrorsAndPairwiseConsistency() : unit =
-        let peer = self.networkCfg.GetPeer 0
-        self.networkCfg.EachPeer
+    member self.CheckNoErrorsAndPairwiseConsistency =
+        let peer = networkCfg.GetPeer networkCfg.coreSets.[0] 0
+        networkCfg.EachPeer
             begin
                 fun p ->
                     p.CheckNoErrorMetrics(includeTxInternalErrors=false)
                     p.CheckConsistencyWith peer
             end
 
-    member self.RunLoadgenAndCheckNoErrors() : unit =
-        let peer = self.networkCfg.GetPeer 0
+    member self.CheckUsesLatestProtocolVersion =
+        networkCfg.EachPeer
+            begin
+                fun p ->
+                    p.CheckUsesLatestProtocolVersion
+            end
+
+    member self.RunLoadgen cs lg =
+        let peer = networkCfg.GetPeer cs 0
+        LogInfo "Loadgen: %s" (peer.GenerateLoad lg)
+        peer.WaitForLoadGenComplete lg
+
+    member self.RunLoadgenAndCheckNoErrors cs =
+        let peer = networkCfg.GetPeer cs 0
         let lg = { DefaultAccountCreationLoadGen with accounts = 10000 }
         LogInfo "Loadgen: %s" (peer.GenerateLoad lg)
         peer.WaitForLoadGenComplete lg
-        self.CheckNoErrorsAndPairwiseConsistency()
+        self.CheckNoErrorsAndPairwiseConsistency
 
 
 type Kubernetes with
 
     // Starts a StatefulSet, Service, and Ingress for a given NetworkCfg, then
     // waits for it to be ready.
-    member self.MakeFormation (nCfg:NetworkCfg) : ClusterFormation =
+    member self.MakeFormation (nCfg:NetworkCfg) pv keepData probeTimeout : ClusterFormation =
         let nsStr = nCfg.NamespaceProperty
         let ns = self.CreateNamespace(nCfg.Namespace())
         try
-            let svc = self.CreateNamespacedService(body = nCfg.ToService(),
-                                                   namespaceParameter = nsStr)
-            let cfgMap = self.CreateNamespacedConfigMap(body = nCfg.ToConfigMap(),
-                                                        namespaceParameter = nsStr)
-            let statefulSet = self.CreateNamespacedStatefulSet(body = nCfg.ToStatefulSet CfgVal.peerSetName,
-                                                               namespaceParameter = nsStr)
+            self.CreateNamespacedService(body = nCfg.ToService(),
+                                         namespaceParameter = nsStr) |> ignore
+            self.CreateNamespacedConfigMap(body = nCfg.ToConfigMap(),
+                                           namespaceParameter = nsStr) |> ignore
+            let makeStatefulSet cs = 
+                self.CreateNamespacedStatefulSet(body = nCfg.ToStatefulSet cs cs.CurrentCount probeTimeout,
+                                                               namespaceParameter = nsStr)  
+            let statefulSets = List.map makeStatefulSet nCfg.coreSets
 
-            for svc in nCfg.ToPerPodServices() do
+            match pv with
+            | Some(x) ->
+                for persistentVolume in nCfg.ToPersistentVolumes x do
+                    self.CreatePersistentVolume(body = persistentVolume) |> ignore
+
+                for persistentVolumeClaim in nCfg.ToPersistentVolumeClaims do
+                    self.CreateNamespacedPersistentVolumeClaim(body = persistentVolumeClaim,
+                                                               namespaceParameter = nsStr) |> ignore
+            | None -> ()
+
+            for svc in nCfg.ToPerPodServices do
                 ignore (self.CreateNamespacedService(namespaceParameter = nsStr,
                                                      body = svc))
 
@@ -173,15 +245,29 @@ type Kubernetes with
             let formation = new ClusterFormation(networkCfg = nCfg,
                                                  kube = self,
                                                  ns = ns,
-                                                 statefulSet = statefulSet,
-                                                 ingress = ingress)
-            formation.WaitForAllReplicasReady()
+                                                 statefulSets = statefulSets,
+                                                 ingress = ingress,
+                                                 probeTimeout = probeTimeout)
+            formation.WaitForAllReplicasOnAllSetsReady()
             formation
         with
         | x ->
-            LogError "Exception while building formation, deleting namespace '%s'"
-                         nCfg.NamespaceProperty
-            ignore (self.DeleteNamespace(name = nCfg.NamespaceProperty,
-                                         propagationPolicy = "Foreground"))
+            if keepData         
+            then
+                LogError "Exception while building formation, keeping namespace '%s' for debug"
+                             nCfg.NamespaceProperty
+            else
+                LogError "Exception while building formation, deleting namespace '%s'"
+                             nCfg.NamespaceProperty
+                self.DeleteNamespace(name = nCfg.NamespaceProperty,
+                                     propagationPolicy = "Foreground") |> ignore
+                match pv with
+                | Some(x) ->
+                    for persistentVolume in nCfg.ToPersistentVolumes x do
+                        try
+                            self.DeletePersistentVolume(name = persistentVolume.Metadata.Name) |> ignore
+                        with
+                        | x -> ()
+                | None -> ()
             reraise()
 

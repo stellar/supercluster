@@ -5,7 +5,6 @@
 module StellarCoreHTTP
 
 open FSharp.Data
-open FSharp.Data.JsonExtensions
 open stellar_dotnet_sdk
 
 open PollRetry
@@ -24,6 +23,7 @@ type Metrics = JsonProvider<"json-type-samples/sample-metrics.json", SampleIsLis
 type Info = JsonProvider<"json-type-samples/sample-info.json">
 type TestAcc = JsonProvider<"json-type-samples/sample-testacc.json", SampleIsList=true>
 type Tx = JsonProvider<"json-type-samples/sample-tx.json", SampleIsList=true>
+type PerformanceCsv = CsvProvider<"csv-type-samples/sample-performance.csv", Separators="\t", HasHeaders=true>
 
 
 type LoadGenMode =
@@ -50,7 +50,6 @@ type LoadGen =
            ("accounts", self.accounts.ToString());
            ("txs", self.txs.ToString());
            ("txrate", self.txrate.ToString());
-           ("offset", self.offset.ToString());
            ("batchsize", self.batchsize.ToString());
         ]
 
@@ -99,20 +98,26 @@ let MeterCountOr (def:int) (m:Option<Metrics.GenericMeter>) : int =
 
 let ConsistencyCheckIterationCount : int = 5
 
-exception PeerRejectedUpgrades of string
-exception InconsistentPeers of (Peer * Peer)
-exception MaybeInconsistentPeers of (Peer * Peer)
-exception PeerHasNonzeroErrorMetrics of (Peer * string * int)
-exception TransactionRejected of Transaction
-
+exception PeerRejectedUpgradesException of string
+exception InconsistentPeersException of (Peer * Peer)
+exception MaybeInconsistentPeersException of (Peer * Peer)
+exception PeerHasNonzeroErrorMetricsException of (Peer * string * int)
+exception TransactionRejectedException of Transaction
+exception ProtocolVersionNotUpgradedException of (int * int)
+exception NodeLostSyncException of string
 
 type Peer with
 
     member self.URL (path:string) : string =
-        sprintf "http://localhost:8080/%s/%s/%s"
+        sprintf "http://localhost:%d/%s/%s/core/%s"
+            self.networkCfg.ingressPort
             (self.networkCfg.networkNonce.ToString())
             self.ShortName
             path
+
+    member self.GetState =
+        WebExceptionRetry DefaultRetry
+            (fun _ -> Info.Load(self.URL "info").Info.State)
 
     member self.GetMetrics : Metrics.Metrics =
         WebExceptionRetry DefaultRetry
@@ -135,11 +140,11 @@ type Peer with
                                              url=self.URL "upgrades",
                                              query=upgrades.ToQuery))
         if res.ToLower().Contains("exception")
-        then raise (PeerRejectedUpgrades res)
+        then raise (PeerRejectedUpgradesException res)
 
     member self.WaitForLedgerNum (n:int) =
         RetryUntilTrue
-            (fun _ -> self.GetLedgerNum = n)
+            (fun _ -> self.GetLedgerNum >= n)
             (fun _ -> LogInfo "Waiting for ledger %d on %s"
                               n self.ShortName )
 
@@ -149,7 +154,7 @@ type Peer with
     member self.CheckNoErrorMetrics(includeTxInternalErrors:bool) =
         let raiseIfNonzero (c:int) (n:string) =
             if c <> 0
-            then raise (PeerHasNonzeroErrorMetrics (self, n, c))
+            then raise (PeerHasNonzeroErrorMetricsException (self, n, c))
         let m:Metrics.Metrics = self.GetMetrics
         raiseIfNonzero m.ScpEnvelopeInvalidsig.Count "scp.envelope.invalidsig"
         raiseIfNonzero m.HistoryPublishFailure.Count "history.publish.failure"
@@ -162,7 +167,7 @@ type Peer with
     member self.CheckConsistencyWith (other:Peer) =
         let rec loop (ours:Map<int,string>) (theirs:Map<int,string>) (n:int) =
             if n < 0
-            then raise (MaybeInconsistentPeers (self, other))
+            then raise (MaybeInconsistentPeersException (self, other))
             else
                 if Map.exists
                     begin
@@ -173,7 +178,7 @@ type Peer with
                                     LogInfo "found agreeing ledger %d = %s on %s and %s"
                                         k (v.Remove 6) self.ShortName other.ShortName
                                     true
-                                | Some w -> raise (InconsistentPeers (self, other))
+                                | Some w -> raise (InconsistentPeersException (self, other))
                     end
                         ours
                 then ()
@@ -187,10 +192,16 @@ type Peer with
                         (n-1)
         loop Map.empty Map.empty ConsistencyCheckIterationCount
 
+    member self.CheckUsesLatestProtocolVersion =
+        let lastestProtocolVersion = self.GetProtocolVersion
+        let currentProtocolVersion = self.GetInfo.ProtocolVersion
+        if lastestProtocolVersion <> currentProtocolVersion then
+            raise (ProtocolVersionNotUpgradedException (currentProtocolVersion, lastestProtocolVersion))
+
     member self.ClearMetrics() =
         WebExceptionRetry DefaultRetry
             (fun _ -> Http.RequestString(httpMethod="GET",
-                                         url=self.URL "clearmetrics"))
+                                         url=self.URL "clearmetrics")) |> ignore
 
     member self.GetTestAcc (accName:string) : TestAcc.Root =
         // NB: work around buggy JSON parser upstream, see
@@ -212,6 +223,7 @@ type Peer with
             (fun _ -> LogWarn "Waiting for account %s to exist, to read seqnum" accName)
 
     member self.GenerateLoad (lg:LoadGen) =
+        let m = self.GetMetrics
         WebExceptionRetry DefaultRetry
             (fun _ -> Http.RequestString(httpMethod="GET",
                                          url=self.URL "generateload",
@@ -240,12 +252,16 @@ type Peer with
                 | Some(r) ->
                     let txr = responses.TransactionResult.FromXdr(r)
                     LogError "Result details: %O" txr
-            raise (TransactionRejected tx)
+            raise (TransactionRejectedException tx)
         else res
 
     member self.WaitForLoadGenComplete (lg:LoadGen) =
         RetryUntilTrue
             (fun _ ->
+                if self.GetState <> "Synced!"
+                then
+                    (NodeLostSyncException self.ShortName) |> raise
+
                 let m = self.GetMetrics
                 (MeterCountOr 0 m.LoadgenRunStart) =
                      (MeterCountOr 0 m.LoadgenRunComplete))
@@ -256,6 +272,23 @@ type Peer with
                             (MeterCountOr 0 m.LoadgenAccountCreated) lg.accounts
                             (MeterCountOr 0 m.LoadgenTxnAttempted) lg.txs)
 
+    member self.WaitUntilReady =
+        RetryUntilTrue
+            (fun _ ->
+                self.GetState <> "Booting"
+                )
+            (fun _ ->
+                LogInfo "Waiting until %s is ready"
+                    self.ShortName)
+
+    member self.WaitUntilSynced =
+        RetryUntilTrue
+            (fun _ ->
+                self.GetState = "Synced!"
+                )
+            (fun _ ->
+                LogInfo "Waiting until %s is synced"
+                    self.ShortName)
 
 let ReportAllPeerStatus (nCfg:NetworkCfg) =
     nCfg.EachPeer

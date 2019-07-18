@@ -1,41 +1,56 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
   </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
-    <GenerateTailCalls>true</GenerateTailCalls>
-  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' " />
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
-    <GenerateTailCalls>true</GenerateTailCalls>
   </PropertyGroup>
   <ItemGroup>
-    <!-- For HTTP and JSON access to core. -->
-    <PackageReference Include="FSharp.Data" Version="3.1.1" />
-    <!-- For the k8s API. -->
-    <PackageReference Include="KubernetesClient" Version="1.5.17" />
-    <!-- For writing stellar-core.cfg TOML files. -->
-    <PackageReference Include="Nett" Version="0.11.0" />
-    <PackageReference Include="Serilog" Version="2.8.0" />
-    <PackageReference Include="Serilog.Sinks.Console" Version="3.1.1" />
-    <!-- For KeyPairs and other core XDR types. -->
-    <PackageReference Include="stellar-dotnet-sdk" Version="2.1.25" />
-  </ItemGroup>
-  <ItemGroup>
-    <!-- Note to readers: files need to be listed here in dependency
-       order, with users of a module declared after the module. Further,
-       those dependencies must be acyclic. Acyclicality is a bit of a
-       bummer for organizing your code but it helps keep things tidy and,
-       in any case, is mandated by most of the ML family, including F#.   -->
     <Compile Include="Logging.fs" />
     <Compile Include="PollRetry.fs" />
+    <Compile Include="StellarCoreSet.fs" />
     <Compile Include="StellarNetworkCfg.fs" />
+    <Compile Include="StellarNetworkData.fs" />
     <Compile Include="StellarCoreCfg.fs" />
     <Compile Include="StellarCorePeer.fs" />
     <Compile Include="StellarCoreHTTP.fs" />
     <Compile Include="StellarTransaction.fs" />
+    <Compile Include="StellarPersistentVolume.fs" />
     <Compile Include="StellarKubeSpecs.fs" />
+    <Compile Include="StellarDestination.fs" />
     <Compile Include="StellarSupercluster.fs" />
+    <Compile Include="StellarDataDump.fs" />
+    <Compile Include="StellarPerformanceReporter.fs" />
+    <Compile Include="MissionContext.fs" />
+    <Compile Include="MissionHelpers.fs" />
+    <Compile Include="MissionCatchupHelpers.fs" />
+    <Compile Include="MissionSimplePayment.fs" />
+    <Compile Include="MissionComplexTopology.fs" />
+    <Compile Include="MissionLoadGeneration.fs" />
+    <Compile Include="MissionBenchmarkBaseline.fs" />
+    <Compile Include="MissionBenchmarkIncreaseTxRate.fs" />
+    <Compile Include="MissionHistoryGenerateAndCatchup.fs" />
+    <Compile Include="MissionHistoryPubnetMinimumCatchup.fs" />
+    <Compile Include="MissionHistoryPubnetRecentCatchup.fs" />
+    <Compile Include="MissionHistoryPubnetCompleteCatchup.fs" />
+    <Compile Include="MissionHistoryTestnetCompleteCatchup.fs" />
+    <Compile Include="MissionHistoryTestnetRecentCatchup.fs" />
+    <Compile Include="MissionHistoryTestnetMinimumCatchup.fs" />
+    <Compile Include="MissionVersionMixConsensus.fs" />
+    <Compile Include="MissionVersionNewCatchupToOld.fs" />
+    <Compile Include="MissionVersionOldCatchupToNew.fs" />
+    <Compile Include="MissionProtocolUpgradeTestnet.fs" />
+    <Compile Include="MissionProtocolUpgradePubnet.fs" />
+    <Compile Include="MissionDatabaseInplaceUpgrade.fs" />
     <Compile Include="StellarMission.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Data" Version="3.1.1" />
+    <PackageReference Include="KubernetesClient" Version="1.5.25" />
+    <PackageReference Include="Nett" Version="0.13.0" />
+    <PackageReference Include="Serilog" Version="2.8.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="3.1.1" />
+    <PackageReference Include="stellar-dotnet-sdk" Version="2.2.31" />
   </ItemGroup>
 </Project>
