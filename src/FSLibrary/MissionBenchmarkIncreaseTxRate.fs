@@ -8,30 +8,26 @@ open StellarCoreHTTP
 open StellarCorePeer
 open StellarCoreSet
 open StellarMissionContext
+open StellarPerformanceReporter
+open StellarSupercluster
 
 let benchmarkIncreaseTxRate (context : MissionContext) =
-    let coreSet = MakeCoreSet "core" context.numNodes context.numNodes CoreSetOptions.Default
-    context.ExecuteWithPerformanceReporter [coreSet] None (fun f pr ->
-        f.WaitUntilSynced [coreSet]
+    let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = context.numNodes }
+    context.ExecuteWithPerformanceReporter [coreSet] None (fun (formation: ClusterFormation) (performanceReporter: PerformanceReporter) ->
+        formation.WaitUntilSynced [coreSet]
+        formation.UpgradeProtocolToLatest [coreSet]
+        formation.UpgradeMaxTxSize [coreSet] 1000000
 
-        let upgrades = { DefaultUpgradeParameters with
-                           maxTxSize = Some(1000000);
-                           protocolVersion = Some(11) }
-        f.NetworkCfg.EachPeer (fun p ->
-            p.SetUpgrades(upgrades) // upgrade protocol
-            p.WaitForNextLedger()
-            p.SetUpgrades(upgrades) // upgrade maxTxSize properly
-        )
-
-        f.RunLoadgen coreSet context.GenerateAccountCreationLoad
+        formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
 
         for txRate in context.txRate..(10)..context.maxTxRate do
-            pr.RecordPerformanceMetrics "pay" context.numAccounts context.numTxs txRate 100 (fun _ ->
-                f.RunLoadgen coreSet { mode = GeneratePaymentLoad
-                                       accounts = context.numAccounts
-                                       txs = context.numTxs
-                                       txrate = txRate
-                                       offset = 0
-                                       batchsize = 100 }
+            let loadGen = { mode = GeneratePaymentLoad
+                            accounts = context.numAccounts
+                            txs = context.numTxs
+                            txrate = txRate
+                            offset = 0
+                            batchsize = 100 }
+            performanceReporter.RecordPerformanceMetrics loadGen (fun _ ->
+                formation.RunLoadgen coreSet loadGen
             )
     )

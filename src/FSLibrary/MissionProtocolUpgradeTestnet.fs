@@ -10,28 +10,25 @@ open StellarCoreSet
 open StellarMissionContext
 open StellarNetworkCfg
 open StellarNetworkData
+open StellarSupercluster
 
 let protocolUpgradeTestnet (context : MissionContext) =
     let set = { CoreSetOptions.Default with
+                  nodeCount = 1
                   quorumSet = Some(["core"])
                   historyNodes = Some([])
                   historyGetCommands = TestnetGetCommands
                   catchupMode = CatchupRecent(0)
                   initialization = { CoreSetInitialization.Default with initialCatchup = true } }
 
-    let coreSet = MakeCoreSet "core" 1 1 set
-    context.Execute [coreSet] (Some(SDFTestNet)) (fun f ->
-        f.WaitUntilSynced [coreSet]
+    let coreSet = MakeLiveCoreSet "core" set
+    context.Execute [coreSet] (Some(SDFTestNet)) (fun (formation: ClusterFormation) ->
+        formation.WaitUntilSynced [coreSet]
 
-        let peer = f.NetworkCfg.GetPeer coreSet 0
-        peer.WaitForNextLedger()
-        peer.WaitForNextLedger()
-        peer.WaitForNextLedger()
-        let upgrades = { DefaultUpgradeParameters with protocolVersion = Some(peer.GetProtocolVersion) }
-        peer.SetUpgrades(upgrades)
-        peer.WaitForNextLedger()
-        peer.WaitForNextLedger()
-        peer.WaitForNextLedger()
+        let peer = formation.NetworkCfg.GetPeer coreSet 0
+        peer.WaitForFewLedgers(3)
+        peer.UpgradeProtocolToLatest()
+        peer.WaitForFewLedgers(3)
 
-        f.CheckUsesLatestProtocolVersion
+        formation.CheckUsesLatestProtocolVersion()
     )

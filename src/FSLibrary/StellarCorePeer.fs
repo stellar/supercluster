@@ -23,17 +23,17 @@ type Peer =
 
 
 type NetworkCfg with
-    member self.GetPeer cs i : Peer =
+    member self.GetPeer (coreSet: CoreSet) i : Peer =
         { networkCfg = self;
-          coreSet = cs;
+          coreSet = coreSet;
           peerNum = i }
 
     member self.EachPeer f =
-        for cs in self.coreSets do
-            for i in 0..(cs.CurrentCount - 1) do
-                f (self.GetPeer cs i)
+        for coreSet in self.coreSetList do
+            for i in 0..(coreSet.CurrentCount - 1) do
+                f (self.GetPeer coreSet i)
 
-    member self.EachPeerInSets (sets: CoreSet array) f =
-        for cs in sets do
-            for i in 0..(cs.CurrentCount - 1) do
-                f (self.GetPeer cs i)
+    member self.EachPeerInSets (coreSetArray: CoreSet array) f =
+        for coreSet in coreSetArray do
+            for i in 0..(coreSet.CurrentCount - 1) do
+                f (self.GetPeer coreSet i)

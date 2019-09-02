@@ -7,12 +7,14 @@ module StellarMissionContext
 open k8s
 
 open StellarCoreHTTP
+open StellarCorePeer
 open StellarDataDump
 open StellarDestination
 open StellarNetworkCfg
 open StellarPerformanceReporter
 open StellarPersistentVolume
 open StellarSupercluster
+open StellarCoreSet
 
 let GetOrDefault optional def =
     match optional with
@@ -34,37 +36,37 @@ type MissionContext =
       keepData : bool
       probeTimeout : int }
 
-    member self.Execute coreSets passprhase run =
-      let networkCfg = MakeNetworkCfg(coreSets, self.ingressPort, passprhase)
-      use f = self.kube.MakeFormation networkCfg (Some(self.persistentVolume)) self.keepData self.probeTimeout
+    member self.Execute (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option) run =
+      let networkCfg = MakeNetworkCfg coreSetList self.ingressPort passphrase
+      use formation = self.kube.MakeFormation networkCfg (Some(self.persistentVolume)) self.keepData self.probeTimeout
       try
           try
-              f.WaitUntilReady
-              run f
-              f.CheckNoErrorsAndPairwiseConsistency
+              formation.WaitUntilReady()
+              run formation
+              formation.CheckNoErrorsAndPairwiseConsistency()
           finally
-             f.DumpData self.destination
+             formation.DumpData self.destination
       with
       | x -> (
-                if self.keepData then f.KeepData
+                if self.keepData then formation.KeepData()
                 reraise()
              )
 
-    member self.ExecuteWithPerformanceReporter coreSets passprhase run =
-      let networkCfg = MakeNetworkCfg(coreSets, self.ingressPort, passprhase)
-      use f = self.kube.MakeFormation networkCfg (Some(self.persistentVolume)) self.keepData self.probeTimeout
-      let pr = PerformanceReporter networkCfg
+    member self.ExecuteWithPerformanceReporter (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option) run =
+      let networkCfg = MakeNetworkCfg coreSetList self.ingressPort passphrase
+      use formation = self.kube.MakeFormation networkCfg (Some(self.persistentVolume)) self.keepData self.probeTimeout
+      let performanceReporter = PerformanceReporter networkCfg
       try
           try
-              f.WaitUntilReady
-              run f pr
-              f.CheckNoErrorsAndPairwiseConsistency
+              formation.WaitUntilReady()
+              run formation performanceReporter
+              formation.CheckNoErrorsAndPairwiseConsistency()
           finally
-              pr.DumpPerformanceMetrics self.destination
-              f.DumpData self.destination
+              performanceReporter.DumpPerformanceMetrics self.destination
+              formation.DumpData self.destination
       with
       | x -> (
-                if self.keepData then f.KeepData
+                if self.keepData then formation.KeepData()
                 reraise()
              )
 
@@ -83,3 +85,11 @@ type MissionContext =
         txrate = self.txRate
         offset = 0
         batchsize = 100 }
+
+    member self.ObtainProtocolVersion (image: string) =
+      let coreSet = MakeLiveCoreSet "obtain-version" { CoreSetOptions.Default with nodeCount = 1; image = Some(image) }
+      let networkCfg = MakeNetworkCfg [coreSet] self.ingressPort None
+      use f = self.kube.MakeFormation networkCfg (Some(self.persistentVolume)) self.keepData self.probeTimeout
+
+      let peer = networkCfg.GetPeer coreSet 0
+      peer.GetProtocolVersion()

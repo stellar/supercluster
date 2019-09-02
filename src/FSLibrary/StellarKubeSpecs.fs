@@ -70,7 +70,7 @@ let WithReadinessProbe (container:V1Container) probeTimeout : V1Container =
 // Extend NetworkCfg type with methods for producing various Kubernetes objects.
 type NetworkCfg with
 
-    member self.Namespace() : V1Namespace =
+    member self.Namespace : V1Namespace =
         V1Namespace(spec = V1NamespaceSpec(),
                     metadata = V1ObjectMeta(name = self.NamespaceProperty))
 
@@ -100,7 +100,7 @@ type NetworkCfg with
     // get a node's config to it, and to browse the configuration of the entire
     // network eg. in the k8s dashboard.
     member self.ToConfigMap() : V1ConfigMap =
-        let peerKeyValPair cs i = (CfgVal.peerCfgName cs i, (self.StellarCoreCfg (cs, i)).ToString())
+        let peerKeyValPair (coreSet: CoreSet) i = (CfgVal.peerCfgName coreSet i, (self.StellarCoreCfg (coreSet, i)).ToString())
         let cfgs = Array.append (self.MapAllPeers peerKeyValPair) [| self.HistoryConfig() |]
         V1ConfigMap(metadata = V1ObjectMeta(name = CfgVal.cfgMapName,
                                             namespaceProperty = self.NamespaceProperty),
@@ -110,11 +110,11 @@ type NetworkCfg with
     // volume on /data. Then initializes a local stellar-core database in
     // /data/stellar.db with buckets in /data/buckets and history archive in
     // /data/history, forces SCP on next startup, and runs.
-    member self.ToPodTemplateSpec cs probeTimeout : V1PodTemplateSpec =
+    member self.ToPodTemplateSpec (coreSet: CoreSet) probeTimeout : V1PodTemplateSpec =
         let cfgVol = V1Volume(name = CfgVal.cfgVolumeName,
                               configMap = V1ConfigMapVolumeSource(name = CfgVal.cfgMapName))
         let dataVol = 
-            match cs.options.persistentVolume with
+            match coreSet.options.persistentVolume with
             | None -> V1Volume(name = CfgVal.dataVolumeName,
                                emptyDir = V1EmptyDirVolumeSource())
             | Some(x) ->
@@ -123,7 +123,7 @@ type NetworkCfg with
                          persistentVolumeClaim = claim)
 
         let imageName =
-            match cs.options.image with
+            match coreSet.options.image with
             | None -> CfgVal.stellarCoreImageName
             | Some(x) -> x
 
@@ -137,7 +137,7 @@ type NetworkCfg with
 
 
         let volumes = [| cfgVol; dataVol |]
-        let initContianers = Array.map (fun p -> CoreContainerForCommand imageName p) (initSequence cs.options.initialization)
+        let initContianers = Array.map (fun p -> CoreContainerForCommand imageName p) (initSequence coreSet.options.initialization)
 
         let containers = [| WithReadinessProbe (CoreContainerForCommand imageName [| "run" |]) probeTimeout;
                             HistoryContainer; SqliteContainer |]
@@ -166,16 +166,16 @@ type NetworkCfg with
 
     // Returns a StatefulSet object that will build stellar-core Pods named
     // peer-0 .. peer-N, and bind them to the generic "peer" Service above.
-    member self.ToStatefulSet (cs: CoreSet) count probeTimeout : V1StatefulSet =
+    member self.ToStatefulSet (coreSet: CoreSet) probeTimeout : V1StatefulSet =
         let statefulSetSpec =
             V1StatefulSetSpec
                 (selector = V1LabelSelector(matchLabels = CfgVal.labels),
                  serviceName = CfgVal.serviceName,
-                 template = self.ToPodTemplateSpec cs probeTimeout,
-                 replicas = System.Nullable<int>(count))
-        let statefulSet = V1StatefulSet(metadata = self.NamespacedMeta (CfgVal.peerSetName cs),
+                 template = self.ToPodTemplateSpec coreSet probeTimeout,
+                 replicas = System.Nullable<int>(coreSet.CurrentCount))
+        let statefulSet = V1StatefulSet(metadata = self.NamespacedMeta (CfgVal.peerSetName coreSet),
                                         spec = statefulSetSpec)
-        ignore( statefulSet.Validate())
+        statefulSet.Validate() |> ignore
         statefulSet
 
 
@@ -188,10 +188,10 @@ type NetworkCfg with
     // separate URL prefixes to separate Pods (which is somewhat the opposite of
     // the load-balancing task Services, Pods, and Ingress systems typically
     // do).
-    member self.ToPerPodServices : V1Service array =
-        let perPodService cs i =
-            let name = CfgVal.peerShortName cs i
-            let dnsName = CfgVal.peerDNSName self.networkNonce cs i
+    member self.ToPerPodServices () : V1Service array =
+        let perPodService (coreSet: CoreSet) i =
+            let name = CfgVal.peerShortName coreSet i
+            let dnsName = CfgVal.peerDNSName self.networkNonce coreSet i
             let spec = V1ServiceSpec(``type`` = "ExternalName",
                                      ports =
                                       [|V1ServicePort(name = "core",
@@ -202,17 +202,17 @@ type NetworkCfg with
             V1Service(metadata = self.NamespacedMeta name, spec = spec)
         self.MapAllPeers perPodService
 
-    member self.ToCoreSetPersistentVolumeNames =
-        let withPersistentVolumes = self.coreSets |> List.filter (fun cs -> cs.options.persistentVolume <> None)
-        let getName cs =
-            cs.options.persistentVolume.Value
+    member self.ToCoreSetPersistentVolumeNames () =
+        let withPersistentVolumes = self.coreSetList |> List.filter (fun coreSet -> coreSet.options.persistentVolume <> None)
+        let getName (coreSet: CoreSet) =
+            coreSet.options.persistentVolume.Value
         let names = List.map getName withPersistentVolumes
         names |> List.sort |> List.distinct
 
-    member self.ToPersistentVolumeNames =
+    member self.ToPersistentVolumeNames () =
         let getFullName name =
             CfgVal.peristentVolumeName self.NamespaceProperty name
-        List.map getFullName self.ToCoreSetPersistentVolumeNames
+        List.map getFullName (self.ToCoreSetPersistentVolumeNames())
 
     member self.ToPersistentVolumes (pv: PersistentVolume) =
         let makePersistentVolume name =
@@ -228,9 +228,9 @@ type NetworkCfg with
                                               hostPath = hostPath,
                                               persistentVolumeReclaimPolicy = "Retain")
             V1PersistentVolume(metadata = meta, spec = spec)
-        List.map makePersistentVolume self.ToCoreSetPersistentVolumeNames
+        List.map makePersistentVolume (self.ToCoreSetPersistentVolumeNames())
 
-    member self.ToPersistentVolumeClaims =
+    member self.ToPersistentVolumeClaims () =
         let makePersistentVolumeClaim name =
             let volumeName = CfgVal.peristentVolumeName self.NamespaceProperty name
             let claimName = CfgVal.peristentVolumeClaimName self.NamespaceProperty name
@@ -243,7 +243,7 @@ type NetworkCfg with
                                                    storageClassName = volumeName,
                                                    resources = requirements)
             V1PersistentVolumeClaim(metadata = meta, spec = spec)
-        List.map makePersistentVolumeClaim self.ToCoreSetPersistentVolumeNames
+        List.map makePersistentVolumeClaim (self.ToCoreSetPersistentVolumeNames())
 
     // Returns an Ingress object with rules that map URLs /$namespace/peer-N/foo
     // to the per-Pod Service within $namespace named peer-N (which then, via
@@ -258,13 +258,13 @@ type NetworkCfg with
         let historyBackend (pn:string) =
             Extensionsv1beta1IngressBackend(serviceName = pn,
                                             servicePort = IntstrIntOrString(value = "80"))
-        let corePath cs i =
-            let pn = CfgVal.peerShortName cs i
+        let corePath (coreSet: CoreSet) i =
+            let pn = CfgVal.peerShortName coreSet i
             Extensionsv1beta1HTTPIngressPath(path = sprintf "/%s/%s/core/(.*)"
                                                     (self.NamespaceProperty) pn,
                                              backend = coreBackend pn)
-        let historyPath cs i =
-            let pn = CfgVal.peerShortName cs i
+        let historyPath (coreSet: CoreSet) i =
+            let pn = CfgVal.peerShortName coreSet i
             Extensionsv1beta1HTTPIngressPath(path = sprintf "/%s/%s/history/(.*)"
                                                     (self.NamespaceProperty) pn,
                                              backend = historyBackend pn)

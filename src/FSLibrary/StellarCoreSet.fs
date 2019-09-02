@@ -24,7 +24,8 @@ type CoreSetInitialization =
 
 
 type CoreSetOptions =
-    { quorumSet : string list option
+    { nodeCount : int
+      quorumSet : string list option
       quorumSetKeys : Map<string, KeyPair>
       historyNodes : string list option
       historyGetCommands : Map<string, string>
@@ -39,7 +40,8 @@ type CoreSetOptions =
       initialization : CoreSetInitialization }
 
     static member Default = 
-      { quorumSet = None
+      { nodeCount = 3
+        quorumSet = None
         quorumSetKeys = Map.empty
         historyNodes = None
         historyGetCommands = Map.empty
@@ -57,19 +59,29 @@ type CoreSet =
     { name : string
       options : CoreSetOptions
       keys : KeyPair array
-      mutable currentCount : int }
+      live : bool }
 
     member self.NumKeys : int =
         self.keys.Length
 
     member self.CurrentCount : int =
-        self.currentCount
+        if self.live then self.keys.Length else 0
 
-    member self.SetCurrentCount c =
-        self.currentCount <- c
+    member self.WithLive (live : bool) =
+        { name = self.name
+          options = self.options
+          keys = self.keys
+          live = live }
 
-let MakeCoreSet name initialCount maxCount options =
+
+let MakeLiveCoreSet (name: string) (options: CoreSetOptions) =
     { name = name
       options = options
-      keys = Array.init maxCount (fun _ -> KeyPair.Random())
-      currentCount = initialCount }
+      keys = Array.init options.nodeCount (fun _ -> KeyPair.Random())
+      live = true }
+
+let MakeDeferredCoreSet (name: string) (options: CoreSetOptions) =
+    { name = name
+      options = options
+      keys = Array.init options.nodeCount (fun _ -> KeyPair.Random())
+      live = false }

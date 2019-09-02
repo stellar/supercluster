@@ -4,32 +4,32 @@
 
 module MissionDatabaseInplaceUpgrade
 
-open MissionHelpers
 open StellarCoreCfg
 open StellarCoreHTTP
 open StellarCorePeer
 open StellarCoreSet
 open StellarMissionContext
+open StellarSupercluster
 
 let databaseInplaceUpgrade (context : MissionContext) =
     let newImage = GetOrDefault context.image CfgVal.stellarCoreImageName
     let oldImage = GetOrDefault context.oldImage CfgVal.stellarCoreImageName
 
-    let version = obtainVersion context oldImage
+    let version = context.ObtainProtocolVersion oldImage
 
     let quorumSet = Some(["core"])
-    let beforeUpgradeCoreSet = MakeCoreSet 
+    let beforeUpgradeCoreSet = MakeLiveCoreSet 
                                  "before-upgrade"
-                                 1 1
                                  { CoreSetOptions.Default with
+                                     nodeCount = 1
                                      quorumSet = quorumSet
                                      image = Some(oldImage)
                                      persistentVolume = Some("upgrade") }
-    let coreSet = MakeCoreSet "core" 3 3 { CoreSetOptions.Default with quorumSet = quorumSet; image = Some(newImage) }
-    let afterUpgradeCoreSet = MakeCoreSet 
+    let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with quorumSet = quorumSet; image = Some(newImage) }
+    let afterUpgradeCoreSet = MakeDeferredCoreSet 
                                  "after-upgrade"
-                                 0 1
                                  { CoreSetOptions.Default with
+                                     nodeCount = 1
                                      quorumSet = quorumSet
                                      image = Some(newImage)
                                      persistentVolume = Some("upgrade")
@@ -38,24 +38,21 @@ let databaseInplaceUpgrade (context : MissionContext) =
                                                         initialCatchup = false
                                                         forceScp = false } }
 
-    context.Execute [beforeUpgradeCoreSet; coreSet; afterUpgradeCoreSet] None (fun f ->
-      f.WaitUntilSynced [beforeUpgradeCoreSet; coreSet]
+    context.Execute [beforeUpgradeCoreSet; coreSet; afterUpgradeCoreSet] None (fun (formation: ClusterFormation) ->
+      formation.WaitUntilSynced [beforeUpgradeCoreSet; coreSet]
+      formation.UpgradeProtocol [coreSet] version
+      formation.UpgradeMaxTxSize [coreSet] 100000
 
-      let upgrades = { DefaultUpgradeParameters with protocolVersion = version }
-      f.NetworkCfg.EachPeer(fun p ->
-          p.SetUpgrades(upgrades)
-      )
+      formation.RunLoadgen beforeUpgradeCoreSet context.GenerateAccountCreationLoad
+      formation.RunLoadgen beforeUpgradeCoreSet context.GeneratePaymentLoad
+      formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
+      formation.RunLoadgen coreSet context.GeneratePaymentLoad
 
-      f.RunLoadgen beforeUpgradeCoreSet context.GenerateAccountCreationLoad
-      f.RunLoadgen beforeUpgradeCoreSet context.GeneratePaymentLoad
-      f.RunLoadgen coreSet context.GenerateAccountCreationLoad
-      f.RunLoadgen coreSet context.GeneratePaymentLoad
+      formation.Stop beforeUpgradeCoreSet.name
+      formation.Start afterUpgradeCoreSet.name
 
-      f.ChangeCount beforeUpgradeCoreSet.name 0
-      f.ChangeCount afterUpgradeCoreSet.name 1
-
-      f.RunLoadgen afterUpgradeCoreSet context.GenerateAccountCreationLoad
-      f.RunLoadgen afterUpgradeCoreSet context.GeneratePaymentLoad
-      f.RunLoadgen coreSet context.GenerateAccountCreationLoad
-      f.RunLoadgen coreSet context.GeneratePaymentLoad
+      formation.RunLoadgen afterUpgradeCoreSet context.GenerateAccountCreationLoad
+      formation.RunLoadgen afterUpgradeCoreSet context.GeneratePaymentLoad
+      formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
+      formation.RunLoadgen coreSet context.GeneratePaymentLoad
     )

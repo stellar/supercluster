@@ -26,7 +26,7 @@ type PersistentVolume(root: string) =
         LogInfo "Creating %s" (self.FullPath(volume))
         Directory.CreateDirectory(self.FullPath(volume)) |> ignore
 
-    member public self.Cleanup =
+    member public self.Cleanup() =
         for volume in volumes do
             try
                 Directory.Delete(self.FullPath(volume), true)

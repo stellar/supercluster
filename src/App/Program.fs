@@ -147,16 +147,16 @@ let main argv =
 
     | :? SetupOptions as setup ->
       let kube = ConnectToCluster setup.kubeconfig
-      let coreSet = MakeCoreSet "core" setup.numNodes setup.numNodes CoreSetOptions.Default
-      let nCfg = MakeNetworkCfg ([coreSet], setup.ingressPort, None)
+      let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = setup.numNodes }
+      let nCfg = MakeNetworkCfg [coreSet] setup.ingressPort None
       use formation = kube.MakeFormation nCfg None false setup.probeTimeout
       formation.ReportStatus()
       0
 
     | :? LoadgenOptions as loadgen ->
       let kube = ConnectToCluster loadgen.kubeconfig
-      let coreSet = MakeCoreSet "core" loadgen.numNodes loadgen.numNodes CoreSetOptions.Default
-      let nCfg = MakeNetworkCfg ([coreSet], loadgen.ingressPort, None)
+      let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = loadgen.numNodes }
+      let nCfg = MakeNetworkCfg [coreSet] loadgen.ingressPort None
       use formation = kube.MakeFormation nCfg None false loadgen.probeTimeout
       formation.RunLoadgenAndCheckNoErrors coreSet
       formation.ReportStatus()
@@ -209,7 +209,7 @@ let main argv =
                         LogInfo "Finished mission: %s" m
                         LogInfo "-----------------------------------"
                     finally
-                        persistentVolume.Cleanup
+                        persistentVolume.Cleanup()
                 0
             end
 

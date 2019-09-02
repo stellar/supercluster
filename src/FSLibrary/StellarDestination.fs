@@ -17,8 +17,8 @@ type Destination(path: string) =
             Directory.CreateDirectory(path) |> ignore
 
     member private self.GetExistingNsPath ns =
-        let path = Path.Combine [|path; ns|]
-        Directory.CreateDirectory(path) |> ignore
+        let fullPath = Path.Combine [|path; ns|]
+        Directory.CreateDirectory(fullPath) |> ignore
         path
 
     member public self.WriteStream ns name (stream : Stream) =

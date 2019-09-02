@@ -23,7 +23,6 @@
     <Compile Include="StellarDataDump.fs" />
     <Compile Include="StellarPerformanceReporter.fs" />
     <Compile Include="MissionContext.fs" />
-    <Compile Include="MissionHelpers.fs" />
     <Compile Include="MissionCatchupHelpers.fs" />
     <Compile Include="MissionSimplePayment.fs" />
     <Compile Include="MissionComplexTopology.fs" />

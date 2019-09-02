@@ -5,6 +5,7 @@
 module StellarNetworkCfg
 
 open stellar_dotnet_sdk
+
 open StellarCoreSet
 
 // Random nonce used as both a Kubernetes namespace and a stellar network
@@ -21,7 +22,7 @@ type NetworkNonce =
 let MakeNetworkNonce() : NetworkNonce =
     let bytes : byte array = Array.zeroCreate 6
     let rng = System.Security.Cryptography.RNGCryptoServiceProvider.Create()
-    ignore (rng.GetBytes(bytes))
+    rng.GetBytes(bytes) |> ignore
     NetworkNonce bytes
 
 // Symbolic type for the different sorts of NETWORK_PASSPHRASE that can show up
@@ -49,34 +50,36 @@ type NetworkPassphrase =
 type NetworkCfg =
     { networkNonce : NetworkNonce
       networkPassphrase : NetworkPassphrase
-      mutable coreSets : CoreSet list
+      coreSetList : CoreSet list
       ingressPort : int }
 
     member self.Find (n:string) =
-        (List.find (fun x -> (x.name = n)) self.coreSets)
+        (List.find (fun x -> (x.name = n)) self.coreSetList)
 
     member self.NamespaceProperty : string =
         self.networkNonce.ToString()
 
-    member self.MapCoreSetPeers f cs =
-        Array.mapi (fun i k -> f cs i) cs.keys
+    static member MapCoreSetPeers f (coreSet: CoreSet) =
+        Array.mapi (fun i k -> f coreSet i) coreSet.keys
 
     member self.MapAllPeers f =
-        List.map (self.MapCoreSetPeers f) self.coreSets |> Array.concat
+        List.map (NetworkCfg.MapCoreSetPeers f) self.coreSetList |> Array.concat
 
-    member self.ChangeCount name count =
-        let cs = self.Find(name)
-        cs.SetCurrentCount count
-        let newCoreSets = List.filter (fun x -> (x. name <> name)) self.coreSets
-        self.coreSets <- cs :: newCoreSets
+    member self.WithLive name (live: bool) =
+        let coreSet = self.Find(name).WithLive live
+        let filteredList = List.filter (fun x -> (x.name <> name)) self.coreSetList
+        { networkNonce = self.networkNonce
+          networkPassphrase = self.networkPassphrase
+          coreSetList = coreSet :: filteredList
+          ingressPort = self.ingressPort }
 
 // Generates a fresh network of size n, with fresh keypairs for each node, and a
 // random nonce to isolate the network.
-let MakeNetworkCfg (c,p,passprhase) : NetworkCfg =
+let MakeNetworkCfg (coreSetList: CoreSet list) (ingressPort: int) (passphrase: NetworkPassphrase option) : NetworkCfg =
     let nonce = MakeNetworkNonce()
     { networkNonce = nonce
-      networkPassphrase = match passprhase with
+      networkPassphrase = match passphrase with
                           | None -> PrivateNet nonce
                           | Some(x) -> x
-      coreSets = c
-      ingressPort = p }
+      coreSetList = coreSetList
+      ingressPort = ingressPort }

@@ -5,18 +5,19 @@
 module MissionVersionMixOldCatchupToNew
 
 open MissionCatchupHelpers
-open MissionHelpers
 open StellarCoreCfg
 open StellarMissionContext
+open StellarSupercluster
 
 let versionMixOldCatchupToNew (context : MissionContext) =
     let newImage = GetOrDefault context.image CfgVal.stellarCoreImageName
     let oldImage = GetOrDefault context.oldImage CfgVal.stellarCoreImageName
 
-    let (generatorSet, deferedSets) = catchupSets newImage oldImage
-    let sets = List.append [generatorSet] deferedSets
-    let version = obtainVersion context oldImage
-    context.Execute sets None (fun f ->
-        f.WaitUntilSynced sets
-        doCatchup context f generatorSet deferedSets version
+    let catchupOptions = { generatorImage = newImage; catchupImage = oldImage }
+    let catchupSets = MakeCatchupSets catchupOptions
+    let sets = catchupSets.AllSetList()
+    let version = context.ObtainProtocolVersion oldImage
+    context.Execute sets None (fun (formation: ClusterFormation) ->
+        formation.WaitUntilSynced sets
+        doCatchup context formation catchupSets version
     )

@@ -6,13 +6,21 @@ module MissionHistoryGenerateAndCatchup
 
 open MissionCatchupHelpers
 open StellarCoreCfg
+open StellarCorePeer
+open StellarCoreHTTP
 open StellarMissionContext
+open StellarSupercluster
 
 let historyGenerateAndCatchup (context : MissionContext) =
     let image = CfgVal.stellarCoreImageName
-    let (generatorSet, deferedSets) = catchupSets image image
-    let sets = List.append [generatorSet] deferedSets
-    context.Execute sets None (fun f ->
-        f.WaitUntilSynced sets
-        doCatchup context f generatorSet deferedSets (Some(11))
+    let catchupOptions = { generatorImage = image; catchupImage = image }
+    let catchupSets = MakeCatchupSets catchupOptions
+    let sets = catchupSets.AllSetList()
+
+    context.Execute sets None (fun (formation: ClusterFormation) ->
+        formation.WaitUntilSynced sets
+        let peer = formation.NetworkCfg.GetPeer catchupSets.generatorSet 0
+        let version = peer.GetProtocolVersion()
+
+        doCatchup context formation catchupSets version
     )

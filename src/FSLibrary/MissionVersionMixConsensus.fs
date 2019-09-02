@@ -4,32 +4,28 @@
 
 module MissionVersionMixConsensus
 
-open MissionHelpers
 open StellarCoreCfg
 open StellarCoreHTTP
 open StellarCorePeer
 open StellarCoreSet
 open StellarMissionContext
 open StellarTransaction
+open StellarSupercluster
 
 let versionMixConsensus (context : MissionContext) =
     let newImage = GetOrDefault context.image CfgVal.stellarCoreImageName
     let oldImage = GetOrDefault context.oldImage CfgVal.stellarCoreImageName
 
-    let version = obtainVersion context oldImage
+    let oldCoreSet = MakeLiveCoreSet "old-core" { CoreSetOptions.Default with nodeCount = 2; image = Some(oldImage) }
+    let newCoreSet = MakeLiveCoreSet "new-core" { CoreSetOptions.Default with nodeCount = 2; image = Some(newImage) }
+    context.Execute [oldCoreSet; newCoreSet] None (fun (formation: ClusterFormation) ->
+        formation.WaitUntilSynced [oldCoreSet; newCoreSet]
+        let peer = formation.NetworkCfg.GetPeer oldCoreSet 0
+        let version = peer.GetProtocolVersion()
+        formation.UpgradeProtocol [oldCoreSet; newCoreSet] version
 
-    let oldCoreSet = MakeCoreSet "old-core" 2 2 { CoreSetOptions.Default with image = Some(oldImage) }
-    let newCoreSet = MakeCoreSet "new-core" 2 2 { CoreSetOptions.Default with image = Some(newImage) }
-    context.Execute [oldCoreSet; newCoreSet] None (fun f ->
-        f.WaitUntilSynced [oldCoreSet; newCoreSet]
-
-        let upgrades = { DefaultUpgradeParameters with protocolVersion = version }
-        f.NetworkCfg.EachPeer(fun p ->
-            p.SetUpgrades(upgrades)
-        )
-
-        f.CreateAccount oldCoreSet UserAlice
-        f.CreateAccount oldCoreSet UserBob
-        f.Pay oldCoreSet UserAlice UserBob
-        f.Pay newCoreSet UserAlice UserBob
+        formation.CreateAccount oldCoreSet UserAlice
+        formation.CreateAccount oldCoreSet UserBob
+        formation.Pay oldCoreSet UserAlice UserBob
+        formation.Pay newCoreSet UserAlice UserBob
     )

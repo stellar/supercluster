@@ -6,11 +6,14 @@ module MissionLoadGeneration
 
 open StellarCoreSet
 open StellarMissionContext
+open StellarSupercluster
 
 let loadGeneration (context : MissionContext) =
-    let coreSet = MakeCoreSet "core" 3 3 CoreSetOptions.Default
-    context.Execute [coreSet] None (fun f ->
-        f.WaitUntilSynced [coreSet]
-        f.RunLoadgen coreSet context.GenerateAccountCreationLoad
-        f.RunLoadgen coreSet context.GeneratePaymentLoad
+    let coreSet = MakeLiveCoreSet "core" CoreSetOptions.Default
+    context.Execute [coreSet] None (fun (formation: ClusterFormation) ->
+        formation.WaitUntilSynced [coreSet]
+        formation.UpgradeProtocolToLatest [coreSet]
+
+        formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
+        formation.RunLoadgen coreSet context.GeneratePaymentLoad
     )

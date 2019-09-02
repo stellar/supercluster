@@ -53,7 +53,7 @@ type PerformanceRow =
         meanRate : decimal
     }
 
-    member self.ToCsvRow =
+    member self.ToCsvRow () =
         let valueOrNan x =
             match x with
             | None -> Double.NaN
@@ -101,16 +101,16 @@ type PerformanceReporter(networkCfg: NetworkCfg) =
     let networkCfg = networkCfg
     let mutable data: Map<string, List<PerformanceRow>> = Map.empty
 
-    member self.GetPerformanceMetrics (p: Peer) txtype accounts expectedTxs txRate batchSize =
-        let metrics = p.GetMetrics
+    member self.GetPerformanceMetrics (p: Peer) (loadGen: LoadGen) =
+        let metrics = p.GetMetrics()
         {
             time = DateTime.Now
-            txtype = txtype
-            accounts = accounts
-            expectedTxs = expectedTxs
+            txtype = loadGen.mode.ToString()
+            accounts = loadGen.accounts
+            expectedTxs = loadGen.txs
             appliedTxs = metrics.LedgerTransactionApply.Count
-            txRate = txRate
-            batchSize = batchSize
+            txRate = loadGen.txrate
+            batchSize = loadGen.batchsize
             txsPerLedgeMean = decimal(metrics.LedgerTransactionCount.Mean)
             txsPerLedgeStdDev = decimal(metrics.LedgerTransactionCount.Stddev)
             loadStepRate = Option.map (fun (x: Metrics.GenericTimer) -> x.MeanRate) metrics.LoadgenStepSubmit
@@ -121,11 +121,11 @@ type PerformanceReporter(networkCfg: NetworkCfg) =
             meanRate = decimal(metrics.LedgerLedgerClose.MeanRate)
         }
 
-    member self.RecordPerformanceMetrics txtype accounts expectedTxs txRate batchSize f =
+    member self.RecordPerformanceMetrics (loadGen: LoadGen) f =
         networkCfg.EachPeer (fun p-> p.ClearMetrics())
         f()
         networkCfg.EachPeer (fun p->
-            let metrics = self.GetPerformanceMetrics p txtype accounts expectedTxs txRate batchSize
+            let metrics = self.GetPerformanceMetrics p loadGen
             if not (data.ContainsKey(p.ShortName))
             then
                 data <- data.Add(p.ShortName, [])
@@ -138,7 +138,7 @@ type PerformanceReporter(networkCfg: NetworkCfg) =
     member self.DumpPerformanceMetrics (destination: Destination) =
         let dumpPeerPerformanceMetrics (destination: Destination) ns (p: Peer) =
             let toCsvRow (x: PerformanceRow) =
-                x.ToCsvRow
+                x.ToCsvRow()
             let name = p.ShortName
             if data.ContainsKey name
             then

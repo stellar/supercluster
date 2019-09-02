@@ -10,66 +10,71 @@ open StellarCoreSet
 open StellarMissionContext
 open StellarSupercluster
 
-let catchupSets generatorImage catchupImage =
-    let generatorOptions = { CoreSetOptions.Default with quorumSet = Some(["generator"]); accelerateTime = true; image = Some(generatorImage) }
-    let genratorSet = MakeCoreSet "generator" 1 1 generatorOptions
+type CatchupMissionOptions =
+    { generatorImage : string
+      catchupImage : string }
 
-    let newNodeOptions = { CoreSetOptions.Default with quorumSet = Some(["generator"]); accelerateTime = true; image = Some(catchupImage) }
+type CatchupSets =
+    { generatorSet : CoreSet
+      deferredSetList : CoreSet list }
+     
+    member self.AllSetList () = 
+        List.append [self.generatorSet] self.deferredSetList
+
+let MakeCatchupSets (options: CatchupMissionOptions) =
+    let generatorOptions = { CoreSetOptions.Default with nodeCount = 1; quorumSet = Some(["generator"]); accelerateTime = true; image = Some(options.generatorImage) }
+    let generatorSet = MakeLiveCoreSet "generator" generatorOptions
+
+    let newNodeOptions = { CoreSetOptions.Default with nodeCount = 1; quorumSet = Some(["generator"]); accelerateTime = true; image = Some(options.catchupImage) }
     let minimal1Options =  { newNodeOptions with catchupMode = CatchupRecent(0) }
-    let minimal1Set = MakeCoreSet "minimal1" 0 1 minimal1Options
+    let minimal1Set = MakeDeferredCoreSet "minimal1" minimal1Options
 
     let complete1Options =  { newNodeOptions with catchupMode = CatchupComplete }
-    let complete1Set = MakeCoreSet "complete1" 0 1 complete1Options
+    let complete1Set = MakeDeferredCoreSet "complete1" complete1Options
 
     let recent1Options =  { newNodeOptions with catchupMode = CatchupRecent(75) }
-    let recent1Set = MakeCoreSet "recent1" 0 1 recent1Options
+    let recent1Set = MakeDeferredCoreSet "recent1" recent1Options
 
     // minimal => minimal cascade step: make sure that you can catch up to a node that was, itself, created by catchup.
-    let minimal2Options = { minimal1Options with quorumSet = Some(["minimal1"]); image = Some(catchupImage) }
-    let minimal2Set = MakeCoreSet "minimal2" 0 1 minimal2Options
+    let minimal2Options = { minimal1Options with quorumSet = Some(["minimal1"]); image = Some(options.catchupImage) }
+    let minimal2Set = MakeDeferredCoreSet "minimal2" minimal2Options
 
     // complete => complete cascade step: make sure that you can catch up to a node that was, itself, created by catchup.
-    let complete2Options = { complete1Options with quorumSet = Some(["complete1"]); image = Some(catchupImage) }
-    let complete2Set = MakeCoreSet "complete2" 0 1 complete2Options
+    let complete2Options = { complete1Options with quorumSet = Some(["complete1"]); image = Some(options.catchupImage) }
+    let complete2Set = MakeDeferredCoreSet "complete2" complete2Options
 
     // recent => recent cascade step: make sure that you can catch up to a node that was, itself, created by catchup.
-    let recent2Options = { recent1Options with quorumSet = Some(["recent1"]); image = Some(catchupImage) }
-    let recent2Set = MakeCoreSet "recent2" 0 1 recent2Options
+    let recent2Options = { recent1Options with quorumSet = Some(["recent1"]); image = Some(options.catchupImage) }
+    let recent2Set = MakeDeferredCoreSet "recent2" recent2Options
 
     // complete => minimal cascade step: make sure that you can catch up to a node that was, itself, created by catchup.
-    let minimal3Options = { minimal1Options with quorumSet = Some(["complete1"]); image = Some(catchupImage) }
-    let minimal3Set = MakeCoreSet "minimal3" 0 1 minimal3Options
+    let minimal3Options = { minimal1Options with quorumSet = Some(["complete1"]); image = Some(options.catchupImage) }
+    let minimal3Set = MakeDeferredCoreSet "minimal3"minimal3Options
 
     // complete => recent cascade step: make sure that you can catch up to a node that was, itself, created by catchup.
-    let recent3Options = { recent1Options with quorumSet = Some(["complete1"]); image = Some(catchupImage) }
-    let recent3Set = MakeCoreSet "recent3" 0 1 recent3Options
+    let recent3Options = { recent1Options with quorumSet = Some(["complete1"]); image = Some(options.catchupImage) }
+    let recent3Set = MakeDeferredCoreSet "recent3"recent3Options
 
-    let deferedSets = [minimal1Set
-                       complete1Set
-                       recent1Set
-                       minimal2Set
-                       complete2Set
-                       recent2Set
-                       minimal3Set
-                       recent3Set ]
+    { generatorSet = generatorSet
+      deferredSetList = [minimal1Set
+                         complete1Set
+                         recent1Set
+                         minimal2Set
+                         complete2Set
+                         recent2Set
+                         minimal3Set
+                         recent3Set ]}
 
-    (genratorSet, deferedSets)
+let doCatchup (context: MissionContext) (formation: ClusterFormation) (catchupSets: CatchupSets) version =
+    let generatorPeer = formation.NetworkCfg.GetPeer catchupSets.generatorSet 0
+    generatorPeer.UpgradeProtocol(version)
+    generatorPeer.UpgradeMaxTxSize(1000000)
 
-let doCatchup (context: MissionContext) (f: ClusterFormation) generatorSet deferedSets version =
-    f.RunLoadgen generatorSet context.GenerateAccountCreationLoad
-    f.RunLoadgen generatorSet context.GeneratePaymentLoad
-
-    let generatorPeer = f.NetworkCfg.GetPeer generatorSet 0
-    let upgrades = { DefaultUpgradeParameters with
-                       maxTxSize = Some(1000000);
-                       protocolVersion = version }
-    generatorPeer.SetUpgrades(upgrades) // upgrade protocol
-    generatorPeer.WaitForNextLedger()
-    generatorPeer.SetUpgrades(upgrades) // upgrade maxTxSize properly
-
+    formation.RunLoadgen catchupSets.generatorSet context.GenerateAccountCreationLoad
+    formation.RunLoadgen catchupSets.generatorSet context.GeneratePaymentLoad
     generatorPeer.WaitForLedgerNum 32
 
-    for set in deferedSets do
-        f.ChangeCount set.name 1
-        let peer = f.NetworkCfg.GetPeer set 0
+    for set in catchupSets.deferredSetList do
+        formation.Start set.name
+        let peer = formation.NetworkCfg.GetPeer set 0
         peer.WaitForLedgerNum 40

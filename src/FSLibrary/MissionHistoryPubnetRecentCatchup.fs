@@ -8,10 +8,11 @@ open StellarCoreSet
 open StellarMissionContext
 open StellarNetworkCfg
 open StellarNetworkData
+open StellarSupercluster
 
 let historyPubnetRecentCatchup (context : MissionContext) =
-    let set = { PubnetCoreSet with catchupMode = CatchupRecent(1001) }
-    let coreSet = MakeCoreSet "core" 1 1 set
-    context.Execute [coreSet] (Some(SDFMainNet)) (fun f ->
-        f.WaitUntilSynced [coreSet]
+    let set = { PubnetCoreSet with nodeCount = 1; catchupMode = CatchupRecent(1001) }
+    let coreSet = MakeLiveCoreSet "core" set
+    context.Execute [coreSet] (Some(SDFMainNet)) (fun (formation: ClusterFormation) ->
+        formation.WaitUntilSynced [coreSet]
     )

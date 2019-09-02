@@ -28,13 +28,13 @@ module CfgVal =
     let databasePath = dataVolumePath + "/stellar.db"
     let historyPath = dataVolumePath + "/history"
     let bucketsPath = dataVolumePath + "/buckets"
-    let peerSetName (cs: CoreSet) = sprintf "peer-%s" cs.name
-    let peerShortName cs n = sprintf "%s-%d" (peerSetName cs) n
-    let peerCfgName cs n = sprintf "%s.cfg" (peerShortName cs n)
+    let peerSetName (coreSet: CoreSet) = sprintf "peer-%s" coreSet.name
+    let peerShortName (coreSet: CoreSet) n = sprintf "%s-%d" (peerSetName coreSet) n
+    let peerCfgName (coreSet: CoreSet) n = sprintf "%s.cfg" (peerShortName coreSet n)
     let localHistName = "local"
     let serviceName = "stellar-core"
-    let peerDNSName (nonce : NetworkNonce) cs n =
-        sprintf "%s.%s.%s.svc.cluster.local" (peerShortName cs n) serviceName (nonce.ToString())
+    let peerDNSName (nonce : NetworkNonce) (coreSet: CoreSet) n =
+        sprintf "%s.%s.%s.svc.cluster.local" (peerShortName coreSet n) serviceName (nonce.ToString())
     let peerNameEnvVarName = "STELLAR_CORE_PEER_SHORT_NAME"
     let peerNameEnvCfgFile = cfgVolumePath + "/$(STELLAR_CORE_PEER_SHORT_NAME).cfg"
     let historyCfgFile = cfgVolumePath + "/nginx.conf"
@@ -93,31 +93,31 @@ type StellarCoreCfg =
         let getHist getCommand = 
             Map.ofSeq [| ("get", getCommand) |]
 
-        ignore (t.Add("DATABASE", self.database.ToString()))
-        ignore (t.Add("HTTP_PORT", int64(CfgVal.httpPort)))
-        ignore (t.Add("PUBLIC_HTTP_PORT", true))
-        ignore (t.Add("BUCKET_DIR_PATH", CfgVal.bucketsPath))
-        ignore (t.Add("NETWORK_PASSPHRASE", self.networkPassphrase.ToString()))
-        ignore (t.Add("NODE_SEED", self.nodeSeed.SecretSeed))
-        ignore (t.Add("NODE_IS_VALIDATOR", self.nodeIsValidator))
-        ignore (t.Add("RUN_STANDALONE", self.runStandalone))
-        ignore (t.Add("PREFERRED_PEERS", self.preferredPeers))
-        ignore (t.Add("CATCHUP_COMPLETE", self.catchupMode = CatchupComplete))
-        ignore (t.Add("CATCHUP_RECENT",
-                      match self.catchupMode with
-                        | CatchupComplete -> 0
-                        | CatchupRecent n -> n))
-        ignore (t.Add("AUTOMATIC_MAINTENANCE_PERIOD", self.automaticMaintenancePeriod))
-        ignore (t.Add("AUTOMATIC_MAINTENANCE_COUNT", self.automaticMaintenanceCount))
-        ignore (t.Add("ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING", self.accelerateTime))
-        ignore (t.Add("ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING", self.generateLoad))
-        ignore (t.Add("MANUAL_CLOSE", self.manualClose))
-        ignore (t.Add("INVARIANT_CHECKS", self.invariantChecks))
-        ignore (t.Add("UNSAFE_QUORUM", self.unsafeQuorum))
-        ignore (t.Add("FAILURE_SAFETY", self.failureSafety))
-        ignore (t.Add("QUORUM_SET", Map.ofSeq [| ("VALIDATORS", qset) |]))
+        t.Add("DATABASE", self.database.ToString()) |> ignore
+        t.Add("HTTP_PORT", int64(CfgVal.httpPort)) |> ignore
+        t.Add("PUBLIC_HTTP_PORT", true) |> ignore
+        t.Add("BUCKET_DIR_PATH", CfgVal.bucketsPath) |> ignore
+        t.Add("NETWORK_PASSPHRASE", self.networkPassphrase.ToString()) |> ignore
+        t.Add("NODE_SEED", self.nodeSeed.SecretSeed) |> ignore
+        t.Add("NODE_IS_VALIDATOR", self.nodeIsValidator) |> ignore
+        t.Add("RUN_STANDALONE", self.runStandalone) |> ignore
+        t.Add("PREFERRED_PEERS", self.preferredPeers) |> ignore
+        t.Add("CATCHUP_COMPLETE", self.catchupMode = CatchupComplete) |> ignore
+        t.Add("CATCHUP_RECENT",
+              match self.catchupMode with
+                | CatchupComplete -> 0
+                | CatchupRecent n -> n) |> ignore
+        t.Add("AUTOMATIC_MAINTENANCE_PERIOD", self.automaticMaintenancePeriod) |> ignore
+        t.Add("AUTOMATIC_MAINTENANCE_COUNT", self.automaticMaintenanceCount) |> ignore
+        t.Add("ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING", self.accelerateTime) |> ignore
+        t.Add("ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING", self.generateLoad) |> ignore
+        t.Add("MANUAL_CLOSE", self.manualClose) |> ignore
+        t.Add("INVARIANT_CHECKS", self.invariantChecks) |> ignore
+        t.Add("UNSAFE_QUORUM", self.unsafeQuorum) |> ignore
+        t.Add("FAILURE_SAFETY", self.failureSafety) |> ignore
+        t.Add("QUORUM_SET", Map.ofSeq [| ("VALIDATORS", qset) |]) |> ignore
         let localTab = t.Add("HISTORY", Toml.Create(), TomlObjectFactory.RequireTomlObject()).Added
-        ignore (localTab.Add(CfgVal.localHistName, hist))
+        localTab.Add(CfgVal.localHistName, hist) |> ignore
         for historyNode in self.historyNodes do
             localTab.Add(historyNode.Key, remoteHist historyNode.Value) |> ignore
         for historyGetCommand in self.historyGetCommands do
@@ -131,35 +131,35 @@ type StellarCoreCfg =
 // to modify a field, use a copy-and-update record expression like
 // {cfg with accelerateTime = true}
 type NetworkCfg with
-    member self.GetNameKeyList(cs) =
-        let map = Array.mapi (fun i k -> (CfgVal.peerShortName cs i, k))
-        map cs.keys
+    member self.GetNameKeyList (coreSet: CoreSet) =
+        let map = Array.mapi (fun i k -> (CfgVal.peerShortName coreSet i, k))
+        map coreSet.keys
 
-    member self.GetNameKeyList(csl) =
-        List.map (self.Find >> self.GetNameKeyList) csl |> Array.concat
+    member self.GetNameKeyList (coreSetNames: string list) =
+        List.map (self.Find >> self.GetNameKeyList) coreSetNames |> Array.concat
 
     member self.GetNameKeyListAll() =
-        List.map self.GetNameKeyList self.coreSets |> Array.concat
+        List.map self.GetNameKeyList self.coreSetList |> Array.concat
 
-    member self.DnsNamesWithKey(cs) =
-        let map = Array.mapi (fun i k -> (CfgVal.peerShortName cs i, CfgVal.peerDNSName self.networkNonce cs i))
-        map cs.keys
+    member self.DnsNamesWithKey(coreSet: CoreSet) =
+        let map = Array.mapi (fun i k -> (CfgVal.peerShortName coreSet i, CfgVal.peerDNSName self.networkNonce coreSet i))
+        map coreSet.keys
 
     member self.DnsNamesWithKey(csl) =
         List.map (self.Find >> self.DnsNamesWithKey) csl |> Array.concat
 
     member self.DnsNamesWithKey() =
-        List.map self.DnsNamesWithKey self.coreSets |> Array.concat
+        List.map self.DnsNamesWithKey self.coreSetList |> Array.concat
 
-    member self.DnsNames(cs) =
-        let map = Array.mapi (fun i k -> (CfgVal.peerDNSName self.networkNonce cs i))
-        map cs.keys
+    member self.DnsNames(coreSet: CoreSet) =
+        let map = Array.mapi (fun i k -> (CfgVal.peerDNSName self.networkNonce coreSet i))
+        map coreSet.keys
 
     member self.DnsNames(csl) =
         List.map (self.Find >> self.DnsNames) csl |> Array.concat
 
     member self.DnsNames() =
-        List.map self.DnsNames self.coreSets |> Array.concat
+        List.map self.DnsNames self.coreSetList |> Array.concat
 
     member self.QuorumSet(o: CoreSetOptions) =
         let fromQuorumSet = 

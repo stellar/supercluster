@@ -115,23 +115,23 @@ type Peer with
             self.ShortName
             path
 
-    member self.GetState =
+    member self.GetState() =
         WebExceptionRetry DefaultRetry
             (fun _ -> Info.Load(self.URL "info").Info.State)
 
-    member self.GetMetrics : Metrics.Metrics =
+    member self.GetMetrics() : Metrics.Metrics =
         WebExceptionRetry DefaultRetry
             (fun _ -> Metrics.Load(self.URL "metrics").Metrics)
 
-    member self.GetInfo : Info.Info =
+    member self.GetInfo() : Info.Info =
         WebExceptionRetry DefaultRetry
             (fun _ -> Info.Load(self.URL "info").Info)
 
-    member self.GetLedgerNum : int =
-        self.GetInfo.Ledger.Num
+    member self.GetLedgerNum() : int =
+        self.GetInfo().Ledger.Num
 
-    member self.GetProtocolVersion : int =
-        self.GetInfo.ProtocolVersion
+    member self.GetProtocolVersion() : int =
+        self.GetInfo().ProtocolVersion
 
     member self.SetUpgrades (upgrades:UpgradeParameters) =
         let res =
@@ -142,20 +142,41 @@ type Peer with
         if res.ToLower().Contains("exception")
         then raise (PeerRejectedUpgradesException res)
 
+    member self.UpgradeProtocol (version: int) =
+        let upgrades = { DefaultUpgradeParameters with
+                           protocolVersion = Some(version) }
+        self.SetUpgrades(upgrades)
+        self.WaitForNextLedger()
+
+    member self.UpgradeProtocolToLatest () =
+        let upgrades = { DefaultUpgradeParameters with
+                           protocolVersion = Some(self.GetProtocolVersion()) }
+        self.SetUpgrades(upgrades)
+        self.WaitForNextLedger()
+
+    member self.UpgradeMaxTxSize (txSize: int) =
+        let upgrades = { DefaultUpgradeParameters with
+                           maxTxSize = Some(txSize) }
+        self.SetUpgrades(upgrades)
+        self.WaitForNextLedger()
+
     member self.WaitForLedgerNum (n:int) =
         RetryUntilTrue
-            (fun _ -> self.GetLedgerNum >= n)
+            (fun _ -> self.GetLedgerNum() >= n)
             (fun _ -> LogInfo "Waiting for ledger %d on %s"
                               n self.ShortName )
 
+    member self.WaitForFewLedgers count =
+        self.WaitForLedgerNum (self.GetLedgerNum() + count)
+
     member self.WaitForNextLedger() =
-        self.WaitForLedgerNum (self.GetLedgerNum + 1)
+        self.WaitForFewLedgers(1)
 
     member self.CheckNoErrorMetrics(includeTxInternalErrors:bool) =
         let raiseIfNonzero (c:int) (n:string) =
             if c <> 0
             then raise (PeerHasNonzeroErrorMetricsException (self, n, c))
-        let m:Metrics.Metrics = self.GetMetrics
+        let m:Metrics.Metrics = self.GetMetrics()
         raiseIfNonzero m.ScpEnvelopeInvalidsig.Count "scp.envelope.invalidsig"
         raiseIfNonzero m.HistoryPublishFailure.Count "history.publish.failure"
         raiseIfNonzero m.LedgerInvariantFailure.Count "ledger.invariant.failure"
@@ -183,8 +204,8 @@ type Peer with
                         ours
                 then ()
                 else
-                    let ourLedger = self.GetInfo.Ledger
-                    let theirLedger = other.GetInfo.Ledger
+                    let ourLedger = self.GetInfo().Ledger
+                    let theirLedger = other.GetInfo().Ledger
 
                     loop
                         (Map.add ourLedger.Num ourLedger.Hash ours)
@@ -192,9 +213,9 @@ type Peer with
                         (n-1)
         loop Map.empty Map.empty ConsistencyCheckIterationCount
 
-    member self.CheckUsesLatestProtocolVersion =
-        let lastestProtocolVersion = self.GetProtocolVersion
-        let currentProtocolVersion = self.GetInfo.ProtocolVersion
+    member self.CheckUsesLatestProtocolVersion() =
+        let lastestProtocolVersion = self.GetProtocolVersion()
+        let currentProtocolVersion = self.GetInfo().ProtocolVersion
         if lastestProtocolVersion <> currentProtocolVersion then
             raise (ProtocolVersionNotUpgradedException (currentProtocolVersion, lastestProtocolVersion))
 
@@ -222,12 +243,12 @@ type Peer with
             (fun _ -> self.GetTestAcc(accName).Seqnum)
             (fun _ -> LogWarn "Waiting for account %s to exist, to read seqnum" accName)
 
-    member self.GenerateLoad (lg:LoadGen) =
+    member self.GenerateLoad (loadGen: LoadGen) =
         let m = self.GetMetrics
         WebExceptionRetry DefaultRetry
             (fun _ -> Http.RequestString(httpMethod="GET",
                                          url=self.URL "generateload",
-                                         query=lg.ToQuery))
+                                         query=loadGen.ToQuery))
 
     member self.SubmitSignedTransaction (tx:Transaction) : Tx.Root =
         let b64 = tx.ToEnvelopeXdrBase64()
@@ -255,36 +276,36 @@ type Peer with
             raise (TransactionRejectedException tx)
         else res
 
-    member self.WaitForLoadGenComplete (lg:LoadGen) =
+    member self.WaitForLoadGenComplete (loadGen: LoadGen) =
         RetryUntilTrue
             (fun _ ->
-                if self.GetState <> "Synced!"
+                if self.GetState() <> "Synced!"
                 then
                     (NodeLostSyncException self.ShortName) |> raise
 
-                let m = self.GetMetrics
+                let m = self.GetMetrics()
                 (MeterCountOr 0 m.LoadgenRunStart) =
                      (MeterCountOr 0 m.LoadgenRunComplete))
             (fun _ ->
-                let m = self.GetMetrics
+                let m = self.GetMetrics()
                 LogInfo "Waiting for loadgen run %d to finish, %d/%d accts, %d/%d txns"
                             (MeterCountOr 0 m.LoadgenRunStart)
-                            (MeterCountOr 0 m.LoadgenAccountCreated) lg.accounts
-                            (MeterCountOr 0 m.LoadgenTxnAttempted) lg.txs)
+                            (MeterCountOr 0 m.LoadgenAccountCreated) loadGen.accounts
+                            (MeterCountOr 0 m.LoadgenTxnAttempted) loadGen.txs)
 
-    member self.WaitUntilReady =
+    member self.WaitUntilReady() =
         RetryUntilTrue
             (fun _ ->
-                self.GetState <> "Booting"
+                self.GetState() <> "Booting"
                 )
             (fun _ ->
                 LogInfo "Waiting until %s is ready"
                     self.ShortName)
 
-    member self.WaitUntilSynced =
+    member self.WaitUntilSynced() =
         RetryUntilTrue
             (fun _ ->
-                self.GetState = "Synced!"
+                self.GetState() = "Synced!"
                 )
             (fun _ ->
                 LogInfo "Waiting until %s is synced"
@@ -294,8 +315,8 @@ let ReportAllPeerStatus (nCfg:NetworkCfg) =
     nCfg.EachPeer
         begin
         fun (p:Peer) ->
-            let info = p.GetInfo
-            let metrics = p.GetMetrics
+            let info = p.GetInfo()
+            let metrics = p.GetMetrics()
             LogInfo "Peer '%s' startedOn '%s', state '%s', overlay reading %.1f bytes/sec"
                       p.ShortName (info.StartedOn.ToString())
                       info.State metrics.OverlayByteRead.MeanRate
