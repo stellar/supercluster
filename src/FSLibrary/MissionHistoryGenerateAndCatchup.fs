@@ -13,14 +13,11 @@ open StellarSupercluster
 
 let historyGenerateAndCatchup (context : MissionContext) =
     let image = CfgVal.stellarCoreImageName
-    let catchupOptions = { generatorImage = image; catchupImage = image }
+    let catchupOptions = { generatorImage = image; catchupImage = image; versionImage = image }
     let catchupSets = MakeCatchupSets catchupOptions
     let sets = catchupSets.AllSetList()
 
     context.Execute sets None (fun (formation: ClusterFormation) ->
         formation.WaitUntilSynced sets
-        let peer = formation.NetworkCfg.GetPeer catchupSets.generatorSet 0
-        let version = peer.GetProtocolVersion()
-
-        doCatchup context formation catchupSets version
+        doCatchup context formation catchupSets
     )

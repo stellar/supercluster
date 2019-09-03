@@ -19,6 +19,7 @@
     <Compile Include="StellarPersistentVolume.fs" />
     <Compile Include="StellarKubeSpecs.fs" />
     <Compile Include="StellarDestination.fs" />
+    <Compile Include="StellarNamespaceContent.fs" />
     <Compile Include="StellarSupercluster.fs" />
     <Compile Include="StellarDataDump.fs" />
     <Compile Include="StellarPerformanceReporter.fs" />

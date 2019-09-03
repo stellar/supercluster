@@ -33,8 +33,8 @@ module CfgVal =
     let peerCfgName (coreSet: CoreSet) n = sprintf "%s.cfg" (peerShortName coreSet n)
     let localHistName = "local"
     let serviceName = "stellar-core"
-    let peerDNSName (nonce : NetworkNonce) (coreSet: CoreSet) n =
-        sprintf "%s.%s.%s.svc.cluster.local" (peerShortName coreSet n) serviceName (nonce.ToString())
+    let peerDNSName (namespaceProperty: string) (coreSet: CoreSet) n =
+        sprintf "%s.%s.%s.svc.cluster.local" (peerShortName coreSet n) serviceName namespaceProperty
     let peerNameEnvVarName = "STELLAR_CORE_PEER_SHORT_NAME"
     let peerNameEnvCfgFile = cfgVolumePath + "/$(STELLAR_CORE_PEER_SHORT_NAME).cfg"
     let historyCfgFile = cfgVolumePath + "/nginx.conf"
@@ -142,7 +142,7 @@ type NetworkCfg with
         List.map self.GetNameKeyList self.coreSetList |> Array.concat
 
     member self.DnsNamesWithKey(coreSet: CoreSet) =
-        let map = Array.mapi (fun i k -> (CfgVal.peerShortName coreSet i, CfgVal.peerDNSName self.networkNonce coreSet i))
+        let map = Array.mapi (fun i k -> (CfgVal.peerShortName coreSet i, CfgVal.peerDNSName self.namespaceProperty coreSet i))
         map coreSet.keys
 
     member self.DnsNamesWithKey(csl) =
@@ -152,7 +152,7 @@ type NetworkCfg with
         List.map self.DnsNamesWithKey self.coreSetList |> Array.concat
 
     member self.DnsNames(coreSet: CoreSet) =
-        let map = Array.mapi (fun i k -> (CfgVal.peerDNSName self.networkNonce coreSet i))
+        let map = Array.mapi (fun i k -> (CfgVal.peerDNSName self.namespaceProperty coreSet i))
         map coreSet.keys
 
     member self.DnsNames(csl) =

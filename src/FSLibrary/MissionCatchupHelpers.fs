@@ -12,14 +12,16 @@ open StellarSupercluster
 
 type CatchupMissionOptions =
     { generatorImage : string
-      catchupImage : string }
+      catchupImage : string
+      versionImage : string }
 
 type CatchupSets =
     { generatorSet : CoreSet
-      deferredSetList : CoreSet list }
+      deferredSetList : CoreSet list
+      versionSet : CoreSet }
      
     member self.AllSetList () = 
-        List.append [self.generatorSet] self.deferredSetList
+        List.concat [[self.generatorSet]; self.deferredSetList; [self.versionSet]]
 
 let MakeCatchupSets (options: CatchupMissionOptions) =
     let generatorOptions = { CoreSetOptions.Default with nodeCount = 1; quorumSet = Some(["generator"]); accelerateTime = true; image = Some(options.generatorImage) }
@@ -49,11 +51,14 @@ let MakeCatchupSets (options: CatchupMissionOptions) =
 
     // complete => minimal cascade step: make sure that you can catch up to a node that was, itself, created by catchup.
     let minimal3Options = { minimal1Options with quorumSet = Some(["complete1"]); image = Some(options.catchupImage) }
-    let minimal3Set = MakeDeferredCoreSet "minimal3"minimal3Options
+    let minimal3Set = MakeDeferredCoreSet "minimal3" minimal3Options
 
     // complete => recent cascade step: make sure that you can catch up to a node that was, itself, created by catchup.
     let recent3Options = { recent1Options with quorumSet = Some(["complete1"]); image = Some(options.catchupImage) }
-    let recent3Set = MakeDeferredCoreSet "recent3"recent3Options
+    let recent3Set = MakeDeferredCoreSet "recent3" recent3Options
+
+    let versionOptions = { CoreSetOptions.Default with nodeCount = 1; quorumSet = Some(["version"]); accelerateTime = true; image = Some(options.versionImage) }
+    let versionSet = MakeLiveCoreSet "version" versionOptions
 
     { generatorSet = generatorSet
       deferredSetList = [minimal1Set
@@ -63,9 +68,13 @@ let MakeCatchupSets (options: CatchupMissionOptions) =
                          complete2Set
                          recent2Set
                          minimal3Set
-                         recent3Set ]}
+                         recent3Set ]
+      versionSet = versionSet}
 
-let doCatchup (context: MissionContext) (formation: ClusterFormation) (catchupSets: CatchupSets) version =
+let doCatchup (context: MissionContext) (formation: ClusterFormation) (catchupSets: CatchupSets) =
+    let versionPeer = formation.NetworkCfg.GetPeer catchupSets.versionSet 0
+    let version = versionPeer.GetProtocolVersion()
+
     let generatorPeer = formation.NetworkCfg.GetPeer catchupSets.generatorSet 0
     generatorPeer.UpgradeProtocol(version)
     generatorPeer.UpgradeMaxTxSize(1000000)

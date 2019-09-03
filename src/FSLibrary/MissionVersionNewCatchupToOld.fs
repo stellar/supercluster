@@ -13,11 +13,10 @@ let versionMixNewCatchupToOld (context : MissionContext) =
     let newImage = GetOrDefault context.image CfgVal.stellarCoreImageName
     let oldImage = GetOrDefault context.oldImage CfgVal.stellarCoreImageName
 
-    let catchupOptions = { generatorImage = oldImage; catchupImage = newImage }
+    let catchupOptions = { generatorImage = oldImage; catchupImage = newImage; versionImage = oldImage }
     let catchupSets = MakeCatchupSets catchupOptions
     let sets = catchupSets.AllSetList()
-    let version = context.ObtainProtocolVersion oldImage
     context.Execute sets None (fun (formation: ClusterFormation) ->
         formation.WaitUntilSynced sets
-        doCatchup context formation catchupSets version
+        doCatchup context formation catchupSets
     )

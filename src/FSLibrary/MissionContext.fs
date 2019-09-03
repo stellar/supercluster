@@ -33,11 +33,12 @@ type MissionContext =
       numNodes : int
       ingressPort : int
       persistentVolume : PersistentVolume
+      namespaceProperty : string option
       keepData : bool
       probeTimeout : int }
 
     member self.Execute (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option) run =
-      let networkCfg = MakeNetworkCfg coreSetList self.ingressPort passphrase
+      let networkCfg = MakeNetworkCfg coreSetList self.namespaceProperty self.ingressPort passphrase
       use formation = self.kube.MakeFormation networkCfg (Some(self.persistentVolume)) self.keepData self.probeTimeout
       try
           try
@@ -53,7 +54,7 @@ type MissionContext =
              )
 
     member self.ExecuteWithPerformanceReporter (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option) run =
-      let networkCfg = MakeNetworkCfg coreSetList self.ingressPort passphrase
+      let networkCfg = MakeNetworkCfg coreSetList self.namespaceProperty self.ingressPort passphrase
       use formation = self.kube.MakeFormation networkCfg (Some(self.persistentVolume)) self.keepData self.probeTimeout
       let performanceReporter = PerformanceReporter networkCfg
       try
@@ -85,11 +86,3 @@ type MissionContext =
         txrate = self.txRate
         offset = 0
         batchsize = 100 }
-
-    member self.ObtainProtocolVersion (image: string) =
-      let coreSet = MakeLiveCoreSet "obtain-version" { CoreSetOptions.Default with nodeCount = 1; image = Some(image) }
-      let networkCfg = MakeNetworkCfg [coreSet] self.ingressPort None
-      use f = self.kube.MakeFormation networkCfg (Some(self.persistentVolume)) self.keepData self.probeTimeout
-
-      let peer = networkCfg.GetPeer coreSet 0
-      peer.GetProtocolVersion()

@@ -111,7 +111,7 @@ type Peer with
     member self.URL (path:string) : string =
         sprintf "http://localhost:%d/%s/%s/core/%s"
             self.networkCfg.ingressPort
-            (self.networkCfg.networkNonce.ToString())
+            (self.networkCfg.namespaceProperty)
             self.ShortName
             path
 

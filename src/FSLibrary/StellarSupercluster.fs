@@ -16,6 +16,7 @@ open StellarCorePeer
 open StellarCoreHTTP
 open StellarPersistentVolume
 open StellarTransaction
+open StellarNamespaceContent
 open System
 
 let ExpandHomeDirTilde (s:string) : string =
@@ -55,20 +56,43 @@ let PollCluster (kube:Kubernetes) =
 // tear down the Kubernetes namespace (and all contained cluster-side objects) as it goes.
 type ClusterFormation(networkCfg: NetworkCfg,
                       kube: Kubernetes,
-                      ns: V1Namespace,
                       statefulSets: V1StatefulSet list,
-                      ingress: Extensionsv1beta1Ingress,
+                      namespaceContent: NamespaceContent,
                       probeTimeout: int) =
+
     let mutable networkCfg = networkCfg
     let kube = kube
-    let ns = ns
-    let ingress = ingress
     let mutable statefulSets = statefulSets
     let mutable keepData = false
+    let namespaceContent = namespaceContent
     let probeTimeout = probeTimeout
-
     let mutable disposed = false
-    let cleanup(disposing:bool) =
+
+    member self.Kube = kube
+    member self.NetworkCfg = networkCfg
+
+    member self.ForceCleanup() =
+        let deleteVolume persistentVolume = 
+            try
+                self.Kube.DeletePersistentVolume(name = persistentVolume) |> ignore
+            with
+            | x -> ()
+            true
+
+        (List.forall deleteVolume (networkCfg.ToPersistentVolumeNames())) |> ignore
+
+        if not networkCfg.existingNamespace
+        then
+            LogInfo "Disposing formation, deleting namespace '%s'"
+                networkCfg.NamespaceProperty
+            kube.DeleteNamespace(name = networkCfg.NamespaceProperty,
+                propagationPolicy = "Foreground") |> ignore
+        else
+            LogInfo "Disposing formation, keeping pre-existing namespace '%s', removing content"
+                    networkCfg.NamespaceProperty
+            namespaceContent.Cleanup()
+
+    member self.Cleanup(disposing:bool) =
         if not disposed then
             disposed <- true
             if disposing then
@@ -77,23 +101,7 @@ type ClusterFormation(networkCfg: NetworkCfg,
                     LogInfo "Disposing formation, keeping namespace '%s' for debug"
                         networkCfg.NamespaceProperty
                 else
-                    LogInfo "Disposing formation, deleting namespace '%s'"
-                        networkCfg.NamespaceProperty
-                    kube.DeleteNamespace(name = networkCfg.NamespaceProperty,
-                        propagationPolicy = "Foreground") |> ignore
-
-                    let deleteVolume persistentVolume = 
-                        try
-                            kube.DeletePersistentVolume(name = persistentVolume) |> ignore
-                        with
-                        | x -> ()
-                        true
-
-                    (List.forall deleteVolume (networkCfg.ToPersistentVolumeNames())) |> ignore
-
-    member self.StatefulSets = statefulSets
-    member self.NetworkCfg = networkCfg
-    member self.Kube = kube
+                    self.ForceCleanup()
 
     member self.KeepData() =
         keepData <- true
@@ -101,12 +109,12 @@ type ClusterFormation(networkCfg: NetworkCfg,
     // implementation of IDisposable
     interface System.IDisposable with
         member self.Dispose() =
-            cleanup(true)
+            self.Cleanup(true)
             System.GC.SuppressFinalize(self)
 
     // override of finalizer
     override self.Finalize() =
-        cleanup(false)
+        self.Cleanup(false)
 
     override self.ToString() : string =
         let name = statefulSets.[0].Metadata.Name
@@ -232,38 +240,47 @@ type Kubernetes with
     // waits for it to be ready.
     member self.MakeFormation (nCfg: NetworkCfg) (persistentVolume: PersistentVolume option) (keepData: bool) (probeTimeout: int) : ClusterFormation =
         let nsStr = nCfg.NamespaceProperty
-        let ns = self.CreateNamespace(nCfg.Namespace)
+        let namespaceContent = NamespaceContent(self, nsStr)
+        if not nCfg.existingNamespace
+        then
+            self.CreateNamespace(nCfg.Namespace) |> ignore
         try
-            self.CreateNamespacedService(body = nCfg.ToService(),
-                                         namespaceParameter = nsStr) |> ignore
-            self.CreateNamespacedConfigMap(body = nCfg.ToConfigMap(),
-                                           namespaceParameter = nsStr) |> ignore
-            let makeStatefulSet coreSet = 
+            namespaceContent.Add(self.CreateNamespacedService(body = nCfg.ToService(),
+                                                              namespaceParameter = nsStr))
+            namespaceContent.Add(self.CreateNamespacedConfigMap(body = nCfg.ToConfigMap(),
+                                                                namespaceParameter = nsStr))
+
+            let makeStatefulSet coreSet =
                 self.CreateNamespacedStatefulSet(body = nCfg.ToStatefulSet coreSet probeTimeout,
-                                                 namespaceParameter = nsStr)  
+                                                 namespaceParameter = nsStr)
             let statefulSets = List.map makeStatefulSet nCfg.coreSetList
+            for statefulSet in statefulSets do
+                namespaceContent.Add(statefulSet)
 
             match persistentVolume with
             | Some(pv) ->
                 for persistentVolume in nCfg.ToPersistentVolumes pv do
                     self.CreatePersistentVolume(body = persistentVolume) |> ignore
-
-                for persistentVolumeClaim in nCfg.ToPersistentVolumeClaims() do
-                    self.CreateNamespacedPersistentVolumeClaim(body = persistentVolumeClaim,
-                                                               namespaceParameter = nsStr) |> ignore
             | None -> ()
 
+            for persistentVolumeClaim in nCfg.ToPersistentVolumeClaims() do
+                let claim = self.CreateNamespacedPersistentVolumeClaim(body = persistentVolumeClaim,
+                                                                       namespaceParameter = nsStr)
+                namespaceContent.Add(claim)
+
             for svc in nCfg.ToPerPodServices() do
-                self.CreateNamespacedService(namespaceParameter = nsStr,
-                                             body = svc) |> ignore
+                let service = self.CreateNamespacedService(namespaceParameter = nsStr,
+                                                           body = svc)
+                namespaceContent.Add(service)
 
             let ingress = self.CreateNamespacedIngress(namespaceParameter = nsStr,
-                                                       body = nCfg.ToIngress())
+                                         body = nCfg.ToIngress())
+            namespaceContent.Add(ingress)
+
             let formation = new ClusterFormation(networkCfg = nCfg,
                                                  kube = self,
-                                                 ns = ns,
                                                  statefulSets = statefulSets,
-                                                 ingress = ingress,
+                                                 namespaceContent = namespaceContent,
                                                  probeTimeout = probeTimeout)
             formation.WaitForAllReplicasOnAllSetsReady()
             formation
@@ -274,10 +291,17 @@ type Kubernetes with
                 LogError "Exception while building formation, keeping namespace '%s' for debug"
                              nCfg.NamespaceProperty
             else
-                LogError "Exception while building formation, deleting namespace '%s'"
-                             nCfg.NamespaceProperty
-                self.DeleteNamespace(name = nCfg.NamespaceProperty,
-                                     propagationPolicy = "Foreground") |> ignore
+                if not nCfg.existingNamespace
+                then
+                    LogError "Exception while building formation, deleting namespace '%s'"
+                                 nCfg.NamespaceProperty
+                    self.DeleteNamespace(name = nCfg.NamespaceProperty,
+                                         propagationPolicy = "Foreground") |> ignore
+                else
+                    LogError "Exception while building formation, keeping pre-existing namespace '%s'"
+                                 nCfg.NamespaceProperty
+                    namespaceContent.Cleanup()
+
                 match persistentVolume with
                 | Some(pv) ->
                     for persistentVolume in nCfg.ToPersistentVolumes pv do

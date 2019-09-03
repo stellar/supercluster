@@ -191,7 +191,7 @@ type NetworkCfg with
     member self.ToPerPodServices () : V1Service array =
         let perPodService (coreSet: CoreSet) i =
             let name = CfgVal.peerShortName coreSet i
-            let dnsName = CfgVal.peerDNSName self.networkNonce coreSet i
+            let dnsName = CfgVal.peerDNSName self.namespaceProperty coreSet i
             let spec = V1ServiceSpec(``type`` = "ExternalName",
                                      ports =
                                       [|V1ServicePort(name = "core",

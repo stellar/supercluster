@@ -50,6 +50,8 @@ type NetworkPassphrase =
 type NetworkCfg =
     { networkNonce : NetworkNonce
       networkPassphrase : NetworkPassphrase
+      existingNamespace : bool
+      namespaceProperty : string
       coreSetList : CoreSet list
       ingressPort : int }
 
@@ -57,7 +59,7 @@ type NetworkCfg =
         (List.find (fun x -> (x.name = n)) self.coreSetList)
 
     member self.NamespaceProperty : string =
-        self.networkNonce.ToString()
+        self.namespaceProperty
 
     static member MapCoreSetPeers f (coreSet: CoreSet) =
         Array.mapi (fun i k -> f coreSet i) coreSet.keys
@@ -70,16 +72,22 @@ type NetworkCfg =
         let filteredList = List.filter (fun x -> (x.name <> name)) self.coreSetList
         { networkNonce = self.networkNonce
           networkPassphrase = self.networkPassphrase
+          existingNamespace = self.existingNamespace
+          namespaceProperty = self.namespaceProperty
           coreSetList = coreSet :: filteredList
           ingressPort = self.ingressPort }
 
 // Generates a fresh network of size n, with fresh keypairs for each node, and a
 // random nonce to isolate the network.
-let MakeNetworkCfg (coreSetList: CoreSet list) (ingressPort: int) (passphrase: NetworkPassphrase option) : NetworkCfg =
+let MakeNetworkCfg (coreSetList: CoreSet list) (namespaceProperty: string option) (ingressPort: int) (passphrase: NetworkPassphrase option) : NetworkCfg =
     let nonce = MakeNetworkNonce()
     { networkNonce = nonce
       networkPassphrase = match passphrase with
                           | None -> PrivateNet nonce
                           | Some(x) -> x
+      existingNamespace = namespaceProperty.IsSome
+      namespaceProperty = match namespaceProperty with
+                          | None -> nonce.ToString()
+                          | Some(x) -> x 
       coreSetList = coreSetList
       ingressPort = ingressPort }

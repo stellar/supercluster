@@ -26,6 +26,10 @@ type SetupOptions = {
            Required = false, Default = 5)>]
   numNodes : int
 
+  [<Option("namespace", HelpText="Namespace to use. If empty, random one will be generated.",
+           Required = false)>]
+  namespaceProperty : string option
+
   [<Option('p', "ingress-port", HelpText="Ingress port",
            Required = false, Default = 80)>]
   ingressPort : int
@@ -45,6 +49,10 @@ type LoadgenOptions = {
   [<Option('n', "num-nodes", HelpText="Number of nodes in config",
            Required = false, Default = 5)>]
   numNodes : int
+
+  [<Option("namespace", HelpText="Namespace to use. If empty, random one will be generated.",
+           Required = false)>]
+  namespaceProperty : string option
 
   [<Option('p', "ingress-port", HelpText="Ingress port",
            Required = false, Default = 80)>]
@@ -105,6 +113,10 @@ type MissionOptions = {
            Required = false, Default = 3)>]
   numNodes : int
 
+  [<Option("namespace", HelpText="Namespace to use. If empty, random one will be generated.",
+           Required = false)>]
+  namespaceProperty : string option
+
   [<Option("keep-data", HelpText="Keeps namespaces nad persistent volumes after mission fails",
            Required = false, Default = false)>]
   keepData : bool
@@ -148,7 +160,7 @@ let main argv =
     | :? SetupOptions as setup ->
       let kube = ConnectToCluster setup.kubeconfig
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = setup.numNodes }
-      let nCfg = MakeNetworkCfg [coreSet] setup.ingressPort None
+      let nCfg = MakeNetworkCfg [coreSet] setup.namespaceProperty setup.ingressPort None
       use formation = kube.MakeFormation nCfg None false setup.probeTimeout
       formation.ReportStatus()
       0
@@ -156,7 +168,7 @@ let main argv =
     | :? LoadgenOptions as loadgen ->
       let kube = ConnectToCluster loadgen.kubeconfig
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = loadgen.numNodes }
-      let nCfg = MakeNetworkCfg [coreSet] loadgen.ingressPort None
+      let nCfg = MakeNetworkCfg [coreSet] loadgen.namespaceProperty loadgen.ingressPort None
       use formation = kube.MakeFormation nCfg None false loadgen.probeTimeout
       formation.RunLoadgenAndCheckNoErrors coreSet
       formation.ReportStatus()
@@ -197,6 +209,7 @@ let main argv =
                                                    numNodes = mission.numNodes
                                                    ingressPort = mission.ingressPort
                                                    persistentVolume = persistentVolume
+                                                   namespaceProperty = mission.namespaceProperty
                                                    keepData = mission.keepData
                                                    probeTimeout = mission.probeTimeout }
                             allMissions.[m] missionContext

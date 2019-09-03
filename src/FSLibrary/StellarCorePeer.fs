@@ -19,7 +19,7 @@ type Peer =
         CfgVal.peerShortName self.coreSet self.peerNum
 
     member self.DNSName =
-        CfgVal.peerDNSName self.networkCfg.networkNonce self.coreSet self.peerNum
+        CfgVal.peerDNSName self.networkCfg.namespaceProperty self.coreSet self.peerNum
 
 
 type NetworkCfg with

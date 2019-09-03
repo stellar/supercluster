@@ -15,8 +15,6 @@ let databaseInplaceUpgrade (context : MissionContext) =
     let newImage = GetOrDefault context.image CfgVal.stellarCoreImageName
     let oldImage = GetOrDefault context.oldImage CfgVal.stellarCoreImageName
 
-    let version = context.ObtainProtocolVersion oldImage
-
     let quorumSet = Some(["core"])
     let beforeUpgradeCoreSet = MakeLiveCoreSet 
                                  "before-upgrade"
@@ -40,6 +38,9 @@ let databaseInplaceUpgrade (context : MissionContext) =
 
     context.Execute [beforeUpgradeCoreSet; coreSet; afterUpgradeCoreSet] None (fun (formation: ClusterFormation) ->
       formation.WaitUntilSynced [beforeUpgradeCoreSet; coreSet]
+
+      let peer = formation.NetworkCfg.GetPeer beforeUpgradeCoreSet 0
+      let version = peer.GetProtocolVersion()
       formation.UpgradeProtocol [coreSet] version
       formation.UpgradeMaxTxSize [coreSet] 100000
 
