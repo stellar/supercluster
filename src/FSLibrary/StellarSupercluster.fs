@@ -18,6 +18,7 @@ open StellarPersistentVolume
 open StellarTransaction
 open StellarNamespaceContent
 open System
+open Microsoft.Rest
 
 let ExpandHomeDirTilde (s:string) : string =
     if s.StartsWith("~/")

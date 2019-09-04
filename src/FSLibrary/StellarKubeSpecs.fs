@@ -260,21 +260,25 @@ type NetworkCfg with
                                             servicePort = IntstrIntOrString(value = "80"))
         let corePath (coreSet: CoreSet) i =
             let pn = CfgVal.peerShortName coreSet i
-            Extensionsv1beta1HTTPIngressPath(path = sprintf "/%s/%s/core/(.*)"
+            Extensionsv1beta1HTTPIngressPath(path = sprintf "/%s/%s/core/"
                                                     (self.NamespaceProperty) pn,
                                              backend = coreBackend pn)
         let historyPath (coreSet: CoreSet) i =
             let pn = CfgVal.peerShortName coreSet i
-            Extensionsv1beta1HTTPIngressPath(path = sprintf "/%s/%s/history/(.*)"
+            Extensionsv1beta1HTTPIngressPath(path = sprintf "/%s/%s/history/"
                                                     (self.NamespaceProperty) pn,
                                              backend = historyBackend pn)
         let corePaths = self.MapAllPeers corePath
         let historyPaths = self.MapAllPeers historyPath
         let rule = Extensionsv1beta1HTTPIngressRuleValue(paths = Array.concat [corePaths; historyPaths])
-        let rules = [|Extensionsv1beta1IngressRule(http = rule)|]
+        let host = System.Uri(self.ingressUrl).Host
+        let rules = [|Extensionsv1beta1IngressRule(
+                        host = host,
+                        http = rule)|]
         let spec = Extensionsv1beta1IngressSpec(rules = rules)
-        let annotation = Map.ofArray [|("nginx.ingress.kubernetes.io/ssl-redirect", "false");
-                                       ("nginx.ingress.kubernetes.io/rewrite-target", "/$1")|]
+        let annotation = Map.ofArray [|("traefik.ingress.kubernetes.io/request-modifier",
+                                        (sprintf "ReplacePathRegex: ^/%s/peer-core-([0-9]+)/(core|history)/(.*) /$3"
+                                                 self.NamespaceProperty))|]
         let meta = V1ObjectMeta(name = "stellar-core-ingress",
                                 namespaceProperty = self.NamespaceProperty,
                                 annotations = annotation)

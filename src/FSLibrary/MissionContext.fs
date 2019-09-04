@@ -31,14 +31,14 @@ type MissionContext =
       numAccounts : int
       numTxs : int
       numNodes : int
-      ingressPort : int
+      ingressUrl : string
       persistentVolume : PersistentVolume
       namespaceProperty : string option
       keepData : bool
       probeTimeout : int }
 
     member self.Execute (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option) run =
-      let networkCfg = MakeNetworkCfg coreSetList self.namespaceProperty self.ingressPort passphrase
+      let networkCfg = MakeNetworkCfg coreSetList self.namespaceProperty self.ingressUrl passphrase
       use formation = self.kube.MakeFormation networkCfg (Some(self.persistentVolume)) self.keepData self.probeTimeout
       try
           try
@@ -54,7 +54,7 @@ type MissionContext =
              )
 
     member self.ExecuteWithPerformanceReporter (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option) run =
-      let networkCfg = MakeNetworkCfg coreSetList self.namespaceProperty self.ingressPort passphrase
+      let networkCfg = MakeNetworkCfg coreSetList self.namespaceProperty self.ingressUrl passphrase
       use formation = self.kube.MakeFormation networkCfg (Some(self.persistentVolume)) self.keepData self.probeTimeout
       let performanceReporter = PerformanceReporter networkCfg
       try

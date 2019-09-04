@@ -53,7 +53,7 @@ type NetworkCfg =
       existingNamespace : bool
       namespaceProperty : string
       coreSetList : CoreSet list
-      ingressPort : int }
+      ingressUrl : string }
 
     member self.Find (n:string) =
         (List.find (fun x -> (x.name = n)) self.coreSetList)
@@ -75,11 +75,11 @@ type NetworkCfg =
           existingNamespace = self.existingNamespace
           namespaceProperty = self.namespaceProperty
           coreSetList = coreSet :: filteredList
-          ingressPort = self.ingressPort }
+          ingressUrl = self.ingressUrl }
 
 // Generates a fresh network of size n, with fresh keypairs for each node, and a
 // random nonce to isolate the network.
-let MakeNetworkCfg (coreSetList: CoreSet list) (namespaceProperty: string option) (ingressPort: int) (passphrase: NetworkPassphrase option) : NetworkCfg =
+let MakeNetworkCfg (coreSetList: CoreSet list) (namespaceProperty: string option) (ingressUrl: string) (passphrase: NetworkPassphrase option) : NetworkCfg =
     let nonce = MakeNetworkNonce()
     { networkNonce = nonce
       networkPassphrase = match passphrase with
@@ -90,4 +90,4 @@ let MakeNetworkCfg (coreSetList: CoreSet list) (namespaceProperty: string option
                           | None -> nonce.ToString()
                           | Some(x) -> x 
       coreSetList = coreSetList
-      ingressPort = ingressPort }
+      ingressUrl = ingressUrl }

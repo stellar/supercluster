@@ -109,8 +109,8 @@ exception NodeLostSyncException of string
 type Peer with
 
     member self.URL (path:string) : string =
-        sprintf "http://localhost:%d/%s/%s/core/%s"
-            self.networkCfg.ingressPort
+        sprintf "%s/%s/%s/core/%s"
+            self.networkCfg.ingressUrl
             (self.networkCfg.namespaceProperty)
             self.ShortName
             path

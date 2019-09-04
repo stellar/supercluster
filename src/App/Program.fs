@@ -1,4 +1,4 @@
-﻿// Copyright 2019 Stellar Development Foundation and contributors. Licensed
+// Copyright 2019 Stellar Development Foundation and contributors. Licensed
 // under the Apache License, Version 2.0. See the COPYING file at the root
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
@@ -15,6 +15,7 @@ open StellarMissionContext
 open StellarPersistentVolume
 open StellarSupercluster
 
+
 [<Verb("setup", HelpText="Set up a new stellar-core cluster")>]
 type SetupOptions = {
 
@@ -27,12 +28,12 @@ type SetupOptions = {
   numNodes : int
 
   [<Option("namespace", HelpText="Namespace to use. If empty, random one will be generated.",
-           Required = false)>]
+           Required = false, Default = "stellar-supercluster")>]
   namespaceProperty : string option
 
-  [<Option('p', "ingress-port", HelpText="Ingress port",
-           Required = false, Default = 80)>]
-  ingressPort : int
+  [<Option("ingress-url", HelpText="Ingress URL",
+           Required = false, Default = "https://local:80/")>]
+  ingressUrl : string
 
   [<Option("probe-timeout", HelpText="Timeout for liveness probe",
            Required = false, Default = 1)>]
@@ -51,12 +52,12 @@ type LoadgenOptions = {
   numNodes : int
 
   [<Option("namespace", HelpText="Namespace to use. If empty, random one will be generated.",
-           Required = false)>]
+           Required = false, Default = "stellar-supercluster")>]
   namespaceProperty : string option
 
-  [<Option('p', "ingress-port", HelpText="Ingress port",
-           Required = false, Default = 80)>]
-  ingressPort : int
+  [<Option("ingress-url", HelpText="Ingress URL",
+           Required = false, Default = "https://local:80/")>]
+  ingressUrl : string
 
   [<Option("probe-timeout", HelpText="Timeout for liveness probe",
            Required = false, Default = 1)>]
@@ -73,9 +74,9 @@ type MissionOptions = {
   [<Value(0, Required = true)>]
   missions : string seq
 
-  [<Option('p', "ingress-port", HelpText="Ingress port",
-           Required = false, Default = 80)>]
-  ingressPort : int
+  [<Option("ingress-url", HelpText="Ingress URL",
+           Required = false, Default = "https://local:80/")>]
+  ingressUrl : string
 
   [<Option('d', "destination", HelpText="Output directory for logs and sql dumps",
            Required = false, Default = "destination")>]
@@ -114,7 +115,7 @@ type MissionOptions = {
   numNodes : int
 
   [<Option("namespace", HelpText="Namespace to use. If empty, random one will be generated.",
-           Required = false)>]
+           Required = false, Default = "stellar-supercluster")>]
   namespaceProperty : string option
 
   [<Option("keep-data", HelpText="Keeps namespaces nad persistent volumes after mission fails",
@@ -134,9 +135,9 @@ type PollOptions = {
            Required = false, Default = "~/.kube/config")>]
   kubeconfig : string
 
-  [<Option('n', "ingress-port", HelpText="Ingress port",
-           Required = false, Default = 80)>]
-  ingressPort : int
+  [<Option("ingress-url", HelpText="Ingress URL",
+           Required = false, Default = "https://local:80/")>]
+  ingressUrl : string
 }
 
 
@@ -160,7 +161,7 @@ let main argv =
     | :? SetupOptions as setup ->
       let kube = ConnectToCluster setup.kubeconfig
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = setup.numNodes }
-      let nCfg = MakeNetworkCfg [coreSet] setup.namespaceProperty setup.ingressPort None
+      let nCfg = MakeNetworkCfg [coreSet] setup.namespaceProperty setup.ingressUrl None
       use formation = kube.MakeFormation nCfg None false setup.probeTimeout
       formation.ReportStatus()
       0
@@ -168,7 +169,7 @@ let main argv =
     | :? LoadgenOptions as loadgen ->
       let kube = ConnectToCluster loadgen.kubeconfig
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = loadgen.numNodes }
-      let nCfg = MakeNetworkCfg [coreSet] loadgen.namespaceProperty loadgen.ingressPort None
+      let nCfg = MakeNetworkCfg [coreSet] loadgen.namespaceProperty loadgen.ingressUrl None
       use formation = kube.MakeFormation nCfg None false loadgen.probeTimeout
       formation.RunLoadgenAndCheckNoErrors coreSet
       formation.ReportStatus()
@@ -207,7 +208,7 @@ let main argv =
                                                    numAccounts = mission.numAccounts
                                                    numTxs = mission.numTxs
                                                    numNodes = mission.numNodes
-                                                   ingressPort = mission.ingressPort
+                                                   ingressUrl = mission.ingressUrl
                                                    persistentVolume = persistentVolume
                                                    namespaceProperty = mission.namespaceProperty
                                                    keepData = mission.keepData
