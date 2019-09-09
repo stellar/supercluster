@@ -43,8 +43,8 @@ type PerformanceRow =
         appliedTxs : int
         txRate : int
         batchSize : int
-        txsPerLedgeMean : decimal
-        txsPerLedgeStdDev : decimal
+        txsPerLedgerMean : decimal
+        txsPerLedgerStdDev : decimal
         loadStepRate : Option<double>
         loadStepStdDev : Option<double>
         nominate : Timer
@@ -66,8 +66,8 @@ type PerformanceRow =
             self.appliedTxs,
             self.txRate,
             self.batchSize,
-            self.txsPerLedgeMean,
-            self.txsPerLedgeStdDev,
+            self.txsPerLedgerMean,
+            self.txsPerLedgerStdDev,
             valueOrNan self.loadStepRate,
             valueOrNan self.loadStepStdDev,
             self.nominate.mean,
@@ -111,8 +111,8 @@ type PerformanceReporter(networkCfg: NetworkCfg) =
             appliedTxs = metrics.LedgerTransactionApply.Count
             txRate = loadGen.txrate
             batchSize = loadGen.batchsize
-            txsPerLedgeMean = decimal(metrics.LedgerTransactionCount.Mean)
-            txsPerLedgeStdDev = decimal(metrics.LedgerTransactionCount.Stddev)
+            txsPerLedgerMean = decimal(metrics.LedgerTransactionCount.Mean)
+            txsPerLedgerStdDev = decimal(metrics.LedgerTransactionCount.Stddev)
             loadStepRate = Option.map (fun (x: Metrics.GenericTimer) -> x.MeanRate) metrics.LoadgenStepSubmit
             loadStepStdDev = Option.map (fun (x: Metrics.GenericTimer) -> x.Stddev) metrics.LoadgenStepSubmit
             nominate = Timer.FromGenericTimer(metrics.ScpTimingNominated)
