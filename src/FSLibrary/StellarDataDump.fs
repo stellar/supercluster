@@ -19,7 +19,7 @@ open Microsoft.Rest.Serialization
 type ClusterFormation with
     member self.DumpPeerCommandLogs (destination : Destination) command p =
         let ns = self.NetworkCfg.NamespaceProperty
-        let name = CfgVal.peerShortName p.coreSet p.peerNum
+        let name = self.NetworkCfg.PeerShortName p.coreSet p.peerNum
 
         try
             let stream = self.Kube.ReadNamespacedPodLog(name = name,
@@ -40,7 +40,7 @@ type ClusterFormation with
     member self.DumpPeerDatabase (destination : Destination) p =
         try
             let ns = self.NetworkCfg.NamespaceProperty
-            let name = CfgVal.peerShortName p.coreSet p.peerNum
+            let name = self.NetworkCfg.PeerShortName p.coreSet p.peerNum
 
             let muxedStream = self.Kube.MuxedStreamNamespacedPodExecAsync(
                                 name = name,

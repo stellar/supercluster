@@ -28,13 +28,7 @@ module CfgVal =
     let databasePath = dataVolumePath + "/stellar.db"
     let historyPath = dataVolumePath + "/history"
     let bucketsPath = dataVolumePath + "/buckets"
-    let peerSetName (coreSet: CoreSet) = sprintf "peer-%s" coreSet.name
-    let peerShortName (coreSet: CoreSet) n = sprintf "%s-%d" (peerSetName coreSet) n
-    let peerCfgName (coreSet: CoreSet) n = sprintf "%s.cfg" (peerShortName coreSet n)
     let localHistName = "local"
-    let serviceName = "stellar-core"
-    let peerDNSName (namespaceProperty: string) (coreSet: CoreSet) n =
-        sprintf "%s.%s.%s.svc.cluster.local" (peerShortName coreSet n) serviceName namespaceProperty
     let peerNameEnvVarName = "STELLAR_CORE_PEER_SHORT_NAME"
     let peerNameEnvCfgFile = cfgVolumePath + "/$(STELLAR_CORE_PEER_SHORT_NAME).cfg"
     let historyCfgFile = cfgVolumePath + "/nginx.conf"
@@ -90,7 +84,7 @@ type StellarCoreCfg =
                          ("mkdir", sprintf "mkdir -p %s/{0}" CfgVal.historyPath) |]
         let remoteHist dnsName =
             Map.ofSeq [| ("get", sprintf "curl -sf %s/{0} -o {1}" dnsName) |]
-        let getHist getCommand = 
+        let getHist getCommand =
             Map.ofSeq [| ("get", getCommand) |]
 
         t.Add("DATABASE", self.database.ToString()) |> ignore
@@ -131,44 +125,44 @@ type StellarCoreCfg =
 // to modify a field, use a copy-and-update record expression like
 // {cfg with accelerateTime = true}
 type NetworkCfg with
-    member self.GetNameKeyList (coreSet: CoreSet) =
-        let map = Array.mapi (fun i k -> (CfgVal.peerShortName coreSet i, k))
+    member self.GetNameKeyList (coreSet: CoreSet) : (string * KeyPair) array =
+        let map = Array.mapi (fun i k -> (self.PeerShortName coreSet i, k))
         map coreSet.keys
 
-    member self.GetNameKeyList (coreSetNames: string list) =
-        List.map (self.Find >> self.GetNameKeyList) coreSetNames |> Array.concat
+    member self.GetNameKeyList (coreSetNames: string list) : (string * KeyPair) array =
+        List.map (self.FindCoreSet >> self.GetNameKeyList) coreSetNames |> Array.concat
 
-    member self.GetNameKeyListAll() =
-        List.map self.GetNameKeyList self.coreSetList |> Array.concat
+    member self.GetNameKeyListAll() : (string * KeyPair) array =
+        List.map self.GetNameKeyList self.CoreSetList |> Array.concat
 
-    member self.DnsNamesWithKey(coreSet: CoreSet) =
-        let map = Array.mapi (fun i k -> (CfgVal.peerShortName coreSet i, CfgVal.peerDNSName self.namespaceProperty coreSet i))
+    member self.DnsNamesWithKey(coreSet: CoreSet) : (string * string) array =
+        let map = Array.mapi (fun i k -> (self.PeerShortName coreSet i, self.PeerDNSName coreSet i))
         map coreSet.keys
 
-    member self.DnsNamesWithKey(csl) =
-        List.map (self.Find >> self.DnsNamesWithKey) csl |> Array.concat
+    member self.DnsNamesWithKey(coreSetNames:string list) : (string * string) array =
+        List.map (self.FindCoreSet >> self.DnsNamesWithKey) coreSetNames |> Array.concat
 
-    member self.DnsNamesWithKey() =
-        List.map self.DnsNamesWithKey self.coreSetList |> Array.concat
+    member self.DnsNamesWithKey() : (string * string) array =
+        List.map self.DnsNamesWithKey self.CoreSetList |> Array.concat
 
-    member self.DnsNames(coreSet: CoreSet) =
-        let map = Array.mapi (fun i k -> (CfgVal.peerDNSName self.namespaceProperty coreSet i))
+    member self.DnsNames(coreSet: CoreSet) : string array =
+        let map = Array.mapi (fun i k -> (self.PeerDNSName coreSet i))
         map coreSet.keys
 
-    member self.DnsNames(csl) =
-        List.map (self.Find >> self.DnsNames) csl |> Array.concat
+    member self.DnsNames(coreSetNames:string list) : string array =
+        List.map (self.FindCoreSet >> self.DnsNames) coreSetNames |> Array.concat
 
     member self.DnsNames() =
-        List.map self.DnsNames self.coreSetList |> Array.concat
+        List.map self.DnsNames self.CoreSetList |> Array.concat
 
     member self.QuorumSet(o: CoreSetOptions) =
-        let fromQuorumSet = 
+        let fromQuorumSet =
             match o.quorumSet with
             | None -> self.GetNameKeyListAll()
             | Some(x) -> self.GetNameKeyList(x)
 
         List.concat [fromQuorumSet |> List.ofArray; o.quorumSetKeys |> Map.toList] |> Map.ofList
- 
+
     member self.HistoryNodes(o: CoreSetOptions) =
         match o.historyNodes, o.quorumSet with
         | None, None -> self.DnsNamesWithKey() |> Map.ofArray
@@ -178,7 +172,7 @@ type NetworkCfg with
     member self.PreferredPeers(o: CoreSetOptions) =
         match o.peers with
         | None -> List.concat [self.DnsNames() |> List.ofArray; o.peersDns ]
-        | Some(x) -> List.concat [self.DnsNames(x) |> List.ofArray; o.peersDns ]                
+        | Some(x) -> List.concat [self.DnsNames(x) |> List.ofArray; o.peersDns ]
 
     member self.StellarCoreCfg(c, i) : StellarCoreCfg =
         { network = self

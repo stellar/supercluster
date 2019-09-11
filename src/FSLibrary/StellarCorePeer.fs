@@ -15,11 +15,11 @@ type Peer =
       coreSet: CoreSet
       peerNum: int }
 
-    member self.ShortName =
-        CfgVal.peerShortName self.coreSet self.peerNum
+    member self.ShortName : string =
+        self.networkCfg.PeerShortName self.coreSet self.peerNum
 
-    member self.DNSName =
-        CfgVal.peerDNSName self.networkCfg.namespaceProperty self.coreSet self.peerNum
+    member self.DNSName : string =
+        self.networkCfg.PeerDNSName self.coreSet self.peerNum
 
 
 type NetworkCfg with
@@ -29,7 +29,7 @@ type NetworkCfg with
           peerNum = i }
 
     member self.EachPeer f =
-        for coreSet in self.coreSetList do
+        for coreSet in self.CoreSetList do
             for i in 0..(coreSet.CurrentCount - 1) do
                 f (self.GetPeer coreSet i)
 

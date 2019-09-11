@@ -100,7 +100,7 @@ type NetworkCfg with
     // get a node's config to it, and to browse the configuration of the entire
     // network eg. in the k8s dashboard.
     member self.ToConfigMap() : V1ConfigMap =
-        let peerKeyValPair (coreSet: CoreSet) i = (CfgVal.peerCfgName coreSet i, (self.StellarCoreCfg (coreSet, i)).ToString())
+        let peerKeyValPair (coreSet: CoreSet) i = (self.PeerCfgName coreSet i, (self.StellarCoreCfg (coreSet, i)).ToString())
         let cfgs = Array.append (self.MapAllPeers peerKeyValPair) [| self.HistoryConfig() |]
         V1ConfigMap(metadata = V1ObjectMeta(name = CfgVal.cfgMapName,
                                             namespaceProperty = self.NamespaceProperty),
@@ -161,7 +161,7 @@ type NetworkCfg with
     member self.ToService () : V1Service =
         let serviceSpec = V1ServiceSpec(clusterIP = "None", selector = CfgVal.labels)
         V1Service(spec = serviceSpec,
-                  metadata = self.NamespacedMeta CfgVal.serviceName)
+                  metadata = self.NamespacedMeta self.ServiceName)
 
 
     // Returns a StatefulSet object that will build stellar-core Pods named
@@ -170,10 +170,10 @@ type NetworkCfg with
         let statefulSetSpec =
             V1StatefulSetSpec
                 (selector = V1LabelSelector(matchLabels = CfgVal.labels),
-                 serviceName = CfgVal.serviceName,
+                 serviceName = self.ServiceName,
                  template = self.ToPodTemplateSpec coreSet probeTimeout,
                  replicas = System.Nullable<int>(coreSet.CurrentCount))
-        let statefulSet = V1StatefulSet(metadata = self.NamespacedMeta (CfgVal.peerSetName coreSet),
+        let statefulSet = V1StatefulSet(metadata = self.NamespacedMeta (self.PeerSetName coreSet),
                                         spec = statefulSetSpec)
         statefulSet.Validate() |> ignore
         statefulSet
@@ -190,8 +190,8 @@ type NetworkCfg with
     // do).
     member self.ToPerPodServices () : V1Service array =
         let perPodService (coreSet: CoreSet) i =
-            let name = CfgVal.peerShortName coreSet i
-            let dnsName = CfgVal.peerDNSName self.namespaceProperty coreSet i
+            let name = self.PeerShortName coreSet i
+            let dnsName = self.PeerDNSName coreSet i
             let spec = V1ServiceSpec(``type`` = "ExternalName",
                                      ports =
                                       [|V1ServicePort(name = "core",
@@ -203,7 +203,7 @@ type NetworkCfg with
         self.MapAllPeers perPodService
 
     member self.ToCoreSetPersistentVolumeNames () =
-        let withPersistentVolumes = self.coreSetList |> List.filter (fun coreSet -> coreSet.options.persistentVolume <> None)
+        let withPersistentVolumes = self.CoreSetList |> List.filter (fun coreSet -> coreSet.options.persistentVolume <> None)
         let getName (coreSet: CoreSet) =
             coreSet.options.persistentVolume.Value
         let names = List.map getName withPersistentVolumes
@@ -245,10 +245,10 @@ type NetworkCfg with
             V1PersistentVolumeClaim(metadata = meta, spec = spec)
         List.map makePersistentVolumeClaim (self.ToCoreSetPersistentVolumeNames())
 
-    // Returns an Ingress object with rules that map URLs /$namespace/peer-N/foo
-    // to the per-Pod Service within $namespace named peer-N (which then, via
+    // Returns an Ingress object with rules that map URLs http://$ingressHost/peer-N/foo
+    // to the per-Pod Service within the current networkCfg named peer-N (which then, via
     // DNS mapping, goes to the Pod itself). Exposing this to external traffic
-    // requires that you enable the nginx Ingress controller on your k8s
+    // requires that you enable the traefik Ingress controller on your k8s
     // cluster.
     member self.ToIngress () : Extensionsv1beta1Ingress =
         let httpPortStr = IntstrIntOrString(value = CfgVal.httpPort.ToString())
@@ -259,26 +259,22 @@ type NetworkCfg with
             Extensionsv1beta1IngressBackend(serviceName = pn,
                                             servicePort = IntstrIntOrString(value = "80"))
         let corePath (coreSet: CoreSet) i =
-            let pn = CfgVal.peerShortName coreSet i
-            Extensionsv1beta1HTTPIngressPath(path = sprintf "/%s/%s/core/"
-                                                    (self.NamespaceProperty) pn,
+            let pn = self.PeerShortName coreSet i
+            Extensionsv1beta1HTTPIngressPath(path = sprintf "/%s/core/" pn,
                                              backend = coreBackend pn)
         let historyPath (coreSet: CoreSet) i =
-            let pn = CfgVal.peerShortName coreSet i
-            Extensionsv1beta1HTTPIngressPath(path = sprintf "/%s/%s/history/"
-                                                    (self.NamespaceProperty) pn,
+            let pn = self.PeerShortName coreSet i
+            Extensionsv1beta1HTTPIngressPath(path = sprintf "/%s/history/" pn,
                                              backend = historyBackend pn)
         let corePaths = self.MapAllPeers corePath
         let historyPaths = self.MapAllPeers historyPath
         let rule = Extensionsv1beta1HTTPIngressRuleValue(paths = Array.concat [corePaths; historyPaths])
-        let host = System.Uri(self.ingressUrl).Host
+        let host = self.IngressHostName
         let rules = [|Extensionsv1beta1IngressRule(
                         host = host,
                         http = rule)|]
         let spec = Extensionsv1beta1IngressSpec(rules = rules)
-        let annotation = Map.ofArray [|("traefik.ingress.kubernetes.io/request-modifier",
-                                        (sprintf "ReplacePathRegex: ^/%s/peer-core-([0-9]+)/(core|history)/(.*) /$3"
-                                                 self.NamespaceProperty))|]
+        let annotation = Map.ofArray [|("traefik.ingress.kubernetes.io/rule-type", "PathPrefixStrip")|]
         let meta = V1ObjectMeta(name = "stellar-core-ingress",
                                 namespaceProperty = self.NamespaceProperty,
                                 annotations = annotation)

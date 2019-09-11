@@ -151,12 +151,13 @@ type ClusterFormation(networkCfg: NetworkCfg,
 
     member self.WithLive name (live: bool) =
         networkCfg <- networkCfg.WithLive name live
-        let coreSet = networkCfg.Find name
+        let coreSet = networkCfg.FindCoreSet name
+        let peerSetName = networkCfg.PeerSetName coreSet
         let ss = kube.ReplaceNamespacedStatefulSet(
                    body = networkCfg.ToStatefulSet coreSet probeTimeout,
-                   name = CfgVal.peerSetName coreSet,
+                   name = peerSetName,
                    namespaceParameter = networkCfg.NamespaceProperty)
-        let newSets = statefulSets |> List.filter (fun x -> x.Metadata.Name <> CfgVal.peerSetName coreSet)
+        let newSets = statefulSets |> List.filter (fun x -> x.Metadata.Name <> peerSetName)
         statefulSets <- ss :: newSets
         self.WaitForAllReplicasReady ss
 
@@ -207,7 +208,7 @@ type ClusterFormation(networkCfg: NetworkCfg,
             self
 
     member self.CheckNoErrorsAndPairwiseConsistency () =
-        let peer = networkCfg.GetPeer networkCfg.coreSetList.[0] 0
+        let peer = networkCfg.GetPeer networkCfg.CoreSetList.[0] 0
         networkCfg.EachPeer
             begin
                 fun p ->
@@ -254,7 +255,7 @@ type Kubernetes with
             let makeStatefulSet coreSet =
                 self.CreateNamespacedStatefulSet(body = nCfg.ToStatefulSet coreSet probeTimeout,
                                                  namespaceParameter = nsStr)
-            let statefulSets = List.map makeStatefulSet nCfg.coreSetList
+            let statefulSets = List.map makeStatefulSet nCfg.CoreSetList
             for statefulSet in statefulSets do
                 namespaceContent.Add(statefulSet)
 

@@ -16,7 +16,7 @@ type CoreSetInitialization =
       initialCatchup : bool
       forceScp : bool }
 
-    static member Default = 
+    static member Default =
       { newDb = true
         newHist = true
         initialCatchup = false
@@ -39,7 +39,7 @@ type CoreSetOptions =
       persistentVolume : string option
       initialization : CoreSetInitialization }
 
-    static member Default = 
+    static member Default =
       { nodeCount = 3
         quorumSet = None
         quorumSetKeys = Map.empty

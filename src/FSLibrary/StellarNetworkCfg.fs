@@ -52,42 +52,62 @@ type NetworkCfg =
       networkPassphrase : NetworkPassphrase
       existingNamespace : bool
       namespaceProperty : string
-      coreSetList : CoreSet list
-      ingressUrl : string }
+      coreSets : Map<string,CoreSet>
+      ingressDomain : string }
 
-    member self.Find (n:string) =
-        (List.find (fun x -> (x.name = n)) self.coreSetList)
+    member self.FindCoreSet (n:string) : CoreSet =
+        Map.find n self.coreSets
 
     member self.NamespaceProperty : string =
         self.namespaceProperty
 
-    static member MapCoreSetPeers f (coreSet: CoreSet) =
-        Array.mapi (fun i k -> f coreSet i) coreSet.keys
+    member self.MapAllPeers<'a> (f:CoreSet->int->'a) : 'a array =
+        let mapCoreSetPeers (cs:CoreSet) = Array.mapi (fun i k -> f cs i) cs.keys
+        Map.toArray self.coreSets
+        |> Array.collect (fun (_, cs) -> mapCoreSetPeers cs)
 
-    member self.MapAllPeers f =
-        List.map (NetworkCfg.MapCoreSetPeers f) self.coreSetList |> Array.concat
+    member self.CoreSetList : CoreSet list =
+        Map.toList self.coreSets |> List.map (fun (_, v) -> v)
+
+    member self.PeerSetName (cs:CoreSet) : string =
+        sprintf "%s-peer-%s" (self.networkNonce.ToString()) (cs.name)
+
+    member self.PeerShortName (cs:CoreSet) (n:int) : string =
+        sprintf "%s-%d" (self.PeerSetName cs) n
+
+    member self.PeerCfgName (cs:CoreSet) (n:int) : string =
+        sprintf "%s.cfg" (self.PeerShortName cs n)
+
+    member self.ServiceName : string =
+        sprintf "%s-stellar-core" (self.networkNonce.ToString())
+
+    member self.PeerDNSName (cs:CoreSet) (n:int) : string =
+        sprintf "%s.%s.%s.svc.cluster.local"
+            (self.PeerShortName cs n)
+            self.ServiceName
+            self.namespaceProperty
+
+    member self.IngressHostName : string =
+        sprintf "%s.%s" (self.networkNonce.ToString()) (self.ingressDomain)
 
     member self.WithLive name (live: bool) =
-        let coreSet = self.Find(name).WithLive live
-        let filteredList = List.filter (fun x -> (x.name <> name)) self.coreSetList
+        let coreSet = self.FindCoreSet(name).WithLive live
         { networkNonce = self.networkNonce
           networkPassphrase = self.networkPassphrase
           existingNamespace = self.existingNamespace
           namespaceProperty = self.namespaceProperty
-          coreSetList = coreSet :: filteredList
-          ingressUrl = self.ingressUrl }
+          coreSets = self.coreSets.Add(name, coreSet)
+          ingressDomain = self.ingressDomain }
 
 // Generates a fresh network of size n, with fresh keypairs for each node, and a
 // random nonce to isolate the network.
-let MakeNetworkCfg (coreSetList: CoreSet list) (namespaceProperty: string option) (ingressUrl: string) (passphrase: NetworkPassphrase option) : NetworkCfg =
+let MakeNetworkCfg (coreSetList: CoreSet list) (namespaceProperty: string) (ingressDomain: string) (passphrase: NetworkPassphrase option) : NetworkCfg =
     let nonce = MakeNetworkNonce()
     { networkNonce = nonce
       networkPassphrase = match passphrase with
                           | None -> PrivateNet nonce
                           | Some(x) -> x
-      existingNamespace = namespaceProperty.IsSome
-      namespaceProperty = match namespaceProperty with
-                          | None -> nonce.ToString()
-                          | Some(x) -> x 
-      coreSetList = coreSetList
-      ingressUrl = ingressUrl }
+      existingNamespace = true
+      namespaceProperty = namespaceProperty
+      coreSets = List.map (fun cs -> (cs.name, cs)) coreSetList |> Map.ofList
+      ingressDomain = ingressDomain }
