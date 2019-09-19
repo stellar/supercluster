@@ -58,6 +58,9 @@ type NetworkCfg =
     member self.FindCoreSet (n:string) : CoreSet =
         Map.find n self.coreSets
 
+    member self.Nonce : string =
+        self.networkNonce.ToString()
+
     member self.NamespaceProperty : string =
         self.namespaceProperty
 
@@ -70,7 +73,7 @@ type NetworkCfg =
         Map.toList self.coreSets |> List.map (fun (_, v) -> v)
 
     member self.PeerSetName (cs:CoreSet) : string =
-        sprintf "%s-peer-%s" (self.networkNonce.ToString()) (cs.name)
+        sprintf "%s-peer-%s" self.Nonce cs.name
 
     member self.PeerShortName (cs:CoreSet) (n:int) : string =
         sprintf "%s-%d" (self.PeerSetName cs) n
@@ -79,7 +82,7 @@ type NetworkCfg =
         sprintf "%s.cfg" (self.PeerShortName cs n)
 
     member self.ServiceName : string =
-        sprintf "%s-stellar-core" (self.networkNonce.ToString())
+        sprintf "%s-stellar-core" self.Nonce
 
     member self.PeerDNSName (cs:CoreSet) (n:int) : string =
         sprintf "%s.%s.%s.svc.cluster.local"
