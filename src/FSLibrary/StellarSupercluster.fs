@@ -82,16 +82,10 @@ type ClusterFormation(networkCfg: NetworkCfg,
 
         (List.forall deleteVolume (networkCfg.ToPersistentVolumeNames())) |> ignore
 
-        if not networkCfg.existingNamespace
-        then
-            LogInfo "Disposing formation, deleting namespace '%s'"
-                networkCfg.NamespaceProperty
-            kube.DeleteNamespace(name = networkCfg.NamespaceProperty,
-                propagationPolicy = "Foreground") |> ignore
-        else
-            LogInfo "Disposing formation, keeping pre-existing namespace '%s', removing content"
-                    networkCfg.NamespaceProperty
-            namespaceContent.Cleanup()
+        LogInfo "Cleaning run '%s' resources from namespace '%s'"
+            (networkCfg.networkNonce.ToString())
+            networkCfg.NamespaceProperty
+        namespaceContent.Cleanup()
 
     member self.Cleanup(disposing:bool) =
         if not disposed then
@@ -243,9 +237,6 @@ type Kubernetes with
     member self.MakeFormation (nCfg: NetworkCfg) (persistentVolume: PersistentVolume option) (keepData: bool) (probeTimeout: int) : ClusterFormation =
         let nsStr = nCfg.NamespaceProperty
         let namespaceContent = NamespaceContent(self, nsStr)
-        if not nCfg.existingNamespace
-        then
-            self.CreateNamespace(nCfg.Namespace) |> ignore
         try
             namespaceContent.Add(self.CreateNamespacedService(body = nCfg.ToService(),
                                                               namespaceParameter = nsStr))
@@ -288,21 +279,16 @@ type Kubernetes with
             formation
         with
         | x ->
-            if keepData         
+            if keepData
             then
-                LogError "Exception while building formation, keeping namespace '%s' for debug"
+                LogError "Exception while building formation, keeping resources for run '%s' in namespace '%s' for debug"
+                             nCfg.Nonce
                              nCfg.NamespaceProperty
             else
-                if not nCfg.existingNamespace
-                then
-                    LogError "Exception while building formation, deleting namespace '%s'"
-                                 nCfg.NamespaceProperty
-                    self.DeleteNamespace(name = nCfg.NamespaceProperty,
-                                         propagationPolicy = "Foreground") |> ignore
-                else
-                    LogError "Exception while building formation, keeping pre-existing namespace '%s'"
-                                 nCfg.NamespaceProperty
-                    namespaceContent.Cleanup()
+                LogError "Exception while building formation, cleaning up resources for run '%s' in namespace '%s'"
+                             nCfg.Nonce
+                             nCfg.NamespaceProperty
+                namespaceContent.Cleanup()
 
                 match persistentVolume with
                 | Some(pv) ->

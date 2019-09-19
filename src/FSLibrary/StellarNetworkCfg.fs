@@ -50,7 +50,6 @@ type NetworkPassphrase =
 type NetworkCfg =
     { networkNonce : NetworkNonce
       networkPassphrase : NetworkPassphrase
-      existingNamespace : bool
       namespaceProperty : string
       coreSets : Map<string,CoreSet>
       ingressDomain : string }
@@ -97,7 +96,6 @@ type NetworkCfg =
         let coreSet = self.FindCoreSet(name).WithLive live
         { networkNonce = self.networkNonce
           networkPassphrase = self.networkPassphrase
-          existingNamespace = self.existingNamespace
           namespaceProperty = self.namespaceProperty
           coreSets = self.coreSets.Add(name, coreSet)
           ingressDomain = self.ingressDomain }
@@ -110,7 +108,6 @@ let MakeNetworkCfg (coreSetList: CoreSet list) (namespaceProperty: string) (ingr
       networkPassphrase = match passphrase with
                           | None -> PrivateNet nonce
                           | Some(x) -> x
-      existingNamespace = true
       namespaceProperty = namespaceProperty
       coreSets = List.map (fun cs -> (cs.name, cs)) coreSetList |> Map.ofList
       ingressDomain = ingressDomain }
