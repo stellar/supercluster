@@ -102,7 +102,7 @@ type NetworkCfg with
     member self.ToConfigMap() : V1ConfigMap =
         let peerKeyValPair (coreSet: CoreSet) i = (self.PeerCfgName coreSet i, (self.StellarCoreCfg (coreSet, i)).ToString())
         let cfgs = Array.append (self.MapAllPeers peerKeyValPair) [| self.HistoryConfig() |]
-        V1ConfigMap(metadata = V1ObjectMeta(name = CfgVal.cfgMapName,
+        V1ConfigMap(metadata = V1ObjectMeta(name = self.CfgMapName,
                                             namespaceProperty = self.NamespaceProperty),
                     data = Map.ofSeq cfgs)
 
@@ -112,7 +112,7 @@ type NetworkCfg with
     // /data/history, forces SCP on next startup, and runs.
     member self.ToPodTemplateSpec (coreSet: CoreSet) probeTimeout : V1PodTemplateSpec =
         let cfgVol = V1Volume(name = CfgVal.cfgVolumeName,
-                              configMap = V1ConfigMapVolumeSource(name = CfgVal.cfgMapName))
+                              configMap = V1ConfigMapVolumeSource(name = self.CfgMapName))
         let dataVol = 
             match coreSet.options.persistentVolume with
             | None -> V1Volume(name = CfgVal.dataVolumeName,

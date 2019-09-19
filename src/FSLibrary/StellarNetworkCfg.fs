@@ -86,6 +86,9 @@ type NetworkCfg =
     member self.IngressName : string =
         sprintf "%s-stellar-core-ingress" self.Nonce
 
+    member self.CfgMapName : string =
+        sprintf "%s-stellar-core-cfg" self.Nonce
+
     member self.PeerDNSName (cs:CoreSet) (n:int) : string =
         sprintf "%s.%s.%s.svc.cluster.local"
             (self.PeerShortName cs n)
