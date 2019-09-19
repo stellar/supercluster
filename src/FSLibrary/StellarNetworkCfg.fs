@@ -83,6 +83,9 @@ type NetworkCfg =
     member self.ServiceName : string =
         sprintf "%s-stellar-core" self.Nonce
 
+    member self.IngressName : string =
+        sprintf "%s-stellar-core-ingress" self.Nonce
+
     member self.PeerDNSName (cs:CoreSet) (n:int) : string =
         sprintf "%s.%s.%s.svc.cluster.local"
             (self.PeerShortName cs n)
@@ -90,7 +93,7 @@ type NetworkCfg =
             self.namespaceProperty
 
     member self.IngressHostName : string =
-        sprintf "%s.%s" (self.networkNonce.ToString()) (self.ingressDomain)
+        sprintf "%s.%s" self.Nonce self.ingressDomain
 
     member self.WithLive name (live: bool) =
         let coreSet = self.FindCoreSet(name).WithLive live

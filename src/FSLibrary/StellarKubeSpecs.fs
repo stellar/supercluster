@@ -275,7 +275,7 @@ type NetworkCfg with
                         http = rule)|]
         let spec = Extensionsv1beta1IngressSpec(rules = rules)
         let annotation = Map.ofArray [|("traefik.ingress.kubernetes.io/rule-type", "PathPrefixStrip")|]
-        let meta = V1ObjectMeta(name = "stellar-core-ingress",
+        let meta = V1ObjectMeta(name = self.IngressName,
                                 namespaceProperty = self.NamespaceProperty,
                                 annotations = annotation)
         Extensionsv1beta1Ingress(spec = spec, metadata = meta)
