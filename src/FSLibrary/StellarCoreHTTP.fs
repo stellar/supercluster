@@ -191,6 +191,7 @@ type Peer with
         LogInfo "No errors found on %s" self.ShortName
 
     member self.CheckConsistencyWith (other:Peer) =
+        let shortHash (v:string) : string = v.Remove 6
         let rec loop (ours:Map<int,string>) (theirs:Map<int,string>) (n:int) =
             if n < 0
             then raise (MaybeInconsistentPeersException (self, other))
@@ -202,9 +203,12 @@ type Peer with
                                 | None -> false
                                 | Some w when v = w ->
                                     LogInfo "found agreeing ledger %d = %s on %s and %s"
-                                        k (v.Remove 6) self.ShortName other.ShortName
+                                        k (shortHash v) self.ShortName other.ShortName
                                     true
-                                | Some w -> raise (InconsistentPeersException (self, other))
+                                | Some w ->
+                                    LogError "Inconsistent peers: ledger %d = %s on %s and %s on %s"
+                                       k (shortHash v) self.ShortName (shortHash w) other.ShortName
+                                    raise (InconsistentPeersException (self, other))
                     end
                         ours
                 then ()
