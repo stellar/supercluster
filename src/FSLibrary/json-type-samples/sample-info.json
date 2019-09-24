@@ -1,3 +1,4 @@
+[
 {
    "info" : {
       "build" : "v11.0.0",
@@ -19,18 +20,104 @@
       },
       "protocol_version" : 11,
       "quorum" : {
-         "14" : {
-            "agree" : 5,
+         "node" : "GD3CX",
+         "qset" : {
+            "agree" : 1,
             "delayed" : 0,
             "disagree" : 0,
-            "fail_at" : 2,
-            "hash" : "06d08f",
+            "fail_at" : 1,
+            "hash" : "47f9b3",
+            "ledger" : 463,
             "missing" : 0,
             "phase" : "EXTERNALIZE",
-            "validated" : true
+            "validated" : false
+         },
+         "transitive" : {
+            "critical" : [
+               [ "ssc-6d7df4ef0078-peer-complete1-0" ]
+            ],
+            "intersection" : true,
+            "last_check_ledger" : 460,
+            "node_count" : 3
          }
       },
       "startedOn" : "2019-04-25T00:58:21Z",
       "state" : "Synced!"
    }
+},
+{
+   "info" : {
+      "build" : "v12.0.0rc1-5-gec62e52",
+      "history_failure_rate" : "0",
+      "ledger" : {
+         "age" : 1568932345,
+         "baseFee" : 100,
+         "baseReserve" : 100000000,
+         "closeTime" : 0,
+         "hash" : "93bed95c7893b7c1b37a1f143c0521cebd0b911ac8d9ac840fa5e2f64676e38b",
+         "maxTxSetSize" : 100,
+         "num" : 1,
+         "version" : 0
+      },
+      "network" : "Private test network 'ssc-6d7df4ef0078'",
+      "peers" : {
+         "authenticated_count" : 6,
+         "pending_count" : 0
+      },
+      "protocol_version" : 12,
+      "quorum" : {
+         "node" : "GD3CX",
+         "qset" : {
+            "agree" : 1,
+            "delayed" : 0,
+            "disagree" : 0,
+            "fail_at" : 1,
+            "hash" : "47f9b3",
+            "ledger" : 463,
+            "missing" : 0,
+            "phase" : "EXTERNALIZE",
+            "validated" : false
+         },
+         "transitive" : {
+            "critical" : [
+               [ "ssc-6d7df4ef0078-peer-complete1-0" ]
+            ],
+            "intersection" : true,
+            "last_check_ledger" : 460,
+            "node_count" : 3
+         }
+      },
+      "startedOn" : "2019-09-19T22:31:20Z",
+      "state" : "Catching up",
+      "status" : [ "Catching up: Waiting for trigger ledger: 464/513, ETA: 245s" ]
+   }
+},
+{
+   "info" : {
+      "build" : "v12.0.0rc1-5-gec62e52",
+      "history_failure_rate" : "0",
+      "ledger" : {
+         "age" : 1568932625,
+         "baseFee" : 100,
+         "baseReserve" : 100000000,
+         "closeTime" : 0,
+         "hash" : "93bed95c7893b7c1b37a1f143c0521cebd0b911ac8d9ac840fa5e2f64676e38b",
+         "maxTxSetSize" : 100,
+         "num" : 1,
+         "version" : 0
+      },
+      "network" : "Private test network 'ssc-6d7df4ef0078'",
+      "peers" : {
+         "authenticated_count" : 7,
+         "pending_count" : 0
+      },
+      "protocol_version" : 12,
+      "quorum" : {
+         "node" : "GCUI2",
+         "qset" : null
+      },
+      "startedOn" : "2019-09-19T22:36:47Z",
+      "state" : "Joining SCP"
+   }
 }
+]
