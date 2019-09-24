@@ -118,6 +118,12 @@ type Peer with
         WebExceptionRetry DefaultRetry
             (fun _ -> Info.Load(self.URL "info").Info.State)
 
+    member self.GetStatusOrState() : string =
+        WebExceptionRetry DefaultRetry
+            (fun _ ->
+             let i = Info.Load(self.URL "info").Info
+             if i.Status.Length = 0 then i.State else i.Status.[0] )
+
     member self.GetMetrics() : Metrics.Metrics =
         WebExceptionRetry DefaultRetry
             (fun _ -> Metrics.Load(self.URL "metrics").Metrics)
@@ -162,8 +168,8 @@ type Peer with
     member self.WaitForLedgerNum (n:int) =
         RetryUntilTrue
             (fun _ -> self.GetLedgerNum() >= n)
-            (fun _ -> LogInfo "Waiting for ledger %d on %s"
-                              n self.ShortName )
+            (fun _ -> LogInfo "Waiting for ledger %d on %s: %s"
+                              n self.ShortName (self.GetStatusOrState()))
 
     member self.WaitForFewLedgers count =
         self.WaitForLedgerNum (self.GetLedgerNum() + count)
