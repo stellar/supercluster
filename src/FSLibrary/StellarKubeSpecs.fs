@@ -45,11 +45,18 @@ let CoreContainerForCommand image (subCommands:string array) : V1Container =
     let peerNameEnvVarSource = V1EnvVarSource(fieldRef = peerNameFieldSel)
     let peerNameEnvVar = V1EnvVar(name = CfgVal.peerNameEnvVarName,
                                   valueFrom = peerNameEnvVarSource)
+    let requests = dict["cpu", ResourceQuantity("0.1");
+                        "memory", ResourceQuantity("100Mi")]
+    let limits = dict["cpu", ResourceQuantity("2");
+                      "memory", ResourceQuantity("1Gi")]
+    let requirements = V1ResourceRequirements(requests = requests, limits = limits)
+
     V1Container
         (name = "stellar-core-" + (Array.get subCommands 0),
          image = image,
          command = [| CfgVal.stellarCoreBinPath |], env = [| peerNameEnvVar |],
          args = Array.append subCommands [| "--conf"; CfgVal.peerNameEnvCfgFile |],
+         resources = requirements,
          volumeMounts = [| V1VolumeMount(name = CfgVal.dataVolumeName,
                                          mountPath = CfgVal.dataVolumePath)
                            V1VolumeMount(name = CfgVal.cfgVolumeName,
