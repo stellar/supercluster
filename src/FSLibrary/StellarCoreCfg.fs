@@ -173,7 +173,7 @@ type NetworkCfg with
         | None -> List.concat [self.DnsNames() |> List.ofArray; o.peersDns ]
         | Some(x) -> List.concat [self.DnsNames(x) |> List.ofArray; o.peersDns ]
 
-    member self.StellarCoreCfg(c, i) : StellarCoreCfg =
+    member self.StellarCoreCfg(c:CoreSet, i:int) : StellarCoreCfg =
         { network = self
           database = SQLite3File CfgVal.databasePath
           networkPassphrase = self.networkPassphrase
@@ -184,7 +184,7 @@ type NetworkCfg with
           catchupMode = c.options.catchupMode
           automaticMaintenancePeriod = 30
           automaticMaintenanceCount = 10000
-          accelerateTime = false
+          accelerateTime = c.options.accelerateTime
           generateLoad = true
           manualClose = false
           invariantChecks = [".*"]
