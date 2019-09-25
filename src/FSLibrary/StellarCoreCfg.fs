@@ -151,10 +151,10 @@ type NetworkCfg with
     member self.DnsNames(coreSetNames:string list) : string array =
         List.map (self.FindCoreSet >> self.DnsNames) coreSetNames |> Array.concat
 
-    member self.DnsNames() =
+    member self.DnsNames() : string array =
         List.map self.DnsNames self.CoreSetList |> Array.concat
 
-    member self.QuorumSet(o: CoreSetOptions) =
+    member self.QuorumSet(o: CoreSetOptions) : Map<string, KeyPair> =
         let fromQuorumSet =
             match o.quorumSet with
             | None -> self.GetNameKeyListAll()
@@ -162,7 +162,7 @@ type NetworkCfg with
 
         List.concat [fromQuorumSet |> List.ofArray; o.quorumSetKeys |> Map.toList] |> Map.ofList
 
-    member self.HistoryNodes(o: CoreSetOptions) =
+    member self.HistoryNodes(o: CoreSetOptions) : Map<string, string> =
         match o.historyNodes, o.quorumSet with
         | None, None -> self.DnsNamesWithKey() |> Map.ofArray
         | None, Some(x) -> self.DnsNamesWithKey(x) |> Map.ofArray

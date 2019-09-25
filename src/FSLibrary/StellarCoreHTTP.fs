@@ -171,7 +171,7 @@ type Peer with
             (fun _ -> LogInfo "Waiting for ledger %d on %s: %s"
                               n self.ShortName (self.GetStatusOrState()))
 
-    member self.WaitForFewLedgers count =
+    member self.WaitForFewLedgers (count:int) =
         self.WaitForLedgerNum (self.GetLedgerNum() + count)
 
     member self.WaitForNextLedger() =
@@ -252,7 +252,7 @@ type Peer with
             (fun _ -> self.GetTestAcc(accName).Seqnum)
             (fun _ -> LogWarn "Waiting for account %s to exist, to read seqnum" accName)
 
-    member self.GenerateLoad (loadGen: LoadGen) =
+    member self.GenerateLoad (loadGen: LoadGen) : string =
         let m = self.GetMetrics
         WebExceptionRetry DefaultRetry
             (fun _ -> Http.RequestString(httpMethod="GET",

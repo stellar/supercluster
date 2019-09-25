@@ -18,10 +18,10 @@ type PersistentVolume(root: string) =
         else
             Directory.CreateDirectory(root) |> ignore
 
-    member public self.FullPath volume =
+    member public self.FullPath (volume:string) : string =
         Path.Combine [|root; volume|]
 
-    member public self.Create volume =
+    member public self.Create (volume:string) : unit =
         volumes <- volume :: volumes
         LogInfo "Creating %s" (self.FullPath(volume))
         Directory.CreateDirectory(self.FullPath(volume)) |> ignore

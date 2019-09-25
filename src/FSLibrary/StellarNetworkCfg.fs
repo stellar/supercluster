@@ -108,7 +108,11 @@ type NetworkCfg =
 
 // Generates a fresh network of size n, with fresh keypairs for each node, and a
 // random nonce to isolate the network.
-let MakeNetworkCfg (coreSetList: CoreSet list) (namespaceProperty: string) (ingressDomain: string) (passphrase: NetworkPassphrase option) : NetworkCfg =
+let MakeNetworkCfg
+        (coreSetList: CoreSet list)
+        (namespaceProperty: string)
+        (ingressDomain: string)
+        (passphrase: NetworkPassphrase option) : NetworkCfg =
     let nonce = MakeNetworkNonce()
     { networkNonce = nonce
       networkPassphrase = match passphrase with

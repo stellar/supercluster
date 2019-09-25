@@ -16,7 +16,7 @@ type Destination(path: string) =
         else
             Directory.CreateDirectory(path) |> ignore
 
-    member private self.GetExistingNsPath ns =
+    member private self.GetExistingNsPath (ns:string) : string =
         let fullPath = Path.Combine [|path; ns|]
         Directory.CreateDirectory(fullPath) |> ignore
         path
@@ -27,6 +27,6 @@ type Destination(path: string) =
         stream.CopyTo(fileStream)
         fileStream.Close()
 
-    member public self.WriteString ns name content =
+    member public self.WriteString (ns:string) (name:string) (content:string) : unit =
         let fullPath = Path.Combine [|self.GetExistingNsPath ns; name|]
         File.WriteAllText(fullPath, content)

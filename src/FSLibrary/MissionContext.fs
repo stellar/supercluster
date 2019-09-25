@@ -37,7 +37,7 @@ type MissionContext =
       keepData : bool
       probeTimeout : int }
 
-    member self.Execute (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option) run =
+    member self.Execute (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option) (run:ClusterFormation->unit) : unit =
       let networkCfg = MakeNetworkCfg coreSetList self.namespaceProperty self.ingressDomain passphrase
       use formation = self.kube.MakeFormation networkCfg (Some(self.persistentVolume)) self.keepData self.probeTimeout
       try
@@ -53,7 +53,9 @@ type MissionContext =
                 reraise()
              )
 
-    member self.ExecuteWithPerformanceReporter (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option) run =
+    member self.ExecuteWithPerformanceReporter
+            (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option)
+            (run:ClusterFormation->PerformanceReporter->unit) : unit =
       let networkCfg = MakeNetworkCfg coreSetList self.namespaceProperty self.ingressDomain passphrase
       use formation = self.kube.MakeFormation networkCfg (Some(self.persistentVolume)) self.keepData self.probeTimeout
       let performanceReporter = PerformanceReporter networkCfg
@@ -71,7 +73,7 @@ type MissionContext =
                 reraise()
              )
 
-    member self.GenerateAccountCreationLoad =
+    member self.GenerateAccountCreationLoad : LoadGen =
       { mode = GenerateAccountCreationLoad
         accounts = self.numAccounts
         txs = 0
@@ -79,7 +81,7 @@ type MissionContext =
         offset = 0
         batchsize = 100 }
 
-    member self.GeneratePaymentLoad =
+    member self.GeneratePaymentLoad : LoadGen=
       { mode = GeneratePaymentLoad
         accounts = self.numAccounts
         txs = self.numTxs

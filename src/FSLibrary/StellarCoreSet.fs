@@ -67,20 +67,20 @@ type CoreSet =
     member self.CurrentCount : int =
         if self.live then self.keys.Length else 0
 
-    member self.WithLive (live : bool) =
+    member self.WithLive (live : bool) : CoreSet =
         { name = self.name
           options = self.options
           keys = self.keys
           live = live }
 
 
-let MakeLiveCoreSet (name: string) (options: CoreSetOptions) =
+let MakeLiveCoreSet (name: string) (options: CoreSetOptions) : CoreSet =
     { name = name
       options = options
       keys = Array.init options.nodeCount (fun _ -> KeyPair.Random())
       live = true }
 
-let MakeDeferredCoreSet (name: string) (options: CoreSetOptions) =
+let MakeDeferredCoreSet (name: string) (options: CoreSetOptions) : CoreSet =
     { name = name
       options = options
       keys = Array.init options.nodeCount (fun _ -> KeyPair.Random())

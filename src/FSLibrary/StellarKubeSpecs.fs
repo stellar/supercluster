@@ -85,7 +85,7 @@ type NetworkCfg with
         V1ObjectMeta(name = name, labels = CfgVal.labels,
                      namespaceProperty = self.NamespaceProperty)
 
-    member self.HistoryConfig() =
+    member self.HistoryConfig() : (string * string) =
         ("nginx.conf", sprintf "
           error_log /var/log/nginx.error_log debug;\n
           daemon off;
@@ -209,14 +209,14 @@ type NetworkCfg with
             V1Service(metadata = self.NamespacedMeta name, spec = spec)
         self.MapAllPeers perPodService
 
-    member self.ToCoreSetPersistentVolumeNames () =
+    member self.ToCoreSetPersistentVolumeNames () : string list =
         let withPersistentVolumes = self.CoreSetList |> List.filter (fun coreSet -> coreSet.options.persistentVolume <> None)
         let getName (coreSet: CoreSet) =
             coreSet.options.persistentVolume.Value
         let names = List.map getName withPersistentVolumes
         names |> List.sort |> List.distinct
 
-    member self.ToPersistentVolumeNames () =
+    member self.ToPersistentVolumeNames () : string list =
         let getFullName name =
             CfgVal.peristentVolumeName self.NamespaceProperty name
         List.map getFullName (self.ToCoreSetPersistentVolumeNames())
@@ -237,7 +237,7 @@ type NetworkCfg with
             V1PersistentVolume(metadata = meta, spec = spec)
         List.map makePersistentVolume (self.ToCoreSetPersistentVolumeNames())
 
-    member self.ToPersistentVolumeClaims () =
+    member self.ToPersistentVolumeClaims () : V1PersistentVolumeClaim list =
         let makePersistentVolumeClaim name =
             let volumeName = CfgVal.peristentVolumeName self.NamespaceProperty name
             let claimName = CfgVal.peristentVolumeClaimName self.NamespaceProperty name
@@ -262,14 +262,14 @@ type NetworkCfg with
         let coreBackend (pn:string) =
             Extensionsv1beta1IngressBackend(serviceName = pn,
                                             servicePort = httpPortStr)
-        let historyBackend (pn:string) =
+        let historyBackend (pn:string) : Extensionsv1beta1IngressBackend =
             Extensionsv1beta1IngressBackend(serviceName = pn,
                                             servicePort = IntstrIntOrString(value = "80"))
-        let corePath (coreSet: CoreSet) i =
+        let corePath (coreSet: CoreSet) (i:int) : Extensionsv1beta1HTTPIngressPath =
             let pn = self.PeerShortName coreSet i
             Extensionsv1beta1HTTPIngressPath(path = sprintf "/%s/core/" pn,
                                              backend = coreBackend pn)
-        let historyPath (coreSet: CoreSet) i =
+        let historyPath (coreSet: CoreSet) (i:int) : Extensionsv1beta1HTTPIngressPath =
             let pn = self.PeerShortName coreSet i
             Extensionsv1beta1HTTPIngressPath(path = sprintf "/%s/history/" pn,
                                              backend = historyBackend pn)

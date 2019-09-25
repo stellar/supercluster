@@ -17,7 +17,7 @@ open System.Threading
 open Microsoft.Rest.Serialization
 
 type ClusterFormation with
-    member self.DumpPeerCommandLogs (destination : Destination) command p =
+    member self.DumpPeerCommandLogs (destination : Destination) (command:string) (p:Peer) =
         let ns = self.NetworkCfg.NamespaceProperty
         let name = self.NetworkCfg.PeerShortName p.coreSet p.peerNum
 
@@ -30,14 +30,14 @@ type ClusterFormation with
         with
         | x -> ()
 
-    member self.DumpPeerLogs (destination : Destination) p =
+    member self.DumpPeerLogs (destination : Destination) (p:Peer) =
         self.DumpPeerCommandLogs destination "new-db" p
         self.DumpPeerCommandLogs destination "new-hist" p
         self.DumpPeerCommandLogs destination "catchup" p
         self.DumpPeerCommandLogs destination "force-scp" p
         self.DumpPeerCommandLogs destination "run" p
 
-    member self.DumpPeerDatabase (destination : Destination) p =
+    member self.DumpPeerDatabase (destination : Destination) (p:Peer) =
         try
             let ns = self.NetworkCfg.NamespaceProperty
             let name = self.NetworkCfg.PeerShortName p.coreSet p.peerNum
@@ -65,7 +65,7 @@ type ClusterFormation with
         with
         | x -> ()  
 
-    member self.DumpPeerData (destination : Destination) p =
+    member self.DumpPeerData (destination : Destination) (p:Peer) =
         self.DumpPeerLogs destination p
         self.DumpPeerDatabase destination p
 
