@@ -12,6 +12,7 @@ open StellarMissionContext
 open StellarSupercluster
 
 let databaseInplaceUpgrade (context : MissionContext) =
+    let context = context.WithNominalLoad
     let newImage = GetOrDefault context.image CfgVal.stellarCoreImageName
     let oldImage = GetOrDefault context.oldImage CfgVal.stellarCoreImageName
 
@@ -42,7 +43,6 @@ let databaseInplaceUpgrade (context : MissionContext) =
       let peer = formation.NetworkCfg.GetPeer beforeUpgradeCoreSet 0
       let version = peer.GetProtocolVersion()
       formation.UpgradeProtocol [coreSet] version
-      formation.UpgradeMaxTxSize [coreSet] 100000
 
       formation.RunLoadgen beforeUpgradeCoreSet context.GenerateAccountCreationLoad
       formation.RunLoadgen beforeUpgradeCoreSet context.GeneratePaymentLoad

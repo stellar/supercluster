@@ -9,6 +9,7 @@ open StellarMissionContext
 open StellarSupercluster
 
 let complexTopology (context : MissionContext) =
+    let context = context.WithNominalLoad
     let coreSet = MakeLiveCoreSet "core"
                     { CoreSetOptions.Default with
                         nodeCount = 4
@@ -33,7 +34,6 @@ let complexTopology (context : MissionContext) =
     context.Execute [coreSet; publicSet; orgSet] None (fun (formation: ClusterFormation) ->
         formation.WaitUntilSynced [coreSet; publicSet; orgSet]
         formation.UpgradeProtocolToLatest [coreSet]
-        formation.UpgradeMaxTxSize [coreSet] 100000
 
         formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
         formation.RunLoadgen coreSet context.GeneratePaymentLoad

@@ -73,6 +73,9 @@ type MissionContext =
                 reraise()
              )
 
+    member self.WithNominalLoad : MissionContext =
+      { self with numTxs = 100; numAccounts = 100 }
+
     member self.GenerateAccountCreationLoad : LoadGen =
       { mode = GenerateAccountCreationLoad
         accounts = self.numAccounts

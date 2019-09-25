@@ -12,6 +12,7 @@ open StellarMissionContext
 open StellarSupercluster
 
 let historyGenerateAndCatchup (context : MissionContext) =
+    let context = context.WithNominalLoad
     let image = CfgVal.stellarCoreImageName
     let catchupOptions = { generatorImage = image; catchupImage = image; versionImage = image }
     let catchupSets = MakeCatchupSets catchupOptions

@@ -13,6 +13,7 @@ let loadGeneration (context : MissionContext) =
     context.Execute [coreSet] None (fun (formation: ClusterFormation) ->
         formation.WaitUntilSynced [coreSet]
         formation.UpgradeProtocolToLatest [coreSet]
+        formation.UpgradeMaxTxSize [coreSet] 100000
 
         formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
         formation.RunLoadgen coreSet context.GeneratePaymentLoad
