@@ -124,33 +124,46 @@ type StellarCoreCfg =
 // to modify a field, use a copy-and-update record expression like
 // {cfg with accelerateTime = true}
 type NetworkCfg with
+
+    // Returns a map containing all (shortname, keypair) pairs of a given CoreSet.
     member self.GetNameKeyList (coreSet: CoreSet) : (string * KeyPair) array =
         let map = Array.mapi (fun i k -> (self.PeerShortName coreSet i, k))
         map coreSet.keys
 
+    // Returns a map containing the union of all (shortname, keypair) pairs of all
+    // named CoreSets listed in the `coreSetNames` argument.
     member self.GetNameKeyList (coreSetNames: string list) : (string * KeyPair) array =
         List.map (self.FindCoreSet >> self.GetNameKeyList) coreSetNames |> Array.concat
 
+    // Returns an array of all (shortname, keypair) pairs of all CoreSets.
     member self.GetNameKeyListAll() : (string * KeyPair) array =
         List.map self.GetNameKeyList self.CoreSetList |> Array.concat
 
+    // Returns an array of all (shortname, dnsname) pairs of a given CoreSet.
     member self.DnsNamesWithKey(coreSet: CoreSet) : (string * string) array =
         let map = Array.mapi (fun i k -> (self.PeerShortName coreSet i, self.PeerDNSName coreSet i))
         map coreSet.keys
 
+    // Returns an array of all (shortname, dnsname) pairs of all named CoreSets
+    // listed in the `coreSetNames` argument.
     member self.DnsNamesWithKey(coreSetNames:string list) : (string * string) array =
         List.map (self.FindCoreSet >> self.DnsNamesWithKey) coreSetNames |> Array.concat
 
+    // Returns an array of all (shortname, dnsname) pairs of all CoreSets.
     member self.DnsNamesWithKey() : (string * string) array =
         List.map self.DnsNamesWithKey self.CoreSetList |> Array.concat
 
+    // Returns an array of dnsnames of a given CoreSet.
     member self.DnsNames(coreSet: CoreSet) : string array =
         let map = Array.mapi (fun i k -> (self.PeerDNSName coreSet i))
         map coreSet.keys
 
+    // Returns an array of dnsnames of all named Coresets listed in the
+    // `coreSetNames` argument.
     member self.DnsNames(coreSetNames:string list) : string array =
         List.map (self.FindCoreSet >> self.DnsNames) coreSetNames |> Array.concat
 
+    // Returns an array of dnsnames of all Coresets.
     member self.DnsNames() : string array =
         List.map self.DnsNames self.CoreSetList |> Array.concat
 
