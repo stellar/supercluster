@@ -135,7 +135,10 @@ type Peer with
     member self.GetLedgerNum() : int =
         self.GetInfo().Ledger.Num
 
-    member self.GetProtocolVersion() : int =
+    member self.GetLedgerProtocolVersion() : int =
+        self.GetInfo().Ledger.Version
+
+    member self.GetSupportedProtocolVersion() : int =
         self.GetInfo().ProtocolVersion
 
     member self.SetUpgrades (upgrades:UpgradeParameters) =
@@ -155,7 +158,7 @@ type Peer with
 
     member self.UpgradeProtocolToLatest () =
         let upgrades = { DefaultUpgradeParameters with
-                           protocolVersion = Some(self.GetProtocolVersion()) }
+                           protocolVersion = Some(self.GetSupportedProtocolVersion()) }
         self.SetUpgrades(upgrades)
         self.WaitForNextLedger()
 
@@ -223,8 +226,8 @@ type Peer with
         loop Map.empty Map.empty ConsistencyCheckIterationCount
 
     member self.CheckUsesLatestProtocolVersion() =
-        let lastestProtocolVersion = self.GetProtocolVersion()
-        let currentProtocolVersion = self.GetInfo().ProtocolVersion
+        let lastestProtocolVersion = self.GetSupportedProtocolVersion()
+        let currentProtocolVersion = self.GetLedgerProtocolVersion()
         if lastestProtocolVersion <> currentProtocolVersion then
             raise (ProtocolVersionNotUpgradedException (currentProtocolVersion, lastestProtocolVersion))
 

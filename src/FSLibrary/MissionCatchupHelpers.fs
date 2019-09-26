@@ -73,7 +73,7 @@ let MakeCatchupSets (options: CatchupMissionOptions) =
 
 let doCatchup (context: MissionContext) (formation: ClusterFormation) (catchupSets: CatchupSets) =
     let versionPeer = formation.NetworkCfg.GetPeer catchupSets.versionSet 0
-    let version = versionPeer.GetProtocolVersion()
+    let version = versionPeer.GetSupportedProtocolVersion()
 
     let generatorPeer = formation.NetworkCfg.GetPeer catchupSets.generatorSet 0
     generatorPeer.UpgradeProtocol(version)

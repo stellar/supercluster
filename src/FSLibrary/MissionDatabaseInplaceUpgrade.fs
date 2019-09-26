@@ -41,7 +41,7 @@ let databaseInplaceUpgrade (context : MissionContext) =
       formation.WaitUntilSynced [beforeUpgradeCoreSet; coreSet]
 
       let peer = formation.NetworkCfg.GetPeer beforeUpgradeCoreSet 0
-      let version = peer.GetProtocolVersion()
+      let version = peer.GetSupportedProtocolVersion()
       formation.UpgradeProtocol [coreSet] version
 
       formation.RunLoadgen beforeUpgradeCoreSet context.GenerateAccountCreationLoad

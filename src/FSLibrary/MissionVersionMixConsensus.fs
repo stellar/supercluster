@@ -21,7 +21,7 @@ let versionMixConsensus (context : MissionContext) =
     context.Execute [oldCoreSet; newCoreSet] None (fun (formation: ClusterFormation) ->
         formation.WaitUntilSynced [oldCoreSet; newCoreSet]
         let peer = formation.NetworkCfg.GetPeer oldCoreSet 0
-        let version = peer.GetProtocolVersion()
+        let version = peer.GetSupportedProtocolVersion()
         formation.UpgradeProtocol [oldCoreSet; newCoreSet] version
 
         formation.CreateAccount oldCoreSet UserAlice
