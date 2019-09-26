@@ -19,8 +19,8 @@ type CatchupSets =
     { generatorSet : CoreSet
       deferredSetList : CoreSet list
       versionSet : CoreSet }
-     
-    member self.AllSetList () = 
+
+    member self.AllSetList () =
         List.concat [[self.generatorSet]; self.deferredSetList; [self.versionSet]]
 
 let MakeCatchupSets (options: CatchupMissionOptions) =
@@ -74,7 +74,7 @@ let MakeCatchupSets (options: CatchupMissionOptions) =
 let doCatchup (context: MissionContext) (formation: ClusterFormation) (catchupSets: CatchupSets) =
     let versionPeer = formation.NetworkCfg.GetPeer catchupSets.versionSet 0
     let version = versionPeer.GetSupportedProtocolVersion()
-
+    formation.Stop "version"
     let generatorPeer = formation.NetworkCfg.GetPeer catchupSets.generatorSet 0
     generatorPeer.UpgradeProtocol(version)
     if context.numTxs > 100
