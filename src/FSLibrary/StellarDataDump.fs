@@ -69,7 +69,8 @@ type ClusterFormation with
 
     member self.DumpPeerData (destination : Destination) (p:Peer) =
         self.DumpPeerLogs destination p
-        self.DumpPeerDatabase destination p
+        if p.coreSet.options.dumpDatabase
+        then self.DumpPeerDatabase destination p
 
     member self.DumpData (destination : Destination) =
         self.NetworkCfg.EachPeer (self.DumpPeerData destination)

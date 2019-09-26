@@ -31,7 +31,8 @@ let PubnetCoreSet = { CoreSetOptions.Default with
                         quorumSetKeys = PubnetNodes
                         historyGetCommands = PubnetGetCommands
                         peersDns = PubnetPeers
-                        initialization = { CoreSetInitialization.Default with forceScp = false } }
+                        initialization = { CoreSetInitialization.Default with forceScp = false }
+                        dumpDatabase = false }
 
 let TestnetGetCommands = [
                          "core_testnet_001", "wget -q http://history.stellar.org/prd/core-testnet/core_testnet_001/{0} -O {1}"
@@ -56,4 +57,5 @@ let TestnetCoreSet = { CoreSetOptions.Default with
                          quorumSetKeys = TestnetNodes
                          historyGetCommands = TestnetGetCommands
                          peersDns = TestnetPeers
-                         initialization = { CoreSetInitialization.Default with forceScp = false } }
+                         initialization = { CoreSetInitialization.Default with forceScp = false }
+                         dumpDatabase = false }

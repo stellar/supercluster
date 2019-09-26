@@ -37,7 +37,8 @@ type CoreSetOptions =
       catchupMode : CatchupMode
       image : string option
       persistentVolume : string option
-      initialization : CoreSetInitialization }
+      initialization : CoreSetInitialization
+      dumpDatabase: bool }
 
     static member Default =
       { nodeCount = 3
@@ -53,7 +54,8 @@ type CoreSetOptions =
         catchupMode = CatchupComplete
         image = None
         persistentVolume = None
-        initialization = CoreSetInitialization.Default }
+        initialization = CoreSetInitialization.Default
+        dumpDatabase = true }
 
 type CoreSet =
     { name : string
