@@ -5,6 +5,7 @@
 module StellarDestination
 
 open System.IO
+open Logging
 
 type Destination(path: string) =
     let path = path
@@ -23,10 +24,12 @@ type Destination(path: string) =
 
     member public self.WriteStream ns name (stream : Stream) =
         let fullPath = Path.Combine [|self.GetExistingNsPath ns; name|]
+        LogInfo "Copying data stream to %s" fullPath
         let fileStream = File.OpenWrite fullPath
         stream.CopyTo(fileStream)
         fileStream.Close()
 
     member public self.WriteString (ns:string) (name:string) (content:string) : unit =
         let fullPath = Path.Combine [|self.GetExistingNsPath ns; name|]
+        LogInfo "Writing data to %s" fullPath
         File.WriteAllText(fullPath, content)

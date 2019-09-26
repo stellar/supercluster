@@ -311,8 +311,8 @@ type Peer with
                 self.GetState() <> "Booting"
                 )
             (fun _ ->
-                LogInfo "Waiting until %s is ready"
-                    self.ShortName)
+                LogInfo "Waiting until %s is ready: %s"
+                    self.ShortName (self.GetStatusOrState()))
 
     member self.WaitUntilSynced() =
         RetryUntilTrue
@@ -320,8 +320,8 @@ type Peer with
                 self.GetState() = "Synced!"
                 )
             (fun _ ->
-                LogInfo "Waiting until %s is synced"
-                    self.ShortName)
+                LogInfo "Waiting until %s is synced: %s"
+                    self.ShortName (self.GetStatusOrState()))
 
 let ReportAllPeerStatus (nCfg:NetworkCfg) =
     nCfg.EachPeer

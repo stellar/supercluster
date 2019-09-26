@@ -7,6 +7,7 @@ module StellarDataDump
 open k8s
 open k8s.Models
 
+open Logging
 open StellarCoreCfg
 open StellarCorePeer
 open StellarSupercluster
@@ -57,13 +58,14 @@ type ClusterFormation with
                            Nullable<ChannelIndex>())
             let errorReader = new StreamReader(error)
 
+            LogInfo "Dumping SQL database of peer %s" name
             muxedStream.Start()
             destination.WriteStream ns (sprintf "%s.sql" name) stdOut
             let errors = errorReader.ReadToEndAsync().GetAwaiter().GetResult()
             let returnMessage = SafeJsonConvert.DeserializeObject<V1Status>(errors);
             Kubernetes.GetExitCodeOrThrow(returnMessage) |> ignore
         with
-        | x -> ()  
+        | x -> ()
 
     member self.DumpPeerData (destination : Destination) (p:Peer) =
         self.DumpPeerLogs destination p
