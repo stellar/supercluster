@@ -77,7 +77,8 @@ let doCatchup (context: MissionContext) (formation: ClusterFormation) (catchupSe
 
     let generatorPeer = formation.NetworkCfg.GetPeer catchupSets.generatorSet 0
     generatorPeer.UpgradeProtocol(version)
-    generatorPeer.UpgradeMaxTxSize(1000000)
+    if context.numTxs > 100
+    then generatorPeer.UpgradeMaxTxSize(1000000)
 
     formation.RunLoadgen catchupSets.generatorSet context.GenerateAccountCreationLoad
     formation.RunLoadgen catchupSets.generatorSet context.GeneratePaymentLoad
