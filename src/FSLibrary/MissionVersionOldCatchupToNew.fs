@@ -10,6 +10,7 @@ open StellarMissionContext
 open StellarSupercluster
 
 let versionMixOldCatchupToNew (context : MissionContext) =
+    let context = context.WithNominalLoad
     let newImage = GetOrDefault context.image CfgVal.stellarCoreImageName
     let oldImage = GetOrDefault context.oldImage CfgVal.stellarCoreImageName
 
