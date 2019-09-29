@@ -16,7 +16,7 @@ let versionMixConsensus (context : MissionContext) =
     let newImage = GetOrDefault context.image CfgVal.stellarCoreImageName
     let oldImage = GetOrDefault context.oldImage CfgVal.stellarCoreImageName
 
-    let oldCoreSet = MakeLiveCoreSet "old-core" { CoreSetOptions.Default with nodeCount = 2; image = Some(oldImage) }
+    let oldCoreSet = MakeLiveCoreSet "old-core" { CoreSetOptions.Default with nodeCount = 3; image = Some(oldImage) }
     let newCoreSet = MakeLiveCoreSet "new-core" { CoreSetOptions.Default with nodeCount = 2; image = Some(newImage) }
     context.Execute [oldCoreSet; newCoreSet] None (fun (formation: ClusterFormation) ->
         formation.WaitUntilSynced [oldCoreSet; newCoreSet]
