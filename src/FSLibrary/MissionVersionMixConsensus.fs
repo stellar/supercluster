@@ -16,8 +16,17 @@ let versionMixConsensus (context : MissionContext) =
     let newImage = GetOrDefault context.image CfgVal.stellarCoreImageName
     let oldImage = GetOrDefault context.oldImage CfgVal.stellarCoreImageName
 
-    let oldCoreSet = MakeLiveCoreSet "old-core" { CoreSetOptions.Default with nodeCount = 3; image = Some(oldImage) }
-    let newCoreSet = MakeLiveCoreSet "new-core" { CoreSetOptions.Default with nodeCount = 2; image = Some(newImage) }
+    let oldCoreSet = MakeLiveCoreSet "old-core" { CoreSetOptions.Default with
+                                                      nodeCount = 4
+                                                      unsafeQuorum = false
+                                                      image = Some(oldImage)
+                                                      quorumSet = Some(["old-core"]) }
+    let newCoreSet = MakeLiveCoreSet "new-core" { CoreSetOptions.Default with
+                                                      nodeCount = 2
+                                                      unsafeQuorum = false
+                                                      image = Some(newImage)
+                                                      quorumSet = Some(["old-core"])
+                                                      initialization = { CoreSetInitialization.Default with forceScp = false } }
     context.Execute [oldCoreSet; newCoreSet] None (fun (formation: ClusterFormation) ->
         formation.WaitUntilSynced [oldCoreSet; newCoreSet]
         let peer = formation.NetworkCfg.GetPeer oldCoreSet 0

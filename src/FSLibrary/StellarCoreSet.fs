@@ -32,6 +32,7 @@ type CoreSetOptions =
       peers : string list option
       peersDns : string list
       accelerateTime : bool
+      unsafeQuorum : bool
       awaitSync : bool
       validate : bool
       catchupMode : CatchupMode
@@ -49,6 +50,7 @@ type CoreSetOptions =
         peers = None
         peersDns = List.empty
         accelerateTime = true
+        unsafeQuorum = true
         awaitSync = true
         validate = true
         catchupMode = CatchupComplete

@@ -201,7 +201,7 @@ type NetworkCfg with
           generateLoad = true
           manualClose = false
           invariantChecks = [".*"]
-          unsafeQuorum = true
+          unsafeQuorum = c.options.unsafeQuorum
           failureSafety = (-1)
           quorumSet = self.QuorumSet c.options
           historyNodes = self.HistoryNodes c.options
