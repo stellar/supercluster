@@ -22,15 +22,6 @@ let HistoryContainer =
                            V1VolumeMount(name = CfgVal.cfgVolumeName,
                                          mountPath = CfgVal.cfgVolumePath) |])
 
-let SqliteContainer =
-    V1Container
-        (name = "sqlite",
-         image = "dockerpinata/sqlite",
-         command = [| "sleep" |],
-         args = [|"356d"|],
-         volumeMounts = [| V1VolumeMount(name = CfgVal.dataVolumeName,
-                                         mountPath = CfgVal.dataVolumePath)|])
-
 // Returns a k8s V1Container object using the stellar-core image, and running
 // stellar-core with the specified sub-command(s) or arguments, passing a final
 // argument pair "--conf /cfg/$(STELLAR_CORE_PEER_SHORT_NAME).cfg". This is run
@@ -147,7 +138,7 @@ type NetworkCfg with
         let initContianers = Array.map (fun p -> CoreContainerForCommand imageName p) (initSequence coreSet.options.initialization)
 
         let containers = [| WithReadinessProbe (CoreContainerForCommand imageName [| "run" |]) probeTimeout;
-                            HistoryContainer; SqliteContainer |]
+                            HistoryContainer; |]
 
         let podSpec =
             V1PodSpec

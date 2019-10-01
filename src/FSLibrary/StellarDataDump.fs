@@ -47,7 +47,7 @@ type ClusterFormation with
                                 name = name,
                                 ``namespace`` = ns,
                                 command = [|"sqlite3"; CfgVal.databasePath; ".dump" |],
-                                container = "sqlite",
+                                container = "stellar-core-run",
                                 tty = false,
                                 cancellationToken = CancellationToken()).GetAwaiter().GetResult()
             let stdOut = muxedStream.GetStream(
