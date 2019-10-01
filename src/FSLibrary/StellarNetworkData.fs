@@ -31,6 +31,7 @@ let PubnetCoreSet = { CoreSetOptions.Default with
                         quorumSetKeys = PubnetNodes
                         historyGetCommands = PubnetGetCommands
                         peersDns = PubnetPeers
+                        accelerateTime = false
                         initialization = { CoreSetInitialization.Default with forceScp = false }
                         dumpDatabase = false }
 
@@ -57,5 +58,6 @@ let TestnetCoreSet = { CoreSetOptions.Default with
                          quorumSetKeys = TestnetNodes
                          historyGetCommands = TestnetGetCommands
                          peersDns = TestnetPeers
+                         accelerateTime = false
                          initialization = { CoreSetInitialization.Default with forceScp = false }
                          dumpDatabase = false }
