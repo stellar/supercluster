@@ -52,6 +52,8 @@ type NetworkCfg =
       networkPassphrase : NetworkPassphrase
       namespaceProperty : string
       coreSets : Map<string,CoreSet>
+      quotaLimitCPU: int
+      quotaLimitMemoryMB: int
       ingressDomain : string }
 
     member self.FindCoreSet (n:string) : CoreSet =
@@ -67,6 +69,9 @@ type NetworkCfg =
         let mapCoreSetPeers (cs:CoreSet) = Array.mapi (fun i k -> f cs i) cs.keys
         Map.toArray self.coreSets
         |> Array.collect (fun (_, cs) -> mapCoreSetPeers cs)
+
+    member self.MaxPeerCount : int =
+        Map.fold (fun n k v -> n + v.options.nodeCount) 0 self.coreSets
 
     member self.CoreSetList : CoreSet list =
         Map.toList self.coreSets |> List.map (fun (_, v) -> v)
@@ -100,17 +105,15 @@ type NetworkCfg =
 
     member self.WithLive name (live: bool) =
         let coreSet = self.FindCoreSet(name).WithLive live
-        { networkNonce = self.networkNonce
-          networkPassphrase = self.networkPassphrase
-          namespaceProperty = self.namespaceProperty
-          coreSets = self.coreSets.Add(name, coreSet)
-          ingressDomain = self.ingressDomain }
+        { self with coreSets = self.coreSets.Add(name, coreSet) }
 
 // Generates a fresh network of size n, with fresh keypairs for each node, and a
 // random nonce to isolate the network.
 let MakeNetworkCfg
         (coreSetList: CoreSet list)
         (namespaceProperty: string)
+        (quotaLimitCPU: int)
+        (quotaLimitMemoryMB: int)
         (ingressDomain: string)
         (passphrase: NetworkPassphrase option) : NetworkCfg =
     let nonce = MakeNetworkNonce()
@@ -120,4 +123,6 @@ let MakeNetworkCfg
                           | Some(x) -> x
       namespaceProperty = namespaceProperty
       coreSets = List.map (fun cs -> (cs.name, cs)) coreSetList |> Map.ofList
+      quotaLimitCPU = quotaLimitCPU
+      quotaLimitMemoryMB = quotaLimitMemoryMB
       ingressDomain = ingressDomain }

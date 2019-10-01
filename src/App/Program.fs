@@ -27,6 +27,14 @@ type SetupOptions = {
            Required = false, Default = 5)>]
   numNodes : int
 
+  [<Option("quota-limit-cpu", HelpText="Total quota limit for CPU (in vCPUs)",
+           Required = false, Default = 100)>]
+  quotaLimitCPU : int
+
+  [<Option("quota-limit-mem-mb", HelpText="Total quota limit for memory (in MB)",
+           Required = false, Default = 3200)>]
+  quotaLimitMemoryMB : int
+
   [<Option("namespace", HelpText="Namespace to use.",
            Required = false, Default = "stellar-supercluster")>]
   namespaceProperty : string
@@ -51,6 +59,14 @@ type LoadgenOptions = {
            Required = false, Default = 5)>]
   numNodes : int
 
+  [<Option("quota-limit-cpu", HelpText="Total quota limit for CPU (in vCPUs)",
+           Required = false, Default = 100)>]
+  quotaLimitCPU : int
+
+  [<Option("quota-limit-mem-mb", HelpText="Total quota limit for memory (in MB)",
+           Required = false, Default = 3200)>]
+  quotaLimitMemoryMB : int
+
   [<Option("namespace", HelpText="Namespace to use.",
            Required = false, Default = "stellar-supercluster")>]
   namespaceProperty : string
@@ -73,6 +89,14 @@ type MissionOptions = {
 
   [<Value(0, Required = true)>]
   missions : string seq
+
+  [<Option("quota-limit-cpu", HelpText="Total quota limit for CPU (in vCPUs)",
+           Required = false, Default = 100)>]
+  quotaLimitCPU : int
+
+  [<Option("quota-limit-mem-mb", HelpText="Total quota limit for memory (in MB)",
+           Required = false, Default = 3200)>]
+  quotaLimitMemoryMB : int
 
   [<Option("ingress-domain", HelpText="Domain in which to configure ingress host",
            Required = false, Default = "local")>]
@@ -110,7 +134,7 @@ type MissionOptions = {
            Required = false, Default = 100000)>]
   numTxs : int
 
-  [<Option("num-nodes", HelpText="Number of nodes for benchamarks and load generation tests",
+  [<Option("num-nodes", HelpText="Number of nodes for benchmarks and load generation tests",
            Required = false, Default = 3)>]
   numNodes : int
 
@@ -161,7 +185,11 @@ let main argv =
     | :? SetupOptions as setup ->
       let kube = ConnectToCluster setup.kubeconfig
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = setup.numNodes }
-      let nCfg = MakeNetworkCfg [coreSet] setup.namespaceProperty setup.ingressDomain None
+      let nCfg = MakeNetworkCfg [coreSet]
+                                setup.namespaceProperty
+                                setup.quotaLimitCPU
+                                setup.quotaLimitMemoryMB
+                                setup.ingressDomain None
       use formation = kube.MakeFormation nCfg None false setup.probeTimeout
       formation.ReportStatus()
       0
@@ -169,7 +197,11 @@ let main argv =
     | :? LoadgenOptions as loadgen ->
       let kube = ConnectToCluster loadgen.kubeconfig
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = loadgen.numNodes }
-      let nCfg = MakeNetworkCfg [coreSet] loadgen.namespaceProperty loadgen.ingressDomain None
+      let nCfg = MakeNetworkCfg [coreSet]
+                                loadgen.namespaceProperty
+                                loadgen.quotaLimitCPU
+                                loadgen.quotaLimitMemoryMB
+                                loadgen.ingressDomain None
       use formation = kube.MakeFormation nCfg None false loadgen.probeTimeout
       formation.RunLoadgenAndCheckNoErrors coreSet
       formation.ReportStatus()
@@ -208,6 +240,8 @@ let main argv =
                                                    numAccounts = mission.numAccounts
                                                    numTxs = mission.numTxs
                                                    numNodes = mission.numNodes
+                                                   quotaLimitCPU = mission.quotaLimitCPU
+                                                   quotaLimitMemoryMB = mission.quotaLimitMemoryMB
                                                    ingressDomain = mission.ingressDomain
                                                    persistentVolume = persistentVolume
                                                    namespaceProperty = mission.namespaceProperty
