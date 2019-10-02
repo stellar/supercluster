@@ -3,7 +3,6 @@
 open stellar_dotnet_sdk
 
 open StellarNetworkCfg
-open StellarCoreCfg
 open StellarCorePeer
 open StellarCoreHTTP
 
@@ -52,9 +51,9 @@ type Peer with
 
     member self.RootAccount : Account =
         let seq = self.GetTestAccSeq("root")
-        new Account(self.RootKeypair.AccountId, System.Nullable<int64>(seq))
+        Account(self.RootKeypair.AccountId, System.Nullable<int64>(seq))
 
-    member self.GetAccount(u:Username) : Account =
+    member self.GetAccount (u:Username) : Account =
         let key = self.GetKeypair(u)
         let seq = self.GetTestAccSeq(u.ToString())
         Account(key.AccountId, System.Nullable<int64>(seq))
@@ -75,16 +74,16 @@ type Peer with
         let balance = self.GetTestAccBalance (u.ToString())
         (seq, balance)
 
-    member self.GetNetwork : Network =
+    member self.GetNetwork () : Network =
         let phrase = PrivateNet self.networkCfg.networkNonce
         Network(phrase.ToString())
 
     member self.TxCreateAccount (u:Username) : Transaction =
         let root = self.RootAccount
         let newKey = self.GetKeypair u
-        let trb = Transaction.Builder(self.RootAccount)
+        let trb = Transaction.Builder(root)
         let tx = trb.AddOperation(CreateAccountOperation(newKey, "10000")).Build()
-        tx.Sign(signer = self.RootKeypair, network = self.GetNetwork)
+        tx.Sign(signer = self.RootKeypair, network = self.GetNetwork())
         tx
 
     member self.TxPayment (sender:Username) (recipient:Username) : Transaction =
@@ -96,5 +95,5 @@ type Peer with
         let tx = trb.AddOperation(PaymentOperation.Builder(recv, asset, amount)
                                     .SetSourceAccount(send.KeyPair)
                                     .Build()).Build()
-        tx.Sign(signer = (self.GetKeypair sender), network = self.GetNetwork)
+        tx.Sign(signer = (self.GetKeypair sender), network = self.GetNetwork())
         tx

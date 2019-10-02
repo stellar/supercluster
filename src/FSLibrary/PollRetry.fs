@@ -8,7 +8,7 @@ open System.Threading
 open Logging
 
 
-let DefaultRetry = 5
+let DefaultRetry = 100
 
 let rec WebExceptionRetry (n:int) (f:unit->'a) : 'a =
     try

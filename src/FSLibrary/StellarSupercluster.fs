@@ -4,23 +4,27 @@
 
 module StellarSupercluster
 
-open stellar_dotnet_sdk
 open k8s
 open k8s.Models
 
 open Logging
 open StellarNetworkCfg
 open StellarCoreCfg
+open StellarCoreSet
 open StellarKubeSpecs
 open StellarCorePeer
 open StellarCoreHTTP
+open StellarPersistentVolume
 open StellarTransaction
+open StellarNamespaceContent
+open System
+open Microsoft.Rest
 
 let ExpandHomeDirTilde (s:string) : string =
     if s.StartsWith("~/")
     then
-        let upp = System.Environment.SpecialFolder.UserProfile
-        let home = System.Environment.GetFolderPath(upp)
+        let upp = Environment.SpecialFolder.UserProfile
+        let home = Environment.GetFolderPath(upp)
         home + s.Substring(1)
     else
         s
@@ -29,7 +33,7 @@ let ExpandHomeDirTilde (s:string) : string =
 // Loads a config file and builds a Kubernetes client object connected to the
 // cluster described by it.
 let ConnectToCluster (cfgFile:string) : Kubernetes =
-    let cfgFileInfo = System.IO.FileInfo(ExpandHomeDirTilde cfgFile)
+    let cfgFileInfo = IO.FileInfo(ExpandHomeDirTilde cfgFile)
     let kCfg = k8s.KubernetesClientConfiguration.BuildConfigFromConfigFile(cfgFileInfo)
     new k8s.Kubernetes(kCfg)
 
@@ -53,99 +57,176 @@ let PollCluster (kube:Kubernetes) =
 // tear down the Kubernetes namespace (and all contained cluster-side objects) as it goes.
 type ClusterFormation(networkCfg: NetworkCfg,
                       kube: Kubernetes,
-                      ns: V1Namespace,
-                      statefulSet: V1StatefulSet,
-                      ingress: Extensionsv1beta1Ingress) =
+                      statefulSets: V1StatefulSet list,
+                      namespaceContent: NamespaceContent,
+                      probeTimeout: int) =
 
+    let mutable networkCfg = networkCfg
+    let kube = kube
+    let mutable statefulSets = statefulSets
+    let mutable keepData = false
+    let namespaceContent = namespaceContent
+    let probeTimeout = probeTimeout
     let mutable disposed = false
-    let cleanup(disposing:bool) =
+
+    member self.Kube = kube
+    member self.NetworkCfg = networkCfg
+
+    member self.ForceCleanup() =
+        let deleteVolume persistentVolume = 
+            try
+                self.Kube.DeletePersistentVolume(name = persistentVolume) |> ignore
+            with
+            | x -> ()
+            true
+
+        (List.forall deleteVolume (networkCfg.ToPersistentVolumeNames())) |> ignore
+
+        LogInfo "Cleaning run '%s' resources from namespace '%s'"
+            (networkCfg.networkNonce.ToString())
+            networkCfg.NamespaceProperty
+        namespaceContent.Cleanup()
+
+    member self.Cleanup(disposing:bool) =
         if not disposed then
             disposed <- true
             if disposing then
-                LogInfo "Disposing formation, deleting namespace '%s'"
-                    networkCfg.NamespaceProperty
-                ignore (kube.DeleteNamespace(name = networkCfg.NamespaceProperty,
-                                 propagationPolicy = "Foreground"))
+                if keepData
+                then
+                    LogInfo "Disposing formation, keeping namespace '%s' for debug"
+                        networkCfg.NamespaceProperty
+                else
+                    self.ForceCleanup()
+
+    member self.KeepData() =
+        keepData <- true
 
     // implementation of IDisposable
     interface System.IDisposable with
         member self.Dispose() =
-            cleanup(true)
+            self.Cleanup(true)
             System.GC.SuppressFinalize(self)
 
     // override of finalizer
     override self.Finalize() =
-        cleanup(false)
-
-    member self.networkCfg = networkCfg
-    member self.kube = kube
-    member self.ns = ns
-    member self.statefulSet = statefulSet
-    member self.ingress = ingress
+        self.Cleanup(false)
 
     override self.ToString() : string =
-        let name = self.statefulSet.Metadata.Name
-        let ns = self.statefulSet.Metadata.NamespaceProperty
+        let name = statefulSets.[0].Metadata.Name
+        let ns = statefulSets.[0].Metadata.NamespaceProperty
         sprintf "%s/%s" ns name
 
     // Watches the provided StatefulSet until the count of ready replicas equals the
     // count of configured replicas. This normally represents "successful startup".
-    member self.WaitForAllReplicasReady() =
+    member self.WaitForAllReplicasReady (ss : V1StatefulSet) =
         use event = new System.Threading.ManualResetEventSlim(false)
-        let name = self.statefulSet.Metadata.Name
-        let ns = self.statefulSet.Metadata.NamespaceProperty
+        let name = ss.Metadata.Name
+        let ns = ss.Metadata.NamespaceProperty
         let handler (ety:WatchEventType) (ss:V1StatefulSet) =
             let n = ss.Status.ReadyReplicas.GetValueOrDefault(0)
             let k = ss.Spec.Replicas.GetValueOrDefault(0)
             LogInfo "StatefulSet %s/%s: %d/%d replicas ready" ns name n k;
             if n = k then event.Set()
         let action = System.Action<WatchEventType, V1StatefulSet>(handler)
-        use task = self.kube.WatchNamespacedStatefulSetAsync(name = name,
-                                                             ``namespace`` = ns,
-                                                             onEvent = handler)
-        LogInfo "Waiting for replicas"
+        use task = kube.WatchNamespacedStatefulSetAsync(name = name,
+                                                        ``namespace`` = ns,
+                                                        onEvent = handler)
+        LogInfo "Waiting for replicas on %s/%s" ns name
         event.Wait()
-        LogInfo "All replicas ready"
+        LogInfo "All replicas on %s/%s ready" ns name
 
-    member self.ReportStatus() =
-        ReportAllPeerStatus self.networkCfg
+    // Watches the provided StatefulSet until the count of ready replicas equals the
+    // count of configured replicas. This normally represents "successful startup".
+    member self.WaitForAllReplicasOnAllSetsReady() =
+        LogInfo "Waiting for replicas on %s" (self.ToString())
+        for ss in statefulSets do
+            self.WaitForAllReplicasReady ss
+        LogInfo "All replicas on %s ready" (self.ToString())
 
-    member self.CreateAccount (u:Username) : unit =
-        let peer = self.networkCfg.GetPeer 0
+    member self.WithLive name (live: bool) =
+        networkCfg <- networkCfg.WithLive name live
+        let coreSet = networkCfg.FindCoreSet name
+        let peerSetName = networkCfg.PeerSetName coreSet
+        let ss = kube.ReplaceNamespacedStatefulSet(
+                   body = networkCfg.ToStatefulSet coreSet probeTimeout,
+                   name = peerSetName,
+                   namespaceParameter = networkCfg.NamespaceProperty)
+        let newSets = statefulSets |> List.filter (fun x -> x.Metadata.Name <> peerSetName)
+        statefulSets <- ss :: newSets
+        self.WaitForAllReplicasReady ss
+
+    member self.Start name =
+        self.WithLive name true
+
+    member self.Stop name =
+        self.WithLive name false
+
+    member self.WaitUntilReady () =
+        networkCfg.EachPeer (fun p -> p.WaitUntilReady())
+
+    member self.WaitUntilSynced (coreSetList: CoreSet list) =
+        networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.WaitUntilSynced())
+
+    member self.UpgradeProtocol (coreSetList: CoreSet list) (version: int) =
+        networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.UpgradeProtocol version)
+
+    member self.UpgradeProtocolToLatest (coreSetList: CoreSet list) =
+        networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.UpgradeProtocolToLatest())
+
+    member self.UpgradeMaxTxSize (coreSetList: CoreSet list) (maxTxSize: int) =
+        networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.UpgradeMaxTxSize maxTxSize)
+
+    member self.ReportStatus () =
+        ReportAllPeerStatus networkCfg
+
+    member self.CreateAccount (coreSet: CoreSet) (u: Username) =
+        let peer = networkCfg.GetPeer coreSet 0
         let tx = peer.TxCreateAccount u
         LogInfo "creating account for %O on %O" u self
-        ignore (peer.SubmitSignedTransaction tx)
-        ignore (peer.WaitForNextLedger())
+        peer.SubmitSignedTransaction tx |> ignore
+        peer.WaitForNextLedger() |> ignore
         let acc = peer.GetAccount(u)
         LogInfo "created account for %O on %O with seq %d, balance %d"
             u self acc.SequenceNumber
             (peer.GetTestAccBalance (u.ToString()))
 
-    member self.Pay (src:Username) (dst:Username) : unit =
-        let peer = self.networkCfg.GetPeer 0
+    member self.Pay (coreSet: CoreSet) (src: Username) (dst: Username) =
+        let peer = networkCfg.GetPeer coreSet 0
         let tx = peer.TxPayment src dst
         LogInfo "paying from account %O to %O on %O" src dst self
-        ignore (peer.SubmitSignedTransaction tx)
-        ignore (peer.WaitForNextLedger())
+        peer.SubmitSignedTransaction tx |> ignore
+        peer.WaitForNextLedger() |> ignore
         LogInfo "sent payment from %O (%O) to %O (%O) on %O"
             src (peer.GetSeqAndBalance src)
             dst (peer.GetSeqAndBalance dst)
             self
 
-    member self.CheckNoErrorsAndPairwiseConsistency() : unit =
-        let peer = self.networkCfg.GetPeer 0
-        self.networkCfg.EachPeer
+    member self.CheckNoErrorsAndPairwiseConsistency () =
+        let peer = networkCfg.GetPeer networkCfg.CoreSetList.[0] 0
+        networkCfg.EachPeer
             begin
                 fun p ->
                     p.CheckNoErrorMetrics(includeTxInternalErrors=false)
                     p.CheckConsistencyWith peer
             end
 
-    member self.RunLoadgenAndCheckNoErrors() : unit =
-        let peer = self.networkCfg.GetPeer 0
-        let lg = { DefaultAccountCreationLoadGen with accounts = 10000 }
-        LogInfo "Loadgen: %s" (peer.GenerateLoad lg)
-        peer.WaitForLoadGenComplete lg
+    member self.CheckUsesLatestProtocolVersion () =
+        networkCfg.EachPeer
+            begin
+                fun p ->
+                    p.CheckUsesLatestProtocolVersion()
+            end
+
+    member self.RunLoadgen (coreSet: CoreSet) (loadGen: LoadGen) =
+        let peer = networkCfg.GetPeer coreSet 0
+        LogInfo "Loadgen: %s" (peer.GenerateLoad loadGen)
+        peer.WaitForLoadGenComplete loadGen
+
+    member self.RunLoadgenAndCheckNoErrors (coreSet: CoreSet) =
+        let peer = networkCfg.GetPeer coreSet 0
+        let loadGen = { DefaultAccountCreationLoadGen with accounts = 10000 }
+        LogInfo "Loadgen: %s" (peer.GenerateLoad loadGen)
+        peer.WaitForLoadGenComplete loadGen
         self.CheckNoErrorsAndPairwiseConsistency()
 
 
@@ -153,35 +234,69 @@ type Kubernetes with
 
     // Starts a StatefulSet, Service, and Ingress for a given NetworkCfg, then
     // waits for it to be ready.
-    member self.MakeFormation (nCfg:NetworkCfg) : ClusterFormation =
+    member self.MakeFormation (nCfg: NetworkCfg) (persistentVolume: PersistentVolume option) (keepData: bool) (probeTimeout: int) : ClusterFormation =
         let nsStr = nCfg.NamespaceProperty
-        let ns = self.CreateNamespace(nCfg.Namespace())
+        let namespaceContent = NamespaceContent(self, nsStr)
         try
-            let svc = self.CreateNamespacedService(body = nCfg.ToService(),
-                                                   namespaceParameter = nsStr)
-            let cfgMap = self.CreateNamespacedConfigMap(body = nCfg.ToConfigMap(),
-                                                        namespaceParameter = nsStr)
-            let statefulSet = self.CreateNamespacedStatefulSet(body = nCfg.ToStatefulSet CfgVal.peerSetName,
-                                                               namespaceParameter = nsStr)
+            namespaceContent.Add(self.CreateNamespacedService(body = nCfg.ToService(),
+                                                              namespaceParameter = nsStr))
+            namespaceContent.Add(self.CreateNamespacedConfigMap(body = nCfg.ToConfigMap(),
+                                                                namespaceParameter = nsStr))
+
+            let makeStatefulSet coreSet =
+                self.CreateNamespacedStatefulSet(body = nCfg.ToStatefulSet coreSet probeTimeout,
+                                                 namespaceParameter = nsStr)
+            let statefulSets = List.map makeStatefulSet nCfg.CoreSetList
+            for statefulSet in statefulSets do
+                namespaceContent.Add(statefulSet)
+
+            match persistentVolume with
+            | Some(pv) ->
+                for persistentVolume in nCfg.ToPersistentVolumes pv do
+                    self.CreatePersistentVolume(body = persistentVolume) |> ignore
+            | None -> ()
+
+            for persistentVolumeClaim in nCfg.ToPersistentVolumeClaims() do
+                let claim = self.CreateNamespacedPersistentVolumeClaim(body = persistentVolumeClaim,
+                                                                       namespaceParameter = nsStr)
+                namespaceContent.Add(claim)
 
             for svc in nCfg.ToPerPodServices() do
-                ignore (self.CreateNamespacedService(namespaceParameter = nsStr,
-                                                     body = svc))
+                let service = self.CreateNamespacedService(namespaceParameter = nsStr,
+                                                           body = svc)
+                namespaceContent.Add(service)
 
             let ingress = self.CreateNamespacedIngress(namespaceParameter = nsStr,
-                                                       body = nCfg.ToIngress())
+                                         body = nCfg.ToIngress())
+            namespaceContent.Add(ingress)
+
             let formation = new ClusterFormation(networkCfg = nCfg,
                                                  kube = self,
-                                                 ns = ns,
-                                                 statefulSet = statefulSet,
-                                                 ingress = ingress)
-            formation.WaitForAllReplicasReady()
+                                                 statefulSets = statefulSets,
+                                                 namespaceContent = namespaceContent,
+                                                 probeTimeout = probeTimeout)
+            formation.WaitForAllReplicasOnAllSetsReady()
             formation
         with
         | x ->
-            LogError "Exception while building formation, deleting namespace '%s'"
-                         nCfg.NamespaceProperty
-            ignore (self.DeleteNamespace(name = nCfg.NamespaceProperty,
-                                         propagationPolicy = "Foreground"))
+            if keepData
+            then
+                LogError "Exception while building formation, keeping resources for run '%s' in namespace '%s' for debug"
+                             nCfg.Nonce
+                             nCfg.NamespaceProperty
+            else
+                LogError "Exception while building formation, cleaning up resources for run '%s' in namespace '%s'"
+                             nCfg.Nonce
+                             nCfg.NamespaceProperty
+                namespaceContent.Cleanup()
+
+                match persistentVolume with
+                | Some(pv) ->
+                    for persistentVolume in nCfg.ToPersistentVolumes pv do
+                        try
+                            self.DeletePersistentVolume(name = persistentVolume.Metadata.Name) |> ignore
+                        with
+                        | x -> ()
+                | None -> ()
             reraise()
 

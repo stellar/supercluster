@@ -1,0 +1,13 @@
+# IDE directories and editors
+*~
+*.swp
+**/.vscode/*
+/.vs
+
+# build artifacts
+/src/**/obj
+/src/**/bin
+
+# run artifacts
+/destination
+

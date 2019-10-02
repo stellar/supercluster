@@ -7,24 +7,33 @@ module StellarCorePeer
 open stellar_dotnet_sdk
 
 open StellarCoreCfg
+open StellarCoreSet
 open StellarNetworkCfg
 
 type Peer =
     { networkCfg: NetworkCfg
+      coreSet: CoreSet
       peerNum: int }
 
-    member self.ShortName =
-        CfgVal.peerShortName self.peerNum
+    member self.ShortName : string =
+        self.networkCfg.PeerShortName self.coreSet self.peerNum
 
-    member self.DNSName =
-        CfgVal.peerDNSName self.networkCfg.networkNonce self.peerNum
+    member self.DNSName : string =
+        self.networkCfg.PeerDNSName self.coreSet self.peerNum
 
 
 type NetworkCfg with
-    member self.GetPeer (i:int) : Peer =
+    member self.GetPeer (coreSet: CoreSet) i : Peer =
         { networkCfg = self;
+          coreSet = coreSet;
           peerNum = i }
 
-    member self.EachPeer f =
-        for i in 0..(self.NumPeers-1) do
-            f (self.GetPeer i)
+    member self.EachPeer (f:Peer -> unit) : unit =
+        for coreSet in self.CoreSetList do
+            for i in 0..(coreSet.CurrentCount - 1) do
+                f (self.GetPeer coreSet i)
+
+    member self.EachPeerInSets (coreSetArray: CoreSet array) (f:Peer->unit) : unit =
+        for coreSet in coreSetArray do
+            for i in 0..(coreSet.CurrentCount - 1) do
+                f (self.GetPeer coreSet i)
