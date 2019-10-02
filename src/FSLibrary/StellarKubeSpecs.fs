@@ -36,8 +36,8 @@ let CoreContainerForCommand (cpuLim:int) (memLim:int) (image:string) (subCommand
     let peerNameEnvVarSource = V1EnvVarSource(fieldRef = peerNameFieldSel)
     let peerNameEnvVar = V1EnvVar(name = CfgVal.peerNameEnvVarName,
                                   valueFrom = peerNameEnvVarSource)
-    let requests = dict["cpu", ResourceQuantity(sprintf "%d" cpuLim);
-                        "memory", ResourceQuantity(sprintf "%dMi" memLim)]
+    let requests = dict["cpu", ResourceQuantity("0.1");
+                        "memory", ResourceQuantity("100Mi")]
 
     let limits = dict["cpu", ResourceQuantity(sprintf "%d" cpuLim);
                       "memory", ResourceQuantity(sprintf "%dMi" memLim)]
@@ -137,8 +137,8 @@ type NetworkCfg with
 
         let volumes = [| cfgVol; dataVol |]
         let maxPeers = max 1 self.MaxPeerCount
-        let defaultContainerCPULimit = 2
-        let defaultContainerMemLimit = 7000
+        let defaultContainerCPULimit = 4
+        let defaultContainerMemLimit = 8000
         let cpuLim = min (self.quotaLimitCPU / maxPeers) defaultContainerCPULimit
         let memLim = min (self.quotaLimitMemoryMB / maxPeers) defaultContainerMemLimit
         let initContianers = Array.map (fun p -> CoreContainerForCommand cpuLim memLim imageName p) (initSequence coreSet.options.initialization)
