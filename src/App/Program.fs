@@ -32,7 +32,7 @@ type SetupOptions = {
   quotaLimitCPU : int
 
   [<Option("quota-limit-mem-mb", HelpText="Total quota limit for memory (in MB)",
-           Required = false, Default = 3200)>]
+           Required = false, Default = 6200)>]
   quotaLimitMemoryMB : int
 
   [<Option("namespace", HelpText="Namespace to use.",
@@ -64,7 +64,7 @@ type LoadgenOptions = {
   quotaLimitCPU : int
 
   [<Option("quota-limit-mem-mb", HelpText="Total quota limit for memory (in MB)",
-           Required = false, Default = 3200)>]
+           Required = false, Default = 6200)>]
   quotaLimitMemoryMB : int
 
   [<Option("namespace", HelpText="Namespace to use.",
@@ -95,7 +95,7 @@ type MissionOptions = {
   quotaLimitCPU : int
 
   [<Option("quota-limit-mem-mb", HelpText="Total quota limit for memory (in MB)",
-           Required = false, Default = 3200)>]
+           Required = false, Default = 6200)>]
   quotaLimitMemoryMB : int
 
   [<Option("ingress-domain", HelpText="Domain in which to configure ingress host",
