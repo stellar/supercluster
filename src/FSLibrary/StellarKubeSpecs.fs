@@ -36,8 +36,8 @@ let CoreContainerForCommand (cpuLim:int) (memLim:int) (image:string) (subCommand
     let peerNameEnvVarSource = V1EnvVarSource(fieldRef = peerNameFieldSel)
     let peerNameEnvVar = V1EnvVar(name = CfgVal.peerNameEnvVarName,
                                   valueFrom = peerNameEnvVarSource)
-    let requests = dict["cpu", ResourceQuantity("0.1");
-                        "memory", ResourceQuantity("100Mi")]
+    let requests = dict["cpu", ResourceQuantity("2");
+                        "memory", ResourceQuantity("7Gi")]
 
     let limits = dict["cpu", ResourceQuantity(sprintf "%d" cpuLim);
                       "memory", ResourceQuantity(sprintf "%dMi" memLim)]
