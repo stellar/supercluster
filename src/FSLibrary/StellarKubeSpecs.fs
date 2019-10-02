@@ -138,7 +138,7 @@ type NetworkCfg with
         let volumes = [| cfgVol; dataVol |]
         let maxPeers = max 1 self.MaxPeerCount
         let defaultContainerCPULimit = 4
-        let defaultContainerMemLimit = 6000
+        let defaultContainerMemLimit = 8000
         let cpuLim = min (self.quotaLimitCPU / maxPeers) defaultContainerCPULimit
         let memLim = min (self.quotaLimitMemoryMB / maxPeers) defaultContainerMemLimit
         let initContianers = Array.map (fun p -> CoreContainerForCommand cpuLim memLim imageName p) (initSequence coreSet.options.initialization)
