@@ -95,7 +95,7 @@ type StellarCoreCfg =
         t.Add("NODE_IS_VALIDATOR", self.nodeIsValidator) |> ignore
         t.Add("RUN_STANDALONE", self.runStandalone) |> ignore
         t.Add("PREFERRED_PEERS", self.preferredPeers) |> ignore
-        t.Add("COMMANDS", ["ll?level=trace&partition=buckets";
+        t.Add("COMMANDS", ["ll?level=trace&partition=bucket";
                            "ll?level=trace&partition=fs";
                            "ll?level=trace&partition=ledger"]) |> ignore
         t.Add("CATCHUP_COMPLETE", self.catchupMode = CatchupComplete) |> ignore
