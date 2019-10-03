@@ -115,7 +115,7 @@ type NetworkCfg with
         let dataVol = 
             match coreSet.options.persistentVolume with
             | None -> V1Volume(name = CfgVal.dataVolumeName,
-                               emptyDir = V1EmptyDirVolumeSource())
+                               emptyDir = V1EmptyDirVolumeSource(medium = "Memory"))
             | Some(x) ->
                 let claim = V1PersistentVolumeClaimVolumeSource(claimName = CfgVal.peristentVolumeClaimName self.NamespaceProperty x)
                 V1Volume(name = CfgVal.dataVolumeName,
