@@ -97,6 +97,7 @@ type StellarCoreCfg =
         t.Add("PREFERRED_PEERS", self.preferredPeers) |> ignore
         t.Add("COMMANDS", ["ll?level=trace&partition=bucket";
                            "ll?level=trace&partition=fs";
+                           "ll?level=trace&partition=history";
                            "ll?level=trace&partition=ledger"]) |> ignore
         t.Add("CATCHUP_COMPLETE", self.catchupMode = CatchupComplete) |> ignore
         t.Add("CATCHUP_RECENT",
