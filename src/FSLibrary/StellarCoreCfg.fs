@@ -109,7 +109,7 @@ type StellarCoreCfg =
         t.Add("ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING", self.accelerateTime) |> ignore
         t.Add("ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING", self.generateLoad) |> ignore
         t.Add("MANUAL_CLOSE", self.manualClose) |> ignore
-        t.Add("INVARIANT_CHECKS", self.invariantChecks) |> ignore
+        //t.Add("INVARIANT_CHECKS", self.invariantChecks) |> ignore
         t.Add("UNSAFE_QUORUM", self.unsafeQuorum) |> ignore
         t.Add("FAILURE_SAFETY", self.failureSafety) |> ignore
         t.Add("QUORUM_SET", Map.ofSeq [| ("VALIDATORS", qset) |]) |> ignore
