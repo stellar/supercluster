@@ -16,177 +16,190 @@ open StellarPersistentVolume
 open StellarSupercluster
 
 
+type KubeOption(kubeConfig: string) =
+    [<Option('k', "kubeconfig", HelpText = "Kubernetes config file",
+             Required = false, Default = "~/.kube/config")>]
+    member self.KubeConfig = kubeConfig
+
+
+type CommonOptions(kubeConfig: string,
+                   numNodes: int,
+                   quotaLimitCPU: int,
+                   quotaLimitMemoryMB: int,
+                   namespaceProperty: string,
+                   ingressDomain: string,
+                   probeTimeout: int) =
+
+    [<Option('k', "kubeconfig", HelpText = "Kubernetes config file",
+             Required = false, Default = "~/.kube/config")>]
+    member self.KubeConfig = kubeConfig
+
+    [<Option('n', "num-nodes", HelpText="Number of nodes in config",
+             Required = false, Default = 5)>]
+    member self.NumNodes = numNodes
+
+    [<Option("quota-limit-cpu", HelpText="Total quota limit for CPU (in vCPUs)",
+             Required = false, Default = 100)>]
+    member self.QuotaLimitCPU = quotaLimitCPU
+
+    [<Option("quota-limit-mem-mb", HelpText="Total quota limit for memory (in MB)",
+             Required = false, Default = 6200)>]
+    member self.QuotaLimitMemoryMB = quotaLimitMemoryMB
+
+    [<Option("namespace", HelpText="Namespace to use.",
+             Required = false, Default = "stellar-supercluster")>]
+    member self.NamespaceProperty = namespaceProperty
+
+    [<Option("ingress-domain", HelpText="Domain in which to configure ingress host",
+             Required = false, Default = "local")>]
+    member self.IngressDomain = ingressDomain
+
+    [<Option("probe-timeout", HelpText="Timeout for liveness probe",
+             Required = false, Default = 1)>]
+    member self.ProbeTimeout = probeTimeout
+
+
 [<Verb("setup", HelpText="Set up a new stellar-core cluster")>]
-type SetupOptions = {
+type SetupOptions(kubeConfig: string,
+                  numNodes: int,
+                  quotaLimitCPU: int,
+                  quotaLimitMemoryMB: int,
+                  namespaceProperty: string,
+                  ingressDomain: string,
+                  probeTimeout: int) =
+    inherit CommonOptions(kubeConfig,
+                          numNodes,
+                          quotaLimitCPU,
+                          quotaLimitMemoryMB,
+                          namespaceProperty,
+                          ingressDomain,
+                          probeTimeout)
 
-  [<Option('k', "kubeconfig", HelpText = "Kubernetes config file",
-           Required = false, Default = "~/.kube/config")>]
-  kubeconfig : string
-
-  [<Option('n', "num-nodes", HelpText="Number of nodes in config",
-           Required = false, Default = 5)>]
-  numNodes : int
-
-  [<Option("quota-limit-cpu", HelpText="Total quota limit for CPU (in vCPUs)",
-           Required = false, Default = 100)>]
-  quotaLimitCPU : int
-
-  [<Option("quota-limit-mem-mb", HelpText="Total quota limit for memory (in MB)",
-           Required = false, Default = 6200)>]
-  quotaLimitMemoryMB : int
-
-  [<Option("namespace", HelpText="Namespace to use.",
-           Required = false, Default = "stellar-supercluster")>]
-  namespaceProperty : string
-
-  [<Option("ingress-domain", HelpText="Domain in which to configure ingress host",
-           Required = false, Default = "local")>]
-  ingressDomain : string
-
-  [<Option("probe-timeout", HelpText="Timeout for liveness probe",
-           Required = false, Default = 1)>]
-  probeTimeout : int
-}
 
 [<Verb("clean", HelpText="Clean all resources in a namespace")>]
-type CleanOptions = {
-  [<Option('k', "kubeconfig", HelpText = "Kubernetes config file",
-           Required = false, Default = "~/.kube/config")>]
-  kubeconfig : string
-
-  [<Option("quota-limit-cpu", HelpText="Total quota limit for CPU (in vCPUs)",
-           Required = false, Default = 100)>]
-  quotaLimitCPU : int
-
-  [<Option("quota-limit-mem-mb", HelpText="Total quota limit for memory (in MB)",
-           Required = false, Default = 6200)>]
-  quotaLimitMemoryMB : int
-
-  [<Option("namespace", HelpText="Namespace to use.",
-           Required = false, Default = "stellar-supercluster")>]
-  namespaceProperty : string
-
-  [<Option("ingress-domain", HelpText="Domain in which to configure ingress host",
-           Required = false, Default = "local")>]
-  ingressDomain : string
-}
+type CleanOptions(kubeConfig: string,
+                  numNodes: int,
+                  quotaLimitCPU: int,
+                  quotaLimitMemoryMB: int,
+                  namespaceProperty: string,
+                  ingressDomain: string,
+                  probeTimeout: int) =
+    inherit CommonOptions(kubeConfig,
+                          numNodes,
+                          quotaLimitCPU,
+                          quotaLimitMemoryMB,
+                          namespaceProperty,
+                          ingressDomain,
+                          probeTimeout)
 
 
 [<Verb("loadgen", HelpText="Run a load generation test")>]
-type LoadgenOptions = {
+type LoadgenOptions(kubeConfig: string,
+                    numNodes: int,
+                    quotaLimitCPU: int,
+                    quotaLimitMemoryMB: int,
+                    namespaceProperty: string,
+                    ingressDomain: string,
+                    probeTimeout: int) =
+    inherit CommonOptions(kubeConfig,
+                          numNodes,
+                          quotaLimitCPU,
+                          quotaLimitMemoryMB,
+                          namespaceProperty,
+                          ingressDomain,
+                          probeTimeout)
 
-  [<Option('k', "kubeconfig", HelpText = "Kubernetes config file",
-           Required = false, Default = "~/.kube/config")>]
-  kubeconfig : string
-
-  [<Option('n', "num-nodes", HelpText="Number of nodes in config",
-           Required = false, Default = 5)>]
-  numNodes : int
-
-  [<Option("quota-limit-cpu", HelpText="Total quota limit for CPU (in vCPUs)",
-           Required = false, Default = 100)>]
-  quotaLimitCPU : int
-
-  [<Option("quota-limit-mem-mb", HelpText="Total quota limit for memory (in MB)",
-           Required = false, Default = 6200)>]
-  quotaLimitMemoryMB : int
-
-  [<Option("namespace", HelpText="Namespace to use.",
-           Required = false, Default = "stellar-supercluster")>]
-  namespaceProperty : string
-
-  [<Option("ingress-domain", HelpText="Domain in which to configure ingress host",
-           Required = false, Default = "local")>]
-  ingressDomain : string
-
-  [<Option("probe-timeout", HelpText="Timeout for liveness probe",
-           Required = false, Default = 1)>]
-  probeTimeout : int
-}
 
 [<Verb("mission", HelpText="Run one or more named missions")>]
-type MissionOptions = {
+type MissionOptions(kubeConfig: string,
+                    numNodes: int,
+                    quotaLimitCPU: int,
+                    quotaLimitMemoryMB: int,
+                    namespaceProperty: string,
+                    ingressDomain: string,
+                    probeTimeout: int,
+                    missions: string seq,
+                    destination: string,
+                    persistentVolumeRoot: string,
+                    image: string option,
+                    oldImage: string option,
+                    txRate: int,
+                    maxTxRate: int,
+                    numAccounts: int,
+                    numTxs: int,
+                    keepData: bool) =
 
-  [<Option('k', "kubeconfig", HelpText = "Kubernetes config file",
-           Required = false, Default = "~/.kube/config")>]
-  kubeconfig : string
+    [<Option('k', "kubeconfig", HelpText = "Kubernetes config file",
+             Required = false, Default = "~/.kube/config")>]
+    member self.KubeConfig = kubeConfig
 
-  [<Value(0, Required = true)>]
-  missions : string seq
+    [<Option('n', "num-nodes", HelpText="Number of nodes in config",
+             Required = false, Default = 5)>]
+    member self.NumNodes = numNodes
 
-  [<Option("quota-limit-cpu", HelpText="Total quota limit for CPU (in vCPUs)",
-           Required = false, Default = 100)>]
-  quotaLimitCPU : int
+    [<Option("quota-limit-cpu", HelpText="Total quota limit for CPU (in vCPUs)",
+             Required = false, Default = 100)>]
+    member self.QuotaLimitCPU = quotaLimitCPU
 
-  [<Option("quota-limit-mem-mb", HelpText="Total quota limit for memory (in MB)",
-           Required = false, Default = 6200)>]
-  quotaLimitMemoryMB : int
+    [<Option("quota-limit-mem-mb", HelpText="Total quota limit for memory (in MB)",
+             Required = false, Default = 6200)>]
+    member self.QuotaLimitMemoryMB = quotaLimitMemoryMB
 
-  [<Option("ingress-domain", HelpText="Domain in which to configure ingress host",
-           Required = false, Default = "local")>]
-  ingressDomain : string
+    [<Option("namespace", HelpText="Namespace to use.",
+             Required = false, Default = "stellar-supercluster")>]
+    member self.NamespaceProperty = namespaceProperty
 
-  [<Option('d', "destination", HelpText="Output directory for logs and sql dumps",
-           Required = false, Default = "destination")>]
-  destination : string
+    [<Option("ingress-domain", HelpText="Domain in which to configure ingress host",
+             Required = false, Default = "local")>]
+    member self.IngressDomain = ingressDomain
 
-  [<Option("persistent-volume-root", HelpText="Root for persistent volumes - some missions require this for data exchange between pods",
-           Required = false, Default = "/tmp")>]
-  persistentVolumeRoot : string
+    [<Option("probe-timeout", HelpText="Timeout for liveness probe",
+             Required = false, Default = 1)>]
+    member self.ProbeTimeout = probeTimeout
 
-  [<Option('i', "image", HelpText="Stellar-core image to use",
-           Required = false)>]
-  image : string option
+    [<Value(0, Required = true)>]
+    member self.Missions = missions
 
-  [<Option('o', "old-image", HelpText="Stellar-core image to use as old-image",
-           Required = false)>]
-  oldImage : string option
+    [<Option('d', "destination", HelpText="Output directory for logs and sql dumps",
+             Required = false, Default = "destination")>]
+    member self.Destination = destination
 
-  [<Option("tx-rate", HelpText="Transaction rate for benchamarks and load generation tests",
-           Required = false, Default = 100)>]
-  txRate : int
+    [<Option("persistent-volume-root", HelpText="Root for persistent volumes - some missions require this for data exchange between pods",
+             Required = false, Default = "/tmp")>]
+    member self.PersistentVolumeRoot = persistentVolumeRoot
 
-  [<Option("max-tx-rate", HelpText="Maximum transaction rate for benchamarks and load generation tests",
-           Required = false, Default = 300)>]
-  maxTxRate : int
+    [<Option('i', "image", HelpText="Stellar-core image to use",
+             Required = false)>]
+    member self.Image = image
 
-  [<Option("num-accounts", HelpText="Number of accounts for benchamarks and load generation tests",
-           Required = false, Default = 100000)>]
-  numAccounts : int
+    [<Option('o', "old-image", HelpText="Stellar-core image to use as old-image",
+             Required = false)>]
+    member self.OldImage = oldImage
 
-  [<Option("num-txs", HelpText="Number of transactions for benchamarks and load generation tests",
-           Required = false, Default = 100000)>]
-  numTxs : int
+    [<Option("tx-rate", HelpText="Transaction rate for benchamarks and load generation tests",
+             Required = false, Default = 100)>]
+    member self.TxRate = txRate
 
-  [<Option("num-nodes", HelpText="Number of nodes for benchmarks and load generation tests",
-           Required = false, Default = 3)>]
-  numNodes : int
+    [<Option("max-tx-rate", HelpText="Maximum transaction rate for benchamarks and load generation tests",
+             Required = false, Default = 300)>]
+    member self.MaxTxRate = maxTxRate
 
-  [<Option("namespace", HelpText="Namespace to use.",
-           Required = false, Default = "stellar-supercluster")>]
-  namespaceProperty : string
+    [<Option("num-accounts", HelpText="Number of accounts for benchamarks and load generation tests",
+             Required = false, Default = 100000)>]
+    member self.NumAccounts = numAccounts
 
-  [<Option("keep-data", HelpText="Keeps namespaces nad persistent volumes after mission fails",
-           Required = false, Default = false)>]
-  keepData : bool
+    [<Option("num-txs", HelpText="Number of transactions for benchamarks and load generation tests",
+             Required = false, Default = 100000)>]
+    member self.NumTxs = numTxs
 
-  [<Option("probe-timeout", HelpText="Timeout for liveness probe",
-           Required = false, Default = 1)>]
-  probeTimeout : int
-}
+    [<Option("keep-data", HelpText="Keeps namespaces and persistent volumes after mission fails",
+             Required = false, Default = false)>]
+    member self.KeepData = keepData
 
 
 [<Verb("poll", HelpText="Poll a running stellar-core cluster for status")>]
-type PollOptions = {
-
-  [<Option('k', "kubeconfig", HelpText = "Kubernetes config file",
-           Required = false, Default = "~/.kube/config")>]
-  kubeconfig : string
-
-  [<Option("ingress-domain", HelpText="Domain in which to configure ingress host",
-           Required = false, Default = "local")>]
-  ingressDomain : string
-}
+type PollOptions(kubeConfig: string) =
+    inherit KubeOption(kubeConfig)
 
 
 [<EntryPoint>]
@@ -208,43 +221,43 @@ let main argv =
     match command.Value with
 
     | :? SetupOptions as setup ->
-      let kube = ConnectToCluster setup.kubeconfig
-      let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = setup.numNodes }
+      let kube = ConnectToCluster setup.KubeConfig
+      let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = setup.NumNodes }
       let nCfg = MakeNetworkCfg [coreSet]
-                                setup.namespaceProperty
-                                setup.quotaLimitCPU
-                                setup.quotaLimitMemoryMB
-                                setup.ingressDomain None
-      use formation = kube.MakeFormation nCfg None false setup.probeTimeout
+                                setup.NamespaceProperty
+                                setup.QuotaLimitCPU
+                                setup.QuotaLimitMemoryMB
+                                setup.IngressDomain None
+      use formation = kube.MakeFormation nCfg None false setup.ProbeTimeout
       formation.ReportStatus()
       0
 
     | :? CleanOptions as clean ->
-      let kube = ConnectToCluster clean.kubeconfig
+      let kube = ConnectToCluster clean.KubeConfig
       let nCfg = MakeNetworkCfg []
-                                clean.namespaceProperty
-                                clean.quotaLimitCPU
-                                clean.quotaLimitMemoryMB
-                                clean.ingressDomain None
+                                clean.NamespaceProperty
+                                clean.QuotaLimitCPU
+                                clean.QuotaLimitMemoryMB
+                                clean.IngressDomain None
       use formation = kube.MakeEmptyFormation nCfg
       formation.CleanNamespace()
       0
 
     | :? LoadgenOptions as loadgen ->
-      let kube = ConnectToCluster loadgen.kubeconfig
-      let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = loadgen.numNodes }
+      let kube = ConnectToCluster loadgen.KubeConfig
+      let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = loadgen.NumNodes }
       let nCfg = MakeNetworkCfg [coreSet]
-                                loadgen.namespaceProperty
-                                loadgen.quotaLimitCPU
-                                loadgen.quotaLimitMemoryMB
-                                loadgen.ingressDomain None
-      use formation = kube.MakeFormation nCfg None false loadgen.probeTimeout
+                                loadgen.NamespaceProperty
+                                loadgen.QuotaLimitCPU
+                                loadgen.QuotaLimitMemoryMB
+                                loadgen.IngressDomain None
+      use formation = kube.MakeFormation nCfg None false loadgen.ProbeTimeout
       formation.RunLoadgenAndCheckNoErrors coreSet
       formation.ReportStatus()
       0
 
     | :? MissionOptions as mission ->
-      match Seq.tryFind (allMissions.ContainsKey >> not) mission.missions with
+      match Seq.tryFind (allMissions.ContainsKey >> not) mission.Missions with
         | Some e ->
             begin
                 LogError "Unknown mission: %s" e
@@ -257,32 +270,32 @@ let main argv =
                 LogInfo "-----------------------------------"
                 LogInfo "Connecting to Kubernetes cluster"
                 LogInfo "-----------------------------------"
-                let kube = ConnectToCluster mission.kubeconfig
-                let destination = Destination(mission.destination)
-                let persistentVolume = PersistentVolume(mission.persistentVolumeRoot)
+                let kube = ConnectToCluster mission.KubeConfig
+                let destination = Destination(mission.Destination)
+                let persistentVolume = PersistentVolume(mission.PersistentVolumeRoot)
 
                 try
-                    for m in mission.missions do
+                    for m in mission.Missions do
                         LogInfo "-----------------------------------"
                         LogInfo "Starting mission: %s" m
                         LogInfo "-----------------------------------"
                         try
                             let missionContext = { MissionContext.kube = kube
                                                    destination = destination
-                                                   image = mission.image
-                                                   oldImage = mission.oldImage
-                                                   txRate = mission.txRate
-                                                   maxTxRate = mission.maxTxRate
-                                                   numAccounts = mission.numAccounts
-                                                   numTxs = mission.numTxs
-                                                   numNodes = mission.numNodes
-                                                   quotaLimitCPU = mission.quotaLimitCPU
-                                                   quotaLimitMemoryMB = mission.quotaLimitMemoryMB
-                                                   ingressDomain = mission.ingressDomain
+                                                   image = mission.Image
+                                                   oldImage = mission.OldImage
+                                                   txRate = mission.TxRate
+                                                   maxTxRate = mission.MaxTxRate
+                                                   numAccounts = mission.NumAccounts
+                                                   numTxs = mission.NumTxs
+                                                   numNodes = mission.NumNodes
+                                                   quotaLimitCPU = mission.QuotaLimitCPU
+                                                   quotaLimitMemoryMB = mission.QuotaLimitMemoryMB
+                                                   ingressDomain = mission.IngressDomain
                                                    persistentVolume = persistentVolume
-                                                   namespaceProperty = mission.namespaceProperty
-                                                   keepData = mission.keepData
-                                                   probeTimeout = mission.probeTimeout }
+                                                   namespaceProperty = mission.NamespaceProperty
+                                                   keepData = mission.KeepData
+                                                   probeTimeout = mission.ProbeTimeout }
                             allMissions.[m] missionContext
                         with
                         // This looks ridiculous but it's how you coax the .NET runtime
@@ -298,7 +311,7 @@ let main argv =
             end
 
     | :? PollOptions as poll ->
-      let kube = ConnectToCluster poll.kubeconfig
+      let kube = ConnectToCluster poll.KubeConfig
       PollCluster kube
       0
 
