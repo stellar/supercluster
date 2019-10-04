@@ -24,8 +24,13 @@ type KubeOption(kubeConfig: string) =
 
 type CommonOptions(kubeConfig: string,
                    numNodes: int,
-                   quotaLimitCPU: int,
-                   quotaLimitMemoryMB: int,
+                   containerMaxCpuMili: int,
+                   containerMaxMemMega: int,
+                   namespaceQuotaLimCpuMili: int,
+                   namespaceQuotaLimMemMega: int,
+                   namespaceQuotaReqCpuMili: int,
+                   namespaceQuotaReqMemMega: int,
+                   numConcurrentMissions: int,
                    namespaceProperty: string,
                    ingressDomain: string,
                    probeTimeout: int) =
@@ -38,13 +43,38 @@ type CommonOptions(kubeConfig: string,
              Required = false, Default = 5)>]
     member self.NumNodes = numNodes
 
-    [<Option("quota-limit-cpu", HelpText="Total quota limit for CPU (in vCPUs)",
-             Required = false, Default = 100)>]
-    member self.QuotaLimitCPU = quotaLimitCPU
 
-    [<Option("quota-limit-mem-mb", HelpText="Total quota limit for memory (in MB)",
-             Required = false, Default = 6200)>]
-    member self.QuotaLimitMemoryMB = quotaLimitMemoryMB
+    // Getting quotas and limits right needs _seven_ arguments
+
+    [<Option("container-max-cpu-mili", HelpText="Maximum per-container CPU (in mili-CPUs)",
+             Required = false, Default = 4000)>]
+    member self.ContainerMaxCpuMili = containerMaxCpuMili
+
+    [<Option("container-max-mem-mega", HelpText="Maximum per-container memory (in MB)",
+             Required = false, Default = 8000)>]
+    member self.ContainerMaxMemMega = containerMaxMemMega
+
+    [<Option("namespace-quota-lim-cpu-mili", HelpText="Namespace quota for CPU limit (in mili-CPUs)",
+             Required = false, Default = 80000)>]
+    member self.NamespaceQuotaLimCpuMili = namespaceQuotaLimCpuMili
+
+    [<Option("namespace-quota-lim-mem-mega", HelpText="Namespace quota for memory limit (in MB)",
+             Required = false, Default = 62000)>]
+    member self.NamespaceQuotaLimMemMega = namespaceQuotaLimMemMega
+
+    [<Option("namespace-quota-req-cpu-mili", HelpText="Namespace quota for CPU request (in mili-CPUs)",
+             Required = false, Default = 10000)>]
+    member self.NamespaceQuotaReqCpuMili = namespaceQuotaReqCpuMili
+
+    [<Option("namespace-quota-req-mem-mega", HelpText="Namespace quota for memory request (in MB)",
+             Required = false, Default = 22000)>]
+    member self.NamespaceQuotaReqMemMega = namespaceQuotaReqMemMega
+
+    [<Option("num-concurrent-missions", HelpText="Number of missions being run concurrently (including this one)",
+             Required = false, Default = 1)>]
+    member self.NumConcurrentMissions = numConcurrentMissions
+
+
 
     [<Option("namespace", HelpText="Namespace to use.",
              Required = false, Default = "stellar-supercluster")>]
@@ -62,15 +92,25 @@ type CommonOptions(kubeConfig: string,
 [<Verb("setup", HelpText="Set up a new stellar-core cluster")>]
 type SetupOptions(kubeConfig: string,
                   numNodes: int,
-                  quotaLimitCPU: int,
-                  quotaLimitMemoryMB: int,
+                  containerMaxCpuMili: int,
+                  containerMaxMemMega: int,
+                  namespaceQuotaLimCpuMili: int,
+                  namespaceQuotaLimMemMega: int,
+                  namespaceQuotaReqCpuMili: int,
+                  namespaceQuotaReqMemMega: int,
+                  numConcurrentMissions: int,
                   namespaceProperty: string,
                   ingressDomain: string,
                   probeTimeout: int) =
     inherit CommonOptions(kubeConfig,
                           numNodes,
-                          quotaLimitCPU,
-                          quotaLimitMemoryMB,
+                          containerMaxCpuMili,
+                          containerMaxMemMega,
+                          namespaceQuotaLimCpuMili,
+                          namespaceQuotaLimMemMega,
+                          namespaceQuotaReqCpuMili,
+                          namespaceQuotaReqMemMega,
+                          numConcurrentMissions,
                           namespaceProperty,
                           ingressDomain,
                           probeTimeout)
@@ -79,15 +119,25 @@ type SetupOptions(kubeConfig: string,
 [<Verb("clean", HelpText="Clean all resources in a namespace")>]
 type CleanOptions(kubeConfig: string,
                   numNodes: int,
-                  quotaLimitCPU: int,
-                  quotaLimitMemoryMB: int,
+                  containerMaxCpuMili: int,
+                  containerMaxMemMega: int,
+                  namespaceQuotaLimCpuMili: int,
+                  namespaceQuotaLimMemMega: int,
+                  namespaceQuotaReqCpuMili: int,
+                  namespaceQuotaReqMemMega: int,
+                  numConcurrentMissions: int,
                   namespaceProperty: string,
                   ingressDomain: string,
                   probeTimeout: int) =
     inherit CommonOptions(kubeConfig,
                           numNodes,
-                          quotaLimitCPU,
-                          quotaLimitMemoryMB,
+                          containerMaxCpuMili,
+                          containerMaxMemMega,
+                          namespaceQuotaLimCpuMili,
+                          namespaceQuotaLimMemMega,
+                          namespaceQuotaReqCpuMili,
+                          namespaceQuotaReqMemMega,
+                          numConcurrentMissions,
                           namespaceProperty,
                           ingressDomain,
                           probeTimeout)
@@ -96,15 +146,25 @@ type CleanOptions(kubeConfig: string,
 [<Verb("loadgen", HelpText="Run a load generation test")>]
 type LoadgenOptions(kubeConfig: string,
                     numNodes: int,
-                    quotaLimitCPU: int,
-                    quotaLimitMemoryMB: int,
+                    containerMaxCpuMili: int,
+                    containerMaxMemMega: int,
+                    namespaceQuotaLimCpuMili: int,
+                    namespaceQuotaLimMemMega: int,
+                    namespaceQuotaReqCpuMili: int,
+                    namespaceQuotaReqMemMega: int,
+                    numConcurrentMissions: int,
                     namespaceProperty: string,
                     ingressDomain: string,
                     probeTimeout: int) =
     inherit CommonOptions(kubeConfig,
                           numNodes,
-                          quotaLimitCPU,
-                          quotaLimitMemoryMB,
+                          containerMaxCpuMili,
+                          containerMaxMemMega,
+                          namespaceQuotaLimCpuMili,
+                          namespaceQuotaLimMemMega,
+                          namespaceQuotaReqCpuMili,
+                          namespaceQuotaReqMemMega,
+                          numConcurrentMissions,
                           namespaceProperty,
                           ingressDomain,
                           probeTimeout)
@@ -113,8 +173,13 @@ type LoadgenOptions(kubeConfig: string,
 [<Verb("mission", HelpText="Run one or more named missions")>]
 type MissionOptions(kubeConfig: string,
                     numNodes: int,
-                    quotaLimitCPU: int,
-                    quotaLimitMemoryMB: int,
+                    containerMaxCpuMili: int,
+                    containerMaxMemMega: int,
+                    namespaceQuotaLimCpuMili: int,
+                    namespaceQuotaLimMemMega: int,
+                    namespaceQuotaReqCpuMili: int,
+                    namespaceQuotaReqMemMega: int,
+                    numConcurrentMissions: int,
                     namespaceProperty: string,
                     ingressDomain: string,
                     probeTimeout: int,
@@ -137,13 +202,35 @@ type MissionOptions(kubeConfig: string,
              Required = false, Default = 5)>]
     member self.NumNodes = numNodes
 
-    [<Option("quota-limit-cpu", HelpText="Total quota limit for CPU (in vCPUs)",
-             Required = false, Default = 100)>]
-    member self.QuotaLimitCPU = quotaLimitCPU
+    // Getting quotas and limits right needs _seven_ arguments
 
-    [<Option("quota-limit-mem-mb", HelpText="Total quota limit for memory (in MB)",
-             Required = false, Default = 6200)>]
-    member self.QuotaLimitMemoryMB = quotaLimitMemoryMB
+    [<Option("container-max-cpu-mili", HelpText="Maximum per-container CPU (in mili-CPUs)",
+             Required = false, Default = 4000)>]
+    member self.ContainerMaxCpuMili = containerMaxCpuMili
+
+    [<Option("container-max-mem-mega", HelpText="Maximum per-container memory (in MB)",
+             Required = false, Default = 8000)>]
+    member self.ContainerMaxMemMega = containerMaxMemMega
+
+    [<Option("namespace-quota-lim-cpu-mili", HelpText="Namespace quota for CPU limit (in mili-CPUs)",
+             Required = false, Default = 80000)>]
+    member self.NamespaceQuotaLimCpuMili = namespaceQuotaLimCpuMili
+
+    [<Option("namespace-quota-lim-mem-mega", HelpText="Namespace quota for memory limit (in MB)",
+             Required = false, Default = 62000)>]
+    member self.NamespaceQuotaLimMemMega = namespaceQuotaLimMemMega
+
+    [<Option("namespace-quota-req-cpu-mili", HelpText="Namespace quota for CPU request (in mili-CPUs)",
+             Required = false, Default = 10000)>]
+    member self.NamespaceQuotaReqCpuMili = namespaceQuotaReqCpuMili
+
+    [<Option("namespace-quota-req-mem-mega", HelpText="Namespace quota for memory request (in MB)",
+             Required = false, Default = 22000)>]
+    member self.NamespaceQuotaReqMemMega = namespaceQuotaReqMemMega
+
+    [<Option("num-concurrent-missions", HelpText="Number of missions being run concurrently (including this one)",
+             Required = false, Default = 1)>]
+    member self.NumConcurrentMissions = numConcurrentMissions
 
     [<Option("namespace", HelpText="Namespace to use.",
              Required = false, Default = "stellar-supercluster")>]
@@ -223,10 +310,16 @@ let main argv =
     | :? SetupOptions as setup ->
       let kube = ConnectToCluster setup.KubeConfig
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = setup.NumNodes }
+      let nq = MakeNetworkQuotas (setup.ContainerMaxCpuMili,
+                                  setup.ContainerMaxMemMega,
+                                  setup.NamespaceQuotaLimCpuMili,
+                                  setup.NamespaceQuotaLimMemMega,
+                                  setup.NamespaceQuotaReqCpuMili,
+                                  setup.NamespaceQuotaReqMemMega,
+                                  setup.NumConcurrentMissions)
       let nCfg = MakeNetworkCfg [coreSet]
                                 setup.NamespaceProperty
-                                setup.QuotaLimitCPU
-                                setup.QuotaLimitMemoryMB
+                                nq
                                 setup.IngressDomain None
       use formation = kube.MakeFormation nCfg None false setup.ProbeTimeout
       formation.ReportStatus()
@@ -234,10 +327,16 @@ let main argv =
 
     | :? CleanOptions as clean ->
       let kube = ConnectToCluster clean.KubeConfig
+      let nq = MakeNetworkQuotas (clean.ContainerMaxCpuMili,
+                                  clean.ContainerMaxMemMega,
+                                  clean.NamespaceQuotaLimCpuMili,
+                                  clean.NamespaceQuotaLimMemMega,
+                                  clean.NamespaceQuotaReqCpuMili,
+                                  clean.NamespaceQuotaReqMemMega,
+                                  clean.NumConcurrentMissions)
       let nCfg = MakeNetworkCfg []
                                 clean.NamespaceProperty
-                                clean.QuotaLimitCPU
-                                clean.QuotaLimitMemoryMB
+                                nq
                                 clean.IngressDomain None
       use formation = kube.MakeEmptyFormation nCfg
       formation.CleanNamespace()
@@ -246,10 +345,16 @@ let main argv =
     | :? LoadgenOptions as loadgen ->
       let kube = ConnectToCluster loadgen.KubeConfig
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = loadgen.NumNodes }
+      let nq = MakeNetworkQuotas (loadgen.ContainerMaxCpuMili,
+                                  loadgen.ContainerMaxMemMega,
+                                  loadgen.NamespaceQuotaLimCpuMili,
+                                  loadgen.NamespaceQuotaLimMemMega,
+                                  loadgen.NamespaceQuotaReqCpuMili,
+                                  loadgen.NamespaceQuotaReqMemMega,
+                                  loadgen.NumConcurrentMissions)
       let nCfg = MakeNetworkCfg [coreSet]
                                 loadgen.NamespaceProperty
-                                loadgen.QuotaLimitCPU
-                                loadgen.QuotaLimitMemoryMB
+                                nq
                                 loadgen.IngressDomain None
       use formation = kube.MakeFormation nCfg None false loadgen.ProbeTimeout
       formation.RunLoadgenAndCheckNoErrors coreSet
@@ -257,6 +362,13 @@ let main argv =
       0
 
     | :? MissionOptions as mission ->
+      let nq = MakeNetworkQuotas (mission.ContainerMaxCpuMili,
+                                  mission.ContainerMaxMemMega,
+                                  mission.NamespaceQuotaLimCpuMili,
+                                  mission.NamespaceQuotaLimMemMega,
+                                  mission.NamespaceQuotaReqCpuMili,
+                                  mission.NamespaceQuotaReqMemMega,
+                                  mission.NumConcurrentMissions)
       match Seq.tryFind (allMissions.ContainsKey >> not) mission.Missions with
         | Some e ->
             begin
@@ -289,8 +401,7 @@ let main argv =
                                                    numAccounts = mission.NumAccounts
                                                    numTxs = mission.NumTxs
                                                    numNodes = mission.NumNodes
-                                                   quotaLimitCPU = mission.QuotaLimitCPU
-                                                   quotaLimitMemoryMB = mission.QuotaLimitMemoryMB
+                                                   quotas = nq
                                                    ingressDomain = mission.IngressDomain
                                                    persistentVolume = persistentVolume
                                                    namespaceProperty = mission.NamespaceProperty

@@ -31,8 +31,7 @@ type MissionContext =
       numAccounts : int
       numTxs : int
       numNodes : int
-      quotaLimitCPU : int
-      quotaLimitMemoryMB : int
+      quotas: NetworkQuotas
       ingressDomain : string
       persistentVolume : PersistentVolume
       namespaceProperty : string
@@ -42,8 +41,7 @@ type MissionContext =
     member self.Execute (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option) (run:ClusterFormation->unit) : unit =
       let networkCfg = MakeNetworkCfg coreSetList
                                       self.namespaceProperty
-                                      self.quotaLimitCPU
-                                      self.quotaLimitMemoryMB
+                                      self.quotas
                                       self.ingressDomain passphrase
       use formation = self.kube.MakeFormation networkCfg (Some(self.persistentVolume)) self.keepData self.probeTimeout
       try
@@ -64,8 +62,7 @@ type MissionContext =
             (run:ClusterFormation->PerformanceReporter->unit) : unit =
       let networkCfg = MakeNetworkCfg coreSetList
                                       self.namespaceProperty
-                                      self.quotaLimitCPU
-                                      self.quotaLimitMemoryMB
+                                      self.quotas
                                       self.ingressDomain passphrase
       use formation = self.kube.MakeFormation networkCfg (Some(self.persistentVolume)) self.keepData self.probeTimeout
       let performanceReporter = PerformanceReporter networkCfg

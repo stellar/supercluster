@@ -31,17 +31,23 @@ let HistoryContainer =
 //
 // This is admittedly a bit convoluted, but it's the simplest mechanism I could
 // figure out to furnish each stellar-core with a Pod-specific config file.
-let CoreContainerForCommand (cpuLim:int) (memLim:int) (image:string) (subCommands:string array) : V1Container =
+let CoreContainerForCommand (q:NetworkQuotas) (numContainers:int)
+        (image:string) (subCommands:string array) : V1Container =
     let peerNameFieldSel = V1ObjectFieldSelector(fieldPath = "metadata.name")
     let peerNameEnvVarSource = V1EnvVarSource(fieldRef = peerNameFieldSel)
     let peerNameEnvVar = V1EnvVar(name = CfgVal.peerNameEnvVarName,
                                   valueFrom = peerNameEnvVarSource)
-    let requests = dict["cpu", ResourceQuantity("0.1");
-                        "memory", ResourceQuantity("100Mi")]
+    let cpuReq = q.ContainerCpuReqMili numContainers
+    let memReq = q.ContainerMemReqMega numContainers
+    let cpuLim = q.ContainerCpuLimMili numContainers
+    let memLim = q.ContainerMemLimMega numContainers
+    let requests = dict["cpu", ResourceQuantity(sprintf "%dm" cpuReq);
+                        "memory", ResourceQuantity(sprintf "%dMi" memReq)]
 
-    let limits = dict["cpu", ResourceQuantity(sprintf "%d" cpuLim);
+    let limits = dict["cpu", ResourceQuantity(sprintf "%dm" cpuLim);
                       "memory", ResourceQuantity(sprintf "%dMi" memLim)]
-    let requirements = V1ResourceRequirements(requests = requests, limits = limits)
+    let requirements = V1ResourceRequirements(requests = requests,
+                                              limits = limits)
 
     V1Container
         (name = "stellar-core-" + (Array.get subCommands 0),
@@ -112,7 +118,7 @@ type NetworkCfg with
     member self.ToPodTemplateSpec (coreSet: CoreSet) probeTimeout : V1PodTemplateSpec =
         let cfgVol = V1Volume(name = CfgVal.cfgVolumeName,
                               configMap = V1ConfigMapVolumeSource(name = self.CfgMapName))
-        let dataVol = 
+        let dataVol =
             match coreSet.options.persistentVolume with
             | None -> V1Volume(name = CfgVal.dataVolumeName,
                                emptyDir = V1EmptyDirVolumeSource(medium = "Memory"))
@@ -137,13 +143,13 @@ type NetworkCfg with
 
         let volumes = [| cfgVol; dataVol |]
         let maxPeers = max 1 self.MaxPeerCount
-        let defaultContainerCPULimit = 4
-        let defaultContainerMemLimit = 8000
-        let cpuLim = min (self.quotaLimitCPU / maxPeers) defaultContainerCPULimit
-        let memLim = min (self.quotaLimitMemoryMB / maxPeers) defaultContainerMemLimit
-        let initContianers = Array.map (fun p -> CoreContainerForCommand cpuLim memLim imageName p) (initSequence coreSet.options.initialization)
+        let initContianers = Array.map
+                                 (fun p -> CoreContainerForCommand self.quotas maxPeers imageName p)
+                                 (initSequence coreSet.options.initialization)
 
-        let containers = [| WithReadinessProbe (CoreContainerForCommand cpuLim memLim imageName [| "run" |]) probeTimeout;
+        let containers = [| WithReadinessProbe
+                                (CoreContainerForCommand self.quotas maxPeers imageName [| "run" |])
+                                probeTimeout;
                             HistoryContainer; |]
 
         let podSpec =

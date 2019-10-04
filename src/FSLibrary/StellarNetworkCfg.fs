@@ -18,6 +18,78 @@ type NetworkNonce =
         // "ssc" == "stellar supercluster", just to help group namespaces.
         "ssc-" + (Util.BytesToHex n).ToLower()
 
+// Resource allocation in k8s is quite complex.
+//
+// The namespace itself has a _quota_ which applies to the sum of all
+// resources allocated within the namespace, so everything at the
+// namespace quota level has to be divided by the number of containers
+// we're going to instantiate.
+//
+// That quota in turn consists of a request quota and a limit quota for
+// each resource type (CPU and memory), to which the following rules
+// apply:
+//
+//   - Limits and requests of a container must fit within quota
+//     (a container won't be scheduled if _either_ exceeds quota)
+//   - Requests that can be met are provided by guaranteed resources
+//   - Limits can be overprovisioned and are best-effort
+//   - Limits must always be greater than requests
+//   - A container can never use more than limit, it's a hard boundary
+//
+// Furthermore there is a container-level maximum for each resource
+// that's _independent_ of the number of containers or the namespace's
+// remaining quota.
+//
+// So we want to set limit as high as possible and request as low as
+// possible, within the constraints of these quotas and maximums.
+
+type NetworkQuotas =
+    { ContainerMaxCpuMili: int
+      ContainerMaxMemMega: int
+      NamespaceQuotaLimCpuMili: int
+      NamespaceQuotaLimMemMega: int
+      NamespaceQuotaReqCpuMili: int
+      NamespaceQuotaReqMemMega: int
+      NumConcurrentMissions: int }
+
+    member self.ContainerCpuReqMili (numContainers:int) : int =
+        let divisor = numContainers * self.NumConcurrentMissions
+        let nsFrac = self.NamespaceQuotaReqCpuMili / divisor
+        let lim = (self.ContainerCpuLimMili numContainers)
+        min 100 (min nsFrac lim)
+
+    member self.ContainerCpuLimMili (numContainers:int) : int =
+       let divisor = numContainers * self.NumConcurrentMissions
+       let nsFrac = self.NamespaceQuotaLimCpuMili / divisor
+       min nsFrac self.ContainerMaxCpuMili
+
+    member self.ContainerMemReqMega (numContainers:int) : int =
+        let divisor = numContainers * self.NumConcurrentMissions
+        let nsFrac = self.NamespaceQuotaReqMemMega / divisor
+        let lim = (self.ContainerMemLimMega numContainers)
+        min 100 (min nsFrac lim)
+
+    member self.ContainerMemLimMega (numContainers:int) : int =
+        let divisor = numContainers * self.NumConcurrentMissions
+        let nsFrac = self.NamespaceQuotaLimMemMega / divisor
+        min nsFrac self.ContainerMaxMemMega
+
+
+let MakeNetworkQuotas (containerMaxCpuMili: int,
+                       containerMaxMemMega: int,
+                       namespaceQuotaLimCpuMili: int,
+                       namespaceQuotaLimMemMega: int,
+                       namespaceQuotaReqCpuMili: int,
+                       namespaceQuotaReqMemMega: int,
+                       numConcurrentMissions: int) =
+    { ContainerMaxCpuMili = containerMaxCpuMili
+      ContainerMaxMemMega = containerMaxMemMega
+      NamespaceQuotaLimCpuMili = namespaceQuotaLimCpuMili
+      NamespaceQuotaLimMemMega = namespaceQuotaLimMemMega
+      NamespaceQuotaReqCpuMili = namespaceQuotaReqCpuMili
+      NamespaceQuotaReqMemMega = namespaceQuotaReqMemMega
+      NumConcurrentMissions = numConcurrentMissions }
+
 
 let MakeNetworkNonce() : NetworkNonce =
     let bytes : byte array = Array.zeroCreate 6
@@ -52,8 +124,7 @@ type NetworkCfg =
       networkPassphrase : NetworkPassphrase
       namespaceProperty : string
       coreSets : Map<string,CoreSet>
-      quotaLimitCPU: int
-      quotaLimitMemoryMB: int
+      quotas: NetworkQuotas
       ingressDomain : string }
 
     member self.FindCoreSet (n:string) : CoreSet =
@@ -112,8 +183,7 @@ type NetworkCfg =
 let MakeNetworkCfg
         (coreSetList: CoreSet list)
         (namespaceProperty: string)
-        (quotaLimitCPU: int)
-        (quotaLimitMemoryMB: int)
+        (quotas: NetworkQuotas)
         (ingressDomain: string)
         (passphrase: NetworkPassphrase option) : NetworkCfg =
     let nonce = MakeNetworkNonce()
@@ -123,6 +193,5 @@ let MakeNetworkCfg
                           | Some(x) -> x
       namespaceProperty = namespaceProperty
       coreSets = List.map (fun cs -> (cs.name, cs)) coreSetList |> Map.ofList
-      quotaLimitCPU = quotaLimitCPU
-      quotaLimitMemoryMB = quotaLimitMemoryMB
+      quotas = quotas
       ingressDomain = ingressDomain }
