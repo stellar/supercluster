@@ -46,3 +46,15 @@ type NamespaceContent(kube: Kubernetes,
 
     member self.Add(ingress: Extensionsv1beta1Ingress) =
         ingressList <- ingress.Metadata.Name :: ingressList
+
+    member self.AddAll() =
+        for s in kube.ListNamespacedService(namespaceParameter = namespaceProperty).Items do
+            self.Add(s)
+        for c in kube.ListNamespacedConfigMap(namespaceParameter = namespaceProperty).Items do
+            self.Add(c)
+        for s in kube.ListNamespacedStatefulSet(namespaceParameter = namespaceProperty).Items do
+            self.Add(s)
+        for c in kube.ListNamespacedPersistentVolumeClaim(namespaceParameter = namespaceProperty).Items do
+            self.Add(c)
+        for i in kube.ListNamespacedIngress(namespaceParameter = namespaceProperty).Items do
+            self.Add(i)

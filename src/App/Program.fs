@@ -48,6 +48,30 @@ type SetupOptions = {
   probeTimeout : int
 }
 
+[<Verb("clean", HelpText="Clean all resources in a namespace")>]
+type CleanOptions = {
+  [<Option('k', "kubeconfig", HelpText = "Kubernetes config file",
+           Required = false, Default = "~/.kube/config")>]
+  kubeconfig : string
+
+  [<Option("quota-limit-cpu", HelpText="Total quota limit for CPU (in vCPUs)",
+           Required = false, Default = 100)>]
+  quotaLimitCPU : int
+
+  [<Option("quota-limit-mem-mb", HelpText="Total quota limit for memory (in MB)",
+           Required = false, Default = 6200)>]
+  quotaLimitMemoryMB : int
+
+  [<Option("namespace", HelpText="Namespace to use.",
+           Required = false, Default = "stellar-supercluster")>]
+  namespaceProperty : string
+
+  [<Option("ingress-domain", HelpText="Domain in which to configure ingress host",
+           Required = false, Default = "local")>]
+  ingressDomain : string
+}
+
+
 [<Verb("loadgen", HelpText="Run a load generation test")>]
 type LoadgenOptions = {
 
@@ -174,6 +198,7 @@ let main argv =
 
   AuxClass.CheckCSharpWorksToo()
   let result = CommandLine.Parser.Default.ParseArguments<SetupOptions,
+                                                         CleanOptions,
                                                          LoadgenOptions,
                                                          MissionOptions,
                                                          PollOptions>(argv)
@@ -192,6 +217,17 @@ let main argv =
                                 setup.ingressDomain None
       use formation = kube.MakeFormation nCfg None false setup.probeTimeout
       formation.ReportStatus()
+      0
+
+    | :? CleanOptions as clean ->
+      let kube = ConnectToCluster clean.kubeconfig
+      let nCfg = MakeNetworkCfg []
+                                clean.namespaceProperty
+                                clean.quotaLimitCPU
+                                clean.quotaLimitMemoryMB
+                                clean.ingressDomain None
+      use formation = kube.MakeEmptyFormation nCfg
+      formation.CleanNamespace()
       0
 
     | :? LoadgenOptions as loadgen ->

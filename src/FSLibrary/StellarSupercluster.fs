@@ -72,8 +72,14 @@ type ClusterFormation(networkCfg: NetworkCfg,
     member self.Kube = kube
     member self.NetworkCfg = networkCfg
 
+    member self.CleanNamespace() =
+        LogInfo "Cleaning all resources from namespace '%s'"
+            networkCfg.NamespaceProperty
+        namespaceContent.AddAll()
+        namespaceContent.Cleanup()
+
     member self.ForceCleanup() =
-        let deleteVolume persistentVolume = 
+        let deleteVolume persistentVolume =
             try
                 self.Kube.DeletePersistentVolume(name = persistentVolume) |> ignore
             with
@@ -234,6 +240,15 @@ type Kubernetes with
 
     // Starts a StatefulSet, Service, and Ingress for a given NetworkCfg, then
     // waits for it to be ready.
+
+    member self.MakeEmptyFormation (nCfg: NetworkCfg) : ClusterFormation =
+        new ClusterFormation(networkCfg = nCfg,
+                             kube = self,
+                             statefulSets = [],
+                             namespaceContent = NamespaceContent(self, nCfg.NamespaceProperty),
+                             probeTimeout = 1)
+
+
     member self.MakeFormation (nCfg: NetworkCfg) (persistentVolume: PersistentVolume option) (keepData: bool) (probeTimeout: int) : ClusterFormation =
         let nsStr = nCfg.NamespaceProperty
         let namespaceContent = NamespaceContent(self, nsStr)
