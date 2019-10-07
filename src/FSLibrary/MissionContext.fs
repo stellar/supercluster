@@ -32,6 +32,7 @@ type MissionContext =
       numTxs : int
       numNodes : int
       quotas: NetworkQuotas
+      logLevels: LogLevels
       ingressDomain : string
       persistentVolume : PersistentVolume
       namespaceProperty : string
@@ -42,6 +43,7 @@ type MissionContext =
       let networkCfg = MakeNetworkCfg coreSetList
                                       self.namespaceProperty
                                       self.quotas
+                                      self.logLevels
                                       self.ingressDomain passphrase
       use formation = self.kube.MakeFormation networkCfg (Some(self.persistentVolume)) self.keepData self.probeTimeout
       try
@@ -63,6 +65,7 @@ type MissionContext =
       let networkCfg = MakeNetworkCfg coreSetList
                                       self.namespaceProperty
                                       self.quotas
+                                      self.logLevels
                                       self.ingressDomain passphrase
       use formation = self.kube.MakeFormation networkCfg (Some(self.persistentVolume)) self.keepData self.probeTimeout
       let performanceReporter = PerformanceReporter networkCfg

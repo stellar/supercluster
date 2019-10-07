@@ -86,6 +86,18 @@ type StellarCoreCfg =
         let getHist getCommand =
             Map.ofSeq [| ("get", getCommand) |]
 
+        let debugLevelCommands =
+            List.map
+                (sprintf "ll?level=debug&partition=%s")
+                self.network.logLevels.LogDebugPartitions
+
+        let traceLevelCommands =
+            List.map
+                (sprintf "ll?level=trace&partition=%s")
+                self.network.logLevels.LogTracePartitions
+
+        let logLevelCommands = List.append debugLevelCommands traceLevelCommands
+
         t.Add("DATABASE", self.database.ToString()) |> ignore
         t.Add("HTTP_PORT", int64(CfgVal.httpPort)) |> ignore
         t.Add("PUBLIC_HTTP_PORT", true) |> ignore
@@ -95,10 +107,7 @@ type StellarCoreCfg =
         t.Add("NODE_IS_VALIDATOR", self.nodeIsValidator) |> ignore
         t.Add("RUN_STANDALONE", self.runStandalone) |> ignore
         t.Add("PREFERRED_PEERS", self.preferredPeers) |> ignore
-        //        t.Add("COMMANDS", ["ll?level=trace&partition=bucket";
-        //                           "ll?level=trace&partition=fs";
-        //                           "ll?level=trace&partition=history";
-        //                           "ll?level=trace&partition=ledger"]) |> ignore
+        t.Add("COMMANDS", logLevelCommands) |> ignore
         t.Add("CATCHUP_COMPLETE", self.catchupMode = CatchupComplete) |> ignore
         t.Add("CATCHUP_RECENT",
               match self.catchupMode with

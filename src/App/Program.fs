@@ -24,6 +24,8 @@ type KubeOption(kubeConfig: string) =
 
 type CommonOptions(kubeConfig: string,
                    numNodes: int,
+                   logDebugPartitions: string list,
+                   logTracePartitions: string list,
                    containerMaxCpuMili: int,
                    containerMaxMemMega: int,
                    namespaceQuotaLimCpuMili: int,
@@ -43,6 +45,11 @@ type CommonOptions(kubeConfig: string,
              Required = false, Default = 5)>]
     member self.NumNodes = numNodes
 
+    [<Option("debug", HelpText="Log-partitions to set to 'debug' level")>]
+    member self.LogDebugPartitions = logDebugPartitions
+
+    [<Option("trace", HelpText="Log-partitions to set to 'trace' level")>]
+    member self.LogTracePartitions = logTracePartitions
 
     // Getting quotas and limits right needs _seven_ arguments
 
@@ -92,6 +99,8 @@ type CommonOptions(kubeConfig: string,
 [<Verb("setup", HelpText="Set up a new stellar-core cluster")>]
 type SetupOptions(kubeConfig: string,
                   numNodes: int,
+                  logDebugPartitions: string list,
+                  logTracePartitions: string list,
                   containerMaxCpuMili: int,
                   containerMaxMemMega: int,
                   namespaceQuotaLimCpuMili: int,
@@ -104,6 +113,8 @@ type SetupOptions(kubeConfig: string,
                   probeTimeout: int) =
     inherit CommonOptions(kubeConfig,
                           numNodes,
+                          logDebugPartitions,
+                          logTracePartitions,
                           containerMaxCpuMili,
                           containerMaxMemMega,
                           namespaceQuotaLimCpuMili,
@@ -119,6 +130,8 @@ type SetupOptions(kubeConfig: string,
 [<Verb("clean", HelpText="Clean all resources in a namespace")>]
 type CleanOptions(kubeConfig: string,
                   numNodes: int,
+                  logDebugPartitions: string list,
+                  logTracePartitions: string list,
                   containerMaxCpuMili: int,
                   containerMaxMemMega: int,
                   namespaceQuotaLimCpuMili: int,
@@ -131,6 +144,8 @@ type CleanOptions(kubeConfig: string,
                   probeTimeout: int) =
     inherit CommonOptions(kubeConfig,
                           numNodes,
+                          logDebugPartitions,
+                          logTracePartitions,
                           containerMaxCpuMili,
                           containerMaxMemMega,
                           namespaceQuotaLimCpuMili,
@@ -146,6 +161,8 @@ type CleanOptions(kubeConfig: string,
 [<Verb("loadgen", HelpText="Run a load generation test")>]
 type LoadgenOptions(kubeConfig: string,
                     numNodes: int,
+                    logDebugPartitions: string list,
+                    logTracePartitions: string list,
                     containerMaxCpuMili: int,
                     containerMaxMemMega: int,
                     namespaceQuotaLimCpuMili: int,
@@ -158,6 +175,8 @@ type LoadgenOptions(kubeConfig: string,
                     probeTimeout: int) =
     inherit CommonOptions(kubeConfig,
                           numNodes,
+                          logDebugPartitions,
+                          logTracePartitions,
                           containerMaxCpuMili,
                           containerMaxMemMega,
                           namespaceQuotaLimCpuMili,
@@ -173,6 +192,8 @@ type LoadgenOptions(kubeConfig: string,
 [<Verb("mission", HelpText="Run one or more named missions")>]
 type MissionOptions(kubeConfig: string,
                     numNodes: int,
+                    logDebugPartitions: string list,
+                    logTracePartitions: string list,
                     containerMaxCpuMili: int,
                     containerMaxMemMega: int,
                     namespaceQuotaLimCpuMili: int,
@@ -201,6 +222,12 @@ type MissionOptions(kubeConfig: string,
     [<Option('n', "num-nodes", HelpText="Number of nodes in config",
              Required = false, Default = 5)>]
     member self.NumNodes = numNodes
+
+    [<Option("debug", HelpText="Log-partitions to set to 'debug' level")>]
+    member self.LogDebugPartitions = logDebugPartitions
+
+    [<Option("trace", HelpText="Log-partitions to set to 'trace' level")>]
+    member self.LogTracePartitions = logTracePartitions
 
     // Getting quotas and limits right needs _seven_ arguments
 
@@ -310,6 +337,8 @@ let main argv =
     | :? SetupOptions as setup ->
       let kube = ConnectToCluster setup.KubeConfig
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = setup.NumNodes }
+      let ll = { LogDebugPartitions = setup.LogDebugPartitions
+                 LogTracePartitions = setup.LogTracePartitions }
       let nq = MakeNetworkQuotas (setup.ContainerMaxCpuMili,
                                   setup.ContainerMaxMemMega,
                                   setup.NamespaceQuotaLimCpuMili,
@@ -319,7 +348,7 @@ let main argv =
                                   setup.NumConcurrentMissions)
       let nCfg = MakeNetworkCfg [coreSet]
                                 setup.NamespaceProperty
-                                nq
+                                nq ll
                                 setup.IngressDomain None
       use formation = kube.MakeFormation nCfg None false setup.ProbeTimeout
       formation.ReportStatus()
@@ -327,6 +356,8 @@ let main argv =
 
     | :? CleanOptions as clean ->
       let kube = ConnectToCluster clean.KubeConfig
+      let ll = { LogDebugPartitions = clean.LogDebugPartitions
+                 LogTracePartitions = clean.LogTracePartitions }
       let nq = MakeNetworkQuotas (clean.ContainerMaxCpuMili,
                                   clean.ContainerMaxMemMega,
                                   clean.NamespaceQuotaLimCpuMili,
@@ -336,7 +367,7 @@ let main argv =
                                   clean.NumConcurrentMissions)
       let nCfg = MakeNetworkCfg []
                                 clean.NamespaceProperty
-                                nq
+                                nq ll
                                 clean.IngressDomain None
       use formation = kube.MakeEmptyFormation nCfg
       formation.CleanNamespace()
@@ -345,6 +376,8 @@ let main argv =
     | :? LoadgenOptions as loadgen ->
       let kube = ConnectToCluster loadgen.KubeConfig
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = loadgen.NumNodes }
+      let ll = { LogDebugPartitions = loadgen.LogDebugPartitions
+                 LogTracePartitions = loadgen.LogTracePartitions }
       let nq = MakeNetworkQuotas (loadgen.ContainerMaxCpuMili,
                                   loadgen.ContainerMaxMemMega,
                                   loadgen.NamespaceQuotaLimCpuMili,
@@ -354,7 +387,7 @@ let main argv =
                                   loadgen.NumConcurrentMissions)
       let nCfg = MakeNetworkCfg [coreSet]
                                 loadgen.NamespaceProperty
-                                nq
+                                nq ll
                                 loadgen.IngressDomain None
       use formation = kube.MakeFormation nCfg None false loadgen.ProbeTimeout
       formation.RunLoadgenAndCheckNoErrors coreSet
@@ -369,6 +402,8 @@ let main argv =
                                   mission.NamespaceQuotaReqCpuMili,
                                   mission.NamespaceQuotaReqMemMega,
                                   mission.NumConcurrentMissions)
+      let ll = { LogDebugPartitions = mission.LogDebugPartitions
+                 LogTracePartitions = mission.LogTracePartitions }
       match Seq.tryFind (allMissions.ContainsKey >> not) mission.Missions with
         | Some e ->
             begin
@@ -402,6 +437,7 @@ let main argv =
                                                    numTxs = mission.NumTxs
                                                    numNodes = mission.NumNodes
                                                    quotas = nq
+                                                   logLevels = ll
                                                    ingressDomain = mission.IngressDomain
                                                    persistentVolume = persistentVolume
                                                    namespaceProperty = mission.NamespaceProperty

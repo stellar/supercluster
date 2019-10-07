@@ -18,6 +18,10 @@ type NetworkNonce =
         // "ssc" == "stellar supercluster", just to help group namespaces.
         "ssc-" + (Util.BytesToHex n).ToLower()
 
+type LogLevels =
+    { LogDebugPartitions: string list
+      LogTracePartitions: string list }
+
 // Resource allocation in k8s is quite complex.
 //
 // The namespace itself has a _quota_ which applies to the sum of all
@@ -125,6 +129,7 @@ type NetworkCfg =
       namespaceProperty : string
       coreSets : Map<string,CoreSet>
       quotas: NetworkQuotas
+      logLevels: LogLevels
       ingressDomain : string }
 
     member self.FindCoreSet (n:string) : CoreSet =
@@ -184,6 +189,7 @@ let MakeNetworkCfg
         (coreSetList: CoreSet list)
         (namespaceProperty: string)
         (quotas: NetworkQuotas)
+        (logLevels: LogLevels)
         (ingressDomain: string)
         (passphrase: NetworkPassphrase option) : NetworkCfg =
     let nonce = MakeNetworkNonce()
@@ -194,4 +200,5 @@ let MakeNetworkCfg
       namespaceProperty = namespaceProperty
       coreSets = List.map (fun cs -> (cs.name, cs)) coreSetList |> Map.ofList
       quotas = quotas
+      logLevels = logLevels
       ingressDomain = ingressDomain }
