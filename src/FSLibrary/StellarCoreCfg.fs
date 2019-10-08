@@ -118,7 +118,7 @@ type StellarCoreCfg =
         t.Add("ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING", self.accelerateTime) |> ignore
         t.Add("ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING", self.generateLoad) |> ignore
         t.Add("MANUAL_CLOSE", self.manualClose) |> ignore
-        //t.Add("INVARIANT_CHECKS", self.invariantChecks) |> ignore
+        t.Add("INVARIANT_CHECKS", self.invariantChecks) |> ignore
         t.Add("UNSAFE_QUORUM", self.unsafeQuorum) |> ignore
         t.Add("FAILURE_SAFETY", self.failureSafety) |> ignore
         t.Add("QUORUM_SET", Map.ofSeq [| ("VALIDATORS", qset) |]) |> ignore
@@ -213,7 +213,10 @@ type NetworkCfg with
           accelerateTime = c.options.accelerateTime
           generateLoad = true
           manualClose = false
-          invariantChecks = [".*"]
+          // FIXME: see bug https://github.com/stellar/stellar-core/issues/2304
+          // the BucketListIsConsistentWithDatabase invariant blocks too long,
+          // so we explicitly disable it here.
+          invariantChecks = ["(?!BucketListIsConsistentWithDatabase).*"]
           unsafeQuorum = c.options.unsafeQuorum
           failureSafety = (-1)
           quorumSet = self.QuorumSet c.options
