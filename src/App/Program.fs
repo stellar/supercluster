@@ -319,9 +319,18 @@ type PollOptions(kubeConfig: string) =
 [<EntryPoint>]
 let main argv =
 
-  Log.Logger <- LoggerConfiguration()
+  let logToConsoleOnly _ =
+      Log.Logger <- LoggerConfiguration()
                     .MinimumLevel.Debug()
-                    .WriteTo.Console().CreateLogger()
+                    .WriteTo.Console()
+                    .CreateLogger()
+
+  let logToConsoleAndFile (file:string) =
+      Log.Logger <- LoggerConfiguration()
+                    .MinimumLevel.Debug()
+                    .WriteTo.Console()
+                    .WriteTo.File(file)
+                    .CreateLogger()
 
   AuxClass.CheckCSharpWorksToo()
   let result = CommandLine.Parser.Default.ParseArguments<SetupOptions,
@@ -335,6 +344,7 @@ let main argv =
     match command.Value with
 
     | :? SetupOptions as setup ->
+      let _ = logToConsoleOnly()
       let kube = ConnectToCluster setup.KubeConfig
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = setup.NumNodes }
       let ll = { LogDebugPartitions = List.ofSeq setup.LogDebugPartitions
@@ -355,6 +365,7 @@ let main argv =
       0
 
     | :? CleanOptions as clean ->
+      let _ = logToConsoleOnly()
       let kube = ConnectToCluster clean.KubeConfig
       let ll = { LogDebugPartitions = List.ofSeq clean.LogDebugPartitions
                  LogTracePartitions = List.ofSeq clean.LogTracePartitions }
@@ -374,6 +385,7 @@ let main argv =
       0
 
     | :? LoadgenOptions as loadgen ->
+      let _ = logToConsoleOnly()
       let kube = ConnectToCluster loadgen.KubeConfig
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = loadgen.NumNodes }
       let ll = { LogDebugPartitions = List.ofSeq loadgen.LogDebugPartitions
@@ -395,6 +407,8 @@ let main argv =
       0
 
     | :? MissionOptions as mission ->
+      let _ = logToConsoleAndFile (sprintf "%s/stellar-supercluster.log"
+                                           mission.Destination)
       let nq = MakeNetworkQuotas (mission.ContainerMaxCpuMili,
                                   mission.ContainerMaxMemMega,
                                   mission.NamespaceQuotaLimCpuMili,
