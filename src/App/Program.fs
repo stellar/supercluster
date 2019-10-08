@@ -24,8 +24,8 @@ type KubeOption(kubeConfig: string) =
 
 type CommonOptions(kubeConfig: string,
                    numNodes: int,
-                   logDebugPartitions: string list,
-                   logTracePartitions: string list,
+                   logDebugPartitions: seq<string>,
+                   logTracePartitions: seq<string>,
                    containerMaxCpuMili: int,
                    containerMaxMemMega: int,
                    namespaceQuotaLimCpuMili: int,
@@ -192,8 +192,8 @@ type LoadgenOptions(kubeConfig: string,
 [<Verb("mission", HelpText="Run one or more named missions")>]
 type MissionOptions(kubeConfig: string,
                     numNodes: int,
-                    logDebugPartitions: string list,
-                    logTracePartitions: string list,
+                    logDebugPartitions: seq<string>,
+                    logTracePartitions: seq<string>,
                     containerMaxCpuMili: int,
                     containerMaxMemMega: int,
                     namespaceQuotaLimCpuMili: int,
@@ -337,8 +337,8 @@ let main argv =
     | :? SetupOptions as setup ->
       let kube = ConnectToCluster setup.KubeConfig
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = setup.NumNodes }
-      let ll = { LogDebugPartitions = setup.LogDebugPartitions
-                 LogTracePartitions = setup.LogTracePartitions }
+      let ll = { LogDebugPartitions = List.ofSeq setup.LogDebugPartitions
+                 LogTracePartitions = List.ofSeq setup.LogTracePartitions }
       let nq = MakeNetworkQuotas (setup.ContainerMaxCpuMili,
                                   setup.ContainerMaxMemMega,
                                   setup.NamespaceQuotaLimCpuMili,
@@ -356,8 +356,8 @@ let main argv =
 
     | :? CleanOptions as clean ->
       let kube = ConnectToCluster clean.KubeConfig
-      let ll = { LogDebugPartitions = clean.LogDebugPartitions
-                 LogTracePartitions = clean.LogTracePartitions }
+      let ll = { LogDebugPartitions = List.ofSeq clean.LogDebugPartitions
+                 LogTracePartitions = List.ofSeq clean.LogTracePartitions }
       let nq = MakeNetworkQuotas (clean.ContainerMaxCpuMili,
                                   clean.ContainerMaxMemMega,
                                   clean.NamespaceQuotaLimCpuMili,
@@ -376,8 +376,8 @@ let main argv =
     | :? LoadgenOptions as loadgen ->
       let kube = ConnectToCluster loadgen.KubeConfig
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = loadgen.NumNodes }
-      let ll = { LogDebugPartitions = loadgen.LogDebugPartitions
-                 LogTracePartitions = loadgen.LogTracePartitions }
+      let ll = { LogDebugPartitions = List.ofSeq loadgen.LogDebugPartitions
+                 LogTracePartitions = List.ofSeq loadgen.LogTracePartitions }
       let nq = MakeNetworkQuotas (loadgen.ContainerMaxCpuMili,
                                   loadgen.ContainerMaxMemMega,
                                   loadgen.NamespaceQuotaLimCpuMili,
@@ -402,8 +402,8 @@ let main argv =
                                   mission.NamespaceQuotaReqCpuMili,
                                   mission.NamespaceQuotaReqMemMega,
                                   mission.NumConcurrentMissions)
-      let ll = { LogDebugPartitions = mission.LogDebugPartitions
-                 LogTracePartitions = mission.LogTracePartitions }
+      let ll = { LogDebugPartitions = List.ofSeq mission.LogDebugPartitions
+                 LogTracePartitions = List.ofSeq mission.LogTracePartitions }
       match Seq.tryFind (allMissions.ContainsKey >> not) mission.Missions with
         | Some e ->
             begin
