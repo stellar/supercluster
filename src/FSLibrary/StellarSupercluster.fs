@@ -118,8 +118,8 @@ type ClusterFormation(networkCfg: NetworkCfg,
         self.Cleanup(false)
 
     override self.ToString() : string =
-        let name = statefulSets.[0].Metadata.Name
-        let ns = statefulSets.[0].Metadata.NamespaceProperty
+        let name = networkCfg.ServiceName
+        let ns = networkCfg.NamespaceProperty
         sprintf "%s/%s" ns name
 
     // Watches the provided StatefulSet until the count of ready replicas equals the
@@ -141,7 +141,8 @@ type ClusterFormation(networkCfg: NetworkCfg,
             use task = kube.WatchNamespacedStatefulSetAsync(name = name,
                                                             ``namespace`` = ns,
                                                             onEvent = handler)
-            if event.Wait(millisecondsTimeout = 10000 * ss.Spec.Replicas.Value)
+            let timeout = 10000 * (max 1 (ss.Spec.Replicas.GetValueOrDefault(0)))
+            if event.Wait(millisecondsTimeout = timeout)
             then ()
             else if n = 0
                  then let msg = "Failed to start replicas on " + (self.ToString())
