@@ -218,7 +218,7 @@ type NetworkCfg with
           // so we explicitly disable it here.
           invariantChecks = ["(?!BucketListIsConsistentWithDatabase).*"]
           unsafeQuorum = c.options.unsafeQuorum
-          failureSafety = (-1)
+          failureSafety = 0
           quorumSet = self.QuorumSet c.options
           historyNodes = self.HistoryNodes c.options
           historyGetCommands = c.options.historyGetCommands }
