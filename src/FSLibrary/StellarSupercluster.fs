@@ -125,20 +125,32 @@ type ClusterFormation(networkCfg: NetworkCfg,
     // Watches the provided StatefulSet until the count of ready replicas equals the
     // count of configured replicas. This normally represents "successful startup".
     member self.WaitForAllReplicasReady (ss : V1StatefulSet) =
-        use event = new System.Threading.ManualResetEventSlim(false)
         let name = ss.Metadata.Name
         let ns = ss.Metadata.NamespaceProperty
-        let handler (ety:WatchEventType) (ss:V1StatefulSet) =
-            let n = ss.Status.ReadyReplicas.GetValueOrDefault(0)
-            let k = ss.Spec.Replicas.GetValueOrDefault(0)
-            LogInfo "StatefulSet %s/%s: %d/%d replicas ready" ns name n k;
-            if n = k then event.Set()
-        let action = System.Action<WatchEventType, V1StatefulSet>(handler)
-        use task = kube.WatchNamespacedStatefulSetAsync(name = name,
-                                                        ``namespace`` = ns,
-                                                        onEvent = handler)
         LogInfo "Waiting for replicas on %s/%s" ns name
-        event.Wait()
+        // Sometimes the "Wait" call here stalls out, presumably due to
+        // a failure in the watch subscription: retry up to 10 times.
+        let rec tryWait (n:int) =
+            use event = new System.Threading.ManualResetEventSlim(false)
+            let handler (ety:WatchEventType) (ss:V1StatefulSet) =
+                let n = ss.Status.ReadyReplicas.GetValueOrDefault(0)
+                let k = ss.Spec.Replicas.GetValueOrDefault(0)
+                LogInfo "StatefulSet %s/%s: %d/%d replicas ready" ns name n k;
+                if n = k then event.Set()
+            let action = System.Action<WatchEventType, V1StatefulSet>(handler)
+            use task = kube.WatchNamespacedStatefulSetAsync(name = name,
+                                                            ``namespace`` = ns,
+                                                            onEvent = handler)
+            if event.Wait(millisecondsTimeout = 10000 * ss.Spec.Replicas.Value)
+            then ()
+            else if n = 0
+                 then let msg = "Failed to start replicas on " + (self.ToString())
+                      LogError "%s" msg
+                      failwith msg
+                 else
+                      LogWarn "Retrying replica-start on %s" (self.ToString())
+                      tryWait (n-1)
+        tryWait 10
         LogInfo "All replicas on %s/%s ready" ns name
 
     // Watches the provided StatefulSet until the count of ready replicas equals the
