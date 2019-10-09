@@ -129,7 +129,7 @@ type ClusterFormation(networkCfg: NetworkCfg,
         let ns = ss.Metadata.NamespaceProperty
         LogInfo "Waiting for replicas on %s/%s" ns name
         // Sometimes the "Wait" call here stalls out, presumably due to
-        // a failure in the watch subscription: retry up to 10 times.
+        // a failure in the watch subscription: retry up to 100 times.
         let rec tryWait (n:int) =
             use event = new System.Threading.ManualResetEventSlim(false)
             let handler (ety:WatchEventType) (ss:V1StatefulSet) =
@@ -145,13 +145,14 @@ type ClusterFormation(networkCfg: NetworkCfg,
             if event.Wait(millisecondsTimeout = timeout)
             then ()
             else if n = 0
-                 then let msg = "Failed to start replicas on " + (self.ToString())
+                 then let msg = "Failed to start replicas on sts " + ss.Metadata.Name
                       LogError "%s" msg
                       failwith msg
                  else
-                      LogWarn "Retrying replica-start on %s" (self.ToString())
+                      LogWarn "Retrying replica-start %d more times on sts %s"
+                          (n-1) ss.Metadata.Name
                       tryWait (n-1)
-        tryWait 10
+        tryWait 100
         LogInfo "All replicas on %s/%s ready" ns name
 
     // Watches the provided StatefulSet until the count of ready replicas equals the

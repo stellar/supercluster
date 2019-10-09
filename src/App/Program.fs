@@ -92,7 +92,7 @@ type CommonOptions(kubeConfig: string,
     member self.IngressDomain = ingressDomain
 
     [<Option("probe-timeout", HelpText="Timeout for liveness probe",
-             Required = false, Default = 1)>]
+             Required = false, Default = 5)>]
     member self.ProbeTimeout = probeTimeout
 
 
@@ -268,7 +268,7 @@ type MissionOptions(kubeConfig: string,
     member self.IngressDomain = ingressDomain
 
     [<Option("probe-timeout", HelpText="Timeout for liveness probe",
-             Required = false, Default = 1)>]
+             Required = false, Default = 5)>]
     member self.ProbeTimeout = probeTimeout
 
     [<Value(0, Required = true)>]

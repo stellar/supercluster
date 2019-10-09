@@ -64,7 +64,8 @@ let CoreContainerForCommand (q:NetworkQuotas) (numContainers:int)
 let WithReadinessProbe (container:V1Container) probeTimeout : V1Container =
     let httpPortStr = IntstrIntOrString(value = CfgVal.httpPort.ToString())
     let readyProbe = V1Probe(periodSeconds = System.Nullable<int>(5),
-                             initialDelaySeconds = System.Nullable<int>(5),
+                             initialDelaySeconds = System.Nullable<int>(10),
+                             failureThreshold = System.Nullable<int>(6),
                              timeoutSeconds = System.Nullable<int>(probeTimeout),
                              httpGet = V1HTTPGetAction(path = "/info",
                                                        port = httpPortStr))
