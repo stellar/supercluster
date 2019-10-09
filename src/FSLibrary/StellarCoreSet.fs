@@ -22,6 +22,18 @@ type CoreSetInitialization =
         initialCatchup = false
         forceScp = true }
 
+    static member DefaultNoForceSCP =
+      { newDb = true
+        newHist = true
+        initialCatchup = false
+        forceScp = false }
+
+    static member CatchupNoForceSCP =
+      { newDb = true
+        newHist = true
+        initialCatchup = true
+        forceScp = false }
+
 
 type CoreSetOptions =
     { nodeCount : int
@@ -40,6 +52,9 @@ type CoreSetOptions =
       persistentVolume : string option
       initialization : CoreSetInitialization
       dumpDatabase: bool }
+
+    member self.WithForceSCP (f:bool) =
+        { self with initialization = { self.initialization with forceScp = f } }
 
     static member Default =
       { nodeCount = 3

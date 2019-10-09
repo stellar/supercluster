@@ -27,7 +27,8 @@ let MakeCatchupSets (options: CatchupMissionOptions) =
     let generatorOptions = { CoreSetOptions.Default with nodeCount = 1; quorumSet = Some(["generator"]); accelerateTime = true; image = Some(options.generatorImage) }
     let generatorSet = MakeLiveCoreSet "generator" generatorOptions
 
-    let newNodeOptions = { CoreSetOptions.Default with nodeCount = 1; quorumSet = Some(["generator"]); accelerateTime = true; image = Some(options.catchupImage) }
+    let newNodeOptions = { CoreSetOptions.Default with nodeCount = 1; quorumSet = Some(["generator"]); accelerateTime = true; image = Some(options.catchupImage);
+                                                       initialization = { CoreSetOptions.Default.initialization with forceScp = false }}
     let minimal1Options =  { newNodeOptions with catchupMode = CatchupRecent(0) }
     let minimal1Set = MakeDeferredCoreSet "minimal1" minimal1Options
 
