@@ -132,11 +132,14 @@ type ClusterFormation(networkCfg: NetworkCfg,
         // a failure in the watch subscription: retry up to 100 times.
         let rec tryWait (n:int) =
             use event = new System.Threading.ManualResetEventSlim(false)
+            let mutable active = true
             let handler (ety:WatchEventType) (ss:V1StatefulSet) =
-                let n = ss.Status.ReadyReplicas.GetValueOrDefault(0)
-                let k = ss.Spec.Replicas.GetValueOrDefault(0)
-                LogInfo "StatefulSet %s/%s: %d/%d replicas ready" ns name n k;
-                if n = k then event.Set()
+                if active
+                then
+                    let n = ss.Status.ReadyReplicas.GetValueOrDefault(0)
+                    let k = ss.Spec.Replicas.GetValueOrDefault(0)
+                    LogInfo "StatefulSet %s/%s: %d/%d replicas ready" ns name n k;
+                    if n = k then event.Set()
             let action = System.Action<WatchEventType, V1StatefulSet>(handler)
             use task = kube.WatchNamespacedStatefulSetAsync(name = name,
                                                             ``namespace`` = ns,
@@ -144,14 +147,16 @@ type ClusterFormation(networkCfg: NetworkCfg,
             let timeout = 10000 * (max 1 (ss.Spec.Replicas.GetValueOrDefault(0)))
             if event.Wait(millisecondsTimeout = timeout)
             then ()
-            else if n = 0
-                 then let msg = "Failed to start replicas on sts " + ss.Metadata.Name
-                      LogError "%s" msg
-                      failwith msg
-                 else
-                      LogWarn "Retrying replica-start %d more times on sts %s"
-                          (n-1) ss.Metadata.Name
-                      tryWait (n-1)
+            else
+                active <- false
+                if n = 0
+                then let msg = "Failed to start replicas on sts " + ss.Metadata.Name
+                     LogError "%s" msg
+                     failwith msg
+                else
+                    LogWarn "Retrying replica-start %d more times on sts %s"
+                        (n-1) ss.Metadata.Name
+                    tryWait (n-1)
         tryWait 100
         LogInfo "All replicas on %s/%s ready" ns name
 
