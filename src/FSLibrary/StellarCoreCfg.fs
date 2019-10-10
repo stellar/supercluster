@@ -30,7 +30,10 @@ module CfgVal =
     let localHistName = "local"
     let peerNameEnvVarName = "STELLAR_CORE_PEER_SHORT_NAME"
     let peerNameEnvCfgFile = cfgVolumePath + "/$(STELLAR_CORE_PEER_SHORT_NAME).cfg"
-    let historyCfgFile = cfgVolumePath + "/nginx.conf"
+    let jobCfgFilename = "job.cfg"
+    let jobCfgFile = cfgVolumePath + "/" + jobCfgFilename
+    let historyCfgFilename = "nginx.conf"
+    let historyCfgFile = cfgVolumePath + "/" + historyCfgFilename
 
 
 // Symbolic type of the different sorts of DATABASE that can show up in a
@@ -198,6 +201,30 @@ type NetworkCfg with
         match o.peers with
         | None -> List.concat [self.DnsNames() |> List.ofArray; o.peersDns ]
         | Some(x) -> List.concat [self.DnsNames(x) |> List.ofArray; o.peersDns ]
+
+    member self.StellarCoreCfgForJob(opts:CoreSetOptions) : StellarCoreCfg =
+        { network = self
+          database = SQLite3File CfgVal.databasePath
+          networkPassphrase = self.networkPassphrase
+          nodeSeed = KeyPair.Random()
+          nodeIsValidator = false
+          runStandalone = false
+          preferredPeers = self.PreferredPeers opts
+          catchupMode = opts.catchupMode
+          automaticMaintenancePeriod = 0
+          automaticMaintenanceCount = 0
+          accelerateTime = opts.accelerateTime
+          generateLoad = true
+          manualClose = false
+          // FIXME: see bug https://github.com/stellar/stellar-core/issues/2304
+          // the BucketListIsConsistentWithDatabase invariant blocks too long,
+          // so we explicitly disable it here.
+          invariantChecks = ["(?!BucketListIsConsistentWithDatabase).*"]
+          unsafeQuorum = opts.unsafeQuorum
+          failureSafety = 0
+          quorumSet = self.QuorumSet opts
+          historyNodes = self.HistoryNodes opts
+          historyGetCommands = opts.historyGetCommands }
 
     member self.StellarCoreCfg(c:CoreSet, i:int) : StellarCoreCfg =
         { network = self

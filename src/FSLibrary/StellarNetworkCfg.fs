@@ -128,6 +128,7 @@ type NetworkCfg =
       networkPassphrase : NetworkPassphrase
       namespaceProperty : string
       coreSets : Map<string,CoreSet>
+      jobCoreSetOptions : CoreSetOptions option
       quotas: NetworkQuotas
       logLevels: LogLevels
       ingressDomain : string }
@@ -199,6 +200,7 @@ let MakeNetworkCfg
                           | Some(x) -> x
       namespaceProperty = namespaceProperty
       coreSets = List.map (fun cs -> (cs.name, cs)) coreSetList |> Map.ofList
+      jobCoreSetOptions = None
       quotas = quotas
       logLevels = logLevels
       ingressDomain = ingressDomain }

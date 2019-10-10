@@ -39,13 +39,27 @@ type MissionContext =
       keepData : bool
       probeTimeout : int }
 
+    member self.MakeFormation (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option) : ClusterFormation =
+        let networkCfg =
+            MakeNetworkCfg coreSetList
+                self.namespaceProperty
+                self.quotas
+                self.logLevels
+                self.ingressDomain passphrase
+        self.kube.MakeFormation networkCfg (Some(self.persistentVolume)) self.keepData self.probeTimeout
+
+    member self.MakeFormationForJob (opts:CoreSetOptions) (passphrase: NetworkPassphrase option) : ClusterFormation =
+        let networkCfg =
+            MakeNetworkCfg []
+                self.namespaceProperty
+                self.quotas
+                self.logLevels
+                self.ingressDomain passphrase
+        let networkCfg = { networkCfg with jobCoreSetOptions = Some(opts) }
+        self.kube.MakeFormation networkCfg None self.keepData self.probeTimeout
+
     member self.Execute (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option) (run:ClusterFormation->unit) : unit =
-      let networkCfg = MakeNetworkCfg coreSetList
-                                      self.namespaceProperty
-                                      self.quotas
-                                      self.logLevels
-                                      self.ingressDomain passphrase
-      use formation = self.kube.MakeFormation networkCfg (Some(self.persistentVolume)) self.keepData self.probeTimeout
+      use formation = self.MakeFormation coreSetList passphrase
       try
           try
               formation.WaitUntilReady()
@@ -62,13 +76,8 @@ type MissionContext =
     member self.ExecuteWithPerformanceReporter
             (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option)
             (run:ClusterFormation->PerformanceReporter->unit) : unit =
-      let networkCfg = MakeNetworkCfg coreSetList
-                                      self.namespaceProperty
-                                      self.quotas
-                                      self.logLevels
-                                      self.ingressDomain passphrase
-      use formation = self.kube.MakeFormation networkCfg (Some(self.persistentVolume)) self.keepData self.probeTimeout
-      let performanceReporter = PerformanceReporter networkCfg
+      use formation = self.MakeFormation coreSetList passphrase
+      let performanceReporter = PerformanceReporter formation.NetworkCfg
       try
           try
               formation.WaitUntilReady()

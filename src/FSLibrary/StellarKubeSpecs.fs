@@ -32,7 +32,7 @@ let HistoryContainer =
 // This is admittedly a bit convoluted, but it's the simplest mechanism I could
 // figure out to furnish each stellar-core with a Pod-specific config file.
 let CoreContainerForCommand (q:NetworkQuotas) (numContainers:int)
-        (image:string) (subCommands:string array) : V1Container =
+        (image:string) (isJob:bool) (subCommands:string array) : V1Container =
     let peerNameFieldSel = V1ObjectFieldSelector(fieldPath = "metadata.name")
     let peerNameEnvVarSource = V1EnvVarSource(fieldRef = peerNameFieldSel)
     let peerNameEnvVar = V1EnvVar(name = CfgVal.peerNameEnvVarName,
@@ -48,12 +48,14 @@ let CoreContainerForCommand (q:NetworkQuotas) (numContainers:int)
                       "memory", ResourceQuantity(sprintf "%dMi" memLim)]
     let requirements = V1ResourceRequirements(requests = requests,
                                               limits = limits)
-
+    let cfgFile = if isJob
+                  then CfgVal.jobCfgFile
+                  else CfgVal.peerNameEnvCfgFile
     V1Container
         (name = "stellar-core-" + (Array.get subCommands 0),
          image = image,
          command = [| CfgVal.stellarCoreBinPath |], env = [| peerNameEnvVar |],
-         args = Array.append subCommands [| "--conf"; CfgVal.peerNameEnvCfgFile |],
+         args = Array.append subCommands [| "--conf"; cfgFile |],
          resources = requirements,
          volumeMounts = [| V1VolumeMount(name = CfgVal.dataVolumeName,
                                          mountPath = CfgVal.dataVolumePath)
@@ -85,7 +87,7 @@ type NetworkCfg with
                      namespaceProperty = self.NamespaceProperty)
 
     member self.HistoryConfig() : (string * string) =
-        ("nginx.conf", sprintf "
+        (CfgVal.historyCfgFilename, sprintf "
           error_log /var/log/nginx.error_log debug;\n
           daemon off;
           user root root;
@@ -98,6 +100,10 @@ type NetworkCfg with
             }\n
           }" CfgVal.historyPath)
 
+    member self.JobConfig(opts:CoreSetOptions) : (string * string) =
+        let cfg = self.StellarCoreCfgForJob opts
+        (CfgVal.jobCfgFilename, (cfg.ToString()))
+
     // Returns a ConfigMap dictionary that names "peer-0.cfg".."peer-N.cfg" to
     // TOML config file data for each such config. Mounting this ConfigMap on a
     // Pod will provide it access to _all_ the configs in the network, but it
@@ -108,9 +114,30 @@ type NetworkCfg with
     member self.ToConfigMap() : V1ConfigMap =
         let peerKeyValPair (coreSet: CoreSet) i = (self.PeerCfgName coreSet i, (self.StellarCoreCfg (coreSet, i)).ToString())
         let cfgs = Array.append (self.MapAllPeers peerKeyValPair) [| self.HistoryConfig() |]
-        V1ConfigMap(metadata = V1ObjectMeta(name = self.CfgMapName,
-                                            namespaceProperty = self.NamespaceProperty),
+        let cfgs = match self.jobCoreSetOptions with
+                   | None -> cfgs
+                   | Some(opts) -> Array.append cfgs [| self.JobConfig(opts) |]
+        V1ConfigMap(metadata = self.NamespacedMeta self.CfgMapName,
                     data = Map.ofSeq cfgs)
+
+    member self.GetJobPodTemplateSpec (commands: string array array) : V1PodTemplateSpec =
+        let maxPeers = 1
+        let imageName = CfgVal.stellarCoreImageName
+        let containers = Array.map (CoreContainerForCommand self.quotas maxPeers imageName true) commands
+        let cfgVol = V1Volume(name = CfgVal.cfgVolumeName,
+                              configMap = V1ConfigMapVolumeSource(name = self.CfgMapName))
+        let dataVol = V1Volume(name = CfgVal.dataVolumeName,
+                               emptyDir = V1EmptyDirVolumeSource(medium = "Memory"))
+        V1PodTemplateSpec
+                (spec = V1PodSpec (containers = containers,
+                                   volumes = [| cfgVol; dataVol |],
+                                   restartPolicy = "Never"),
+                 metadata = V1ObjectMeta(labels = CfgVal.labels,
+                                         namespaceProperty = self.NamespaceProperty))
+
+    member self.GetJobFor (commands: string array array) : V1Job =
+        V1Job(spec = V1JobSpec(template = self.GetJobPodTemplateSpec commands),
+              metadata = self.NamespacedMeta "job")
 
     // Returns a PodTemplate that mounts the ConfigMap on /cfg and an empty data
     // volume on /data. Then initializes a local stellar-core database in
@@ -145,11 +172,11 @@ type NetworkCfg with
         let volumes = [| cfgVol; dataVol |]
         let maxPeers = max 1 self.MaxPeerCount
         let initContianers = Array.map
-                                 (fun p -> CoreContainerForCommand self.quotas maxPeers imageName p)
+                                 (fun p -> CoreContainerForCommand self.quotas maxPeers imageName false p)
                                  (initSequence coreSet.options.initialization)
 
         let containers = [| WithReadinessProbe
-                                (CoreContainerForCommand self.quotas maxPeers imageName [| "run" |])
+                                (CoreContainerForCommand self.quotas maxPeers imageName false [| "run" |])
                                 probeTimeout;
                             HistoryContainer; |]
 

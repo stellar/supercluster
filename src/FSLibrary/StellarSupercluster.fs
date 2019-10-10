@@ -143,7 +143,7 @@ type ClusterFormation(networkCfg: NetworkCfg,
             let action = System.Action<WatchEventType, V1StatefulSet>(handler)
             use task = kube.WatchNamespacedStatefulSetAsync(name = name,
                                                             ``namespace`` = ns,
-                                                            onEvent = handler)
+                                                            onEvent = action)
             let timeout = 10000 * (max 1 (ss.Spec.Replicas.GetValueOrDefault(0)))
             if event.Wait(millisecondsTimeout = timeout)
             then ()
@@ -188,6 +188,19 @@ type ClusterFormation(networkCfg: NetworkCfg,
 
     member self.WaitUntilReady () =
         networkCfg.EachPeer (fun p -> p.WaitUntilReady())
+
+    member self.StartJob (j:V1Job) : V1Job =
+        try
+            self.Kube.CreateNamespacedJob(body=j, namespaceParameter = networkCfg.NamespaceProperty)
+        with
+        | :? HttpOperationException as w ->
+            LogError "err: %s" w.Message
+            LogError "err: %s" w.Response.Content
+            LogError "err: %s" w.Response.ReasonPhrase
+            reraise()
+
+    member self.StartJobForCmds (cmds:string array array) : V1Job =
+        self.StartJob (networkCfg.GetJobFor cmds)
 
     member self.WaitUntilSynced (coreSetList: CoreSet list) =
         networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.WaitUntilSynced())
@@ -300,9 +313,11 @@ type Kubernetes with
                                                            body = svc)
                 namespaceContent.Add(service)
 
-            let ingress = self.CreateNamespacedIngress(namespaceParameter = nsStr,
-                                         body = nCfg.ToIngress())
-            namespaceContent.Add(ingress)
+            if not (List.isEmpty statefulSets)
+            then
+                let ingress = self.CreateNamespacedIngress(namespaceParameter = nsStr,
+                                                           body = nCfg.ToIngress())
+                namespaceContent.Add(ingress)
 
             let formation = new ClusterFormation(networkCfg = nCfg,
                                                  kube = self,
