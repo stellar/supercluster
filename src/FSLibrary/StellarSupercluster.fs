@@ -191,7 +191,11 @@ type ClusterFormation(networkCfg: NetworkCfg,
 
     member self.StartJob (j:V1Job) : V1Job =
         try
-            self.Kube.CreateNamespacedJob(body=j, namespaceParameter = networkCfg.NamespaceProperty)
+            let ns = networkCfg.NamespaceProperty
+            let j = self.Kube.CreateNamespacedJob(body=j,
+                                                  namespaceParameter = ns)
+            namespaceContent.Add(j)
+            j
         with
         | :? HttpOperationException as w ->
             LogError "err: %s" w.Message
@@ -200,7 +204,7 @@ type ClusterFormation(networkCfg: NetworkCfg,
             reraise()
 
     member self.StartJobForCmds (cmds:string array array) : V1Job =
-        self.StartJob (networkCfg.GetJobFor cmds)
+        self.StartJob (networkCfg.GetJobFor (namespaceContent.NumJobs) cmds)
 
     member self.WaitUntilSynced (coreSetList: CoreSet list) =
         networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.WaitUntilSynced())

@@ -168,6 +168,9 @@ type NetworkCfg =
     member self.IngressName : string =
         sprintf "%s-stellar-core-ingress" self.Nonce
 
+    member self.JobName(i:int) : string =
+        sprintf "%s-stellar-core-job-%d" self.Nonce i
+
     member self.CfgMapName : string =
         sprintf "%s-stellar-core-cfg" self.Nonce
 

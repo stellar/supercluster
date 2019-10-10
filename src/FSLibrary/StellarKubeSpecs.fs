@@ -135,9 +135,9 @@ type NetworkCfg with
                  metadata = V1ObjectMeta(labels = CfgVal.labels,
                                          namespaceProperty = self.NamespaceProperty))
 
-    member self.GetJobFor (commands: string array array) : V1Job =
+    member self.GetJobFor (jobNum:int) (commands: string array array) : V1Job =
         V1Job(spec = V1JobSpec(template = self.GetJobPodTemplateSpec commands),
-              metadata = self.NamespacedMeta "job")
+              metadata = self.NamespacedMeta (self.JobName jobNum))
 
     // Returns a PodTemplate that mounts the ConfigMap on /cfg and an empty data
     // volume on /data. Then initializes a local stellar-core database in

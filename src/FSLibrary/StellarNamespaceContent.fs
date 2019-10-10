@@ -17,6 +17,7 @@ type NamespaceContent(kube: Kubernetes,
     let mutable statefulSetList: string list = []
     let mutable persistentVolumeClaimList: string list = []
     let mutable ingressList: string list = []
+    let mutable jobList: string list = []
 
     member self.Cleanup() =
         let safeDelete f list =
@@ -31,6 +32,7 @@ type NamespaceContent(kube: Kubernetes,
         safeDelete (fun name -> kube.DeleteNamespacedStatefulSet(namespaceParameter = namespaceProperty, name = name, propagationPolicy = "Foreground")) statefulSetList
         safeDelete (fun name -> kube.DeleteNamespacedPersistentVolumeClaim(namespaceParameter = namespaceProperty, name = name, propagationPolicy = "Foreground")) persistentVolumeClaimList
         safeDelete (fun name -> kube.DeleteNamespacedIngress(namespaceParameter = namespaceProperty, name = name, propagationPolicy = "Foreground")) ingressList
+        safeDelete (fun name -> kube.DeleteNamespacedJob(namespaceParameter = namespaceProperty, name = name, propagationPolicy = "Foreground")) jobList
 
     member self.Add(service: V1Service) =
         serviceList <- service.Metadata.Name :: serviceList
@@ -47,6 +49,12 @@ type NamespaceContent(kube: Kubernetes,
     member self.Add(ingress: Extensionsv1beta1Ingress) =
         ingressList <- ingress.Metadata.Name :: ingressList
 
+    member self.Add(job: V1Job) =
+        jobList <- job.Metadata.Name :: jobList
+
+    member self.NumJobs : int =
+        jobList.Length
+
     member self.AddAll() =
         for s in kube.ListNamespacedService(namespaceParameter = namespaceProperty).Items do
             self.Add(s)
@@ -57,4 +65,6 @@ type NamespaceContent(kube: Kubernetes,
         for c in kube.ListNamespacedPersistentVolumeClaim(namespaceParameter = namespaceProperty).Items do
             self.Add(c)
         for i in kube.ListNamespacedIngress(namespaceParameter = namespaceProperty).Items do
+            self.Add(i)
+        for i in kube.ListNamespacedJob(namespaceParameter = namespaceProperty).Items do
             self.Add(i)
