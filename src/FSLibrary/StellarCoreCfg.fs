@@ -70,7 +70,8 @@ type StellarCoreCfg =
       failureSafety : int
       quorumSet : Map<string, KeyPair>
       historyNodes : Map<string, string>
-      historyGetCommands : Map<string, string> }
+      historyGetCommands : Map<string, string>
+      localHistory: bool }
 
     member self.ToTOML() : TomlTable =
         let t = Toml.Create()
@@ -126,7 +127,8 @@ type StellarCoreCfg =
         t.Add("FAILURE_SAFETY", self.failureSafety) |> ignore
         t.Add("QUORUM_SET", Map.ofSeq [| ("VALIDATORS", qset) |]) |> ignore
         let localTab = t.Add("HISTORY", Toml.Create(), TomlObjectFactory.RequireTomlObject()).Added
-        localTab.Add(CfgVal.localHistName, hist) |> ignore
+        if self.localHistory
+        then localTab.Add(CfgVal.localHistName, hist) |> ignore
         for historyNode in self.historyNodes do
             localTab.Add(historyNode.Key, remoteHist historyNode.Value) |> ignore
         for historyGetCommand in self.historyGetCommands do
@@ -224,7 +226,8 @@ type NetworkCfg with
           failureSafety = 0
           quorumSet = self.QuorumSet opts
           historyNodes = self.HistoryNodes opts
-          historyGetCommands = opts.historyGetCommands }
+          historyGetCommands = opts.historyGetCommands
+          localHistory = opts.localHistory }
 
     member self.StellarCoreCfg(c:CoreSet, i:int) : StellarCoreCfg =
         { network = self
@@ -248,4 +251,5 @@ type NetworkCfg with
           failureSafety = 0
           quorumSet = self.QuorumSet c.options
           historyNodes = self.HistoryNodes c.options
-          historyGetCommands = c.options.historyGetCommands }
+          historyGetCommands = c.options.historyGetCommands
+          localHistory = c.options.localHistory }

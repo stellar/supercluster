@@ -41,6 +41,7 @@ type CoreSetOptions =
       quorumSetKeys : Map<string, KeyPair>
       historyNodes : string list option
       historyGetCommands : Map<string, string>
+      localHistory : bool
       peers : string list option
       peersDns : string list
       accelerateTime : bool
@@ -62,6 +63,7 @@ type CoreSetOptions =
         quorumSetKeys = Map.empty
         historyNodes = None
         historyGetCommands = Map.empty
+        localHistory = true
         peers = None
         peersDns = List.empty
         accelerateTime = true
