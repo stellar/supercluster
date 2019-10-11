@@ -120,24 +120,45 @@ type NetworkCfg with
         V1ConfigMap(metadata = self.NamespacedMeta self.CfgMapName,
                     data = Map.ofSeq cfgs)
 
-    member self.GetJobPodTemplateSpec (commands: string array array) : V1PodTemplateSpec =
+    member self.GetJobPodTemplateSpec (command: string array) : V1PodTemplateSpec =
+        let isJob = true
         let maxPeers = 1
         let imageName = CfgVal.stellarCoreImageName
-        let containers = Array.map (CoreContainerForCommand self.quotas maxPeers imageName true) commands
+        let containers = [| CoreContainerForCommand self.quotas maxPeers imageName isJob command |]
         let cfgVol = V1Volume(name = CfgVal.cfgVolumeName,
                               configMap = V1ConfigMapVolumeSource(name = self.CfgMapName))
         let dataVol = V1Volume(name = CfgVal.dataVolumeName,
                                emptyDir = V1EmptyDirVolumeSource(medium = "Memory"))
+        let initContainers =
+            match self.jobCoreSetOptions with
+                | None -> [| |]
+                | Some(opts) -> self.InitContainersFor opts.initialization maxPeers imageName isJob
+
         V1PodTemplateSpec
-                (spec = V1PodSpec (containers = containers,
+                (spec = V1PodSpec (initContainers = initContainers,
+                                   containers = containers,
                                    volumes = [| cfgVol; dataVol |],
                                    restartPolicy = "Never"),
                  metadata = V1ObjectMeta(labels = CfgVal.labels,
                                          namespaceProperty = self.NamespaceProperty))
 
-    member self.GetJobFor (jobNum:int) (commands: string array array) : V1Job =
-        V1Job(spec = V1JobSpec(template = self.GetJobPodTemplateSpec commands),
+    member self.GetJobFor (jobNum:int) (command: string array) : V1Job =
+        V1Job(spec = V1JobSpec(template = self.GetJobPodTemplateSpec command),
               metadata = self.NamespacedMeta (self.JobName jobNum))
+
+
+    member self.InitContainersFor (init:CoreSetInitialization) (maxPeers:int) (imageName:string) (isJob:bool) : V1Container array =
+        let newDb i = if i.newDb then [| [| "new-db" |] |] else [||]
+        let newHist i = if i.newHist then [| [| "new-hist"; CfgVal.localHistName |] |] else [||]
+        let initialCatchup i = if i.initialCatchup then [| [| "catchup"; "current/0" |] |] else [||]
+        let forceScp i = if i.forceScp then [| [| "force-scp" |] |] else [||]
+
+        let initSequence (i : CoreSetInitialization) =
+            Array.concat [ newDb i; newHist i; initialCatchup i; forceScp i ]
+
+        Array.map
+            (fun p -> CoreContainerForCommand self.quotas maxPeers imageName isJob p)
+            (initSequence init)
 
     // Returns a PodTemplate that mounts the ConfigMap on /cfg and an empty data
     // volume on /data. Then initializes a local stellar-core database in
@@ -160,23 +181,12 @@ type NetworkCfg with
             | None -> CfgVal.stellarCoreImageName
             | Some(x) -> x
 
-        let newDb i = if i.newDb then [| [| "new-db" |] |] else [||]
-        let newHist i = if i.newHist then [| [| "new-hist"; CfgVal.localHistName |] |] else [||]
-        let initialCatchup i = if i.initialCatchup then [| [| "catchup"; "current/0" |] |] else [||]
-        let forceScp i = if i.forceScp then [| [| "force-scp" |] |] else [||]
-
-        let initSequence (i : CoreSetInitialization) =
-            Array.concat [ newDb i; newHist i; initialCatchup i; forceScp i ]
-
-
+        let isJob = false
         let volumes = [| cfgVol; dataVol |]
         let maxPeers = max 1 self.MaxPeerCount
-        let initContianers = Array.map
-                                 (fun p -> CoreContainerForCommand self.quotas maxPeers imageName false p)
-                                 (initSequence coreSet.options.initialization)
-
+        let initContianers = self.InitContainersFor coreSet.options.initialization maxPeers imageName isJob
         let containers = [| WithReadinessProbe
-                                (CoreContainerForCommand self.quotas maxPeers imageName false [| "run" |])
+                                (CoreContainerForCommand self.quotas maxPeers imageName isJob [| "run" |])
                                 probeTimeout;
                             HistoryContainer; |]
 

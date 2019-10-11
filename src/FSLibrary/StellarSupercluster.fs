@@ -184,6 +184,69 @@ type ClusterFormation(networkCfg: NetworkCfg,
         installHandler()
         (event.WaitHandle, ok)
 
+    member self.RunParallelJobsInRandomOrder (parallelism:int)
+                                             (allJobs:((string array) array)) : Map<string,bool> =
+        let jobArr = Array.copy allJobs
+        let shuffle (arr:'a array) =
+            let rng = System.Random()
+            let rnd _ = rng.Next(arr.Length)
+            let swap i j =
+                let tmp = arr.[i]
+                arr.[i] <- arr.[j]
+                arr.[j] <- tmp
+            Array.iteri (fun i _ -> swap i (rnd())) arr
+        shuffle jobArr
+        let mutable jobQueue = Array.toList jobArr
+        self.RunParallelJobs parallelism
+            (fun _ -> (match jobQueue with
+                       | [] -> None
+                       | head::tail -> jobQueue <- tail
+                                       Some head))
+
+
+    member self.RunParallelJobs (parallelism:int)
+                                (nextJob:(unit->(string array) option)) : Map<string,bool> =
+        let mutable running = Map.empty
+        let mutable finished = Map.empty
+        let rec loop _ =
+            if running.Count < parallelism
+            then addJob()
+            else waitJob()
+
+        and addJob _ =
+            match nextJob() with
+                 | None ->
+                     if running.IsEmpty
+                     then finished
+                     else waitJob()
+                 | Some(cmd) ->
+                    let j = self.StartJobForCmd cmd
+                    let name = j.Metadata.Name
+                    let watch = self.WatchJob j
+                    running <- running.Add(name, watch)
+                    loop()
+
+        and waitJob _ =
+            let pairs = Map.toArray running
+            let handles = Array.map (fun (_, (handle, _)) -> handle) pairs
+            let i = System.Threading.WaitHandle.WaitAny(handles)
+            let (n, (_, ok)) = pairs.[i]
+            if !ok
+            then LogInfo "Job %s passed" n
+            else LogInfo "Job %s failed" n
+            finished <- finished.Add(n, (!ok))
+            running <- running.Remove n
+            loop()
+
+        let oldConfig = networkCfg
+        let c = parallelism * networkCfg.quotas.NumConcurrentMissions
+        networkCfg <- { networkCfg with
+                            quotas = { networkCfg.quotas with
+                                           NumConcurrentMissions = c } }
+        let res = loop()
+        networkCfg <- oldConfig
+        res
+
     // Watches the provided StatefulSet until the count of ready replicas equals the
     // count of configured replicas. This normally represents "successful startup".
     member self.WaitForAllReplicasOnAllSetsReady() =
@@ -229,8 +292,8 @@ type ClusterFormation(networkCfg: NetworkCfg,
             LogError "err: %s" w.Response.ReasonPhrase
             reraise()
 
-    member self.StartJobForCmds (cmds:string array array) : V1Job =
-        self.StartJob (networkCfg.GetJobFor (namespaceContent.NumJobs) cmds)
+    member self.StartJobForCmd (cmd:string array) : V1Job =
+        self.StartJob (networkCfg.GetJobFor (namespaceContent.NumJobs) cmd)
 
     member self.WaitUntilSynced (coreSetList: CoreSet list) =
         networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.WaitUntilSynced())

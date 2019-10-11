@@ -15,18 +15,20 @@ open StellarNetworkData
 open StellarSupercluster
 open System
 
+
 let historyPubnetParallelCatchup (context : MissionContext) =
-    context.ExecuteJobs PubnetCoreSet (Some(SDFMainNet))
+    let checkpointsPerJob = 3000
+    let maxLedgers = 26256029
+    let ledgersPerCheckpoint = 64
+    let ledgersPerJob = checkpointsPerJob * ledgersPerCheckpoint
+    let numJobs = (maxLedgers / ledgersPerJob) + 1
+    let jobArr = Array.init numJobs (fun i -> [| "catchup"; sprintf "%d/%d" ((i+1)*ledgersPerJob) ledgersPerJob |])
+    let opts = { PubnetCoreSet with
+                     initialization = { PubnetCoreSet.initialization with
+                                            newHist = false;
+                                            forceScp = false } }
+    context.ExecuteJobs opts (Some(SDFMainNet))
         begin
         fun (formation: ClusterFormation) ->
-        let j = formation.StartJobForCmds [|
-                                           [| "new-db" |];
-                                           [| "offline-info" |]
-                                           [| "catchup"; "current/1000" |]
-                                           |]
-        let (handle, ok) = formation.WatchJob j
-        let i = System.Threading.WaitHandle.WaitAny(Array.ofList [handle])
-        if !ok
-        then LogInfo "Job %d passed" i
-        else LogInfo "Job %d failed" i
+            (formation.RunParallelJobsInRandomOrder 4 jobArr) |> ignore
         end
