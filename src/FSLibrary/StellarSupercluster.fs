@@ -127,46 +127,72 @@ type ClusterFormation(networkCfg: NetworkCfg,
     member self.WaitForAllReplicasReady (ss : V1StatefulSet) =
         let name = ss.Metadata.Name
         let ns = ss.Metadata.NamespaceProperty
-        LogInfo "Waiting for replicas on %s/%s" ns name
-        // Sometimes the "Wait" call here stalls out, presumably due to
-        // a failure in the watch subscription: retry up to 100 times.
-        let rec tryWait (n:int) =
-            use event = new System.Threading.ManualResetEventSlim(false)
-            let mutable active = true
+        use event = new System.Threading.ManualResetEventSlim(false)
+
+        // This pattern of a recursive handler-install routine that reinstalls
+        // itself when `onClosed` fires is necessary because watches
+        // automatically time out after 100 seconds and the connection closes.
+        let rec installHandler() =
+            LogInfo "Waiting for replicas on %s/%s" ns name
             let handler (ety:WatchEventType) (ss:V1StatefulSet) =
-                if active
+                LogInfo "Saw event for statefulset %s: %s" name (ety.ToString())
+                if not event.IsSet
                 then
                     let n = ss.Status.ReadyReplicas.GetValueOrDefault(0)
                     let k = ss.Spec.Replicas.GetValueOrDefault(0)
                     LogInfo "StatefulSet %s/%s: %d/%d replicas ready" ns name n k;
                     if n = k then event.Set()
             let action = System.Action<WatchEventType, V1StatefulSet>(handler)
-            use task = kube.WatchNamespacedStatefulSetAsync(name = name,
-                                                            ``namespace`` = ns,
-                                                            onEvent = action)
-            let timeout = 10000 * (max 1 (ss.Spec.Replicas.GetValueOrDefault(0)))
-            if event.Wait(millisecondsTimeout = timeout)
-            then ()
-            else
-                active <- false
-                if n = 0
-                then let msg = "Failed to start replicas on sts " + ss.Metadata.Name
-                     LogError "%s" msg
-                     failwith msg
-                else
-                    LogWarn "Retrying replica-start %d more times on sts %s"
-                        (n-1) ss.Metadata.Name
-                    tryWait (n-1)
-        tryWait 100
+            let reinstall = System.Action(installHandler)
+            kube.WatchNamespacedStatefulSetAsync(name = name,
+                                                 ``namespace`` = ns,
+                                                 onEvent = action,
+                                                 onClosed = reinstall) |> ignore
+        installHandler()
+        event.Wait() |> ignore
         LogInfo "All replicas on %s/%s ready" ns name
+
+    member self.WatchJob (j:V1Job) : (System.Threading.WaitHandle * bool ref) =
+        let name = j.Metadata.Name
+        let ns = j.Metadata.NamespaceProperty
+        let ok = ref false
+        let event = new System.Threading.ManualResetEventSlim(false)
+        let rec installHandler() =
+            LogInfo "Waiting for job %s" name
+            let handler (ety:WatchEventType) (job:V1Job) =
+                LogInfo "Saw event for job %s: %s" name (ety.ToString())
+                if not event.IsSet
+                then
+                    if ety.Equals(WatchEventType.Modified)
+                    then
+                        let jobActive = job.Status.Active.GetValueOrDefault(0)
+                        if jobActive = 0
+                        then
+                            let jobSucceeded = job.Status.Succeeded.GetValueOrDefault(0)
+                            let jobFailed = job.Status.Failed.GetValueOrDefault(0)
+                            LogInfo "Finished job %s: %d fail / %d success"
+                                    name jobFailed jobSucceeded
+                            ok := (jobFailed = 0) && (jobSucceeded = 1)
+                            event.Set() |> ignore
+
+            let action = System.Action<WatchEventType, V1Job>(handler)
+            let reinstall = System.Action(installHandler)
+            kube.WatchNamespacedJobAsync(name = name,
+                                         ``namespace`` = ns,
+                                         onEvent = action,
+                                         onClosed = reinstall) |> ignore
+        installHandler()
+        (event.WaitHandle, ok)
 
     // Watches the provided StatefulSet until the count of ready replicas equals the
     // count of configured replicas. This normally represents "successful startup".
     member self.WaitForAllReplicasOnAllSetsReady() =
-        LogInfo "Waiting for replicas on %s" (self.ToString())
-        for ss in statefulSets do
-            self.WaitForAllReplicasReady ss
-        LogInfo "All replicas on %s ready" (self.ToString())
+        if not statefulSets.IsEmpty
+        then
+            LogInfo "Waiting for replicas on %s" (self.ToString())
+            for ss in statefulSets do
+                self.WaitForAllReplicasReady ss
+            LogInfo "All replicas on %s ready" (self.ToString())
 
     member self.WithLive name (live: bool) =
         networkCfg <- networkCfg.WithLive name live

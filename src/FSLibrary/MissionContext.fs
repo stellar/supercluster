@@ -5,6 +5,7 @@
 module StellarMissionContext
 
 open k8s
+open k8s.Models
 
 open StellarCoreHTTP
 open StellarCorePeer
@@ -57,6 +58,19 @@ type MissionContext =
                 self.ingressDomain passphrase
         let networkCfg = { networkCfg with jobCoreSetOptions = Some(opts) }
         self.kube.MakeFormation networkCfg None self.keepData self.probeTimeout
+
+    member self.ExecuteJobs (opts:CoreSetOptions)
+                            (passphrase:NetworkPassphrase option)
+                            (run:ClusterFormation->unit) =
+      use formation = self.MakeFormationForJob opts passphrase
+      try
+          try
+              run formation
+          finally
+              () // TODO: Dump job data
+      with
+      | x -> (if self.keepData then formation.KeepData()
+              reraise())
 
     member self.Execute (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option) (run:ClusterFormation->unit) : unit =
       use formation = self.MakeFormation coreSetList passphrase
