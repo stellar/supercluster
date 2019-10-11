@@ -213,8 +213,8 @@ type NetworkCfg with
           runStandalone = false
           preferredPeers = self.PreferredPeers opts
           catchupMode = opts.catchupMode
-          automaticMaintenancePeriod = 0
-          automaticMaintenanceCount = 0
+          automaticMaintenancePeriod = 10
+          automaticMaintenanceCount = 50000
           accelerateTime = opts.accelerateTime
           generateLoad = true
           manualClose = false
