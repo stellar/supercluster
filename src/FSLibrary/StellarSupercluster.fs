@@ -177,10 +177,11 @@ type ClusterFormation(networkCfg: NetworkCfg,
 
             let action = System.Action<WatchEventType, V1Job>(handler)
             let reinstall = System.Action(installHandler)
-            kube.WatchNamespacedJobAsync(name = name,
-                                         ``namespace`` = ns,
-                                         onEvent = action,
-                                         onClosed = reinstall) |> ignore
+            if not event.IsSet
+            then kube.WatchNamespacedJobAsync(name = name,
+                                              ``namespace`` = ns,
+                                              onEvent = action,
+                                              onClosed = reinstall) |> ignore
         installHandler()
         (event.WaitHandle, ok)
 
