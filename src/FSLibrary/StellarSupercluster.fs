@@ -144,10 +144,11 @@ type ClusterFormation(networkCfg: NetworkCfg,
                     if n = k then event.Set()
             let action = System.Action<WatchEventType, V1StatefulSet>(handler)
             let reinstall = System.Action(installHandler)
-            kube.WatchNamespacedStatefulSetAsync(name = name,
-                                                 ``namespace`` = ns,
-                                                 onEvent = action,
-                                                 onClosed = reinstall) |> ignore
+            if not event.IsSet
+            then kube.WatchNamespacedStatefulSetAsync(name = name,
+                                                      ``namespace`` = ns,
+                                                      onEvent = action,
+                                                      onClosed = reinstall) |> ignore
         installHandler()
         event.Wait() |> ignore
         LogInfo "All replicas on %s/%s ready" ns name
