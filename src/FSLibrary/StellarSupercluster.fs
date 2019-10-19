@@ -166,12 +166,21 @@ type ClusterFormation(networkCfg: NetworkCfg,
         let ns = j.Metadata.NamespaceProperty
         let ok = ref false
         let event = new System.Threading.ManualResetEventSlim(false)
-        let rec installHandler() =
-            LogInfo "Waiting for job %s" name
+        // As the handler gets repeatedly reinstalled, it's called to re-handle
+        // all the same events it's already seen, so we have to keep a refcell
+        // with the maximum event it's already handled.
+        let handledEv = ref 0
+        let rec installHandler (firstWait:bool) =
+            if firstWait
+            then LogInfo "Waiting for job %s" name
+            else LogInfo "Continuing to wait for job %s" name
+            let nextEv = ref 0
             let handler (ety:WatchEventType) (job:V1Job) =
-                LogInfo "Saw event for job %s: %s" name (ety.ToString())
-                if not event.IsSet
+                nextEv := !nextEv + 1
+                if (not event.IsSet) && (!nextEv > !handledEv)
                 then
+                    LogInfo "Saw event for job %s: %s" name (ety.ToString())
+                    handledEv := !nextEv
                     if ety.Equals(WatchEventType.Modified)
                     then
                         let jobActive = job.Status.Active.GetValueOrDefault(0)
@@ -185,13 +194,13 @@ type ClusterFormation(networkCfg: NetworkCfg,
                             event.Set() |> ignore
 
             let action = System.Action<WatchEventType, V1Job>(handler)
-            let reinstall = System.Action(installHandler)
+            let reinstall = System.Action((fun _ -> installHandler false))
             if not event.IsSet
             then kube.WatchNamespacedJobAsync(name = name,
                                               ``namespace`` = ns,
                                               onEvent = action,
                                               onClosed = reinstall) |> ignore
-        installHandler()
+        installHandler true
         (event.WaitHandle, ok)
 
     member self.RunParallelJobsInRandomOrder (parallelism:int)
@@ -232,20 +241,21 @@ type ClusterFormation(networkCfg: NetworkCfg,
                  | Some(cmd) ->
                     let j = self.StartJobForCmd cmd
                     let name = j.Metadata.Name
-                    let watch = self.WatchJob j
-                    running <- running.Add(name, watch)
+                    let (waitHandle, ok) = self.WatchJob j
+                    running <- running.Add(name, (j, waitHandle, ok))
                     loop()
 
         and waitJob _ =
-            let pairs = Map.toArray running
-            let handles = Array.map (fun (_, (handle, _)) -> handle) pairs
+            let triples = Map.toArray running
+            let handles = Array.map (fun (_, (_, handle, _)) -> handle) triples
             let i = System.Threading.WaitHandle.WaitAny(handles)
-            let (n, (_, ok)) = pairs.[i]
+            let (n, (j, _, ok)) = triples.[i]
             if !ok
             then LogInfo "Job %s passed" n
             else LogInfo "Job %s failed" n
             finished <- finished.Add(n, (!ok))
             running <- running.Remove n
+            self.FinishJob j
             loop()
 
         let oldConfig = networkCfg
