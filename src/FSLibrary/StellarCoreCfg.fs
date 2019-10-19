@@ -18,6 +18,7 @@ module CfgVal =
     let labelSelector = "app = stellar-core"
     let stellarCoreImageName = "stellar/stellar-core"
     let stellarCoreBinPath = "/usr/local/bin/stellar-core"
+    let stellarCoreContainerName (cmd:string) = "stellar-core-" + cmd
     let cfgVolumeName = "cfg-volume"
     let cfgVolumePath = "/cfg"
     let dataVolumeName = "data-volume"

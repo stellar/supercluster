@@ -52,7 +52,7 @@ let CoreContainerForCommand (q:NetworkQuotas) (numContainers:int)
                   then CfgVal.jobCfgFile
                   else CfgVal.peerNameEnvCfgFile
     V1Container
-        (name = "stellar-core-" + (Array.get subCommands 0),
+        (name = CfgVal.stellarCoreContainerName (Array.get subCommands 0),
          image = image,
          command = [| CfgVal.stellarCoreBinPath |], env = [| peerNameEnvVar |],
          args = Array.append subCommands [| "--conf"; cfgFile |],
