@@ -12,48 +12,96 @@ type NamespaceContent(kube: Kubernetes,
 
     let kube = kube
     let namespaceProperty = namespaceProperty
-    let mutable serviceList: string list = []
-    let mutable configMapList: string list = []
-    let mutable statefulSetList: string list = []
-    let mutable persistentVolumeClaimList: string list = []
-    let mutable ingressList: string list = []
-    let mutable jobList: string list = []
+    let services: Set<string> ref = ref Set.empty
+    let configMaps: Set<string> ref = ref Set.empty
+    let statefulSets: Set<string> ref = ref Set.empty
+    let persistentVolumeClaims: Set<string> ref = ref Set.empty
+    let ingresses: Set<string> ref = ref Set.empty
+    let jobs: Set<string> ref = ref Set.empty
+
+    let ignoreError f =
+        try
+            f() |> ignore
+        with
+            | x -> ()
+
+    let delService(name: string) =
+        ignoreError (fun _ -> kube.DeleteNamespacedService(namespaceParameter = namespaceProperty,
+                                                           name = name, propagationPolicy = "Foreground"))
+
+    let delConfigMap(name: string) =
+        ignoreError (fun _ -> kube.DeleteNamespacedConfigMap(namespaceParameter = namespaceProperty,
+                                                             name = name, propagationPolicy = "Foreground"))
+
+    let delStatefulSet(name: string) =
+        ignoreError (fun _ -> kube.DeleteNamespacedStatefulSet(namespaceParameter = namespaceProperty,
+                                                               name = name, propagationPolicy = "Foreground"))
+
+    let delPersistentVolumeClaim(name: string) =
+        ignoreError (fun _ -> kube.DeleteNamespacedPersistentVolumeClaim(namespaceParameter = namespaceProperty,
+                                                                         name = name, propagationPolicy = "Foreground"))
+
+    let delIngress(name: string) =
+        ignoreError (fun _ -> kube.DeleteNamespacedIngress(namespaceParameter = namespaceProperty, name = name,
+                                                           propagationPolicy = "Foreground"))
+
+    let delJob(name: string) =
+        ignoreError (fun _ -> kube.DeleteNamespacedJob(namespaceParameter = namespaceProperty, name = name,
+                                                       propagationPolicy = "Foreground"))
+
+    let cleanSet (f:'a->unit) (s:Set<'a> ref) : unit =
+        Set.iter f (!s); s := Set.empty
+
+    let addOne (s:Set<'a> ref) (x:'a) : unit =
+        s := Set.add x (!s)
+
+    let delOne (f:'a->unit) (s:Set<'a> ref) (x:'a): unit =
+        s := Set.remove x (!s)
+        f x
 
     member self.Cleanup() =
-        let safeDelete f list =
-            for item in list do
-                try
-                    f(item) |> ignore
-                with
-                | x -> ()
-
-        safeDelete (fun name -> kube.DeleteNamespacedService(namespaceParameter = namespaceProperty, name = name, propagationPolicy = "Foreground")) serviceList
-        safeDelete (fun name -> kube.DeleteNamespacedConfigMap(namespaceParameter = namespaceProperty, name = name, propagationPolicy = "Foreground")) configMapList
-        safeDelete (fun name -> kube.DeleteNamespacedStatefulSet(namespaceParameter = namespaceProperty, name = name, propagationPolicy = "Foreground")) statefulSetList
-        safeDelete (fun name -> kube.DeleteNamespacedPersistentVolumeClaim(namespaceParameter = namespaceProperty, name = name, propagationPolicy = "Foreground")) persistentVolumeClaimList
-        safeDelete (fun name -> kube.DeleteNamespacedIngress(namespaceParameter = namespaceProperty, name = name, propagationPolicy = "Foreground")) ingressList
-        safeDelete (fun name -> kube.DeleteNamespacedJob(namespaceParameter = namespaceProperty, name = name, propagationPolicy = "Foreground")) jobList
+        cleanSet delService services
+        cleanSet delStatefulSet statefulSets
+        cleanSet delConfigMap configMaps
+        cleanSet delPersistentVolumeClaim persistentVolumeClaims
+        cleanSet delIngress ingresses
+        cleanSet delJob jobs
 
     member self.Add(service: V1Service) =
-        serviceList <- service.Metadata.Name :: serviceList
+        addOne services service.Metadata.Name
 
     member self.Add(configMap: V1ConfigMap) =
-        configMapList <- configMap.Metadata.Name :: configMapList
+        addOne configMaps configMap.Metadata.Name
 
     member self.Add(statefulSet: V1StatefulSet) =
-        statefulSetList <- statefulSet.Metadata.Name :: statefulSetList
+        addOne statefulSets statefulSet.Metadata.Name
 
     member self.Add(persistentVolumeClaim: V1PersistentVolumeClaim) =
-        persistentVolumeClaimList <- persistentVolumeClaim.Metadata.Name :: persistentVolumeClaimList
+        addOne persistentVolumeClaims persistentVolumeClaim.Metadata.Name
 
     member self.Add(ingress: Extensionsv1beta1Ingress) =
-        ingressList <- ingress.Metadata.Name :: ingressList
+        addOne ingresses ingress.Metadata.Name
 
     member self.Add(job: V1Job) =
-        jobList <- job.Metadata.Name :: jobList
+        addOne jobs job.Metadata.Name
 
-    member self.NumJobs : int =
-        jobList.Length
+    member self.Del(service: V1Service) =
+        delOne delService services service.Metadata.Name
+
+    member self.Del(configMap: V1ConfigMap) =
+        delOne delConfigMap configMaps configMap.Metadata.Name
+
+    member self.Del(statefulSet: V1StatefulSet) =
+        delOne delStatefulSet statefulSets statefulSet.Metadata.Name
+
+    member self.Del(persistentVolumeClaim: V1PersistentVolumeClaim) =
+        delOne delPersistentVolumeClaim persistentVolumeClaims persistentVolumeClaim.Metadata.Name
+
+    member self.Del(ingress: Extensionsv1beta1Ingress) =
+        delOne delIngress ingresses ingress.Metadata.Name
+
+    member self.Del(job: V1Job) =
+        delOne delJob jobs job.Metadata.Name
 
     member self.AddAll() =
         for s in kube.ListNamespacedService(namespaceParameter = namespaceProperty).Items do
