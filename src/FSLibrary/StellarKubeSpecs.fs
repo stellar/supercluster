@@ -142,12 +142,13 @@ type NetworkCfg with
                                    volumes = [| cfgVol; dataVol |],
                                    restartPolicy = "Never"),
                  metadata = V1ObjectMeta(labels = CfgVal.labels,
-                                         namespaceProperty = self.NamespaceProperty))
+                                         namespaceProperty = ns))
 
     member self.GetJobFor (jobNum:int) (command: string array) : V1Job =
-        V1Job(spec = V1JobSpec(template = self.GetJobPodTemplateSpec command),
-              metadata = self.NamespacedMeta (self.JobName jobNum))
-
+        let jobName = self.JobName jobNum
+        let template = self.GetJobPodTemplateSpec jobName command
+        V1Job(spec = V1JobSpec(template = template),
+              metadata = self.NamespacedMeta jobName)
 
     member self.InitContainersFor (init:CoreSetInitialization) (maxPeers:int) (imageName:string) (isJob:bool) : V1Container array =
         let newDb i = if i.newDb then [| [| "new-db" |] |] else [||]
