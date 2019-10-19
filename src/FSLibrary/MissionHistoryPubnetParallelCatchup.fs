@@ -17,12 +17,12 @@ open System
 
 
 let historyPubnetParallelCatchup (context : MissionContext) =
-    let checkpointsPerJob = 2000
+    let checkpointsPerJob = 3000
     let maxLedgers = 26256029
     let ledgersPerCheckpoint = 64
     let ledgersPerJob = checkpointsPerJob * ledgersPerCheckpoint
     let numJobs = (maxLedgers / ledgersPerJob) + 1
-    let parallelism = 6
+    let parallelism = 64
     let jobArr = Array.init numJobs (fun i -> [| "catchup"; sprintf "%d/%d" ((i+1)*ledgersPerJob) ledgersPerJob |])
     let opts = { PubnetCoreSet with
                      localHistory = false
