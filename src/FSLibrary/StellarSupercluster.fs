@@ -294,8 +294,26 @@ type ClusterFormation(networkCfg: NetworkCfg,
             LogError "err: %s" w.Response.ReasonPhrase
             reraise()
 
+    member self.AddPersistentVolumeClaim (pvc:V1PersistentVolumeClaim) : unit =
+        let ns = networkCfg.NamespaceProperty
+        let claim = self.Kube.CreateNamespacedPersistentVolumeClaim(body = pvc,
+                                                                    namespaceParameter = ns)
+        namespaceContent.Add(claim)
+
+    member self.AddDynamicPersistentVolumeClaimForJob (n:int) : unit =
+        let pvc = self.NetworkCfg.ToDynamicPersistentVolumeClaimForJob n
+        self.AddPersistentVolumeClaim pvc
+
     member self.StartJobForCmd (cmd:string array) : V1Job =
-        self.StartJob (networkCfg.GetJobFor (namespaceContent.NumJobs) cmd)
+        let jobNum = self.NextJobNum
+        self.AddDynamicPersistentVolumeClaimForJob jobNum
+        self.StartJob (networkCfg.GetJobFor jobNum cmd)
+
+    member self.FinishJob (j:V1Job) : unit =
+        // We mop up the PVCs here after each job finishes to avoid keeping
+        // huge amounts of idle EBS storage allocated.
+        let pvc = self.NetworkCfg.ToDynamicPersistentVolumeClaim j.Metadata.Name
+        namespaceContent.Del(pvc)
 
     member self.WaitUntilSynced (coreSetList: CoreSet list) =
         networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.WaitUntilSynced())

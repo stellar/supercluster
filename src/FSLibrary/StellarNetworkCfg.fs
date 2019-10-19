@@ -131,6 +131,7 @@ type NetworkCfg =
       jobCoreSetOptions : CoreSetOptions option
       quotas: NetworkQuotas
       logLevels: LogLevels
+      storageClass: string
       ingressDomain : string }
 
     member self.FindCoreSet (n:string) : CoreSet =
@@ -194,6 +195,7 @@ let MakeNetworkCfg
         (namespaceProperty: string)
         (quotas: NetworkQuotas)
         (logLevels: LogLevels)
+        (storageClass: string)
         (ingressDomain: string)
         (passphrase: NetworkPassphrase option) : NetworkCfg =
     let nonce = MakeNetworkNonce()
@@ -206,4 +208,5 @@ let MakeNetworkCfg
       jobCoreSetOptions = None
       quotas = quotas
       logLevels = logLevels
+      storageClass = storageClass
       ingressDomain = ingressDomain }

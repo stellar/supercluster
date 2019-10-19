@@ -36,6 +36,7 @@ type MissionContext =
       logLevels: LogLevels
       ingressDomain : string
       persistentVolume : PersistentVolume
+      storageClass : string
       namespaceProperty : string
       keepData : bool
       probeTimeout : int }
@@ -46,6 +47,7 @@ type MissionContext =
                 self.namespaceProperty
                 self.quotas
                 self.logLevels
+                self.storageClass
                 self.ingressDomain passphrase
         self.kube.MakeFormation networkCfg (Some(self.persistentVolume)) self.keepData self.probeTimeout
 
@@ -55,6 +57,7 @@ type MissionContext =
                 self.namespaceProperty
                 self.quotas
                 self.logLevels
+                self.storageClass
                 self.ingressDomain passphrase
         let networkCfg = { networkCfg with jobCoreSetOptions = Some(opts) }
         self.kube.MakeFormation networkCfg None self.keepData self.probeTimeout

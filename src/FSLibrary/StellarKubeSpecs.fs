@@ -120,15 +120,17 @@ type NetworkCfg with
         V1ConfigMap(metadata = self.NamespacedMeta self.CfgMapName,
                     data = Map.ofSeq cfgs)
 
-    member self.GetJobPodTemplateSpec (command: string array) : V1PodTemplateSpec =
+    member self.GetJobPodTemplateSpec (jobName:string) (command: string array) : V1PodTemplateSpec =
         let isJob = true
         let maxPeers = 1
         let imageName = CfgVal.stellarCoreImageName
         let containers = [| CoreContainerForCommand self.quotas maxPeers imageName isJob command |]
         let cfgVol = V1Volume(name = CfgVal.cfgVolumeName,
                               configMap = V1ConfigMapVolumeSource(name = self.CfgMapName))
+        let ns = self.NamespaceProperty
+        let pvcName = CfgVal.peristentVolumeClaimName ns jobName
         let dataVol = V1Volume(name = CfgVal.dataVolumeName,
-                               emptyDir = V1EmptyDirVolumeSource(medium = "Memory"))
+                               persistentVolumeClaim = V1PersistentVolumeClaimVolumeSource(claimName = pvcName))
         let initContainers =
             match self.jobCoreSetOptions with
                 | None -> [| |]
@@ -277,6 +279,23 @@ type NetworkCfg with
                                               persistentVolumeReclaimPolicy = "Retain")
             V1PersistentVolume(metadata = meta, spec = spec)
         List.map makePersistentVolume (self.ToCoreSetPersistentVolumeNames())
+
+    member self.ToDynamicPersistentVolumeClaim (jobOrPeerName:string) : V1PersistentVolumeClaim =
+        let ns = self.NamespaceProperty
+        let pvcName = CfgVal.peristentVolumeClaimName ns jobOrPeerName
+        let meta = self.NamespacedMeta pvcName
+        let accessModes = [|"ReadWriteOnce"|]
+        // EBS gp2 volumes are provisioned at "3 IOPS per GB". We want a sustained
+        // 3000 IOPS performance level, which means we request a 1TiB volume.
+        let requests = dict["storage", ResourceQuantity("1Ti")]
+        let requirements = V1ResourceRequirements(requests = requests)
+        let spec = V1PersistentVolumeClaimSpec(accessModes = accessModes,
+                                               storageClassName = self.storageClass,
+                                               resources = requirements)
+        V1PersistentVolumeClaim(metadata = meta, spec = spec)
+
+    member self.ToDynamicPersistentVolumeClaimForJob (jobNum:int) : V1PersistentVolumeClaim =
+        self.ToDynamicPersistentVolumeClaim (self.JobName jobNum)
 
     member self.ToPersistentVolumeClaims () : V1PersistentVolumeClaim list =
         let makePersistentVolumeClaim name =

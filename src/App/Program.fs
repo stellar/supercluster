@@ -26,6 +26,7 @@ type CommonOptions(kubeConfig: string,
                    numNodes: int,
                    logDebugPartitions: seq<string>,
                    logTracePartitions: seq<string>,
+                   storageClass: string,
                    containerMaxCpuMili: int,
                    containerMaxMemMega: int,
                    namespaceQuotaLimCpuMili: int,
@@ -50,6 +51,10 @@ type CommonOptions(kubeConfig: string,
 
     [<Option("trace", HelpText="Log-partitions to set to 'trace' level")>]
     member self.LogTracePartitions = logTracePartitions
+
+    [<Option("storage-class", HelpText="Storage class name to use for dynamically provisioning persistent volume claims",
+             Required = false, Default = "default")>]
+    member self.StorageClass = storageClass
 
     // Getting quotas and limits right needs _seven_ arguments
 
@@ -101,6 +106,7 @@ type SetupOptions(kubeConfig: string,
                   numNodes: int,
                   logDebugPartitions: seq<string>,
                   logTracePartitions: seq<string>,
+                  storageClass: string,
                   containerMaxCpuMili: int,
                   containerMaxMemMega: int,
                   namespaceQuotaLimCpuMili: int,
@@ -115,6 +121,7 @@ type SetupOptions(kubeConfig: string,
                           numNodes,
                           logDebugPartitions,
                           logTracePartitions,
+                          storageClass,
                           containerMaxCpuMili,
                           containerMaxMemMega,
                           namespaceQuotaLimCpuMili,
@@ -132,6 +139,7 @@ type CleanOptions(kubeConfig: string,
                   numNodes: int,
                   logDebugPartitions: seq<string>,
                   logTracePartitions: seq<string>,
+                  storageClass: string,
                   containerMaxCpuMili: int,
                   containerMaxMemMega: int,
                   namespaceQuotaLimCpuMili: int,
@@ -146,6 +154,7 @@ type CleanOptions(kubeConfig: string,
                           numNodes,
                           logDebugPartitions,
                           logTracePartitions,
+                          storageClass,
                           containerMaxCpuMili,
                           containerMaxMemMega,
                           namespaceQuotaLimCpuMili,
@@ -163,6 +172,7 @@ type LoadgenOptions(kubeConfig: string,
                     numNodes: int,
                     logDebugPartitions: seq<string>,
                     logTracePartitions: seq<string>,
+                    storageClass: string,
                     containerMaxCpuMili: int,
                     containerMaxMemMega: int,
                     namespaceQuotaLimCpuMili: int,
@@ -177,6 +187,7 @@ type LoadgenOptions(kubeConfig: string,
                           numNodes,
                           logDebugPartitions,
                           logTracePartitions,
+                          storageClass,
                           containerMaxCpuMili,
                           containerMaxMemMega,
                           namespaceQuotaLimCpuMili,
@@ -207,6 +218,7 @@ type MissionOptions(kubeConfig: string,
                     missions: string seq,
                     destination: string,
                     persistentVolumeRoot: string,
+                    storageClass: string,
                     image: string option,
                     oldImage: string option,
                     txRate: int,
@@ -282,6 +294,10 @@ type MissionOptions(kubeConfig: string,
              Required = false, Default = "/tmp")>]
     member self.PersistentVolumeRoot = persistentVolumeRoot
 
+    [<Option("storage-class", HelpText="Storage class name to use for dynamically provisioning persistent volume claims",
+             Required = false, Default = "default")>]
+    member self.StorageClass = storageClass
+
     [<Option('i', "image", HelpText="Stellar-core image to use",
              Required = false)>]
     member self.Image = image
@@ -349,6 +365,7 @@ let main argv =
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = setup.NumNodes }
       let ll = { LogDebugPartitions = List.ofSeq setup.LogDebugPartitions
                  LogTracePartitions = List.ofSeq setup.LogTracePartitions }
+      let sc = setup.StorageClass
       let nq = MakeNetworkQuotas (setup.ContainerMaxCpuMili,
                                   setup.ContainerMaxMemMega,
                                   setup.NamespaceQuotaLimCpuMili,
@@ -358,7 +375,7 @@ let main argv =
                                   setup.NumConcurrentMissions)
       let nCfg = MakeNetworkCfg [coreSet]
                                 setup.NamespaceProperty
-                                nq ll
+                                nq ll sc
                                 setup.IngressDomain None
       use formation = kube.MakeFormation nCfg None false setup.ProbeTimeout
       formation.ReportStatus()
@@ -369,6 +386,7 @@ let main argv =
       let kube = ConnectToCluster clean.KubeConfig
       let ll = { LogDebugPartitions = List.ofSeq clean.LogDebugPartitions
                  LogTracePartitions = List.ofSeq clean.LogTracePartitions }
+      let sc = clean.StorageClass
       let nq = MakeNetworkQuotas (clean.ContainerMaxCpuMili,
                                   clean.ContainerMaxMemMega,
                                   clean.NamespaceQuotaLimCpuMili,
@@ -378,7 +396,7 @@ let main argv =
                                   clean.NumConcurrentMissions)
       let nCfg = MakeNetworkCfg []
                                 clean.NamespaceProperty
-                                nq ll
+                                nq ll sc
                                 clean.IngressDomain None
       use formation = kube.MakeEmptyFormation nCfg
       formation.CleanNamespace()
@@ -390,6 +408,7 @@ let main argv =
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = loadgen.NumNodes }
       let ll = { LogDebugPartitions = List.ofSeq loadgen.LogDebugPartitions
                  LogTracePartitions = List.ofSeq loadgen.LogTracePartitions }
+      let sc = loadgen.StorageClass
       let nq = MakeNetworkQuotas (loadgen.ContainerMaxCpuMili,
                                   loadgen.ContainerMaxMemMega,
                                   loadgen.NamespaceQuotaLimCpuMili,
@@ -399,7 +418,7 @@ let main argv =
                                   loadgen.NumConcurrentMissions)
       let nCfg = MakeNetworkCfg [coreSet]
                                 loadgen.NamespaceProperty
-                                nq ll
+                                nq ll sc
                                 loadgen.IngressDomain None
       use formation = kube.MakeFormation nCfg None false loadgen.ProbeTimeout
       formation.RunLoadgenAndCheckNoErrors coreSet
@@ -454,6 +473,7 @@ let main argv =
                                                    logLevels = ll
                                                    ingressDomain = mission.IngressDomain
                                                    persistentVolume = persistentVolume
+                                                   storageClass = mission.StorageClass
                                                    namespaceProperty = mission.NamespaceProperty
                                                    keepData = mission.KeepData
                                                    probeTimeout = mission.ProbeTimeout }
