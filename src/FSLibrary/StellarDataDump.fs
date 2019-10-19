@@ -18,18 +18,31 @@ open System.Threading
 open Microsoft.Rest.Serialization
 
 type ClusterFormation with
-    member self.DumpPeerCommandLogs (destination : Destination) (command:string) (p:Peer) =
-        let ns = self.NetworkCfg.NamespaceProperty
-        let name = self.NetworkCfg.PeerShortName p.coreSet p.peerNum
 
+    member self.DumpLogs (destination:Destination) (podName:string) (containerName:string) =
+        let ns = self.NetworkCfg.NamespaceProperty
         try
-            let stream = self.Kube.ReadNamespacedPodLog(name = name,
+            let stream = self.Kube.ReadNamespacedPodLog(name = podName,
                                                         namespaceParameter = ns,
-                                                        container = sprintf "stellar-core-%s" command)
-            destination.WriteStream ns (sprintf "%s-%s.log" name command) stream
+                                                        container = containerName)
+            destination.WriteStream ns (sprintf "%s-%s.log" podName containerName) stream
             stream.Close()
         with
         | x -> ()
+
+    member self.DumpJobLogs (destination:Destination) (jobName:string) =
+        let ns = self.NetworkCfg.NamespaceProperty
+        for pod in self.Kube.ListNamespacedPod(namespaceParameter = ns,
+                                               labelSelector="job-name=" + jobName).Items do
+            let podName = pod.Metadata.Name
+            for container in pod.Spec.Containers do
+                let containerName = container.Name
+                self.DumpLogs destination podName containerName
+
+    member self.DumpPeerCommandLogs (destination:Destination) (command:string) (p:Peer) =
+        let podName = self.NetworkCfg.PeerShortName p.coreSet p.peerNum
+        let containerName = CfgVal.stellarCoreContainerName command
+        self.DumpLogs destination podName containerName
 
     member self.DumpPeerLogs (destination : Destination) (p:Peer) =
         self.DumpPeerCommandLogs destination "new-db" p
@@ -71,6 +84,10 @@ type ClusterFormation with
         self.DumpPeerLogs destination p
         if p.coreSet.options.dumpDatabase
         then self.DumpPeerDatabase destination p
+
+    member self.DumpJobData (destination : Destination) =
+        for i in self.AllJobNums do
+            self.DumpJobLogs destination (self.NetworkCfg.JobName i)
 
     member self.DumpData (destination : Destination) =
         self.NetworkCfg.EachPeer (self.DumpPeerData destination)

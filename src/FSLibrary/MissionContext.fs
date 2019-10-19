@@ -70,7 +70,7 @@ type MissionContext =
           try
               run formation
           finally
-              () // TODO: Dump job data
+              formation.DumpJobData self.destination
       with
       | x -> (if self.keepData then formation.KeepData()
               reraise())

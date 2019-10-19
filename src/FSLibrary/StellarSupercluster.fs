@@ -68,6 +68,14 @@ type ClusterFormation(networkCfg: NetworkCfg,
     let namespaceContent = namespaceContent
     let probeTimeout = probeTimeout
     let mutable disposed = false
+    let mutable jobNumber = 0
+
+    member self.NextJobNum : int =
+        jobNumber <- jobNumber + 1
+        jobNumber
+
+    member self.AllJobNums : int list =
+        [ 1 .. jobNumber ]
 
     member self.Kube = kube
     member self.NetworkCfg = networkCfg
