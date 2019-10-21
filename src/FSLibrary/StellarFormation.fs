@@ -136,40 +136,42 @@ type StellarFormation(networkCfg: NetworkCfg,
         let ns = j.Metadata.NamespaceProperty
         let ok = ref false
         let event = new System.Threading.ManualResetEventSlim(false)
-        // As the handler gets repeatedly reinstalled, it's called to re-handle
-        // all the same events it's already seen, so we have to keep a refcell
-        // with the maximum event it's already handled.
-        let handledEv = ref 0
+
+        let checkStatus _ =
+            let js = self.Kube.ReadNamespacedJob(name=name, namespaceParameter=ns)
+            let jobCompleted = js.Status.CompletionTime.HasValue
+            let jobActive = js.Status.Active.GetValueOrDefault(0)
+            if jobCompleted && jobActive = 0
+            then
+                let jobSucceeded = js.Status.Succeeded.GetValueOrDefault(0)
+                let jobFailed = js.Status.Failed.GetValueOrDefault(0)
+                LogInfo "Finished job %s: %d fail / %d success"
+                    name jobFailed jobSucceeded
+                ok := (jobFailed = 0) && (jobSucceeded = 1)
+                event.Set() |> ignore
+
+        // Unfortunately event "watches" time out and get disconnected,
+        // and periodically also drop events, so we can neither rely on
+        // a single event handler registration nor catching every change
+        // event as they occur. Instead, we rely on fully re-reading the
+        // state of the job every time the handler is (re)installed _or_
+        // triggered by any event.
         let rec installHandler (firstWait:bool) =
             if firstWait
             then LogInfo "Waiting for job %s" name
             else LogInfo "Continuing to wait for job %s" name
-            let nextEv = ref 0
-            let handler (ety:WatchEventType) (job:V1Job) =
-                nextEv := !nextEv + 1
-                if (not event.IsSet) && (!nextEv > !handledEv)
-                then
-                    LogInfo "Saw event for job %s: %s" name (ety.ToString())
-                    handledEv := !nextEv
-                    if ety.Equals(WatchEventType.Modified)
-                    then
-                        let jobActive = job.Status.Active.GetValueOrDefault(0)
-                        if jobActive = 0
-                        then
-                            let jobSucceeded = job.Status.Succeeded.GetValueOrDefault(0)
-                            let jobFailed = job.Status.Failed.GetValueOrDefault(0)
-                            LogInfo "Finished job %s: %d fail / %d success"
-                                    name jobFailed jobSucceeded
-                            ok := (jobFailed = 0) && (jobSucceeded = 1)
-                            event.Set() |> ignore
-
-            let action = System.Action<WatchEventType, V1Job>(handler)
-            let reinstall = System.Action((fun _ -> installHandler false))
+            checkStatus()
             if not event.IsSet
-            then kube.WatchNamespacedJobAsync(name = name,
-                                              ``namespace`` = ns,
-                                              onEvent = action,
-                                              onClosed = reinstall) |> ignore
+            then
+                let handler (ety:WatchEventType) (job:V1Job) =
+                    if (not event.IsSet)
+                    then checkStatus()
+                let action = System.Action<WatchEventType, V1Job>(handler)
+                let reinstall = System.Action((fun _ -> installHandler false))
+                kube.WatchNamespacedJobAsync(name = name,
+                                             ``namespace`` = ns,
+                                             onEvent = action,
+                                             onClosed = reinstall) |> ignore
         installHandler true
         (event.WaitHandle, ok)
 
