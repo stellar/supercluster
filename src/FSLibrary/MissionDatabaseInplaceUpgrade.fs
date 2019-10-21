@@ -9,7 +9,7 @@ open StellarCoreHTTP
 open StellarCorePeer
 open StellarCoreSet
 open StellarMissionContext
-open StellarSupercluster
+open StellarFormation
 
 let databaseInplaceUpgrade (context : MissionContext) =
     let context = context.WithNominalLoad
@@ -37,7 +37,7 @@ let databaseInplaceUpgrade (context : MissionContext) =
                                                         initialCatchup = false
                                                         forceScp = false } }
 
-    context.Execute [beforeUpgradeCoreSet; coreSet; afterUpgradeCoreSet] None (fun (formation: ClusterFormation) ->
+    context.Execute [beforeUpgradeCoreSet; coreSet; afterUpgradeCoreSet] None (fun (formation: StellarFormation) ->
       formation.WaitUntilSynced [beforeUpgradeCoreSet; coreSet]
 
       let peer = formation.NetworkCfg.GetPeer beforeUpgradeCoreSet 0

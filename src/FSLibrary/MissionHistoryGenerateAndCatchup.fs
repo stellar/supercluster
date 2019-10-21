@@ -9,7 +9,7 @@ open StellarCoreCfg
 open StellarCorePeer
 open StellarCoreHTTP
 open StellarMissionContext
-open StellarSupercluster
+open StellarFormation
 
 let historyGenerateAndCatchup (context : MissionContext) =
     let context = context.WithNominalLoad
@@ -18,7 +18,7 @@ let historyGenerateAndCatchup (context : MissionContext) =
     let catchupSets = MakeCatchupSets catchupOptions
     let sets = catchupSets.AllSetList()
 
-    context.Execute sets None (fun (formation: ClusterFormation) ->
+    context.Execute sets None (fun (formation: StellarFormation) ->
         formation.WaitUntilSynced sets
         doCatchup context formation catchupSets
     )

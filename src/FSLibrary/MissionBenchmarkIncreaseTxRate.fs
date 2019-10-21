@@ -9,11 +9,11 @@ open StellarCorePeer
 open StellarCoreSet
 open StellarMissionContext
 open StellarPerformanceReporter
-open StellarSupercluster
+open StellarFormation
 
 let benchmarkIncreaseTxRate (context : MissionContext) =
     let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = context.numNodes }
-    context.ExecuteWithPerformanceReporter [coreSet] None (fun (formation: ClusterFormation) (performanceReporter: PerformanceReporter) ->
+    context.ExecuteWithPerformanceReporter [coreSet] None (fun (formation: StellarFormation) (performanceReporter: PerformanceReporter) ->
         formation.WaitUntilSynced [coreSet]
         formation.UpgradeProtocolToLatest [coreSet]
         formation.UpgradeMaxTxSize [coreSet] 1000000

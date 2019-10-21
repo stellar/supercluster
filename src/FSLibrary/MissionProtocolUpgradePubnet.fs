@@ -10,7 +10,7 @@ open StellarCoreSet
 open StellarMissionContext
 open StellarNetworkCfg
 open StellarNetworkData
-open StellarSupercluster
+open StellarFormation
 
 let protocolUpgradePubnet (context : MissionContext) =
     let set = { CoreSetOptions.Default with
@@ -22,7 +22,7 @@ let protocolUpgradePubnet (context : MissionContext) =
                   initialization = { CoreSetInitialization.Default with initialCatchup = true } }
 
     let coreSet = MakeLiveCoreSet "core" set
-    context.Execute [coreSet] (Some(SDFMainNet)) (fun (formation: ClusterFormation) ->
+    context.Execute [coreSet] (Some(SDFMainNet)) (fun (formation: StellarFormation) ->
         formation.WaitUntilSynced [coreSet]
 
         let peer = formation.NetworkCfg.GetPeer coreSet 0

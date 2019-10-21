@@ -7,7 +7,7 @@ module MissionVersionMixOldCatchupToNew
 open MissionCatchupHelpers
 open StellarCoreCfg
 open StellarMissionContext
-open StellarSupercluster
+open StellarFormation
 
 let versionMixOldCatchupToNew (context : MissionContext) =
     let context = context.WithNominalLoad
@@ -17,7 +17,7 @@ let versionMixOldCatchupToNew (context : MissionContext) =
     let catchupOptions = { generatorImage = newImage; catchupImage = oldImage; versionImage = oldImage }
     let catchupSets = MakeCatchupSets catchupOptions
     let sets = catchupSets.AllSetList()
-    context.Execute sets None (fun (formation: ClusterFormation) ->
+    context.Execute sets None (fun (formation: StellarFormation) ->
         formation.WaitUntilSynced sets
         doCatchup context formation catchupSets
     )

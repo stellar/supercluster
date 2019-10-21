@@ -8,11 +8,11 @@ open StellarCoreSet
 open StellarMissionContext
 open StellarNetworkCfg
 open StellarNetworkData
-open StellarSupercluster
+open StellarFormation
 
 let historyTestnetRecentCatchup (context : MissionContext) =
     let set = { TestnetCoreSet with nodeCount = 1; catchupMode = CatchupRecent(1001) }
     let coreSet = MakeLiveCoreSet "core" set
-    context.Execute [coreSet] (Some(SDFTestNet)) (fun (formation: ClusterFormation) ->
+    context.Execute [coreSet] (Some(SDFTestNet)) (fun (formation: StellarFormation) ->
         formation.WaitUntilSynced [coreSet]
     )

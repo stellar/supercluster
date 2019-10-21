@@ -12,7 +12,7 @@ open StellarCoreSet
 open StellarMissionContext
 open StellarNetworkCfg
 open StellarNetworkData
-open StellarSupercluster
+open StellarFormation
 open System
 
 
@@ -31,6 +31,6 @@ let historyPubnetParallelCatchup (context : MissionContext) =
                                             forceScp = false } }
     context.ExecuteJobs opts (Some(SDFMainNet))
         begin
-        fun (formation: ClusterFormation) ->
+        fun (formation: StellarFormation) ->
             (formation.RunParallelJobsInRandomOrder parallelism jobArr) |> ignore
         end

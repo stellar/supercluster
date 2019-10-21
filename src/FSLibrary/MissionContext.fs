@@ -14,6 +14,7 @@ open StellarDestination
 open StellarNetworkCfg
 open StellarPerformanceReporter
 open StellarPersistentVolume
+open StellarFormation
 open StellarSupercluster
 open StellarCoreSet
 
@@ -41,7 +42,7 @@ type MissionContext =
       keepData : bool
       probeTimeout : int }
 
-    member self.MakeFormation (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option) : ClusterFormation =
+    member self.MakeFormation (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option) : StellarFormation =
         let networkCfg =
             MakeNetworkCfg coreSetList
                 self.namespaceProperty
@@ -51,7 +52,7 @@ type MissionContext =
                 self.ingressDomain passphrase
         self.kube.MakeFormation networkCfg (Some(self.persistentVolume)) self.keepData self.probeTimeout
 
-    member self.MakeFormationForJob (opts:CoreSetOptions) (passphrase: NetworkPassphrase option) : ClusterFormation =
+    member self.MakeFormationForJob (opts:CoreSetOptions) (passphrase: NetworkPassphrase option) : StellarFormation =
         let networkCfg =
             MakeNetworkCfg []
                 self.namespaceProperty
@@ -64,7 +65,7 @@ type MissionContext =
 
     member self.ExecuteJobs (opts:CoreSetOptions)
                             (passphrase:NetworkPassphrase option)
-                            (run:ClusterFormation->unit) =
+                            (run:StellarFormation->unit) =
       use formation = self.MakeFormationForJob opts passphrase
       try
           try
@@ -75,7 +76,7 @@ type MissionContext =
       | x -> (if self.keepData then formation.KeepData()
               reraise())
 
-    member self.Execute (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option) (run:ClusterFormation->unit) : unit =
+    member self.Execute (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option) (run:StellarFormation->unit) : unit =
       use formation = self.MakeFormation coreSetList passphrase
       try
           try
@@ -92,7 +93,7 @@ type MissionContext =
 
     member self.ExecuteWithPerformanceReporter
             (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option)
-            (run:ClusterFormation->PerformanceReporter->unit) : unit =
+            (run:StellarFormation->PerformanceReporter->unit) : unit =
       use formation = self.MakeFormation coreSetList passphrase
       let performanceReporter = PerformanceReporter formation.NetworkCfg
       try

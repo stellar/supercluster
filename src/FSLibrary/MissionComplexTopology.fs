@@ -6,7 +6,7 @@ module MissionComplexTopology
 
 open StellarCoreSet
 open StellarMissionContext
-open StellarSupercluster
+open StellarFormation
 
 let complexTopology (context : MissionContext) =
     let context = context.WithNominalLoad
@@ -31,7 +31,7 @@ let complexTopology (context : MissionContext) =
                        initialization = { CoreSetInitialization.Default with forceScp = false }
                        validate = false }
 
-    context.Execute [coreSet; publicSet; orgSet] None (fun (formation: ClusterFormation) ->
+    context.Execute [coreSet; publicSet; orgSet] None (fun (formation: StellarFormation) ->
         formation.WaitUntilSynced [coreSet; publicSet; orgSet]
         formation.UpgradeProtocolToLatest [coreSet]
 

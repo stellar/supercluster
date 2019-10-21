@@ -10,14 +10,14 @@ open k8s.Models
 open Logging
 open StellarCoreCfg
 open StellarCorePeer
-open StellarSupercluster
+open StellarFormation
 open System.IO
 open StellarDestination
 open System
 open System.Threading
 open Microsoft.Rest.Serialization
 
-type ClusterFormation with
+type StellarFormation with
 
     member self.DumpLogs (destination:Destination) (podName:string) (containerName:string) =
         let ns = self.NetworkCfg.NamespaceProperty

@@ -7,11 +7,11 @@ module MissionSimplePayment
 open StellarCoreSet
 open StellarMissionContext
 open StellarTransaction
-open StellarSupercluster
+open StellarFormation
 
 let simplePayment (context : MissionContext) =
     let coreSet = MakeLiveCoreSet "core" CoreSetOptions.Default
-    context.Execute [coreSet] None (fun (formation: ClusterFormation) ->
+    context.Execute [coreSet] None (fun (formation: StellarFormation) ->
         formation.WaitUntilSynced [coreSet]
         formation.UpgradeProtocolToLatest [coreSet]
 

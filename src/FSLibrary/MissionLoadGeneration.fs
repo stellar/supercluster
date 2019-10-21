@@ -6,11 +6,11 @@ module MissionLoadGeneration
 
 open StellarCoreSet
 open StellarMissionContext
-open StellarSupercluster
+open StellarFormation
 
 let loadGeneration (context : MissionContext) =
     let coreSet = MakeLiveCoreSet "core" CoreSetOptions.Default
-    context.Execute [coreSet] None (fun (formation: ClusterFormation) ->
+    context.Execute [coreSet] None (fun (formation: StellarFormation) ->
         formation.WaitUntilSynced [coreSet]
         formation.UpgradeProtocolToLatest [coreSet]
         formation.UpgradeMaxTxSize [coreSet] 100000

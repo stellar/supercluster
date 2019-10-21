@@ -10,7 +10,7 @@ open StellarCorePeer
 open StellarCoreSet
 open StellarMissionContext
 open StellarTransaction
-open StellarSupercluster
+open StellarFormation
 
 let versionMixConsensus (context : MissionContext) =
     let newImage = GetOrDefault context.image CfgVal.stellarCoreImageName
@@ -24,7 +24,7 @@ let versionMixConsensus (context : MissionContext) =
                                                       nodeCount = 2
                                                       image = Some(newImage)
                                                       quorumSet = Some(["old-core"]) }
-    context.Execute [oldCoreSet; newCoreSet] None (fun (formation: ClusterFormation) ->
+    context.Execute [oldCoreSet; newCoreSet] None (fun (formation: StellarFormation) ->
         formation.WaitUntilSynced [oldCoreSet; newCoreSet]
         let peer = formation.NetworkCfg.GetPeer oldCoreSet 0
         let version = peer.GetSupportedProtocolVersion()

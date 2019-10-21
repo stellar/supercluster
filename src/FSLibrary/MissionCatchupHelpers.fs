@@ -8,7 +8,7 @@ open StellarCoreHTTP
 open StellarCorePeer
 open StellarCoreSet
 open StellarMissionContext
-open StellarSupercluster
+open StellarFormation
 
 type CatchupMissionOptions =
     { generatorImage : string
@@ -72,7 +72,7 @@ let MakeCatchupSets (options: CatchupMissionOptions) =
                          recent3Set ]
       versionSet = versionSet}
 
-let doCatchup (context: MissionContext) (formation: ClusterFormation) (catchupSets: CatchupSets) =
+let doCatchup (context: MissionContext) (formation: StellarFormation) (catchupSets: CatchupSets) =
     let versionPeer = formation.NetworkCfg.GetPeer catchupSets.versionSet 0
     let version = versionPeer.GetSupportedProtocolVersion()
     formation.Stop "version"
