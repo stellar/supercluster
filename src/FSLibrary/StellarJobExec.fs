@@ -80,6 +80,10 @@ type StellarFormation with
         installHandler true
         (event.WaitHandle, ok)
 
+    member self.RunSingleJob (destination:Destination)
+                             (job:(string array)) : Map<string,bool> =
+        self.RunParallelJobsInRandomOrder 1 destination [| job |]
+
     member self.RunParallelJobsInRandomOrder (parallelism:int)
                                              (destination:Destination)
                                              (allJobs:((string array) array)) : Map<string,bool> =
