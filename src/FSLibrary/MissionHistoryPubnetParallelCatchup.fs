@@ -4,9 +4,6 @@
 
 module MissionHistoryPubnetParallelCatchup
 
-open k8s
-open k8s.Models
-
 open Logging
 open StellarCoreSet
 open StellarMissionContext
@@ -14,9 +11,6 @@ open StellarNetworkCfg
 open StellarNetworkData
 open StellarFormation
 open StellarJobExec
-open System
-open Logging
-
 
 let historyPubnetParallelCatchup (context : MissionContext) =
     let checkpointsPerJob = 1000
@@ -25,9 +19,14 @@ let historyPubnetParallelCatchup (context : MissionContext) =
     let totalLedgers = GetLatestPubnetLedgerNumber()              // ~25 million ish
     let numJobs = (totalLedgers / ledgersPerJob)                  // 400 ish
     let parallelism = 32
+    let overlapCheckpoints = 5
+    let overlapLedgers = overlapCheckpoints * ledgersPerCheckpoint
+
     LogInfo "Running %d jobs (%d-way parallel) of %d checkpoints each, to catch up to ledger %d"
             numJobs parallelism checkpointsPerJob totalLedgers
-    let jobArr = Array.init numJobs (fun i -> [| "catchup"; sprintf "%d/%d" ((i+1)*ledgersPerJob) ledgersPerJob |])
+
+    let catchupRangeStr i = sprintf "%d/%d" ((i+1) * ledgersPerJob) (ledgersPerJob + overlapLedgers)
+    let jobArr = Array.init numJobs (fun i -> [| "catchup"; catchupRangeStr i|])
     let opts = { PubnetCoreSet with
                      localHistory = false
                      initialization = { PubnetCoreSet.initialization with
