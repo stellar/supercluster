@@ -13,16 +13,17 @@ open StellarMissionContext
 open StellarNetworkCfg
 open StellarNetworkData
 open StellarFormation
+open StellarJobExec
 open System
 open Logging
 
 
 let historyPubnetParallelCatchup (context : MissionContext) =
     let checkpointsPerJob = 1000
-    let totalLedgers = GetLatestPubnetLedgerNumber()
     let ledgersPerCheckpoint = 64
-    let ledgersPerJob = checkpointsPerJob * ledgersPerCheckpoint
-    let numJobs = (totalLedgers / ledgersPerJob) + 1
+    let ledgersPerJob = checkpointsPerJob * ledgersPerCheckpoint  // 64,000
+    let totalLedgers = GetLatestPubnetLedgerNumber()              // ~25 million ish
+    let numJobs = (totalLedgers / ledgersPerJob)                  // 400 ish
     let parallelism = 32
     LogInfo "Running %d jobs (%d-way parallel) of %d checkpoints each, to catch up to ledger %d"
             numJobs parallelism checkpointsPerJob totalLedgers
@@ -35,5 +36,6 @@ let historyPubnetParallelCatchup (context : MissionContext) =
     context.ExecuteJobs opts (Some(SDFMainNet))
         begin
         fun (formation: StellarFormation) ->
-            (formation.RunParallelJobsInRandomOrder parallelism jobArr) |> ignore
+            (formation.RunParallelJobsInRandomOrder parallelism context.destination jobArr)
+            |> formation.CheckAllJobsSucceeded
         end
