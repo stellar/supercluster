@@ -14,15 +14,18 @@ open StellarNetworkCfg
 open StellarNetworkData
 open StellarFormation
 open System
+open Logging
 
 
 let historyPubnetParallelCatchup (context : MissionContext) =
-    let checkpointsPerJob = 3000
-    let maxLedgers = 26256029
+    let checkpointsPerJob = 1000
+    let totalLedgers = GetLatestPubnetLedgerNumber()
     let ledgersPerCheckpoint = 64
     let ledgersPerJob = checkpointsPerJob * ledgersPerCheckpoint
-    let numJobs = (maxLedgers / ledgersPerJob) + 1
-    let parallelism = 64
+    let numJobs = (totalLedgers / ledgersPerJob) + 1
+    let parallelism = 32
+    LogInfo "Running %d jobs (%d-way parallel) of %d checkpoints each, to catch up to ledger %d"
+            numJobs parallelism checkpointsPerJob totalLedgers
     let jobArr = Array.init numJobs (fun i -> [| "catchup"; sprintf "%d/%d" ((i+1)*ledgersPerJob) ledgersPerJob |])
     let opts = { PubnetCoreSet with
                      localHistory = false
