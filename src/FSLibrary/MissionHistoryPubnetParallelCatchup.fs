@@ -33,7 +33,7 @@ let historyPubnetParallelCatchup (context : MissionContext) =
                      initialization = { PubnetCoreSet.initialization with
                                             newHist = false
                                             forceScp = false } }
-    context.ExecuteJobs opts (Some(SDFMainNet))
+    context.ExecuteJobs (Some(opts)) (Some(SDFMainNet))
         begin
         fun (formation: StellarFormation) ->
             (formation.RunParallelJobsInRandomOrder parallelism context.destination jobArr)

@@ -11,6 +11,24 @@ open StellarCoreCfg
 open StellarCoreSet
 open StellarPersistentVolume
 
+// Containers that run stellar-core may or may-not have a final '--conf'
+// argument appended to their command-line. The argument is specified one of 3
+// ways:
+type ConfigOption =
+
+    // Pass no '--conf' argument
+    | NoConfigFile
+
+    // Pass a single '--conf /cfg/job.conf' argument, with content derived from
+    // NetworkCfg.jobCoreSetOptions
+    | SharedJobConfigFile
+
+    // Pass a single '--conf /cfg/$(STELLAR_CORE_PEER_SHORT_NAME).cfg' argument,
+    // where the container is run in an environment with
+    // STELLAR_CORE_PEER_SHORT_NAME set to self.PeerShortName so that the
+    // container picks up a peer-specific config.
+    | PeerSpecificConfigFile
+
 let HistoryContainer =
     V1Container
         (name = "history",
@@ -22,17 +40,8 @@ let HistoryContainer =
                            V1VolumeMount(name = CfgVal.cfgVolumeName,
                                          mountPath = CfgVal.cfgVolumePath) |])
 
-// Returns a k8s V1Container object using the stellar-core image, and running
-// stellar-core with the specified sub-command(s) or arguments, passing a final
-// argument pair "--conf /cfg/$(STELLAR_CORE_PEER_SHORT_NAME).cfg". This is run
-// in an _environment_ that has STELLAR_CORE_PEER_SHORT_NAME set to the Pod's
-// name, via a fieldRef env var referencing the Pod's "metadata.name" field. For
-// example, on Pod peer-1, stellar-core will run with --conf /cfg/peer-1.cfg.
-//
-// This is admittedly a bit convoluted, but it's the simplest mechanism I could
-// figure out to furnish each stellar-core with a Pod-specific config file.
 let CoreContainerForCommand (q:NetworkQuotas) (numContainers:int)
-        (image:string) (isJob:bool) (subCommands:string array) : V1Container =
+        (image:string) (configOpt:ConfigOption) (subCommands:string array) : V1Container =
     let peerNameFieldSel = V1ObjectFieldSelector(fieldPath = "metadata.name")
     let peerNameEnvVarSource = V1EnvVarSource(fieldRef = peerNameFieldSel)
     let peerNameEnvVar = V1EnvVar(name = CfgVal.peerNameEnvVarName,
@@ -48,14 +57,16 @@ let CoreContainerForCommand (q:NetworkQuotas) (numContainers:int)
                       "memory", ResourceQuantity(sprintf "%dMi" memLim)]
     let requirements = V1ResourceRequirements(requests = requests,
                                               limits = limits)
-    let cfgFile = if isJob
-                  then CfgVal.jobCfgFile
-                  else CfgVal.peerNameEnvCfgFile
+    let cfgFileArgs = (match configOpt with
+                       | NoConfigFile -> [| |]
+                       | SharedJobConfigFile -> [| "--conf"; CfgVal.jobCfgFile |]
+                       | PeerSpecificConfigFile -> [| "--conf"; CfgVal.peerNameEnvCfgFile |])
+
     V1Container
         (name = CfgVal.stellarCoreContainerName (Array.get subCommands 0),
          image = image,
          command = [| CfgVal.stellarCoreBinPath |], env = [| peerNameEnvVar |],
-         args = Array.append subCommands [| "--conf"; cfgFile |],
+         args = Array.append subCommands cfgFileArgs,
          resources = requirements,
          volumeMounts = [| V1VolumeMount(name = CfgVal.dataVolumeName,
                                          mountPath = CfgVal.dataVolumePath)
@@ -121,10 +132,12 @@ type NetworkCfg with
                     data = Map.ofSeq cfgs)
 
     member self.GetJobPodTemplateSpec (jobName:string) (command: string array) : V1PodTemplateSpec =
-        let isJob = true
+        let cfgOpt = (if self.jobCoreSetOptions.IsNone
+                      then NoConfigFile
+                      else SharedJobConfigFile)
         let maxPeers = 1
         let imageName = CfgVal.stellarCoreImageName
-        let containers = [| CoreContainerForCommand self.quotas maxPeers imageName isJob command |]
+        let containers = [| CoreContainerForCommand self.quotas maxPeers imageName cfgOpt command |]
         let cfgVol = V1Volume(name = CfgVal.cfgVolumeName,
                               configMap = V1ConfigMapVolumeSource(name = self.CfgMapName))
         let ns = self.NamespaceProperty
@@ -134,7 +147,7 @@ type NetworkCfg with
         let initContainers =
             match self.jobCoreSetOptions with
                 | None -> [| |]
-                | Some(opts) -> self.InitContainersFor opts.initialization maxPeers imageName isJob
+                | Some(opts) -> self.InitContainersFor opts.initialization maxPeers imageName cfgOpt
 
         V1PodTemplateSpec
                 (spec = V1PodSpec (initContainers = initContainers,
@@ -150,7 +163,7 @@ type NetworkCfg with
         V1Job(spec = V1JobSpec(template = template),
               metadata = self.NamespacedMeta jobName)
 
-    member self.InitContainersFor (init:CoreSetInitialization) (maxPeers:int) (imageName:string) (isJob:bool) : V1Container array =
+    member self.InitContainersFor (init:CoreSetInitialization) (maxPeers:int) (imageName:string) (cfgOpt:ConfigOption) : V1Container array =
         let newDb i = if i.newDb then [| [| "new-db" |] |] else [||]
         let newHist i = if i.newHist then [| [| "new-hist"; CfgVal.localHistName |] |] else [||]
         let initialCatchup i = if i.initialCatchup then [| [| "catchup"; "current/0" |] |] else [||]
@@ -160,7 +173,7 @@ type NetworkCfg with
             Array.concat [ newDb i; newHist i; initialCatchup i; forceScp i ]
 
         Array.map
-            (fun p -> CoreContainerForCommand self.quotas maxPeers imageName isJob p)
+            (fun p -> CoreContainerForCommand self.quotas maxPeers imageName cfgOpt p)
             (initSequence init)
 
     // Returns a PodTemplate that mounts the ConfigMap on /cfg and an empty data
@@ -184,12 +197,12 @@ type NetworkCfg with
             | None -> CfgVal.stellarCoreImageName
             | Some(x) -> x
 
-        let isJob = false
+        let cfgOpt = PeerSpecificConfigFile
         let volumes = [| cfgVol; dataVol |]
         let maxPeers = max 1 self.MaxPeerCount
-        let initContianers = self.InitContainersFor coreSet.options.initialization maxPeers imageName isJob
+        let initContianers = self.InitContainersFor coreSet.options.initialization maxPeers imageName cfgOpt
         let containers = [| WithReadinessProbe
-                                (CoreContainerForCommand self.quotas maxPeers imageName isJob [| "run" |])
+                                (CoreContainerForCommand self.quotas maxPeers imageName cfgOpt [| "run" |])
                                 probeTimeout;
                             HistoryContainer; |]
 

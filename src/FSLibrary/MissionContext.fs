@@ -52,7 +52,7 @@ type MissionContext =
                 self.ingressDomain passphrase
         self.kube.MakeFormation networkCfg (Some(self.persistentVolume)) self.keepData self.probeTimeout
 
-    member self.MakeFormationForJob (opts:CoreSetOptions) (passphrase: NetworkPassphrase option) : StellarFormation =
+    member self.MakeFormationForJob (opts:CoreSetOptions option) (passphrase: NetworkPassphrase option) : StellarFormation =
         let networkCfg =
             MakeNetworkCfg []
                 self.namespaceProperty
@@ -60,10 +60,10 @@ type MissionContext =
                 self.logLevels
                 self.storageClass
                 self.ingressDomain passphrase
-        let networkCfg = { networkCfg with jobCoreSetOptions = Some(opts) }
+        let networkCfg = { networkCfg with jobCoreSetOptions = opts }
         self.kube.MakeFormation networkCfg None self.keepData self.probeTimeout
 
-    member self.ExecuteJobs (opts:CoreSetOptions)
+    member self.ExecuteJobs (opts:CoreSetOptions option)
                             (passphrase:NetworkPassphrase option)
                             (run:StellarFormation->unit) =
       use formation = self.MakeFormationForJob opts passphrase
