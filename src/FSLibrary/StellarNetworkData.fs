@@ -43,9 +43,9 @@ let PubnetCoreSet = { CoreSetOptions.Default with
                         dumpDatabase = false }
 
 let TestnetGetCommands = [
-                         "core_testnet_001", "wget -q http://history.stellar.org/prd/core-testnet/core_testnet_001/{0} -O {1}"
-                         "core_testnet_002", "wget -q http://history.stellar.org/prd/core-testnet/core_testnet_002/{0} -O {1}"
-                         "core_testnet_003", "wget -q http://history.stellar.org/prd/core-testnet/core_testnet_003/{0} -O {1}"
+                         "core_testnet_001", "curl -sf http://history.stellar.org/prd/core-testnet/core_testnet_001/{0} -O {1}"
+                         "core_testnet_002", "curl -sf http://history.stellar.org/prd/core-testnet/core_testnet_002/{0} -O {1}"
+                         "core_testnet_003", "curl -sf http://history.stellar.org/prd/core-testnet/core_testnet_003/{0} -O {1}"
                          ] |> Map.ofList
 
 let TestnetNodes = [
