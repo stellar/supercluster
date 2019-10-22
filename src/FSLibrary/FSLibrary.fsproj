@@ -46,6 +46,7 @@
     <Compile Include="MissionProtocolUpgradeTestnet.fs" />
     <Compile Include="MissionProtocolUpgradePubnet.fs" />
     <Compile Include="MissionDatabaseInplaceUpgrade.fs" />
+    <Compile Include="MissionAcceptanceUnitTests.fs" />
     <Compile Include="StellarMission.fs" />
   </ItemGroup>
   <ItemGroup>

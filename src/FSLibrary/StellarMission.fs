@@ -23,6 +23,7 @@ open MissionVersionMixOldCatchupToNew
 open MissionProtocolUpgradeTestnet
 open MissionProtocolUpgradePubnet
 open MissionDatabaseInplaceUpgrade
+open MissionAcceptanceUnitTests
 open StellarMissionContext
 
 type Mission = (MissionContext -> unit)
@@ -49,4 +50,5 @@ let allMissions : Map<string, Mission> =
         ("ProtocolUpgradeTestnet", protocolUpgradeTestnet)
         ("ProtocolUpgradePubnet", protocolUpgradePubnet)
         ("DatabaseInplaceUpgrade", databaseInplaceUpgrade)
+        ("AcceptanceUnitTests", acceptanceUnitTests)
     |]
