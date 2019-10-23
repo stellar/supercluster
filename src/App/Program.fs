@@ -12,7 +12,6 @@ open StellarDestination
 open StellarNetworkCfg
 open StellarMission
 open StellarMissionContext
-open StellarPersistentVolume
 open StellarSupercluster
 
 
@@ -217,7 +216,6 @@ type MissionOptions(kubeConfig: string,
                     probeTimeout: int,
                     missions: string seq,
                     destination: string,
-                    persistentVolumeRoot: string,
                     storageClass: string,
                     image: string option,
                     oldImage: string option,
@@ -289,10 +287,6 @@ type MissionOptions(kubeConfig: string,
     [<Option('d', "destination", HelpText="Output directory for logs and sql dumps",
              Required = false, Default = "destination")>]
     member self.Destination = destination
-
-    [<Option("persistent-volume-root", HelpText="Root for persistent volumes - some missions require this for data exchange between pods",
-             Required = false, Default = "/tmp")>]
-    member self.PersistentVolumeRoot = persistentVolumeRoot
 
     [<Option("storage-class", HelpText="Storage class name to use for dynamically provisioning persistent volume claims",
              Required = false, Default = "default")>]
@@ -377,7 +371,7 @@ let main argv =
                                 setup.NamespaceProperty
                                 nq ll sc
                                 setup.IngressDomain None
-      use formation = kube.MakeFormation nCfg None false setup.ProbeTimeout
+      use formation = kube.MakeFormation nCfg false setup.ProbeTimeout
       formation.ReportStatus()
       0
 
@@ -420,7 +414,7 @@ let main argv =
                                 loadgen.NamespaceProperty
                                 nq ll sc
                                 loadgen.IngressDomain None
-      use formation = kube.MakeFormation nCfg None false loadgen.ProbeTimeout
+      use formation = kube.MakeFormation nCfg false loadgen.ProbeTimeout
       formation.RunLoadgenAndCheckNoErrors coreSet
       formation.ReportStatus()
       0
@@ -452,42 +446,37 @@ let main argv =
                 LogInfo "-----------------------------------"
                 let kube = ConnectToCluster mission.KubeConfig
                 let destination = Destination(mission.Destination)
-                let persistentVolume = PersistentVolume(mission.PersistentVolumeRoot)
 
-                try
-                    for m in mission.Missions do
-                        LogInfo "-----------------------------------"
-                        LogInfo "Starting mission: %s" m
-                        LogInfo "-----------------------------------"
-                        try
-                            let missionContext = { MissionContext.kube = kube
-                                                   destination = destination
-                                                   image = mission.Image
-                                                   oldImage = mission.OldImage
-                                                   txRate = mission.TxRate
-                                                   maxTxRate = mission.MaxTxRate
-                                                   numAccounts = mission.NumAccounts
-                                                   numTxs = mission.NumTxs
-                                                   numNodes = mission.NumNodes
-                                                   quotas = nq
-                                                   logLevels = ll
-                                                   ingressDomain = mission.IngressDomain
-                                                   persistentVolume = persistentVolume
-                                                   storageClass = mission.StorageClass
-                                                   namespaceProperty = mission.NamespaceProperty
-                                                   keepData = mission.KeepData
-                                                   probeTimeout = mission.ProbeTimeout }
-                            allMissions.[m] missionContext
-                        with
-                        // This looks ridiculous but it's how you coax the .NET runtime
-                        // to actually run the IDisposable Dispose methods on uncaught
-                        // exceptions. Sigh.
-                        | x -> reraise()
-                        LogInfo "-----------------------------------"
-                        LogInfo "Finished mission: %s" m
-                        LogInfo "-----------------------------------"
-                    finally
-                        persistentVolume.Cleanup()
+                for m in mission.Missions do
+                    LogInfo "-----------------------------------"
+                    LogInfo "Starting mission: %s" m
+                    LogInfo "-----------------------------------"
+                    try
+                        let missionContext = { MissionContext.kube = kube
+                                               destination = destination
+                                               image = mission.Image
+                                               oldImage = mission.OldImage
+                                               txRate = mission.TxRate
+                                               maxTxRate = mission.MaxTxRate
+                                               numAccounts = mission.NumAccounts
+                                               numTxs = mission.NumTxs
+                                               numNodes = mission.NumNodes
+                                               quotas = nq
+                                               logLevels = ll
+                                               ingressDomain = mission.IngressDomain
+                                               storageClass = mission.StorageClass
+                                               namespaceProperty = mission.NamespaceProperty
+                                               keepData = mission.KeepData
+                                               probeTimeout = mission.ProbeTimeout }
+                        allMissions.[m] missionContext
+                    with
+                    // This looks ridiculous but it's how you coax the .NET runtime
+                    // to actually run the IDisposable Dispose methods on uncaught
+                    // exceptions. Sigh.
+                    | x -> reraise()
+                    LogInfo "-----------------------------------"
+                    LogInfo "Finished mission: %s" m
+                    LogInfo "-----------------------------------"
                 0
             end
 

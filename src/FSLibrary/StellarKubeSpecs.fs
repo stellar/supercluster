@@ -9,7 +9,6 @@ open k8s.Models
 open StellarNetworkCfg
 open StellarCoreCfg
 open StellarCoreSet
-open StellarPersistentVolume
 
 // Containers that run stellar-core may or may-not have a final '--conf'
 // argument appended to their command-line. The argument is specified one of 3
@@ -218,15 +217,8 @@ type NetworkCfg with
     member self.ToPodTemplateSpec (coreSet: CoreSet) probeTimeout : V1PodTemplateSpec =
         let cfgVol = V1Volume(name = CfgVal.cfgVolumeName,
                               configMap = V1ConfigMapVolumeSource(name = self.CfgMapName))
-        let dataVol =
-            match coreSet.options.persistentVolume with
-            | None -> V1Volume(name = CfgVal.dataVolumeName,
+        let dataVol = V1Volume(name = CfgVal.dataVolumeName,
                                emptyDir = V1EmptyDirVolumeSource(medium = "Memory"))
-            | Some(x) ->
-                let claim = V1PersistentVolumeClaimVolumeSource(claimName = CfgVal.peristentVolumeClaimName self.NamespaceProperty x)
-                V1Volume(name = CfgVal.dataVolumeName,
-                         persistentVolumeClaim = claim)
-
         let imageName =
             match coreSet.options.image with
             | None -> CfgVal.stellarCoreImageName
@@ -301,34 +293,6 @@ type NetworkCfg with
             V1Service(metadata = self.NamespacedMeta name, spec = spec)
         self.MapAllPeers perPodService
 
-    member self.ToCoreSetPersistentVolumeNames () : string list =
-        let withPersistentVolumes = self.CoreSetList |> List.filter (fun coreSet -> coreSet.options.persistentVolume <> None)
-        let getName (coreSet: CoreSet) =
-            coreSet.options.persistentVolume.Value
-        let names = List.map getName withPersistentVolumes
-        names |> List.sort |> List.distinct
-
-    member self.ToPersistentVolumeNames () : string list =
-        let getFullName name =
-            CfgVal.peristentVolumeName self.NamespaceProperty name
-        List.map getFullName (self.ToCoreSetPersistentVolumeNames())
-
-    member self.ToPersistentVolumes (pv: PersistentVolume) =
-        let makePersistentVolume name =
-            let volumeName = CfgVal.peristentVolumeName self.NamespaceProperty name
-            let meta = V1ObjectMeta(name = volumeName)
-            let accessModes = [|"ReadWriteOnce"|]
-            let capacity = dict["storage", ResourceQuantity("1Gi")]
-            pv.Create volumeName
-            let hostPath = V1HostPathVolumeSource(path = pv.FullPath volumeName)
-            let spec = V1PersistentVolumeSpec(accessModes = accessModes,
-                                              storageClassName = volumeName,
-                                              capacity = capacity,
-                                              hostPath = hostPath,
-                                              persistentVolumeReclaimPolicy = "Retain")
-            V1PersistentVolume(metadata = meta, spec = spec)
-        List.map makePersistentVolume (self.ToCoreSetPersistentVolumeNames())
-
     member self.ToDynamicPersistentVolumeClaim (jobOrPeerName:string) : V1PersistentVolumeClaim =
         let ns = self.NamespaceProperty
         let pvcName = CfgVal.peristentVolumeClaimName ns jobOrPeerName
@@ -345,21 +309,6 @@ type NetworkCfg with
 
     member self.ToDynamicPersistentVolumeClaimForJob (jobNum:int) : V1PersistentVolumeClaim =
         self.ToDynamicPersistentVolumeClaim (self.JobName jobNum)
-
-    member self.ToPersistentVolumeClaims () : V1PersistentVolumeClaim list =
-        let makePersistentVolumeClaim name =
-            let volumeName = CfgVal.peristentVolumeName self.NamespaceProperty name
-            let claimName = CfgVal.peristentVolumeClaimName self.NamespaceProperty name
-            let meta = V1ObjectMeta(name = claimName)
-            let accessModes = [|"ReadWriteOnce"|]
-            let requests = dict["storage", ResourceQuantity("1Gi")]
-            let requirements = V1ResourceRequirements(requests = requests)
-
-            let spec = V1PersistentVolumeClaimSpec(accessModes = accessModes,
-                                                   storageClassName = volumeName,
-                                                   resources = requirements)
-            V1PersistentVolumeClaim(metadata = meta, spec = spec)
-        List.map makePersistentVolumeClaim (self.ToCoreSetPersistentVolumeNames())
 
     // Returns an Ingress object with rules that map URLs http://$ingressHost/peer-N/foo
     // to the per-Pod Service within the current networkCfg named peer-N (which then, via

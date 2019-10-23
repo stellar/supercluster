@@ -13,7 +13,6 @@ open StellarDestination
 open StellarDataDump
 open StellarFormation
 open StellarKubeSpecs
-open StellarPersistentVolume
 open StellarNamespaceContent
 open System
 open System.Threading

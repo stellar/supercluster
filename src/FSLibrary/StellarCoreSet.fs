@@ -54,7 +54,6 @@ type CoreSetOptions =
       validate : bool
       catchupMode : CatchupMode
       image : string option
-      persistentVolume : string option
       initialization : CoreSetInitialization
       dumpDatabase: bool }
 
@@ -76,7 +75,6 @@ type CoreSetOptions =
         validate = true
         catchupMode = CatchupComplete
         image = None
-        persistentVolume = None
         initialization = CoreSetInitialization.Default
         dumpDatabase = true }
 

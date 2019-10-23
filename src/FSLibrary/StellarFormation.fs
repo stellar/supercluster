@@ -14,7 +14,6 @@ open StellarCoreSet
 open StellarKubeSpecs
 open StellarCorePeer
 open StellarCoreHTTP
-open StellarPersistentVolume
 open StellarTransaction
 open StellarNamespaceContent
 open System
@@ -61,15 +60,6 @@ type StellarFormation(networkCfg: NetworkCfg,
         namespaceContent.Cleanup()
 
     member self.ForceCleanup() =
-        let deleteVolume persistentVolume =
-            try
-                self.Kube.DeletePersistentVolume(name = persistentVolume) |> ignore
-            with
-            | x -> ()
-            true
-
-        (List.forall deleteVolume (networkCfg.ToPersistentVolumeNames())) |> ignore
-
         LogInfo "Cleaning run '%s' resources from namespace '%s'"
             (networkCfg.networkNonce.ToString())
             networkCfg.NamespaceProperty

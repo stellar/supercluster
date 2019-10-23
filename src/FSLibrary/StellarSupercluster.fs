@@ -15,7 +15,6 @@ open StellarCoreSet
 open StellarKubeSpecs
 open StellarCorePeer
 open StellarCoreHTTP
-open StellarPersistentVolume
 open StellarTransaction
 open StellarNamespaceContent
 open System
@@ -70,7 +69,7 @@ type Kubernetes with
 
     // Creates a full-featured formation involving a StatefulSet, Service, and
     // Ingress for a given NetworkCfg, then waits for it to be ready.
-    member self.MakeFormation (nCfg: NetworkCfg) (persistentVolume: PersistentVolume option) (keepData: bool) (probeTimeout: int) : StellarFormation =
+    member self.MakeFormation (nCfg: NetworkCfg) (keepData: bool) (probeTimeout: int) : StellarFormation =
         let nsStr = nCfg.NamespaceProperty
         let namespaceContent = NamespaceContent(self, nsStr)
         try
@@ -85,17 +84,6 @@ type Kubernetes with
             let statefulSets = List.map makeStatefulSet nCfg.CoreSetList
             for statefulSet in statefulSets do
                 namespaceContent.Add(statefulSet)
-
-            match persistentVolume with
-            | Some(pv) ->
-                for persistentVolume in nCfg.ToPersistentVolumes pv do
-                    self.CreatePersistentVolume(body = persistentVolume) |> ignore
-            | None -> ()
-
-            for persistentVolumeClaim in nCfg.ToPersistentVolumeClaims() do
-                let claim = self.CreateNamespacedPersistentVolumeClaim(body = persistentVolumeClaim,
-                                                                       namespaceParameter = nsStr)
-                namespaceContent.Add(claim)
 
             for svc in nCfg.ToPerPodServices() do
                 let service = self.CreateNamespacedService(namespaceParameter = nsStr,
@@ -127,14 +115,5 @@ type Kubernetes with
                              nCfg.Nonce
                              nCfg.NamespaceProperty
                 namespaceContent.Cleanup()
-
-                match persistentVolume with
-                | Some(pv) ->
-                    for persistentVolume in nCfg.ToPersistentVolumes pv do
-                        try
-                            self.DeletePersistentVolume(name = persistentVolume.Metadata.Name) |> ignore
-                        with
-                        | x -> ()
-                | None -> ()
             reraise()
 

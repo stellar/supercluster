@@ -16,7 +16,6 @@
     <Compile Include="StellarCorePeer.fs" />
     <Compile Include="StellarCoreHTTP.fs" />
     <Compile Include="StellarTransaction.fs" />
-    <Compile Include="StellarPersistentVolume.fs" />
     <Compile Include="StellarKubeSpecs.fs" />
     <Compile Include="StellarDestination.fs" />
     <Compile Include="StellarNamespaceContent.fs" />

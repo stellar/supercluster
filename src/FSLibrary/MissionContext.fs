@@ -13,7 +13,6 @@ open StellarDataDump
 open StellarDestination
 open StellarNetworkCfg
 open StellarPerformanceReporter
-open StellarPersistentVolume
 open StellarFormation
 open StellarSupercluster
 open StellarCoreSet
@@ -36,7 +35,6 @@ type MissionContext =
       quotas: NetworkQuotas
       logLevels: LogLevels
       ingressDomain : string
-      persistentVolume : PersistentVolume
       storageClass : string
       namespaceProperty : string
       keepData : bool
@@ -50,7 +48,7 @@ type MissionContext =
                 self.logLevels
                 self.storageClass
                 self.ingressDomain passphrase
-        self.kube.MakeFormation networkCfg (Some(self.persistentVolume)) self.keepData self.probeTimeout
+        self.kube.MakeFormation networkCfg self.keepData self.probeTimeout
 
     member self.MakeFormationForJob (opts:CoreSetOptions option) (passphrase: NetworkPassphrase option) : StellarFormation =
         let networkCfg =
@@ -61,7 +59,7 @@ type MissionContext =
                 self.storageClass
                 self.ingressDomain passphrase
         let networkCfg = { networkCfg with jobCoreSetOptions = opts }
-        self.kube.MakeFormation networkCfg None self.keepData self.probeTimeout
+        self.kube.MakeFormation networkCfg self.keepData self.probeTimeout
 
     member self.ExecuteJobs (opts:CoreSetOptions option)
                             (passphrase:NetworkPassphrase option)
