@@ -33,7 +33,8 @@ let PubnetPeers = [
                   "core-live6.stellar.org"
                   ]
 
-let PubnetCoreSet = { CoreSetOptions.Default with
+let PubnetCoreSetOptions = {
+                    CoreSetOptions.Default with
                         quorumSet = Some([])
                         quorumSetKeys = PubnetNodes
                         historyGetCommands = PubnetGetCommands
@@ -60,7 +61,8 @@ let TestnetPeers = [
                    "core-testnet3.stellar.org"
                    ]
 
-let TestnetCoreSet = { CoreSetOptions.Default with
+let TestnetCoreSetOptions = {
+                    CoreSetOptions.Default with
                          quorumSet = Some([])
                          quorumSetKeys = TestnetNodes
                          historyGetCommands = TestnetGetCommands

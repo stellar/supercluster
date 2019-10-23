@@ -27,9 +27,9 @@ let historyPubnetParallelCatchup (context : MissionContext) =
 
     let catchupRangeStr i = sprintf "%d/%d" ((i+1) * ledgersPerJob) (ledgersPerJob + overlapLedgers)
     let jobArr = Array.init numJobs (fun i -> [| "catchup"; catchupRangeStr i|])
-    let opts = { PubnetCoreSet with
+    let opts = { PubnetCoreSetOptions with
                      localHistory = false
-                     initialization = { PubnetCoreSet.initialization with
+                     initialization = { PubnetCoreSetOptions.initialization with
                                             newHist = false
                                             forceScp = false } }
     context.ExecuteJobs (Some(opts)) (Some(SDFMainNet))

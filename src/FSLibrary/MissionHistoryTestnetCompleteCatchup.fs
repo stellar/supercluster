@@ -11,7 +11,7 @@ open StellarNetworkData
 open StellarFormation
 
 let historyTestnetCompleteCatchup (context : MissionContext) =
-    let set = { TestnetCoreSet with nodeCount = 1; catchupMode = CatchupComplete }
+    let set = { TestnetCoreSetOptions with nodeCount = 1; catchupMode = CatchupComplete }
     let coreSet = MakeLiveCoreSet "core" set
     context.Execute [coreSet] (Some(SDFTestNet)) (fun (formation: StellarFormation) ->
         formation.WaitUntilSynced [coreSet]
