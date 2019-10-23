@@ -27,7 +27,8 @@ module CfgVal =
     let peristentVolumeClaimName ns name = sprintf "pvc-%s" name
     let databasePath = dataVolumePath + "/stellar.db"
     let historyPath = dataVolumePath + "/history"
-    let bucketsPath = dataVolumePath + "/buckets"
+    let bucketsDir = "buckets"
+    let bucketsPath = dataVolumePath + "/" + bucketsDir
     let localHistName = "local"
     let peerNameEnvVarName = "STELLAR_CORE_PEER_SHORT_NAME"
     let peerNameEnvCfgFile = cfgVolumePath + "/$(STELLAR_CORE_PEER_SHORT_NAME).cfg"
@@ -35,6 +36,14 @@ module CfgVal =
     let jobCfgFile = cfgVolumePath + "/" + jobCfgFilename
     let historyCfgFilename = "nginx.conf"
     let historyCfgFile = cfgVolumePath + "/" + historyCfgFilename
+
+    // We very crudely overload the /data/history directory as a general way
+    // to transfer files from one peer to another over HTTP via nginx + curl
+    let databaseBackupPath = historyPath + "/stellar-backup.db"
+    let bucketsBackupPath = historyPath + "/buckets.tar.gz"
+    let databaseBackupURL (host:string) = "http://" + host + "/stellar-backup.db"
+    let bucketsBackupURL (host:string) = "http://" + host + "/buckets.tar.gz"
+    let bucketsDownloadPath = dataVolumePath + "/buckets.tar.gz"
 
 
 // Symbolic type of the different sorts of DATABASE that can show up in a

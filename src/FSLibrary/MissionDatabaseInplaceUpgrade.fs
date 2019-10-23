@@ -10,6 +10,7 @@ open StellarCorePeer
 open StellarCoreSet
 open StellarMissionContext
 open StellarFormation
+open StellarDataDump
 
 let databaseInplaceUpgrade (context : MissionContext) =
     let context = context.WithNominalLoad
@@ -17,25 +18,24 @@ let databaseInplaceUpgrade (context : MissionContext) =
     let oldImage = GetOrDefault context.oldImage CfgVal.stellarCoreImageName
 
     let quorumSet = Some(["core"])
-    let beforeUpgradeCoreSet = MakeLiveCoreSet 
+    let beforeUpgradeCoreSet = MakeLiveCoreSet
                                  "before-upgrade"
                                  { CoreSetOptions.Default with
                                      nodeCount = 1
                                      quorumSet = quorumSet
-                                     image = Some(oldImage)
-                                     persistentVolume = Some("upgrade") }
+                                     image = Some(oldImage) }
     let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with quorumSet = quorumSet; image = Some(newImage) }
-    let afterUpgradeCoreSet = MakeDeferredCoreSet 
+    let afterUpgradeCoreSet = MakeDeferredCoreSet
                                  "after-upgrade"
                                  { CoreSetOptions.Default with
                                      nodeCount = 1
                                      quorumSet = quorumSet
                                      image = Some(newImage)
-                                     persistentVolume = Some("upgrade")
                                      initialization = { newDb = false
                                                         newHist = false
                                                         initialCatchup = false
-                                                        forceScp = false } }
+                                                        forceScp = false
+                                                        fetchDBFromPeer = Some("before-upgrade", 0) } }
 
     context.Execute [beforeUpgradeCoreSet; coreSet; afterUpgradeCoreSet] None (fun (formation: StellarFormation) ->
       formation.WaitUntilSynced [beforeUpgradeCoreSet; coreSet]
@@ -49,7 +49,7 @@ let databaseInplaceUpgrade (context : MissionContext) =
       formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
       formation.RunLoadgen coreSet context.GeneratePaymentLoad
 
-      formation.Stop beforeUpgradeCoreSet.name
+      formation.BackupDatabaseToHistory peer
       formation.Start afterUpgradeCoreSet.name
 
       formation.RunLoadgen afterUpgradeCoreSet context.GenerateAccountCreationLoad

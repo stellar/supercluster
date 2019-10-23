@@ -14,25 +14,29 @@ type CoreSetInitialization =
     { newDb : bool
       newHist : bool
       initialCatchup : bool
-      forceScp : bool }
+      forceScp : bool
+      fetchDBFromPeer: (string * int) option }
 
     static member Default =
       { newDb = true
         newHist = true
         initialCatchup = false
-        forceScp = true }
+        forceScp = true
+        fetchDBFromPeer = None }
 
     static member DefaultNoForceSCP =
       { newDb = true
         newHist = true
         initialCatchup = false
-        forceScp = false }
+        forceScp = false
+        fetchDBFromPeer = None }
 
     static member CatchupNoForceSCP =
       { newDb = true
         newHist = true
         initialCatchup = true
-        forceScp = false }
+        forceScp = false
+        fetchDBFromPeer = None }
 
 
 type CoreSetOptions =

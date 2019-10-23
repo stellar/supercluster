@@ -15,6 +15,7 @@ open System.IO
 open StellarDestination
 open System
 open System.Threading
+open System.Threading.Tasks
 open Microsoft.Rest.Serialization
 
 type StellarFormation with
@@ -50,6 +51,31 @@ type StellarFormation with
         self.DumpPeerCommandLogs destination "catchup" p
         self.DumpPeerCommandLogs destination "force-scp" p
         self.DumpPeerCommandLogs destination "run" p
+
+    member self.BackupDatabaseToHistory (p:Peer) =
+        let ns = self.NetworkCfg.NamespaceProperty
+        let name = self.NetworkCfg.PeerShortName p.coreSet p.peerNum
+        let task = self.Kube.NamespacedPodExecAsync(name = name,
+                                                    ``namespace`` = ns,
+                                                    command = [|"sqlite3"; CfgVal.databasePath;
+                                                                sprintf ".backup '%s'" CfgVal.databaseBackupPath |],
+                                                    container = "stellar-core-run",
+                                                    tty = false,
+                                                    action = ExecAsyncCallback(fun _ _ _ -> Task.CompletedTask),
+                                                    cancellationToken = CancellationToken())
+        if task.GetAwaiter().GetResult() <> 0
+        then failwith "Failed to back up database"
+
+        let task2 = self.Kube.NamespacedPodExecAsync(name = name,
+                                                     ``namespace`` = ns,
+                                                     command = [|"tar"; "cf"; CfgVal.bucketsBackupPath;
+                                                                 "-C"; CfgVal.dataVolumePath; CfgVal.bucketsDir |],
+                                                     container = "stellar-core-run",
+                                                     tty = false,
+                                                     action = ExecAsyncCallback(fun _ _ _ -> Task.CompletedTask),
+                                                     cancellationToken = CancellationToken())
+        if task2.GetAwaiter().GetResult() <> 0
+        then failwith "Failed to back up buckets"
 
     member self.DumpPeerDatabase (destination : Destination) (p:Peer) =
         try

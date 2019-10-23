@@ -29,49 +29,62 @@ type ConfigOption =
     // container picks up a peer-specific config.
     | PeerSpecificConfigFile
 
+let ContainerVolumeMounts : V1VolumeMount array =
+    [| V1VolumeMount(name = CfgVal.dataVolumeName,
+                     mountPath = CfgVal.dataVolumePath)
+       V1VolumeMount(name = CfgVal.cfgVolumeName,
+                     mountPath = CfgVal.cfgVolumePath) |]
+
+
 let HistoryContainer =
     V1Container
         (name = "history",
          image = "nginx",
          command = [| "nginx" |],
          args = [| "-c"; CfgVal.historyCfgFile; |],
-         volumeMounts = [| V1VolumeMount(name = CfgVal.dataVolumeName,
-                                         mountPath = CfgVal.dataVolumePath)
-                           V1VolumeMount(name = CfgVal.cfgVolumeName,
-                                         mountPath = CfgVal.cfgVolumePath) |])
+         volumeMounts = ContainerVolumeMounts )
 
-let CoreContainerForCommand (q:NetworkQuotas) (numContainers:int)
-        (image:string) (configOpt:ConfigOption) (subCommands:string array) : V1Container =
-    let peerNameFieldSel = V1ObjectFieldSelector(fieldPath = "metadata.name")
-    let peerNameEnvVarSource = V1EnvVarSource(fieldRef = peerNameFieldSel)
-    let peerNameEnvVar = V1EnvVar(name = CfgVal.peerNameEnvVarName,
-                                  valueFrom = peerNameEnvVarSource)
+
+let resourceRequirements (q:NetworkQuotas) (numContainers:int) : V1ResourceRequirements =
     let cpuReq = q.ContainerCpuReqMili numContainers
     let memReq = q.ContainerMemReqMega numContainers
     let cpuLim = q.ContainerCpuLimMili numContainers
     let memLim = q.ContainerMemLimMega numContainers
     let requests = dict["cpu", ResourceQuantity(sprintf "%dm" cpuReq);
                         "memory", ResourceQuantity(sprintf "%dMi" memReq)]
-
     let limits = dict["cpu", ResourceQuantity(sprintf "%dm" cpuLim);
                       "memory", ResourceQuantity(sprintf "%dMi" memLim)]
-    let requirements = V1ResourceRequirements(requests = requests,
-                                              limits = limits)
+    V1ResourceRequirements(requests = requests,
+                           limits = limits)
+
+
+let ContainerForCommand (q:NetworkQuotas) (numContainers:int)
+                        (image:string) (containerName:string)
+                        (command:string) (args:string array)
+                        (env:V1EnvVar array) : V1Container =
+    V1Container
+        (name = containerName, image = image,
+         command = [| command |], env = env,
+         args = args, resources = resourceRequirements q numContainers,
+         volumeMounts = ContainerVolumeMounts)
+
+
+let CoreContainerForCommand (q:NetworkQuotas) (numContainers:int)
+        (image:string) (configOpt:ConfigOption)
+        (subCommands:string array) : V1Container =
+    let peerNameFieldSel = V1ObjectFieldSelector(fieldPath = "metadata.name")
+    let peerNameEnvVarSource = V1EnvVarSource(fieldRef = peerNameFieldSel)
+    let peerNameEnvVar = V1EnvVar(name = CfgVal.peerNameEnvVarName,
+                                  valueFrom = peerNameEnvVarSource)
     let cfgFileArgs = (match configOpt with
                        | NoConfigFile -> [| |]
                        | SharedJobConfigFile -> [| "--conf"; CfgVal.jobCfgFile |]
                        | PeerSpecificConfigFile -> [| "--conf"; CfgVal.peerNameEnvCfgFile |])
-
-    V1Container
-        (name = CfgVal.stellarCoreContainerName (Array.get subCommands 0),
-         image = image,
-         command = [| CfgVal.stellarCoreBinPath |], env = [| peerNameEnvVar |],
-         args = Array.append subCommands cfgFileArgs,
-         resources = requirements,
-         volumeMounts = [| V1VolumeMount(name = CfgVal.dataVolumeName,
-                                         mountPath = CfgVal.dataVolumePath)
-                           V1VolumeMount(name = CfgVal.cfgVolumeName,
-                                         mountPath = CfgVal.cfgVolumePath) |])
+    let containerName = CfgVal.stellarCoreContainerName (Array.get subCommands 0)
+    let command = CfgVal.stellarCoreBinPath
+    let args = Array.append subCommands cfgFileArgs
+    let env = [| peerNameEnvVar |]
+    ContainerForCommand q numContainers image containerName command args env
 
 
 let WithReadinessProbe (container:V1Container) probeTimeout : V1Container =
@@ -172,9 +185,31 @@ type NetworkCfg with
         let initSequence (i : CoreSetInitialization) =
             Array.concat [ newDb i; newHist i; initialCatchup i; forceScp i ]
 
-        Array.map
-            (fun p -> CoreContainerForCommand self.quotas maxPeers imageName cfgOpt p)
-            (initSequence init)
+        let coreSteps =
+            Array.map
+                (fun p -> CoreContainerForCommand self.quotas maxPeers imageName cfgOpt p)
+                (initSequence init)
+
+        let restoreDBStep coreSet i =
+            let coreSet = self.FindCoreSet coreSet
+            let dnsName = self.PeerDNSName coreSet i
+            let env = [| |]
+            let cc container command args =
+                ContainerForCommand
+                    self.quotas maxPeers imageName container command args env
+            [|
+                cc "curl-database" "curl" [| "-o"; CfgVal.databasePath;
+                                             CfgVal.databaseBackupURL dnsName |];
+                cc "curl-buckets" "curl" [| "-o"; CfgVal.bucketsDownloadPath;
+                                            CfgVal.bucketsBackupURL dnsName |];
+                cc "untar-buckets" "tar" [| "xf"; CfgVal.bucketsDownloadPath;
+                                            "-C"; CfgVal.dataVolumePath |]
+            |]
+
+        match init.fetchDBFromPeer with
+            | None -> coreSteps
+            | Some(coreSet, i) ->
+                Array.append coreSteps (restoreDBStep coreSet i)
 
     // Returns a PodTemplate that mounts the ConfigMap on /cfg and an empty data
     // volume on /data. Then initializes a local stellar-core database in
