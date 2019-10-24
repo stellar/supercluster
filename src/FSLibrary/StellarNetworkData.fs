@@ -11,9 +11,16 @@ open StellarCoreSet
 
 type HistoryArchiveState = JsonProvider<"json-type-samples/sample-stellar-history.json">
 let PubnetLatestHistoryArchiveState = "http://history.stellar.org/prd/core-live/core_live_001/.well-known/stellar-history.json"
+let TestnetLatestHistoryArchiveState = "http://history.stellar.org/prd/core-testnet/core_testnet_001/.well-known/stellar-history.json"
+
 let GetLatestPubnetLedgerNumber _ : int =
     let has = HistoryArchiveState.Load(PubnetLatestHistoryArchiveState)
     has.CurrentLedger
+
+let GetLatestTestnetLedgerNumber _ : int =
+    let has = HistoryArchiveState.Load(TestnetLatestHistoryArchiveState)
+    has.CurrentLedger
+
 
 let PubnetGetCommands = [
                         "core_live_001", "curl -sf http://history.stellar.org/prd/core-live/core_live_001/{0} -o {1}"
