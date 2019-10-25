@@ -36,10 +36,12 @@
     <Compile Include="MissionHistoryPubnetRecentCatchup.fs" />
     <Compile Include="MissionHistoryPubnetCompleteCatchup.fs" />
     <Compile Include="MissionHistoryPubnetParallelCatchup.fs" />
+    <Compile Include="MissionHistoryPubnetPerformance.fs" />
     <Compile Include="MissionHistoryTestnetCompleteCatchup.fs" />
     <Compile Include="MissionHistoryTestnetRecentCatchup.fs" />
     <Compile Include="MissionHistoryTestnetMinimumCatchup.fs" />
     <Compile Include="MissionHistoryTestnetParallelCatchup.fs" />
+    <Compile Include="MissionHistoryTestnetPerformance.fs" />
     <Compile Include="MissionVersionMixConsensus.fs" />
     <Compile Include="MissionVersionNewCatchupToOld.fs" />
     <Compile Include="MissionVersionOldCatchupToNew.fs" />

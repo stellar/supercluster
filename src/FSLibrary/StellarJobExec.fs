@@ -81,7 +81,28 @@ type StellarFormation with
 
     member self.RunSingleJob (destination:Destination)
                              (job:(string array)) : Map<string,bool> =
-        self.RunParallelJobsInRandomOrder 1 destination [| job |]
+        self.RunSingleJobWithTimeout destination None job
+
+    member self.RunSingleJobWithTimeout (destination:Destination)
+                                        (timeout:TimeSpan option)
+                                        (cmd:(string array)) : Map<string,bool> =
+        let startTime = DateTime.UtcNow
+        let j = self.StartJobForCmd cmd
+        let name = j.Metadata.Name
+        let (waitHandle, ok) = self.WatchJob j
+        let timeoutArg = match timeout with | None -> TimeSpan(0,0,0,0,-1) | Some x -> x
+        let signalled = waitHandle.WaitOne(timeoutArg)
+        let endTime = DateTime.UtcNow
+        if signalled
+        then
+            LogInfo "Job finished after %O (timeout %O): '%s'"
+                (endTime - startTime) timeoutArg (String.Join(" ", cmd))
+            Map.add name (!ok) Map.empty
+        else
+            let err = (sprintf "Timeout while waiting %O for job '%s'"
+                           timeoutArg (String.Join(" ", cmd)))
+            LogError "%s" err
+            failwith err
 
     member self.RunParallelJobsInRandomOrder (parallelism:int)
                                              (destination:Destination)

@@ -14,10 +14,12 @@ open MissionHistoryPubnetMinimumCatchup
 open MissionHistoryPubnetRecentCatchup
 open MissionHistoryPubnetCompleteCatchup
 open MissionHistoryPubnetParallelCatchup
+open MissionHistoryPubnetPerformance
 open MissionHistoryTestnetMinimumCatchup
 open MissionHistoryTestnetRecentCatchup
 open MissionHistoryTestnetCompleteCatchup
 open MissionHistoryTestnetParallelCatchup
+open MissionHistoryTestnetPerformance
 open MissionVersionMixConsensus
 open MissionVersionMixNewCatchupToOld
 open MissionVersionMixOldCatchupToNew
@@ -42,10 +44,12 @@ let allMissions : Map<string, Mission> =
         ("HistoryPubnetRecentCatchup", historyPubnetRecentCatchup)
         ("HistoryPubnetCompleteCatchup", historyPubnetCompleteCatchup)
         ("HistoryPubnetParallelCatchup", historyPubnetParallelCatchup)
+        ("HistoryPubnetPerformance", historyPubnetPerformance)
         ("HistoryTestnetMinimumCatchup", historyTestnetMinimumCatchup)
         ("HistoryTestnetRecentCatchup", historyTestnetRecentCatchup)
         ("HistoryTestnetCompleteCatchup", historyTestnetCompleteCatchup)
         ("HistoryTestnetParallelCatchup", historyTestnetParallelCatchup)
+        ("HistoryTestnetPerformance", historyTestnetPerformance)
         ("VersionMixConsensus", versionMixConsensus)
         ("VersionMixNewCatchupToOld", versionMixNewCatchupToOld)
         ("VersionMixOldCatchupToNew", versionMixOldCatchupToNew)
