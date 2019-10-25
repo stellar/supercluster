@@ -296,8 +296,10 @@ type Peer with
                     (NodeLostSyncException self.ShortName) |> raise
 
                 let m = self.GetMetrics()
-                (MeterCountOr 0 m.LoadgenRunStart) =
-                     (MeterCountOr 0 m.LoadgenRunComplete))
+                if (MeterCountOr 0 m.LoadgenRunFailed) <> 0
+                then failwith "Loadgen failed"
+                else (MeterCountOr 0 m.LoadgenRunStart) =
+                       (MeterCountOr 0 m.LoadgenRunComplete))
             (fun _ ->
                 let m = self.GetMetrics()
                 LogInfo "Waiting for loadgen run %d to finish, %d/%d accts, %d/%d txns"
