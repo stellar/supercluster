@@ -36,13 +36,13 @@ Early experimentation so far suggests that the combination of improved observabi
 
   4. Build with `dotnet build`. You might need to run `dotnet restore` first to install package dependencies.
 
-  5. Run with `dotnet run src/App/App.fsproj setup -n 5 -k ~/.kube/your-cluster-config`
+  5. Run with `dotnet run --project src/App/App.fsproj setup -n 5 -k ~/.kube/your-cluster-config`.
 
   6. When it's running, try talking to the ingress port, it should map a URL route for each Pod in the new network. You may need to check with `kubectl` to find where the ingress was exposed.
 
 ~~~
 
-$ kubectl --kubeconfig ~/.kube/your-cluster-config  describe ingress --all-namespaces
+$ kubectl --kubeconfig ~/.kube/your-cluster-config describe ingress --all-namespaces
 Name:             stellar-core-ingress
 Namespace:        ssc-f4a1c9b0c3d0
 Address:          127.0.0.1
