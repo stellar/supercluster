@@ -150,7 +150,7 @@ type NetworkCfg with
                            | PeerSpecificConfigFile -> [| "--conf"; CfgVal.peerNameEnvCfgFile |])
         let cfgFileArgs = cfgFileArgs |> String.concat " "
 
-        let pgReady = "until pg_isready -h localhost -p 5432; do echo waiting for database; sleep 2; done; "
+        let pgReady = sprintf "until pg_isready -h %s -d %s -U %s; do echo waiting for database; sleep 2; done; " CfgVal.pgHost CfgVal.pgDb CfgVal.pgUser
         let mutable cmd =
           match opts.dbType with
           | Postgres -> pgReady
