@@ -37,6 +37,12 @@ module CfgVal =
     let historyCfgFilename = "nginx.conf"
     let historyCfgFile = cfgVolumePath + "/" + historyCfgFilename
 
+    // pg configs
+    let pgDb = "postgres"
+    let pgUser = "postgres"
+    let pgPassword = "password"
+    let pgHost = "localhost"
+
     // We very crudely overload the /data/history directory as a general way
     // to transfer files from one peer to another over HTTP via nginx + curl
     let databaseBackupPath = historyPath + "/stellar-backup.db"
@@ -214,9 +220,16 @@ type NetworkCfg with
         | None -> List.concat [self.DnsNames() |> List.ofArray; o.peersDns ]
         | Some(x) -> List.concat [self.DnsNames(x) |> List.ofArray; o.peersDns ]
 
+
+    member self.getDbUrl(o: CoreSetOptions): DatabaseURL =
+        match o.dbType with
+        Postgres -> PostgreSQL(CfgVal.pgDb, CfgVal.pgUser, CfgVal.pgPassword, CfgVal.pgHost)
+        | Sqlite -> SQLite3File CfgVal.databasePath
+        | SqliteMemory -> SQLite3Memory
+
     member self.StellarCoreCfgForJob(opts:CoreSetOptions) : StellarCoreCfg =
         { network = self
-          database = SQLite3File CfgVal.databasePath
+          database = self.getDbUrl opts
           networkPassphrase = self.networkPassphrase
           nodeSeed = KeyPair.Random()
           nodeIsValidator = false
@@ -241,7 +254,7 @@ type NetworkCfg with
 
     member self.StellarCoreCfg(c:CoreSet, i:int) : StellarCoreCfg =
         { network = self
-          database = SQLite3File CfgVal.databasePath
+          database = self.getDbUrl c.options
           networkPassphrase = self.networkPassphrase
           nodeSeed = c.keys.[i]
           nodeIsValidator = c.options.validate
