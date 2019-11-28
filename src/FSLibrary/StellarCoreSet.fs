@@ -10,6 +10,11 @@ type CatchupMode =
     | CatchupComplete
     | CatchupRecent of int
 
+type DBType =
+    | Sqlite
+    | SqliteMemory
+    | Postgres
+
 type CoreSetInitialization =
     { newDb : bool
       newHist : bool
@@ -41,6 +46,7 @@ type CoreSetInitialization =
 
 type CoreSetOptions =
     { nodeCount : int
+      dbType : DBType
       quorumSet : string list option
       quorumSetKeys : Map<string, KeyPair>
       historyNodes : string list option
@@ -62,6 +68,7 @@ type CoreSetOptions =
 
     static member Default =
       { nodeCount = 3
+        dbType = Sqlite
         quorumSet = None
         quorumSetKeys = Map.empty
         historyNodes = None

@@ -43,6 +43,12 @@ let HistoryContainer =
          args = [| "-c"; CfgVal.historyCfgFile; |],
          volumeMounts = ContainerVolumeMounts )
 
+let PostgresContainer =
+    V1Container
+        (name = "postgres",
+         ports = [| V1ContainerPort(containerPort = 5432, name = "postgres") |],
+         image = "postgres:9.5",
+         volumeMounts = ContainerVolumeMounts)
 
 let resourceRequirements (q:NetworkQuotas) (numContainers:int) : V1ResourceRequirements =
     let cpuReq = q.ContainerCpuReqMili numContainers
@@ -56,21 +62,9 @@ let resourceRequirements (q:NetworkQuotas) (numContainers:int) : V1ResourceRequi
     V1ResourceRequirements(requests = requests,
                            limits = limits)
 
+let CoreContainerForCommand (q:NetworkQuotas) (numContainers:int) (configOpt:ConfigOption)
+                            (command:string array) (initCommands:string) : V1Container =
 
-let ContainerForCommand (q:NetworkQuotas) (numContainers:int)
-                        (image:string) (containerName:string)
-                        (command:string) (args:string array)
-                        (env:V1EnvVar array) : V1Container =
-    V1Container
-        (name = containerName, image = image,
-         command = [| command |], env = env,
-         args = args, resources = resourceRequirements q numContainers,
-         volumeMounts = ContainerVolumeMounts)
-
-
-let CoreContainerForCommand (q:NetworkQuotas) (numContainers:int)
-        (image:string) (configOpt:ConfigOption)
-        (subCommands:string array) : V1Container =
     let peerNameFieldSel = V1ObjectFieldSelector(fieldPath = "metadata.name")
     let peerNameEnvVarSource = V1EnvVarSource(fieldRef = peerNameFieldSel)
     let peerNameEnvVar = V1EnvVar(name = CfgVal.peerNameEnvVarName,
@@ -79,12 +73,19 @@ let CoreContainerForCommand (q:NetworkQuotas) (numContainers:int)
                        | NoConfigFile -> [| |]
                        | SharedJobConfigFile -> [| "--conf"; CfgVal.jobCfgFile |]
                        | PeerSpecificConfigFile -> [| "--conf"; CfgVal.peerNameEnvCfgFile |])
-    let containerName = CfgVal.stellarCoreContainerName (Array.get subCommands 0)
-    let command = CfgVal.stellarCoreBinPath
-    let args = Array.append subCommands cfgFileArgs
-    let env = [| peerNameEnvVar |]
-    ContainerForCommand q numContainers image containerName command args env
+    let cfgFileArgs = cfgFileArgs |> String.concat " "
+    let containerName = CfgVal.stellarCoreContainerName (Array.get command 0)
 
+    let command = command |> String.concat " "
+    let cmd = sprintf "%s %s %s %s;" initCommands CfgVal.stellarCoreBinPath command cfgFileArgs
+
+    V1Container
+        (name = containerName, image = CfgVal.stellarCoreImageName,
+         command = [| "/bin/bash" |],
+         args = [| "-c"; cmd; |],
+         env = [| peerNameEnvVar|],
+         resources = resourceRequirements q numContainers,
+         volumeMounts = ContainerVolumeMounts)
 
 let WithReadinessProbe (container:V1Container) probeTimeout : V1Container =
     let httpPortStr = IntstrIntOrString(value = CfgVal.httpPort.ToString())
@@ -96,7 +97,6 @@ let WithReadinessProbe (container:V1Container) probeTimeout : V1Container =
                                                        port = httpPortStr))
     container.ReadinessProbe <- readyProbe
     container
-
 
 // Extend NetworkCfg type with methods for producing various Kubernetes objects.
 type NetworkCfg with
@@ -143,27 +143,74 @@ type NetworkCfg with
         V1ConfigMap(metadata = self.NamespacedMeta self.CfgMapName,
                     data = Map.ofSeq cfgs)
 
+    member self.getInitCommands (configOpt:ConfigOption) (opts:CoreSetOptions) : string =
+        let cfgFileArgs = (match configOpt with
+                           | NoConfigFile -> [| |]
+                           | SharedJobConfigFile -> [| "--conf"; CfgVal.jobCfgFile |]
+                           | PeerSpecificConfigFile -> [| "--conf"; CfgVal.peerNameEnvCfgFile |])
+        let cfgFileArgs = cfgFileArgs |> String.concat " "
+
+        let pgReady = sprintf "until pg_isready -h %s -d %s -U %s; do echo waiting for database; sleep 2; done; " CfgVal.pgHost CfgVal.pgDb CfgVal.pgUser
+        let mutable cmd =
+          match opts.dbType with
+          | Postgres -> pgReady
+          | _ -> ""
+
+        let newDb i = if i.newDb then [| "new-db" |] else [||]
+        let newHist i = if i.newHist then [| "new-hist " + CfgVal.localHistName |] else [||]
+        let initialCatchup i = if i.initialCatchup then [| "catchup current/0" |] else [||]
+        let forceScp i = if i.forceScp then [| "force-scp" |] else [||]
+
+        let init = opts.initialization
+        let coreSteps = Array.concat [(newDb init); (newHist init); (initialCatchup init); (forceScp init)]
+
+        let restoreDBStep coreSet i =
+          let dnsName = self.PeerDNSName coreSet i
+          let cmds =
+            [|
+                sprintf "curl -o %s %s" CfgVal.databasePath (CfgVal.databaseBackupURL dnsName);
+                sprintf "curl -o %s %s" CfgVal.bucketsDownloadPath (CfgVal.bucketsBackupURL dnsName);
+                sprintf "tar xf %s -C %s;" CfgVal.bucketsDownloadPath CfgVal.dataVolumePath;
+            |]
+          cmds |> String.concat "; "
+
+        for p in coreSteps do
+            cmd <- cmd + (sprintf "%s %s %s;" CfgVal.stellarCoreBinPath p cfgFileArgs)
+
+        match init.fetchDBFromPeer with
+          | None -> cmd
+          | Some(coreSet, i) ->
+              let coreSet = self.FindCoreSet coreSet
+              match coreSet.options.dbType with
+                  | Postgres -> cmd // PG does not support that yet
+                  | _ -> cmd + (restoreDBStep coreSet i)
+
     member self.GetJobPodTemplateSpec (jobName:string) (command: string array) : V1PodTemplateSpec =
         let cfgOpt = (if self.jobCoreSetOptions.IsNone
                       then NoConfigFile
                       else SharedJobConfigFile)
         let maxPeers = 1
         let imageName = CfgVal.stellarCoreImageName
-        let containers = [| CoreContainerForCommand self.quotas maxPeers imageName cfgOpt command |]
+
         let cfgVol = V1Volume(name = CfgVal.cfgVolumeName,
                               configMap = V1ConfigMapVolumeSource(name = self.CfgMapName))
         let ns = self.NamespaceProperty
         let pvcName = CfgVal.peristentVolumeClaimName ns jobName
         let dataVol = V1Volume(name = CfgVal.dataVolumeName,
                                persistentVolumeClaim = V1PersistentVolumeClaimVolumeSource(claimName = pvcName))
-        let initContainers =
+
+        let containers  =
             match self.jobCoreSetOptions with
-                | None -> [| |]
-                | Some(opts) -> self.InitContainersFor opts.initialization maxPeers imageName cfgOpt
+                | None -> [| CoreContainerForCommand self.quotas maxPeers cfgOpt command "" |]
+                | Some(opts) ->
+                let initCmds = self.getInitCommands cfgOpt opts
+                let coreContainer = CoreContainerForCommand self.quotas maxPeers cfgOpt command initCmds
+                match opts.dbType with
+                    | Postgres -> [| coreContainer; PostgresContainer |]
+                    | _ -> [| coreContainer |]
 
         V1PodTemplateSpec
-                (spec = V1PodSpec (initContainers = initContainers,
-                                   containers = containers,
+                (spec = V1PodSpec (containers = containers,
                                    volumes = [| cfgVol; dataVol |],
                                    restartPolicy = "Never"),
                  metadata = V1ObjectMeta(labels = CfgVal.labels,
@@ -174,41 +221,6 @@ type NetworkCfg with
         let template = self.GetJobPodTemplateSpec jobName command
         V1Job(spec = V1JobSpec(template = template),
               metadata = self.NamespacedMeta jobName)
-
-    member self.InitContainersFor (init:CoreSetInitialization) (maxPeers:int) (imageName:string) (cfgOpt:ConfigOption) : V1Container array =
-        let newDb i = if i.newDb then [| [| "new-db" |] |] else [||]
-        let newHist i = if i.newHist then [| [| "new-hist"; CfgVal.localHistName |] |] else [||]
-        let initialCatchup i = if i.initialCatchup then [| [| "catchup"; "current/0" |] |] else [||]
-        let forceScp i = if i.forceScp then [| [| "force-scp" |] |] else [||]
-
-        let initSequence (i : CoreSetInitialization) =
-            Array.concat [ newDb i; newHist i; initialCatchup i; forceScp i ]
-
-        let coreSteps =
-            Array.map
-                (fun p -> CoreContainerForCommand self.quotas maxPeers imageName cfgOpt p)
-                (initSequence init)
-
-        let restoreDBStep coreSet i =
-            let coreSet = self.FindCoreSet coreSet
-            let dnsName = self.PeerDNSName coreSet i
-            let env = [| |]
-            let cc container command args =
-                ContainerForCommand
-                    self.quotas maxPeers imageName container command args env
-            [|
-                cc "curl-database" "curl" [| "-o"; CfgVal.databasePath;
-                                             CfgVal.databaseBackupURL dnsName |];
-                cc "curl-buckets" "curl" [| "-o"; CfgVal.bucketsDownloadPath;
-                                            CfgVal.bucketsBackupURL dnsName |];
-                cc "untar-buckets" "tar" [| "xf"; CfgVal.bucketsDownloadPath;
-                                            "-C"; CfgVal.dataVolumePath |]
-            |]
-
-        match init.fetchDBFromPeer with
-            | None -> coreSteps
-            | Some(coreSet, i) ->
-                Array.append coreSteps (restoreDBStep coreSet i)
 
     // Returns a PodTemplate that mounts the ConfigMap on /cfg and an empty data
     // volume on /data. Then initializes a local stellar-core database in
@@ -225,18 +237,22 @@ type NetworkCfg with
             | Some(x) -> x
 
         let cfgOpt = PeerSpecificConfigFile
+
         let volumes = [| cfgVol; dataVol |]
         let maxPeers = max 1 self.MaxPeerCount
-        let initContianers = self.InitContainersFor coreSet.options.initialization maxPeers imageName cfgOpt
+        let initCommands = self.getInitCommands cfgOpt coreSet.options
         let containers = [| WithReadinessProbe
-                                (CoreContainerForCommand self.quotas maxPeers imageName cfgOpt [| "run" |])
+                                (CoreContainerForCommand self.quotas maxPeers cfgOpt [| "run" |] initCommands)
                                 probeTimeout;
                             HistoryContainer; |]
+        let containers  =
+            match coreSet.options.dbType with
+                | Postgres -> Array.append containers [| PostgresContainer |]
+                | _ -> containers
 
         let podSpec =
             V1PodSpec
-                (initContainers = initContianers,
-                 containers = containers,
+                (containers = containers,
                  volumes = volumes)
         V1PodTemplateSpec
                 (spec = podSpec,
