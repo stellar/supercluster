@@ -177,8 +177,8 @@ type NetworkCfg with
 
         let restoreDBStep coreSet i : ShCmd array =
           let dnsName = self.PeerDNSName coreSet i
-          [| ShCmd.OfStrs [| "curl"; "-o"; CfgVal.databasePath; CfgVal.databaseBackupURL dnsName |];
-             ShCmd.OfStrs [| "curl"; "-o"; CfgVal.bucketsDownloadPath; CfgVal.bucketsBackupURL dnsName |];
+          [| ShCmd.OfStrs [| "curl"; "-sf"; "-o"; CfgVal.databasePath; CfgVal.databaseBackupURL dnsName |];
+             ShCmd.OfStrs [| "curl"; "-sf"; "-o"; CfgVal.bucketsDownloadPath; CfgVal.bucketsBackupURL dnsName |];
              ShCmd.OfStrs [| "tar"; "xf"; CfgVal.bucketsDownloadPath; "-C"; CfgVal.dataVolumePath |] |]
 
         match init.fetchDBFromPeer with
