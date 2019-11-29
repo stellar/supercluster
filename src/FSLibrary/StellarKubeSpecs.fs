@@ -88,7 +88,7 @@ let CoreContainerForCommand (q:NetworkQuotas) (numContainers:int) (configOpt:Con
     V1Container
         (name = containerName, image = CfgVal.stellarCoreImageName,
          command = [| "/bin/sh" |],
-         args = [| "-c"; allCmds.ToString(); |],
+         args = [| "-e"; "-x"; "-c"; allCmds.ToString(); |],
          env = [| peerNameEnvVar|],
          resources = resourceRequirements q numContainers,
          volumeMounts = ContainerVolumeMounts)
