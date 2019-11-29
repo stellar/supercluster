@@ -9,6 +9,7 @@
   <ItemGroup>
     <Compile Include="Logging.fs" />
     <Compile Include="PollRetry.fs" />
+    <Compile Include="StellarShellCmd.fs" />
     <Compile Include="StellarCoreSet.fs" />
     <Compile Include="StellarNetworkCfg.fs" />
     <Compile Include="StellarNetworkData.fs" />

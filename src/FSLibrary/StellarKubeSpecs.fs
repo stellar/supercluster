@@ -9,6 +9,7 @@ open k8s.Models
 open StellarNetworkCfg
 open StellarCoreCfg
 open StellarCoreSet
+open StellarShellCmd
 
 // Containers that run stellar-core may or may-not have a final '--conf'
 // argument appended to their command-line. The argument is specified one of 3
@@ -62,27 +63,32 @@ let resourceRequirements (q:NetworkQuotas) (numContainers:int) : V1ResourceRequi
     V1ResourceRequirements(requests = requests,
                            limits = limits)
 
+
+let cfgFileArgs (configOpt:ConfigOption) : ShWord array =
+    match configOpt with
+        | NoConfigFile -> [| |]
+        | SharedJobConfigFile -> Array.map ShWord.OfStr [| "--conf"; CfgVal.jobCfgFile |]
+        | PeerSpecificConfigFile -> [| ShWord.OfStr "--conf";
+                                       CfgVal.peerNameEnvCfgFileWord |]
+
 let CoreContainerForCommand (q:NetworkQuotas) (numContainers:int) (configOpt:ConfigOption)
-                            (command:string array) (initCommands:string) : V1Container =
+                            (command:string array) (initCommands:ShCmd array) : V1Container =
 
     let peerNameFieldSel = V1ObjectFieldSelector(fieldPath = "metadata.name")
     let peerNameEnvVarSource = V1EnvVarSource(fieldRef = peerNameFieldSel)
     let peerNameEnvVar = V1EnvVar(name = CfgVal.peerNameEnvVarName,
                                   valueFrom = peerNameEnvVarSource)
-    let cfgFileArgs = (match configOpt with
-                       | NoConfigFile -> [| |]
-                       | SharedJobConfigFile -> [| "--conf"; CfgVal.jobCfgFile |]
-                       | PeerSpecificConfigFile -> [| "--conf"; CfgVal.peerNameEnvCfgFile |])
-    let cfgFileArgs = cfgFileArgs |> String.concat " "
+    let cfgWords = cfgFileArgs configOpt
     let containerName = CfgVal.stellarCoreContainerName (Array.get command 0)
-
-    let command = command |> String.concat " "
-    let cmd = sprintf "%s %s %s %s;" initCommands CfgVal.stellarCoreBinPath command cfgFileArgs
+    let cmdWords = Array.concat [ [| ShWord.OfStr CfgVal.stellarCoreBinPath |];
+                                  Array.map ShWord.OfStr command;
+                                  cfgWords ]
+    let allCmds = ShAnd (Array.append initCommands [| ShCmd cmdWords |])
 
     V1Container
         (name = containerName, image = CfgVal.stellarCoreImageName,
-         command = [| "/bin/bash" |],
-         args = [| "-c"; cmd; |],
+         command = [| "/bin/sh" |],
+         args = [| "-c"; allCmds.ToString(); |],
          env = [| peerNameEnvVar|],
          resources = resourceRequirements q numContainers,
          volumeMounts = ContainerVolumeMounts)
@@ -143,47 +149,45 @@ type NetworkCfg with
         V1ConfigMap(metadata = self.NamespacedMeta self.CfgMapName,
                     data = Map.ofSeq cfgs)
 
-    member self.getInitCommands (configOpt:ConfigOption) (opts:CoreSetOptions) : string =
-        let cfgFileArgs = (match configOpt with
-                           | NoConfigFile -> [| |]
-                           | SharedJobConfigFile -> [| "--conf"; CfgVal.jobCfgFile |]
-                           | PeerSpecificConfigFile -> [| "--conf"; CfgVal.peerNameEnvCfgFile |])
-        let cfgFileArgs = cfgFileArgs |> String.concat " "
-
-        let pgReady = sprintf "until pg_isready -h %s -d %s -U %s; do echo waiting for database; sleep 2; done; " CfgVal.pgHost CfgVal.pgDb CfgVal.pgUser
-        let mutable cmd =
+    member self.getInitCommands (configOpt:ConfigOption) (opts:CoreSetOptions) : ShCmd array =
+        let cfgWords = cfgFileArgs configOpt
+        let runCore args =
+            let cmdAndArgs = (Array.map ShWord.OfStr
+                               (Array.append [| CfgVal.stellarCoreBinPath |] args))
+            ShCmd (Array.append cmdAndArgs cfgWords)
+        let runCoreIf flag args = if flag then Some (runCore args) else None
+        let waitForDB: ShCmd Option =
           match opts.dbType with
-          | Postgres -> pgReady
-          | _ -> ""
-
-        let newDb i = if i.newDb then [| "new-db" |] else [||]
-        let newHist i = if i.newHist then [| "new-hist " + CfgVal.localHistName |] else [||]
-        let initialCatchup i = if i.initialCatchup then [| "catchup current/0" |] else [||]
-        let forceScp i = if i.forceScp then [| "force-scp" |] else [||]
+          | Postgres ->
+              let pgIsReady = [| "pg_isready";
+                                 "-h"; CfgVal.pgHost;
+                                 "-d"; CfgVal.pgDb;
+                                 "-U"; CfgVal.pgUser |]
+              let sleep2 = [| "sleep"; "2" |]
+              Some (ShCmd.Until pgIsReady sleep2)
+          | _ -> None
 
         let init = opts.initialization
-        let coreSteps = Array.concat [(newDb init); (newHist init); (initialCatchup init); (forceScp init)]
+        let newDb = runCoreIf init.newDb [| "new-db" |]
+        let newHist = runCoreIf init.newHist [| "new-hist"; CfgVal.localHistName |]
+        let initialCatchup = runCoreIf init.initialCatchup [| "catchup"; "current/0" |]
+        let forceScp = runCoreIf init.forceScp [| "force-scp" |]
 
-        let restoreDBStep coreSet i =
+        let cmds = Array.choose id [| waitForDB; newDb; newHist; initialCatchup; forceScp |]
+
+        let restoreDBStep coreSet i : ShCmd array =
           let dnsName = self.PeerDNSName coreSet i
-          let cmds =
-            [|
-                sprintf "curl -o %s %s" CfgVal.databasePath (CfgVal.databaseBackupURL dnsName);
-                sprintf "curl -o %s %s" CfgVal.bucketsDownloadPath (CfgVal.bucketsBackupURL dnsName);
-                sprintf "tar xf %s -C %s;" CfgVal.bucketsDownloadPath CfgVal.dataVolumePath;
-            |]
-          cmds |> String.concat "; "
-
-        for p in coreSteps do
-            cmd <- cmd + (sprintf "%s %s %s;" CfgVal.stellarCoreBinPath p cfgFileArgs)
+          [| ShCmd.OfStrs [| "curl"; "-o"; CfgVal.databasePath; CfgVal.databaseBackupURL dnsName |];
+             ShCmd.OfStrs [| "curl"; "-o"; CfgVal.bucketsDownloadPath; CfgVal.bucketsBackupURL dnsName |];
+             ShCmd.OfStrs [| "tar"; "xf"; CfgVal.bucketsDownloadPath; "-C"; CfgVal.dataVolumePath |] |]
 
         match init.fetchDBFromPeer with
-          | None -> cmd
+          | None -> cmds
           | Some(coreSet, i) ->
               let coreSet = self.FindCoreSet coreSet
               match coreSet.options.dbType with
-                  | Postgres -> cmd // PG does not support that yet
-                  | _ -> cmd + (restoreDBStep coreSet i)
+                  | Postgres -> cmds // PG does not support that yet
+                  | _ -> Array.append cmds (restoreDBStep coreSet i)
 
     member self.GetJobPodTemplateSpec (jobName:string) (command: string array) : V1PodTemplateSpec =
         let cfgOpt = (if self.jobCoreSetOptions.IsNone
@@ -201,7 +205,7 @@ type NetworkCfg with
 
         let containers  =
             match self.jobCoreSetOptions with
-                | None -> [| CoreContainerForCommand self.quotas maxPeers cfgOpt command "" |]
+                | None -> [| CoreContainerForCommand self.quotas maxPeers cfgOpt command [| |] |]
                 | Some(opts) ->
                 let initCmds = self.getInitCommands cfgOpt opts
                 let coreContainer = CoreContainerForCommand self.quotas maxPeers cfgOpt command initCmds

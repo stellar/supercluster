@@ -9,6 +9,7 @@ open Nett
 
 open StellarCoreSet
 open StellarNetworkCfg
+open StellarShellCmd
 
 // Submodule of short fixed (or lightly parametrized) config values: names,
 // paths, labels, etc.
@@ -32,6 +33,10 @@ module CfgVal =
     let localHistName = "local"
     let peerNameEnvVarName = "STELLAR_CORE_PEER_SHORT_NAME"
     let peerNameEnvCfgFile = cfgVolumePath + "/$(STELLAR_CORE_PEER_SHORT_NAME).cfg"
+    let peerNameEnvCfgFileWord: ShWord =
+        ShWord.ShPieces [| ShBare (cfgVolumePath + "/");
+                           ShVar (ShName "STELLAR_CORE_PEER_SHORT_NAME");
+                           ShBare ".cfg" |]
     let jobCfgFilename = "job.cfg"
     let jobCfgFile = cfgVolumePath + "/" + jobCfgFilename
     let historyCfgFilename = "nginx.conf"
