@@ -359,7 +359,8 @@ type NetworkCfg with
                         host = host,
                         http = rule)|]
         let spec = Extensionsv1beta1IngressSpec(rules = rules)
-        let annotation = Map.ofArray [|("traefik.ingress.kubernetes.io/rule-type", "PathPrefixStrip")|]
+        let annotation = Map.ofArray [|("traefik.ingress.kubernetes.io/rule-type", "PathPrefixStrip");
+                                       ("kubernetes.io/ingress.class", "private")|]
         let meta = V1ObjectMeta(name = self.IngressName,
                                 namespaceProperty = self.NamespaceProperty,
                                 annotations = annotation)
