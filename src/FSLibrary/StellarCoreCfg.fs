@@ -107,7 +107,7 @@ type StellarCoreCfg =
                          ("put", sprintf "cp {0} %s/{1}" CfgVal.historyPath)
                          ("mkdir", sprintf "mkdir -p %s/{0}" CfgVal.historyPath) |]
         let remoteHist dnsName =
-            Map.ofSeq [| ("get", sprintf "curl -sf %s/{0} -o {1}" dnsName) |]
+            Map.ofSeq [| ("get", sprintf "curl -sf http://%s/{0} -o {1}" dnsName) |]
         let getHist getCommand =
             Map.ofSeq [| ("get", getCommand) |]
 
