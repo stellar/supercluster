@@ -6,6 +6,7 @@ module StellarSupercluster
 
 open k8s
 open k8s.Models
+open k8s.KubeConfigModels
 
 open Logging
 open StellarNetworkCfg
@@ -31,11 +32,33 @@ let ExpandHomeDirTilde (s:string) : string =
 
 
 // Loads a config file and builds a Kubernetes client object connected to the
-// cluster described by it.
-let ConnectToCluster (cfgFile:string) : Kubernetes =
-    let cfgFileInfo = IO.FileInfo(ExpandHomeDirTilde cfgFile)
-    let kCfg = k8s.KubernetesClientConfiguration.BuildConfigFromConfigFile(cfgFileInfo)
-    new k8s.Kubernetes(kCfg)
+// cluster described by it. Takes an optional explicit namespace and returns a
+// resolved namespace, which will be taken from the config file if no explicit
+// namespace is provided.
+let ConnectToCluster (cfgFile:string) (nsOpt:string option) : (Kubernetes * string) =
+    let cfgFileExpanded = ExpandHomeDirTilde cfgFile
+    let cfgFileInfo = IO.FileInfo(cfgFileExpanded)
+    let kCfg = k8s.KubernetesClientConfiguration.LoadKubeConfig(cfgFileInfo)
+    LogInfo "Connecting to cluster using kubeconfig %s" cfgFileExpanded
+    let ns = match nsOpt with
+               | Some ns ->
+                   LogInfo "Using explicit namespace '%s'" ns
+                   ns
+               | None ->
+                   begin
+                   let ctxOpt = Seq.tryFind (fun (c:Context) -> c.Name = kCfg.CurrentContext) kCfg.Contexts
+                   match ctxOpt with
+                       | Some c ->
+                           LogInfo "Using namespace '%s' from kubeconfig context '%s'"
+                               c.ContextDetails.Namespace c.Name
+                           c.ContextDetails.Namespace
+                       | None ->
+                           LogInfo "Using default namespace 'stellar-supercluster'"
+                           "stellar-supercluster"
+                   end
+    let clientConfig = KubernetesClientConfiguration.BuildConfigFromConfigObject(kCfg)
+    let kube = new k8s.Kubernetes(clientConfig)
+    (kube, ns)
 
 
 // Prints the stellar-core StatefulSets and Pods on the provided cluster

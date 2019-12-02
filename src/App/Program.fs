@@ -15,10 +15,15 @@ open StellarMissionContext
 open StellarSupercluster
 
 
-type KubeOption(kubeConfig: string) =
+type KubeOption(kubeConfig: string,
+                namespaceProperty: string option) =
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file",
              Required = false, Default = "~/.kube/config")>]
     member self.KubeConfig = kubeConfig
+
+    [<Option("namespace", HelpText="Namespace to use, overriding kubeconfig.",
+             Required = false)>]
+    member self.NamespaceProperty = namespaceProperty
 
 
 type CommonOptions(kubeConfig: string,
@@ -33,7 +38,7 @@ type CommonOptions(kubeConfig: string,
                    namespaceQuotaReqCpuMili: int,
                    namespaceQuotaReqMemMega: int,
                    numConcurrentMissions: int,
-                   namespaceProperty: string,
+                   namespaceProperty: string option,
                    ingressDomain: string,
                    probeTimeout: int) =
 
@@ -87,8 +92,8 @@ type CommonOptions(kubeConfig: string,
 
 
 
-    [<Option("namespace", HelpText="Namespace to use.",
-             Required = false, Default = "stellar-supercluster")>]
+    [<Option("namespace", HelpText="Namespace to use, overriding kubeconfig.",
+             Required = false)>]
     member self.NamespaceProperty = namespaceProperty
 
     [<Option("ingress-domain", HelpText="Domain in which to configure ingress host",
@@ -113,7 +118,7 @@ type SetupOptions(kubeConfig: string,
                   namespaceQuotaReqCpuMili: int,
                   namespaceQuotaReqMemMega: int,
                   numConcurrentMissions: int,
-                  namespaceProperty: string,
+                  namespaceProperty: string option,
                   ingressDomain: string,
                   probeTimeout: int) =
     inherit CommonOptions(kubeConfig,
@@ -146,7 +151,7 @@ type CleanOptions(kubeConfig: string,
                   namespaceQuotaReqCpuMili: int,
                   namespaceQuotaReqMemMega: int,
                   numConcurrentMissions: int,
-                  namespaceProperty: string,
+                  namespaceProperty: string option,
                   ingressDomain: string,
                   probeTimeout: int) =
     inherit CommonOptions(kubeConfig,
@@ -179,7 +184,7 @@ type LoadgenOptions(kubeConfig: string,
                     namespaceQuotaReqCpuMili: int,
                     namespaceQuotaReqMemMega: int,
                     numConcurrentMissions: int,
-                    namespaceProperty: string,
+                    namespaceProperty: string option,
                     ingressDomain: string,
                     probeTimeout: int) =
     inherit CommonOptions(kubeConfig,
@@ -211,7 +216,7 @@ type MissionOptions(kubeConfig: string,
                     namespaceQuotaReqCpuMili: int,
                     namespaceQuotaReqMemMega: int,
                     numConcurrentMissions: int,
-                    namespaceProperty: string,
+                    namespaceProperty: string option,
                     ingressDomain: string,
                     probeTimeout: int,
                     missions: string seq,
@@ -269,8 +274,8 @@ type MissionOptions(kubeConfig: string,
              Required = false, Default = 1)>]
     member self.NumConcurrentMissions = numConcurrentMissions
 
-    [<Option("namespace", HelpText="Namespace to use.",
-             Required = false, Default = "stellar-supercluster")>]
+    [<Option("namespace", HelpText="Namespace to use, overriding kubeconfig.",
+             Required = false)>]
     member self.NamespaceProperty = namespaceProperty
 
     [<Option("ingress-domain", HelpText="Domain in which to configure ingress host",
@@ -322,8 +327,8 @@ type MissionOptions(kubeConfig: string,
 
 
 [<Verb("poll", HelpText="Poll a running stellar-core cluster for status")>]
-type PollOptions(kubeConfig: string) =
-    inherit KubeOption(kubeConfig)
+type PollOptions(kubeConfig: string, namespaceProperty: string option) =
+    inherit KubeOption(kubeConfig, namespaceProperty)
 
 
 [<EntryPoint>]
@@ -355,7 +360,7 @@ let main argv =
 
     | :? SetupOptions as setup ->
       let _ = logToConsoleOnly()
-      let kube = ConnectToCluster setup.KubeConfig
+      let (kube, ns) = ConnectToCluster setup.KubeConfig setup.NamespaceProperty
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = setup.NumNodes }
       let ll = { LogDebugPartitions = List.ofSeq setup.LogDebugPartitions
                  LogTracePartitions = List.ofSeq setup.LogTracePartitions }
@@ -367,9 +372,7 @@ let main argv =
                                   setup.NamespaceQuotaReqCpuMili,
                                   setup.NamespaceQuotaReqMemMega,
                                   setup.NumConcurrentMissions)
-      let nCfg = MakeNetworkCfg [coreSet]
-                                setup.NamespaceProperty
-                                nq ll sc
+      let nCfg = MakeNetworkCfg [coreSet] ns nq ll sc
                                 setup.IngressDomain None
       use formation = kube.MakeFormation nCfg false setup.ProbeTimeout
       formation.ReportStatus()
@@ -377,7 +380,7 @@ let main argv =
 
     | :? CleanOptions as clean ->
       let _ = logToConsoleOnly()
-      let kube = ConnectToCluster clean.KubeConfig
+      let (kube, ns) = ConnectToCluster clean.KubeConfig clean.NamespaceProperty
       let ll = { LogDebugPartitions = List.ofSeq clean.LogDebugPartitions
                  LogTracePartitions = List.ofSeq clean.LogTracePartitions }
       let sc = clean.StorageClass
@@ -388,9 +391,7 @@ let main argv =
                                   clean.NamespaceQuotaReqCpuMili,
                                   clean.NamespaceQuotaReqMemMega,
                                   clean.NumConcurrentMissions)
-      let nCfg = MakeNetworkCfg []
-                                clean.NamespaceProperty
-                                nq ll sc
+      let nCfg = MakeNetworkCfg [] ns nq ll sc
                                 clean.IngressDomain None
       use formation = kube.MakeEmptyFormation nCfg
       formation.CleanNamespace()
@@ -398,7 +399,7 @@ let main argv =
 
     | :? LoadgenOptions as loadgen ->
       let _ = logToConsoleOnly()
-      let kube = ConnectToCluster loadgen.KubeConfig
+      let (kube, ns) = ConnectToCluster loadgen.KubeConfig loadgen.NamespaceProperty
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = loadgen.NumNodes }
       let ll = { LogDebugPartitions = List.ofSeq loadgen.LogDebugPartitions
                  LogTracePartitions = List.ofSeq loadgen.LogTracePartitions }
@@ -410,9 +411,7 @@ let main argv =
                                   loadgen.NamespaceQuotaReqCpuMili,
                                   loadgen.NamespaceQuotaReqMemMega,
                                   loadgen.NumConcurrentMissions)
-      let nCfg = MakeNetworkCfg [coreSet]
-                                loadgen.NamespaceProperty
-                                nq ll sc
+      let nCfg = MakeNetworkCfg [coreSet] ns nq ll sc
                                 loadgen.IngressDomain None
       use formation = kube.MakeFormation nCfg false loadgen.ProbeTimeout
       formation.RunLoadgenAndCheckNoErrors coreSet
@@ -444,7 +443,7 @@ let main argv =
                 LogInfo "-----------------------------------"
                 LogInfo "Connecting to Kubernetes cluster"
                 LogInfo "-----------------------------------"
-                let kube = ConnectToCluster mission.KubeConfig
+                let (kube, ns) = ConnectToCluster mission.KubeConfig mission.NamespaceProperty
                 let destination = Destination(mission.Destination)
 
                 for m in mission.Missions do
@@ -465,7 +464,7 @@ let main argv =
                                                logLevels = ll
                                                ingressDomain = mission.IngressDomain
                                                storageClass = mission.StorageClass
-                                               namespaceProperty = mission.NamespaceProperty
+                                               namespaceProperty = ns
                                                keepData = mission.KeepData
                                                probeTimeout = mission.ProbeTimeout }
                         allMissions.[m] missionContext
@@ -481,7 +480,7 @@ let main argv =
             end
 
     | :? PollOptions as poll ->
-      let kube = ConnectToCluster poll.KubeConfig
+      let (kube, ns) = ConnectToCluster poll.KubeConfig poll.NamespaceProperty
       PollCluster kube
       0
 
