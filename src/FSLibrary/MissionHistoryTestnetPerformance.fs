@@ -20,18 +20,28 @@ let historyTestnetPerformance (context : MissionContext) =
                                             newHist = false
                                             forceScp = false } }
 
+    // Testnet is reset every quarter (~90 days) so this test is not _perfectly_
+    // stable. It attempts to replay a 10k ledger prefix (a half day of traffic)
+    // from testnet, ending at ledger 100k (around day 5). This will therefore
+    // change its runtime a bit from days 1-5 after a testnet reset.
+
+    let currLedger:int64 = int64(GetLatestTestnetLedgerNumber ())
+    let secondLedger:int64 = min currLedger 100000L
+    let firstLedger:int64 = max 1L (secondLedger - 10000L)
+    let delta:int64 = secondLedger - firstLedger
+    assert(delta > 0L)
     context.ExecuteJobs (Some(opts)) (Some(SDFTestNet))
         begin
         fun (formation: StellarFormation) ->
 
             (formation.RunSingleJobWithTimeout context.destination
                  (Some(TimeSpan.FromMinutes(10.0)))
-                 [| "catchup"; "1000000/0" |])
+                 [| "catchup"; sprintf "%d/0" firstLedger |])
             |> formation.CheckAllJobsSucceeded
 
             (formation.RunSingleJobWithTimeout context.destination
                  (Some(TimeSpan.FromHours(4.0)))
-                 [| "catchup"; "1010000/10000" |])
+                 [| "catchup"; sprintf "%d/%d" secondLedger delta |])
             |> formation.CheckAllJobsSucceeded
 
         end
