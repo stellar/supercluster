@@ -8,6 +8,7 @@ open FSharp.Data
 open stellar_dotnet_sdk
 
 open StellarCoreSet
+open StellarNetworkCfg
 
 type HistoryArchiveState = JsonProvider<"json-type-samples/sample-stellar-history.json">
 let PubnetLatestHistoryArchiveState = "http://history.stellar.org/prd/core-live/core_live_001/.well-known/stellar-history.json"
@@ -77,3 +78,13 @@ let TestnetCoreSetOptions = {
                          accelerateTime = false
                          initialization = { CoreSetInitialization.Default with forceScp = false }
                          dumpDatabase = false }
+
+let clusterQuotas : NetworkQuotas =
+    { ContainerMaxCpuMili = 4000
+      ContainerMaxMemMebi = 8000
+      NamespaceQuotaLimCpuMili = 80000
+      NamespaceQuotaLimMemMebi = 62000
+      NamespaceQuotaReqCpuMili = 10000
+      NamespaceQuotaReqMemMebi = 22000
+      NumConcurrentMissions = 1 }
+
