@@ -129,7 +129,7 @@ type ShCmd =
         ShWhile ((ShCmd.OfStrs w), (ShCmd.OfStrs d))
 
     static member Until (w:string array) (d:string array) : ShCmd =
-        ShWhile ((ShCmd.OfStrs w), (ShCmd.OfStrs d))
+        ShUntil ((ShCmd.OfStrs w), (ShCmd.OfStrs d))
 
     member self.PipeTo (ss:string array) : ShCmd =
         let next = ShCmd.OfStrs ss
