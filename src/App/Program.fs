@@ -480,8 +480,9 @@ let main argv =
             end
 
     | :? PollOptions as poll ->
+      let _ = logToConsoleOnly()
       let (kube, ns) = ConnectToCluster poll.KubeConfig poll.NamespaceProperty
-      PollCluster kube
+      PollCluster kube ns
       0
 
     | _ -> 1

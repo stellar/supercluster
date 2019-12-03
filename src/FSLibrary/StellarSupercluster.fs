@@ -60,19 +60,32 @@ let ConnectToCluster (cfgFile:string) (nsOpt:string option) : (Kubernetes * stri
     let kube = new k8s.Kubernetes(clientConfig)
     (kube, ns)
 
-
 // Prints the stellar-core StatefulSets and Pods on the provided cluster
-let PollCluster (kube:Kubernetes) =
-    let sets = kube.ListStatefulSetForAllNamespaces(labelSelector=CfgVal.labelSelector)
+let PollCluster (kube:Kubernetes) (ns:string) =
+    let qs = kube.ListNamespacedResourceQuota(namespaceParameter=ns)
+    for q in qs.Items do
+        for entry in q.Status.Hard do
+            LogInfo "Quota: name=%s key=%s val=%s"
+                q.Metadata.Name entry.Key (entry.Value.ToString())
+        done
+    done
+
+    let sets = kube.ListNamespacedStatefulSet(namespaceParameter=ns)
     for s in sets.Items do
-        LogInfo "StatefulSet: ns=%s name=%s replicas=%d" s.Metadata.NamespaceProperty
-                                                         s.Metadata.Name s.Status.Replicas
-        let pods = kube.ListNamespacedPod(namespaceParameter = s.Metadata.NamespaceProperty,
-                                          labelSelector = CfgVal.labelSelector)
-        for p in pods.Items do
-            LogInfo "        Pod ns=%s name=%s phase=%s IP=%s" p.Metadata.NamespaceProperty
-                                                               p.Metadata.Name p.Status.Phase
-                                                               p.Status.PodIP
+        LogInfo "StatefulSet: ns=%s name=%s replicas=%d"
+            ns s.Metadata.Name s.Status.Replicas
+    done
+    let jobs = kube.ListNamespacedJob(namespaceParameter = ns)
+    for j in jobs.Items do
+        LogInfo "Job: ns=%s name=%s condition=%O"
+            ns j.Metadata.Name (Seq.last j.Status.Conditions)
+    done
+    let pods = kube.ListNamespacedPod(namespaceParameter = ns)
+    for p in pods.Items do
+        LogInfo "Pod: ns=%s name=%s phase=%s IP=%s"
+            ns p.Metadata.Name p.Status.Phase p.Status.PodIP
+    done
+
 
 
 // Typically one starts with `ConnectToCluster` above to get a `Kubernetes`
