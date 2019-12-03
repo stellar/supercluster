@@ -361,17 +361,11 @@ let main argv =
     | :? SetupOptions as setup ->
       let _ = logToConsoleOnly()
       let (kube, ns) = ConnectToCluster setup.KubeConfig setup.NamespaceProperty
+      let nq = kube.GetQuotas ns
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = setup.NumNodes }
       let ll = { LogDebugPartitions = List.ofSeq setup.LogDebugPartitions
                  LogTracePartitions = List.ofSeq setup.LogTracePartitions }
       let sc = setup.StorageClass
-      let nq = MakeNetworkQuotas (setup.ContainerMaxCpuMili,
-                                  setup.ContainerMaxMemMega,
-                                  setup.NamespaceQuotaLimCpuMili,
-                                  setup.NamespaceQuotaLimMemMega,
-                                  setup.NamespaceQuotaReqCpuMili,
-                                  setup.NamespaceQuotaReqMemMega,
-                                  setup.NumConcurrentMissions)
       let nCfg = MakeNetworkCfg [coreSet] ns nq ll sc
                                 setup.IngressDomain None
       use formation = kube.MakeFormation nCfg false setup.ProbeTimeout
@@ -381,16 +375,10 @@ let main argv =
     | :? CleanOptions as clean ->
       let _ = logToConsoleOnly()
       let (kube, ns) = ConnectToCluster clean.KubeConfig clean.NamespaceProperty
+      let nq = { kube.GetQuotas ns with NumConcurrentMissions = clean.NumConcurrentMissions }
       let ll = { LogDebugPartitions = List.ofSeq clean.LogDebugPartitions
                  LogTracePartitions = List.ofSeq clean.LogTracePartitions }
       let sc = clean.StorageClass
-      let nq = MakeNetworkQuotas (clean.ContainerMaxCpuMili,
-                                  clean.ContainerMaxMemMega,
-                                  clean.NamespaceQuotaLimCpuMili,
-                                  clean.NamespaceQuotaLimMemMega,
-                                  clean.NamespaceQuotaReqCpuMili,
-                                  clean.NamespaceQuotaReqMemMega,
-                                  clean.NumConcurrentMissions)
       let nCfg = MakeNetworkCfg [] ns nq ll sc
                                 clean.IngressDomain None
       use formation = kube.MakeEmptyFormation nCfg
@@ -400,17 +388,11 @@ let main argv =
     | :? LoadgenOptions as loadgen ->
       let _ = logToConsoleOnly()
       let (kube, ns) = ConnectToCluster loadgen.KubeConfig loadgen.NamespaceProperty
+      let nq = { kube.GetQuotas ns with NumConcurrentMissions = loadgen.NumConcurrentMissions }
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = loadgen.NumNodes }
       let ll = { LogDebugPartitions = List.ofSeq loadgen.LogDebugPartitions
                  LogTracePartitions = List.ofSeq loadgen.LogTracePartitions }
       let sc = loadgen.StorageClass
-      let nq = MakeNetworkQuotas (loadgen.ContainerMaxCpuMili,
-                                  loadgen.ContainerMaxMemMega,
-                                  loadgen.NamespaceQuotaLimCpuMili,
-                                  loadgen.NamespaceQuotaLimMemMega,
-                                  loadgen.NamespaceQuotaReqCpuMili,
-                                  loadgen.NamespaceQuotaReqMemMega,
-                                  loadgen.NumConcurrentMissions)
       let nCfg = MakeNetworkCfg [coreSet] ns nq ll sc
                                 loadgen.IngressDomain None
       use formation = kube.MakeFormation nCfg false loadgen.ProbeTimeout
@@ -421,13 +403,6 @@ let main argv =
     | :? MissionOptions as mission ->
       let _ = logToConsoleAndFile (sprintf "%s/stellar-supercluster.log"
                                            mission.Destination)
-      let nq = MakeNetworkQuotas (mission.ContainerMaxCpuMili,
-                                  mission.ContainerMaxMemMega,
-                                  mission.NamespaceQuotaLimCpuMili,
-                                  mission.NamespaceQuotaLimMemMega,
-                                  mission.NamespaceQuotaReqCpuMili,
-                                  mission.NamespaceQuotaReqMemMega,
-                                  mission.NumConcurrentMissions)
       let ll = { LogDebugPartitions = List.ofSeq mission.LogDebugPartitions
                  LogTracePartitions = List.ofSeq mission.LogTracePartitions }
       match Seq.tryFind (allMissions.ContainsKey >> not) mission.Missions with
@@ -444,6 +419,7 @@ let main argv =
                 LogInfo "Connecting to Kubernetes cluster"
                 LogInfo "-----------------------------------"
                 let (kube, ns) = ConnectToCluster mission.KubeConfig mission.NamespaceProperty
+                let nq = { kube.GetQuotas ns with NumConcurrentMissions = mission.NumConcurrentMissions }
                 let destination = Destination(mission.Destination)
 
                 for m in mission.Missions do
@@ -482,6 +458,7 @@ let main argv =
     | :? PollOptions as poll ->
       let _ = logToConsoleOnly()
       let (kube, ns) = ConnectToCluster poll.KubeConfig poll.NamespaceProperty
+      let nq = kube.GetQuotas ns
       PollCluster kube ns
       0
 
