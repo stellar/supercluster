@@ -53,9 +53,9 @@ let PostgresContainer =
 
 let resourceRequirements (q:NetworkQuotas) (numContainers:int) : V1ResourceRequirements =
     let cpuReq = q.ContainerCpuReqMili numContainers
-    let memReq = q.ContainerMemReqMega numContainers
+    let memReq = q.ContainerMemReqMebi numContainers
     let cpuLim = q.ContainerCpuLimMili numContainers
-    let memLim = q.ContainerMemLimMega numContainers
+    let memLim = q.ContainerMemLimMebi numContainers
     let requests = dict["cpu", ResourceQuantity(sprintf "%dm" cpuReq);
                         "memory", ResourceQuantity(sprintf "%dMi" memReq)]
     let limits = dict["cpu", ResourceQuantity(sprintf "%dm" cpuLim);

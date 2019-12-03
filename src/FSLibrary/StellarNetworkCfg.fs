@@ -49,12 +49,19 @@ type LogLevels =
 
 type NetworkQuotas =
     { ContainerMaxCpuMili: int
-      ContainerMaxMemMega: int
+      ContainerMaxMemMebi: int
       NamespaceQuotaLimCpuMili: int
-      NamespaceQuotaLimMemMega: int
+      NamespaceQuotaLimMemMebi: int
       NamespaceQuotaReqCpuMili: int
-      NamespaceQuotaReqMemMega: int
+      NamespaceQuotaReqMemMebi: int
       NumConcurrentMissions: int }
+
+    override self.ToString () =
+        sprintf "max [cpu:%d, mem:%d] lim [cpu:%d, mem:%d] req [cpu:%d, mem:%d] missions %d"
+            self.ContainerMaxCpuMili self.ContainerMaxMemMebi
+            self.NamespaceQuotaLimCpuMili self.NamespaceQuotaLimMemMebi
+            self.NamespaceQuotaReqCpuMili self.NamespaceQuotaReqMemMebi
+            self.NumConcurrentMissions
 
     member self.ContainerCpuReqMili (numContainers:int) : int =
         let divisor = numContainers * self.NumConcurrentMissions
@@ -67,33 +74,32 @@ type NetworkQuotas =
        let nsFrac = self.NamespaceQuotaLimCpuMili / divisor
        min nsFrac self.ContainerMaxCpuMili
 
-    member self.ContainerMemReqMega (numContainers:int) : int =
+    member self.ContainerMemReqMebi (numContainers:int) : int =
         let divisor = numContainers * self.NumConcurrentMissions
-        let nsFrac = self.NamespaceQuotaReqMemMega / divisor
-        let lim = (self.ContainerMemLimMega numContainers)
+        let nsFrac = self.NamespaceQuotaReqMemMebi / divisor
+        let lim = (self.ContainerMemLimMebi numContainers)
         min 100 (min nsFrac lim)
 
-    member self.ContainerMemLimMega (numContainers:int) : int =
+    member self.ContainerMemLimMebi (numContainers:int) : int =
         let divisor = numContainers * self.NumConcurrentMissions
-        let nsFrac = self.NamespaceQuotaLimMemMega / divisor
-        min nsFrac self.ContainerMaxMemMega
+        let nsFrac = self.NamespaceQuotaLimMemMebi / divisor
+        min nsFrac self.ContainerMaxMemMebi
 
 
 let MakeNetworkQuotas (containerMaxCpuMili: int,
-                       containerMaxMemMega: int,
+                       containerMaxMemMebi: int,
                        namespaceQuotaLimCpuMili: int,
-                       namespaceQuotaLimMemMega: int,
+                       namespaceQuotaLimMemMebi: int,
                        namespaceQuotaReqCpuMili: int,
-                       namespaceQuotaReqMemMega: int,
+                       namespaceQuotaReqMemMebi: int,
                        numConcurrentMissions: int) =
     { ContainerMaxCpuMili = containerMaxCpuMili
-      ContainerMaxMemMega = containerMaxMemMega
+      ContainerMaxMemMebi = containerMaxMemMebi
       NamespaceQuotaLimCpuMili = namespaceQuotaLimCpuMili
-      NamespaceQuotaLimMemMega = namespaceQuotaLimMemMega
+      NamespaceQuotaLimMemMebi = namespaceQuotaLimMemMebi
       NamespaceQuotaReqCpuMili = namespaceQuotaReqCpuMili
-      NamespaceQuotaReqMemMega = namespaceQuotaReqMemMega
+      NamespaceQuotaReqMemMebi = namespaceQuotaReqMemMebi
       NumConcurrentMissions = numConcurrentMissions }
-
 
 let MakeNetworkNonce() : NetworkNonce =
     let bytes : byte array = Array.zeroCreate 6

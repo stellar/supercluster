@@ -32,11 +32,11 @@ type CommonOptions(kubeConfig: string,
                    logTracePartitions: seq<string>,
                    storageClass: string,
                    containerMaxCpuMili: int,
-                   containerMaxMemMega: int,
+                   containerMaxMemMebi: int,
                    namespaceQuotaLimCpuMili: int,
-                   namespaceQuotaLimMemMega: int,
+                   namespaceQuotaLimMemMebi: int,
                    namespaceQuotaReqCpuMili: int,
-                   namespaceQuotaReqMemMega: int,
+                   namespaceQuotaReqMemMebi: int,
                    numConcurrentMissions: int,
                    namespaceProperty: string option,
                    ingressDomain: string,
@@ -66,25 +66,25 @@ type CommonOptions(kubeConfig: string,
              Required = false, Default = 4000)>]
     member self.ContainerMaxCpuMili = containerMaxCpuMili
 
-    [<Option("container-max-mem-mega", HelpText="Maximum per-container memory (in MB)",
+    [<Option("container-max-mem-mebi", HelpText="Maximum per-container memory (in MB)",
              Required = false, Default = 8000)>]
-    member self.ContainerMaxMemMega = containerMaxMemMega
+    member self.ContainerMaxMemMebi = containerMaxMemMebi
 
     [<Option("namespace-quota-lim-cpu-mili", HelpText="Namespace quota for CPU limit (in mili-CPUs)",
              Required = false, Default = 80000)>]
     member self.NamespaceQuotaLimCpuMili = namespaceQuotaLimCpuMili
 
-    [<Option("namespace-quota-lim-mem-mega", HelpText="Namespace quota for memory limit (in MB)",
+    [<Option("namespace-quota-lim-mem-mebi", HelpText="Namespace quota for memory limit (in MB)",
              Required = false, Default = 62000)>]
-    member self.NamespaceQuotaLimMemMega = namespaceQuotaLimMemMega
+    member self.NamespaceQuotaLimMemMebi = namespaceQuotaLimMemMebi
 
     [<Option("namespace-quota-req-cpu-mili", HelpText="Namespace quota for CPU request (in mili-CPUs)",
              Required = false, Default = 10000)>]
     member self.NamespaceQuotaReqCpuMili = namespaceQuotaReqCpuMili
 
-    [<Option("namespace-quota-req-mem-mega", HelpText="Namespace quota for memory request (in MB)",
+    [<Option("namespace-quota-req-mem-mebi", HelpText="Namespace quota for memory request (in MB)",
              Required = false, Default = 22000)>]
-    member self.NamespaceQuotaReqMemMega = namespaceQuotaReqMemMega
+    member self.NamespaceQuotaReqMemMebi = namespaceQuotaReqMemMebi
 
     [<Option("num-concurrent-missions", HelpText="Number of missions being run concurrently (including this one)",
              Required = false, Default = 1)>]
@@ -112,11 +112,11 @@ type SetupOptions(kubeConfig: string,
                   logTracePartitions: seq<string>,
                   storageClass: string,
                   containerMaxCpuMili: int,
-                  containerMaxMemMega: int,
+                  containerMaxMemMebi: int,
                   namespaceQuotaLimCpuMili: int,
-                  namespaceQuotaLimMemMega: int,
+                  namespaceQuotaLimMemMebi: int,
                   namespaceQuotaReqCpuMili: int,
-                  namespaceQuotaReqMemMega: int,
+                  namespaceQuotaReqMemMebi: int,
                   numConcurrentMissions: int,
                   namespaceProperty: string option,
                   ingressDomain: string,
@@ -127,11 +127,11 @@ type SetupOptions(kubeConfig: string,
                           logTracePartitions,
                           storageClass,
                           containerMaxCpuMili,
-                          containerMaxMemMega,
+                          containerMaxMemMebi,
                           namespaceQuotaLimCpuMili,
-                          namespaceQuotaLimMemMega,
+                          namespaceQuotaLimMemMebi,
                           namespaceQuotaReqCpuMili,
-                          namespaceQuotaReqMemMega,
+                          namespaceQuotaReqMemMebi,
                           numConcurrentMissions,
                           namespaceProperty,
                           ingressDomain,
@@ -145,11 +145,11 @@ type CleanOptions(kubeConfig: string,
                   logTracePartitions: seq<string>,
                   storageClass: string,
                   containerMaxCpuMili: int,
-                  containerMaxMemMega: int,
+                  containerMaxMemMebi: int,
                   namespaceQuotaLimCpuMili: int,
-                  namespaceQuotaLimMemMega: int,
+                  namespaceQuotaLimMemMebi: int,
                   namespaceQuotaReqCpuMili: int,
-                  namespaceQuotaReqMemMega: int,
+                  namespaceQuotaReqMemMebi: int,
                   numConcurrentMissions: int,
                   namespaceProperty: string option,
                   ingressDomain: string,
@@ -160,11 +160,11 @@ type CleanOptions(kubeConfig: string,
                           logTracePartitions,
                           storageClass,
                           containerMaxCpuMili,
-                          containerMaxMemMega,
+                          containerMaxMemMebi,
                           namespaceQuotaLimCpuMili,
-                          namespaceQuotaLimMemMega,
+                          namespaceQuotaLimMemMebi,
                           namespaceQuotaReqCpuMili,
-                          namespaceQuotaReqMemMega,
+                          namespaceQuotaReqMemMebi,
                           numConcurrentMissions,
                           namespaceProperty,
                           ingressDomain,
@@ -178,11 +178,11 @@ type LoadgenOptions(kubeConfig: string,
                     logTracePartitions: seq<string>,
                     storageClass: string,
                     containerMaxCpuMili: int,
-                    containerMaxMemMega: int,
+                    containerMaxMemMebi: int,
                     namespaceQuotaLimCpuMili: int,
-                    namespaceQuotaLimMemMega: int,
+                    namespaceQuotaLimMemMebi: int,
                     namespaceQuotaReqCpuMili: int,
-                    namespaceQuotaReqMemMega: int,
+                    namespaceQuotaReqMemMebi: int,
                     numConcurrentMissions: int,
                     namespaceProperty: string option,
                     ingressDomain: string,
@@ -193,11 +193,11 @@ type LoadgenOptions(kubeConfig: string,
                           logTracePartitions,
                           storageClass,
                           containerMaxCpuMili,
-                          containerMaxMemMega,
+                          containerMaxMemMebi,
                           namespaceQuotaLimCpuMili,
-                          namespaceQuotaLimMemMega,
+                          namespaceQuotaLimMemMebi,
                           namespaceQuotaReqCpuMili,
-                          namespaceQuotaReqMemMega,
+                          namespaceQuotaReqMemMebi,
                           numConcurrentMissions,
                           namespaceProperty,
                           ingressDomain,
@@ -210,11 +210,11 @@ type MissionOptions(kubeConfig: string,
                     logDebugPartitions: seq<string>,
                     logTracePartitions: seq<string>,
                     containerMaxCpuMili: int,
-                    containerMaxMemMega: int,
+                    containerMaxMemMebi: int,
                     namespaceQuotaLimCpuMili: int,
-                    namespaceQuotaLimMemMega: int,
+                    namespaceQuotaLimMemMebi: int,
                     namespaceQuotaReqCpuMili: int,
-                    namespaceQuotaReqMemMega: int,
+                    namespaceQuotaReqMemMebi: int,
                     numConcurrentMissions: int,
                     namespaceProperty: string option,
                     ingressDomain: string,
@@ -250,25 +250,25 @@ type MissionOptions(kubeConfig: string,
              Required = false, Default = 4000)>]
     member self.ContainerMaxCpuMili = containerMaxCpuMili
 
-    [<Option("container-max-mem-mega", HelpText="Maximum per-container memory (in MB)",
+    [<Option("container-max-mem-mebi", HelpText="Maximum per-container memory (in MB)",
              Required = false, Default = 8000)>]
-    member self.ContainerMaxMemMega = containerMaxMemMega
+    member self.ContainerMaxMemMebi = containerMaxMemMebi
 
     [<Option("namespace-quota-lim-cpu-mili", HelpText="Namespace quota for CPU limit (in mili-CPUs)",
              Required = false, Default = 80000)>]
     member self.NamespaceQuotaLimCpuMili = namespaceQuotaLimCpuMili
 
-    [<Option("namespace-quota-lim-mem-mega", HelpText="Namespace quota for memory limit (in MB)",
+    [<Option("namespace-quota-lim-mem-mebi", HelpText="Namespace quota for memory limit (in MB)",
              Required = false, Default = 62000)>]
-    member self.NamespaceQuotaLimMemMega = namespaceQuotaLimMemMega
+    member self.NamespaceQuotaLimMemMebi = namespaceQuotaLimMemMebi
 
     [<Option("namespace-quota-req-cpu-mili", HelpText="Namespace quota for CPU request (in mili-CPUs)",
              Required = false, Default = 10000)>]
     member self.NamespaceQuotaReqCpuMili = namespaceQuotaReqCpuMili
 
-    [<Option("namespace-quota-req-mem-mega", HelpText="Namespace quota for memory request (in MB)",
+    [<Option("namespace-quota-req-mem-mebi", HelpText="Namespace quota for memory request (in MB)",
              Required = false, Default = 22000)>]
-    member self.NamespaceQuotaReqMemMega = namespaceQuotaReqMemMega
+    member self.NamespaceQuotaReqMemMebi = namespaceQuotaReqMemMebi
 
     [<Option("num-concurrent-missions", HelpText="Number of missions being run concurrently (including this one)",
              Required = false, Default = 1)>]
