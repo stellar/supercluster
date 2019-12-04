@@ -83,12 +83,23 @@ let CoreContainerForCommand (q:NetworkQuotas) (numContainers:int) (configOpt:Con
     let cmdWords = Array.concat [ [| ShWord.OfStr CfgVal.stellarCoreBinPath |];
                                   Array.map ShWord.OfStr command;
                                   cfgWords ]
-    let allCmds = ShAnd (Array.append initCommands [| ShCmd cmdWords |])
+
+    let toShPieces word = ShPieces [| word; |]
+    let statusName = ShName "CORE_EXIT_STATUS"
+    let exitStatusDef = ShDef (statusName, toShPieces ShSpecialLastExit )
+    let exit = ShCmd (Array.map toShPieces [| ShBare "exit"; ShVar statusName;|])
+
+    // Kill any outstanding processes, such as PG
+    let killPs = ShCmd.OfStrs [| "killall5"; "-INT"; |]
+
+    // Regardless of success or failure, get status and cleanup after core's run
+    let allCmds = ShAnd (Array.append initCommands [| ShCmd cmdWords; |])
+    let allCmdsAndCleanup = ShSeq [| allCmds; exitStatusDef; killPs; exit; |]
 
     V1Container
         (name = containerName, image = CfgVal.stellarCoreImageName,
          command = [| "/bin/sh" |],
-         args = [| "-e"; "-x"; "-c"; allCmds.ToString(); |],
+         args = [| "-x"; "-c"; allCmdsAndCleanup.ToString() |],
          env = [| peerNameEnvVar|],
          resources = resourceRequirements q numContainers,
          volumeMounts = ContainerVolumeMounts)
@@ -216,7 +227,8 @@ type NetworkCfg with
         V1PodTemplateSpec
                 (spec = V1PodSpec (containers = containers,
                                    volumes = [| cfgVol; dataVol |],
-                                   restartPolicy = "Never"),
+                                   restartPolicy = "Never",
+                                   shareProcessNamespace = System.Nullable<bool>(true)),
                  metadata = V1ObjectMeta(labels = CfgVal.labels,
                                          namespaceProperty = ns))
 

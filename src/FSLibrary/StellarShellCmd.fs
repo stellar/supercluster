@@ -79,7 +79,7 @@ type ShWord =
                 "\"" + String.concat "" (Array.map (sprintf "%O") ps) + "\""
             | ShQuoted s ->
                 if s.Contains("'")
-                then failwith ("ShQuot used with inner quote '" + s + "'")
+                then failwith ("ShQuoted used with inner quote '" + s + "'")
                 else "'" + s + "'"
 
 
