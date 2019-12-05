@@ -66,6 +66,8 @@ type ShWord =
     static member OfStr (s:string) : ShWord =
         if ShPiece.IsBare s
         then ShPieces [| ShBare s |]
+        elif s.StartsWith "${" && s.EndsWith "}"
+        then ShPieces [| ShVar(ShName(s.Substring(2, (s.Length - 3)))) |]
         else ShQuoted s
 
     static member Var(s:string) : ShWord =
@@ -97,9 +99,12 @@ type ShRedir =
             | ShRedirFdDupTo (i, j) -> i.ToString() + ">&" + j.ToString()
 
 
+// NB: The ShDefSub form below only does substitution on simple "word-list"
+// commands, and can therefore not contain itself. Don't change this.
 type ShCmd =
     | ShCmd of ShWord array                      // word word word ... (as a command)
     | ShDef of (ShName * ShWord)                 // name=word
+    | ShDefSub of (ShName * ShWord array)        // name=`word word word ...`
     | ShRedir of (ShCmd * ShRedir)               // cmd >foo (see ShRedir)
     | ShPipe of ShCmd array                      // { cmd | cmd | ...; }
     | ShAnd of ShCmd array                       // { cmd && cmd && ...; }
@@ -121,6 +126,9 @@ type ShCmd =
 
     static member OfStrs (ss:string array) : ShCmd =
         ShCmd (Array.map ShWord.OfStr ss)
+
+    static member DefVarSub (s:string) (ss:string array) : ShCmd =
+        ShDefSub (ShName s, Array.map ShWord.OfStr ss)
 
     static member IfThen (i:string array) (t:string array) : ShCmd =
         ShIf ((ShCmd.OfStrs i), (ShCmd.OfStrs t), [| |], None)
@@ -175,6 +183,7 @@ type ShCmd =
        match self with
            | ShCmd ws -> words ws
            | ShDef (n, v) -> sprintf "%O=%O" n v
+           | ShDefSub (n, ws) -> sprintf "%O=`%s`" n (words ws)
            | ShRedir (w, r) -> sprintf "%O %O" w r
            | ShPipe cs -> seq cs " | "
            | ShSeq cs -> seq cs "; "

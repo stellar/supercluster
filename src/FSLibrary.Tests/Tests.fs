@@ -48,9 +48,19 @@ let ``TOML Config looks reasonable`` () =
 
 [<Fact>]
 let ``Core init commands look reasonable`` () =
-    let cmds = nCfg.getInitCommands PeerSpecificConfigFile coreSet.options 
+    let cmds = nCfg.getInitCommands PeerSpecificConfigFile coreSet.options
     let cmdStr = ShAnd(cmds).ToString()
     let exp = "{ /usr/local/bin/stellar-core new-db --conf \"/cfg/${STELLAR_CORE_PEER_SHORT_NAME}.cfg\" && " +
                 "/usr/local/bin/stellar-core new-hist local --conf \"/cfg/${STELLAR_CORE_PEER_SHORT_NAME}.cfg\" && " +
                 "/usr/local/bin/stellar-core force-scp --conf \"/cfg/${STELLAR_CORE_PEER_SHORT_NAME}.cfg\"; }"
-    Assert.Equal(exp, cmdStr) 
+    Assert.Equal(exp, cmdStr)
+
+[<Fact>]
+let ``Shell convenience methods work`` () =
+    let cmds = [|
+                ShCmd.DefVarSub "pid" [|"pidof"; "postgresql"|];
+                ShCmd.OfStrs [| "kill"; "-HUP"; "${pid}"; |]
+                |]
+    let s = (ShCmd.ShSeq cmds).ToString()
+    let exp = "{ pid=`pidof postgresql`; kill -HUP \"${pid}\"; }"
+    Assert.Equal(s, exp)
