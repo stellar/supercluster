@@ -166,13 +166,22 @@ type StellarFormation(networkCfg: NetworkCfg,
         networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.WaitUntilSynced())
 
     member self.UpgradeProtocol (coreSetList: CoreSet list) (version: int) =
-        networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.UpgradeProtocol version)
+        let upgradeTime = System.DateTime.UtcNow.AddSeconds(15.0)
+        networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.UpgradeProtocol version upgradeTime)
+        let peer = networkCfg.GetPeer coreSetList.[0] 0
+        peer.WaitForFewLedgers(5) |> ignore
 
     member self.UpgradeProtocolToLatest (coreSetList: CoreSet list) =
-        networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.UpgradeProtocolToLatest())
+        let upgradeTime = System.DateTime.UtcNow.AddSeconds(15.0)
+        networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.UpgradeProtocolToLatest upgradeTime)
+        let peer = networkCfg.GetPeer coreSetList.[0] 0
+        peer.WaitForFewLedgers(5) |> ignore
 
     member self.UpgradeMaxTxSize (coreSetList: CoreSet list) (maxTxSize: int) =
-        networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.UpgradeMaxTxSize maxTxSize)
+        let upgradeTime = System.DateTime.UtcNow.AddSeconds(15.0)
+        networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.UpgradeMaxTxSize maxTxSize upgradeTime)
+        let peer = networkCfg.GetPeer coreSetList.[0] 0
+        peer.WaitForFewLedgers(5) |> ignore
 
     member self.ReportStatus () =
         ReportAllPeerStatus networkCfg

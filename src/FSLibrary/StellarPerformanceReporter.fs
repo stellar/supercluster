@@ -50,6 +50,7 @@ type PerformanceRow =
         nominate : Timer
         prepare : Timer
         close : Timer
+        age : Timer
         meanRate : decimal
     }
 
@@ -94,6 +95,14 @@ type PerformanceRow =
             self.close.per75th,
             self.close.per95th,
             self.close.per99th,
+            self.age.mean,
+            self.age.min,
+            self.age.max,
+            self.age.stdDev,
+            self.age.median,
+            self.age.per75th,
+            self.age.per95th,
+            self.age.per99th,
             self.meanRate
         )
 
@@ -118,6 +127,7 @@ type PerformanceReporter(networkCfg: NetworkCfg) =
             nominate = Timer.FromGenericTimer(metrics.ScpTimingNominated)
             prepare = Timer.FromGenericTimer(metrics.ScpTimingExternalized)
             close = Timer.FromGenericTimer(metrics.LedgerLedgerClose)
+            age = Timer.FromGenericTimer(metrics.LedgerAgeClosed)
             meanRate = decimal(metrics.LedgerLedgerClose.MeanRate)
         }
 

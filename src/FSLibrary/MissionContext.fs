@@ -115,7 +115,7 @@ type MissionContext =
       { mode = GenerateAccountCreationLoad
         accounts = self.numAccounts
         txs = 0
-        txrate = self.txRate
+        txrate = 5
         offset = 0
         batchsize = 100 }
 

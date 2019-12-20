@@ -77,9 +77,9 @@ let doCatchup (context: MissionContext) (formation: StellarFormation) (catchupSe
     let version = versionPeer.GetSupportedProtocolVersion()
     formation.Stop "version"
     let generatorPeer = formation.NetworkCfg.GetPeer catchupSets.generatorSet 0
-    generatorPeer.UpgradeProtocol(version)
+    generatorPeer.UpgradeProtocol version System.DateTime.UtcNow
     if context.numTxs > 100
-    then generatorPeer.UpgradeMaxTxSize(1000000)
+    then generatorPeer.UpgradeMaxTxSize 1000000 System.DateTime.UtcNow
 
     formation.RunLoadgen catchupSets.generatorSet context.GenerateAccountCreationLoad
     formation.RunLoadgen catchupSets.generatorSet context.GeneratePaymentLoad
