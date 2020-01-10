@@ -43,6 +43,12 @@ type CoreSetInitialization =
         forceScp = false
         fetchDBFromPeer = None }
 
+    static member NoInitCmds =
+      { newDb = false
+        newHist = false
+        initialCatchup = false
+        forceScp = false
+        fetchDBFromPeer = None }
 
 type CoreSetOptions =
     { nodeCount : int
@@ -61,7 +67,9 @@ type CoreSetOptions =
       catchupMode : CatchupMode
       image : string option
       initialization : CoreSetInitialization
-      dumpDatabase: bool }
+      dumpDatabase: bool
+      simulateApplyMu : int
+      maxSlotsToRemember : int }
 
     member self.WithForceSCP (f:bool) =
         { self with initialization = { self.initialization with forceScp = f } }
@@ -83,7 +91,12 @@ type CoreSetOptions =
         catchupMode = CatchupComplete
         image = None
         initialization = CoreSetInitialization.Default
-        dumpDatabase = true }
+        dumpDatabase = true
+        simulateApplyMu = 0
+        maxSlotsToRemember = 12 }
+
+    member self.InConsensusOnlyMode (simulateApply:int) =
+        { self with simulateApplyMu = simulateApply; initialization = CoreSetInitialization.NoInitCmds }
 
 type CoreSet =
     { name : string

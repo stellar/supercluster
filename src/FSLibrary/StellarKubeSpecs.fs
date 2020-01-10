@@ -257,8 +257,15 @@ type NetworkCfg with
         let volumes = [| cfgVol; dataVol |]
         let maxPeers = max 1 self.MaxPeerCount
         let initCommands = self.getInitCommands cfgOpt coreSet.options
+
+        let runCmd = [| "run" |]
+        let runCmdWithOpts =
+            match coreSet.options.simulateApplyMu with
+            | 0 -> runCmd
+            | _ -> Array.append runCmd [| "--simulate-apply-per-op"; coreSet.options.simulateApplyMu.ToString() |]
+
         let containers = [| WithReadinessProbe
-                                (CoreContainerForCommand self.quotas maxPeers cfgOpt [| "run" |] initCommands)
+                                (CoreContainerForCommand self.quotas maxPeers cfgOpt runCmdWithOpts initCommands)
                                 probeTimeout;
                             HistoryContainer; |]
         let containers  =
