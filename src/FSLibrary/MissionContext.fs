@@ -115,6 +115,7 @@ type MissionContext =
       { mode = GenerateAccountCreationLoad
         accounts = self.numAccounts
         txs = 0
+        // Use conservative rate for account creation, as the network may quickly get overloaded
         txrate = 5
         offset = 0
         batchsize = 100 }

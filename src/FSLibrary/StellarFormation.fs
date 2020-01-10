@@ -165,6 +165,8 @@ type StellarFormation(networkCfg: NetworkCfg,
     member self.WaitUntilSynced (coreSetList: CoreSet list) =
         networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.WaitUntilSynced())
 
+    // When upgrading multiple nodes, configure upgrade time a bit ahead to ensure nodes have enough
+    // of a buffer to set upgrades
     member self.UpgradeProtocol (coreSetList: CoreSet list) (version: int) =
         let upgradeTime = System.DateTime.UtcNow.AddSeconds(15.0)
         networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.UpgradeProtocol version upgradeTime)
