@@ -150,23 +150,23 @@ type Peer with
         if res.ToLower().Contains("exception")
         then raise (PeerRejectedUpgradesException res)
 
-    member self.UpgradeProtocol (version: int) =
+    member self.UpgradeProtocol (version: int) (time:System.DateTime) =
         let upgrades = { DefaultUpgradeParameters with
-                           protocolVersion = Some(version) }
+                           protocolVersion = Some(version);
+                           upgradeTime = time }
         self.SetUpgrades(upgrades)
-        self.WaitForNextLedger()
 
-    member self.UpgradeProtocolToLatest () =
+    member self.UpgradeProtocolToLatest (time:System.DateTime) =
         let upgrades = { DefaultUpgradeParameters with
-                           protocolVersion = Some(self.GetSupportedProtocolVersion()) }
+                           protocolVersion = Some(self.GetSupportedProtocolVersion());
+                           upgradeTime = time }
         self.SetUpgrades(upgrades)
-        self.WaitForNextLedger()
 
-    member self.UpgradeMaxTxSize (txSize: int) =
+    member self.UpgradeMaxTxSize (txSize: int) (time:System.DateTime) =
         let upgrades = { DefaultUpgradeParameters with
-                           maxTxSize = Some(txSize) }
+                           maxTxSize = Some(txSize);
+                           upgradeTime = time }
         self.SetUpgrades(upgrades)
-        self.WaitForNextLedger()
 
     member self.WaitForLedgerNum (n:int) =
         RetryUntilTrue

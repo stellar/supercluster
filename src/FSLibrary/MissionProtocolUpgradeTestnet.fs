@@ -27,7 +27,7 @@ let protocolUpgradeTestnet (context : MissionContext) =
 
         let peer = formation.NetworkCfg.GetPeer coreSet 0
         peer.WaitForFewLedgers(3)
-        peer.UpgradeProtocolToLatest()
+        peer.UpgradeProtocolToLatest System.DateTime.UtcNow
         peer.WaitForFewLedgers(3)
 
         formation.CheckUsesLatestProtocolVersion()
