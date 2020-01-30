@@ -166,7 +166,8 @@ type NetworkCfg with
             let cmdAndArgs = (Array.map ShWord.OfStr
                                (Array.append [| CfgVal.stellarCoreBinPath |] args))
             ShCmd (Array.append cmdAndArgs cfgWords)
-        let runCoreIf flag args = if flag then Some (runCore args) else None
+        let nonSimulation = opts.simulateApplyMu = 0
+        let runCoreIf flag args = if flag && nonSimulation then Some (runCore args) else None
         let waitForDB: ShCmd Option =
           match opts.dbType with
           | Postgres ->
