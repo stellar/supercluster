@@ -166,7 +166,7 @@ type NetworkCfg with
             let cmdAndArgs = (Array.map ShWord.OfStr
                                (Array.append [| CfgVal.stellarCoreBinPath |] args))
             ShCmd (Array.append cmdAndArgs cfgWords)
-        let nonSimulation = opts.simulateApplyMu = 0
+        let nonSimulation = opts.simulateApplyUsec = 0
         let runCoreIf flag args = if flag && nonSimulation then Some (runCore args) else None
         let waitForDB: ShCmd Option =
           match opts.dbType with
@@ -261,9 +261,9 @@ type NetworkCfg with
 
         let runCmd = [| "run" |]
         let runCmdWithOpts =
-            match coreSet.options.simulateApplyMu with
+            match coreSet.options.simulateApplyUsec with
             | 0 -> runCmd
-            | _ -> Array.append runCmd [| "--simulate-apply-per-op"; coreSet.options.simulateApplyMu.ToString() |]
+            | _ -> Array.append runCmd [| "--simulate-apply-per-op"; coreSet.options.simulateApplyUsec.ToString() |]
 
         let containers = [| WithReadinessProbe
                                 (CoreContainerForCommand self.quotas maxPeers cfgOpt runCmdWithOpts initCommands)

@@ -68,7 +68,7 @@ type CoreSetOptions =
       image : string option
       initialization : CoreSetInitialization
       dumpDatabase: bool
-      simulateApplyMu : int
+      simulateApplyUsec : int
       maxSlotsToRemember : int }
 
     member self.WithForceSCP (f:bool) =
@@ -92,11 +92,11 @@ type CoreSetOptions =
         image = None
         initialization = CoreSetInitialization.Default
         dumpDatabase = true
-        simulateApplyMu = 0
+        simulateApplyUsec = 0
         maxSlotsToRemember = 12 }
 
     member self.InConsensusOnlyMode (simulateApply:int) =
-        { self with simulateApplyMu = simulateApply; initialization = CoreSetInitialization.NoInitCmds }
+        { self with simulateApplyUsec = simulateApply; initialization = CoreSetInitialization.NoInitCmds }
 
 type CoreSet =
     { name : string

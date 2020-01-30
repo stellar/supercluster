@@ -12,7 +12,7 @@ open StellarPerformanceReporter
 open StellarFormation
 
 let benchmarkConsensusOnly (context : MissionContext) =
-    let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = context.numNodes; accelerateTime = false; localHistory = false; simulateApplyMu = 2000; maxSlotsToRemember = 24; }
+    let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = context.numNodes; accelerateTime = false; localHistory = false; simulateApplyUsec = 2000; maxSlotsToRemember = 24; }
     context.ExecuteWithPerformanceReporter [coreSet] None (fun (formation: StellarFormation) (performanceReporter: PerformanceReporter) ->
         formation.WaitUntilSynced [coreSet]
         formation.UpgradeProtocolToLatest [coreSet]
