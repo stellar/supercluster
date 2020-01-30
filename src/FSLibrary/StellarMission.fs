@@ -8,6 +8,7 @@ open MissionSimplePayment
 open MissionComplexTopology
 open MissionLoadGeneration
 open MissionBenchmarkBaseline
+open MissionBenchmarkConsensusOnly
 open MissionBenchmarkIncreaseTxRate
 open MissionHistoryGenerateAndCatchup
 open MissionHistoryPubnetMinimumCatchup
@@ -38,6 +39,7 @@ let allMissions : Map<string, Mission> =
         ("ComplexTopology", complexTopology)
         ("LoadGeneration", loadGeneration)
         ("BenchmarkBaseline", benchmarkBaseline)
+        ("BenchmarkConsensusOnly", benchmarkConsensusOnly)
         ("BenchmarkIncreaseTxRate", benchmarkIncreaseTxRate)
         ("HistoryGenerateAndCatchup", historyGenerateAndCatchup)
         ("HistoryPubnetMinimumCatchup", historyPubnetMinimumCatchup)

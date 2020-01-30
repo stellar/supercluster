@@ -92,7 +92,8 @@ type StellarCoreCfg =
       quorumSet : Map<string, KeyPair>
       historyNodes : Map<string, string>
       historyGetCommands : Map<string, string>
-      localHistory: bool }
+      localHistory: bool
+      maxSlotsToRemember: int}
 
     member self.ToTOML() : TomlTable =
         let t = Toml.Create()
@@ -138,6 +139,7 @@ type StellarCoreCfg =
               match self.catchupMode with
                 | CatchupComplete -> 0
                 | CatchupRecent n -> n) |> ignore
+        t.Add("MAX_SLOTS_TO_REMEMBER", self.maxSlotsToRemember) |> ignore
         t.Add("AUTOMATIC_MAINTENANCE_PERIOD", self.automaticMaintenancePeriod) |> ignore
         t.Add("AUTOMATIC_MAINTENANCE_COUNT", self.automaticMaintenanceCount) |> ignore
         t.Add("ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING", self.accelerateTime) |> ignore
@@ -255,7 +257,8 @@ type NetworkCfg with
           quorumSet = self.QuorumSet opts
           historyNodes = self.HistoryNodes opts
           historyGetCommands = opts.historyGetCommands
-          localHistory = opts.localHistory }
+          localHistory = opts.localHistory
+          maxSlotsToRemember = opts.maxSlotsToRemember }
 
     member self.StellarCoreCfg(c:CoreSet, i:int) : StellarCoreCfg =
         { network = self
@@ -280,4 +283,5 @@ type NetworkCfg with
           quorumSet = self.QuorumSet c.options
           historyNodes = self.HistoryNodes c.options
           historyGetCommands = c.options.historyGetCommands
-          localHistory = c.options.localHistory }
+          localHistory = c.options.localHistory
+          maxSlotsToRemember = c.options.maxSlotsToRemember }

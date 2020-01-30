@@ -31,6 +31,7 @@
     <Compile Include="MissionComplexTopology.fs" />
     <Compile Include="MissionLoadGeneration.fs" />
     <Compile Include="MissionBenchmarkBaseline.fs" />
+    <Compile Include="MissionBenchmarkConsensusOnly.fs" />
     <Compile Include="MissionBenchmarkIncreaseTxRate.fs" />
     <Compile Include="MissionHistoryGenerateAndCatchup.fs" />
     <Compile Include="MissionHistoryPubnetMinimumCatchup.fs" />

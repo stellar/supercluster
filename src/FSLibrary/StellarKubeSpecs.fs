@@ -106,9 +106,9 @@ let CoreContainerForCommand (q:NetworkQuotas) (numContainers:int) (configOpt:Con
 
 let WithReadinessProbe (container:V1Container) probeTimeout : V1Container =
     let httpPortStr = IntstrIntOrString(value = CfgVal.httpPort.ToString())
-    let readyProbe = V1Probe(periodSeconds = System.Nullable<int>(5),
-                             initialDelaySeconds = System.Nullable<int>(10),
-                             failureThreshold = System.Nullable<int>(6),
+    let readyProbe = V1Probe(periodSeconds = System.Nullable<int>(1),
+                             initialDelaySeconds = System.Nullable<int>(1),
+                             failureThreshold = System.Nullable<int>(60),
                              timeoutSeconds = System.Nullable<int>(probeTimeout),
                              httpGet = V1HTTPGetAction(path = "/info",
                                                        port = httpPortStr))
@@ -166,7 +166,8 @@ type NetworkCfg with
             let cmdAndArgs = (Array.map ShWord.OfStr
                                (Array.append [| CfgVal.stellarCoreBinPath |] args))
             ShCmd (Array.append cmdAndArgs cfgWords)
-        let runCoreIf flag args = if flag then Some (runCore args) else None
+        let nonSimulation = opts.simulateApplyUsec = 0
+        let runCoreIf flag args = if flag && nonSimulation then Some (runCore args) else None
         let waitForDB: ShCmd Option =
           match opts.dbType with
           | Postgres ->
@@ -257,8 +258,15 @@ type NetworkCfg with
         let volumes = [| cfgVol; dataVol |]
         let maxPeers = max 1 self.MaxPeerCount
         let initCommands = self.getInitCommands cfgOpt coreSet.options
+
+        let runCmd = [| "run" |]
+        let runCmdWithOpts =
+            match coreSet.options.simulateApplyUsec with
+            | 0 -> runCmd
+            | _ -> Array.append runCmd [| "--simulate-apply-per-op"; coreSet.options.simulateApplyUsec.ToString() |]
+
         let containers = [| WithReadinessProbe
-                                (CoreContainerForCommand self.quotas maxPeers cfgOpt [| "run" |] initCommands)
+                                (CoreContainerForCommand self.quotas maxPeers cfgOpt runCmdWithOpts initCommands)
                                 probeTimeout;
                             HistoryContainer; |]
         let containers  =
