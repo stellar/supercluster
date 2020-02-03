@@ -71,7 +71,7 @@ let cfgFileArgs (configOpt:ConfigOption) : ShWord array =
         | PeerSpecificConfigFile -> [| ShWord.OfStr "--conf";
                                        CfgVal.peerNameEnvCfgFileWord |]
 
-let CoreContainerForCommand (q:NetworkQuotas) (numContainers:int) (configOpt:ConfigOption)
+let CoreContainerForCommand (q:NetworkQuotas) (imageName:string) (numContainers:int) (configOpt:ConfigOption)
                             (command:string array) (initCommands:ShCmd array) : V1Container =
 
     let peerNameFieldSel = V1ObjectFieldSelector(fieldPath = "metadata.name")
@@ -97,7 +97,7 @@ let CoreContainerForCommand (q:NetworkQuotas) (numContainers:int) (configOpt:Con
     let allCmdsAndCleanup = ShSeq [| allCmds; exitStatusDef; killPs; exit; |]
 
     V1Container
-        (name = containerName, image = CfgVal.stellarCoreImageName,
+        (name = containerName, image = imageName,
          command = [| "/bin/sh" |],
          args = [| "-x"; "-c"; allCmdsAndCleanup.ToString() |],
          env = [| peerNameEnvVar|],
@@ -217,10 +217,10 @@ type NetworkCfg with
 
         let containers  =
             match self.jobCoreSetOptions with
-                | None -> [| CoreContainerForCommand self.quotas maxPeers cfgOpt command [| |] |]
+                | None -> [| CoreContainerForCommand self.quotas imageName maxPeers cfgOpt command [| |] |]
                 | Some(opts) ->
                 let initCmds = self.getInitCommands cfgOpt opts
-                let coreContainer = CoreContainerForCommand self.quotas maxPeers cfgOpt command initCmds
+                let coreContainer = CoreContainerForCommand self.quotas imageName maxPeers cfgOpt command initCmds
                 match opts.dbType with
                     | Postgres -> [| coreContainer; PostgresContainer |]
                     | _ -> [| coreContainer |]
@@ -266,7 +266,7 @@ type NetworkCfg with
             | _ -> Array.append runCmd [| "--simulate-apply-per-op"; coreSet.options.simulateApplyUsec.ToString() |]
 
         let containers = [| WithReadinessProbe
-                                (CoreContainerForCommand self.quotas maxPeers cfgOpt runCmdWithOpts initCommands)
+                                (CoreContainerForCommand self.quotas imageName maxPeers cfgOpt runCmdWithOpts initCommands)
                                 probeTimeout;
                             HistoryContainer; |]
         let containers  =
