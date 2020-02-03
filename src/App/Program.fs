@@ -31,6 +31,8 @@ type CommonOptions(kubeConfig: string,
                    logDebugPartitions: seq<string>,
                    logTracePartitions: seq<string>,
                    storageClass: string,
+                   containerMaxCpuMili: int,
+                   containerMaxMemMebi: int,
                    numConcurrentMissions: int,
                    namespaceProperty: string option,
                    ingressDomain: string,
@@ -53,6 +55,14 @@ type CommonOptions(kubeConfig: string,
     [<Option("storage-class", HelpText="Storage class name to use for dynamically provisioning persistent volume claims",
              Required = false, Default = "default")>]
     member self.StorageClass = storageClass
+
+    [<Option("container-max-cpu-mili", HelpText="Maximum per-container CPU (in mili-CPUs)",
+             Required = false, Default = 0)>]
+    member self.ContainerMaxCpuMili = containerMaxCpuMili
+
+    [<Option("container-max-mem-mebi", HelpText="Maximum per-container memory (in MB)",
+             Required = false, Default = 0)>]
+    member self.ContainerMaxMemMebi = containerMaxMemMebi
 
     [<Option("num-concurrent-missions", HelpText="Number of missions being run concurrently (including this one)",
              Required = false, Default = 1)>]
@@ -79,6 +89,8 @@ type SetupOptions(kubeConfig: string,
                   logDebugPartitions: seq<string>,
                   logTracePartitions: seq<string>,
                   storageClass: string,
+                  containerMaxCpuMili: int,
+                  containerMaxMemMebi: int,
                   numConcurrentMissions: int,
                   namespaceProperty: string option,
                   ingressDomain: string,
@@ -88,6 +100,8 @@ type SetupOptions(kubeConfig: string,
                           logDebugPartitions,
                           logTracePartitions,
                           storageClass,
+                          containerMaxCpuMili,
+                          containerMaxMemMebi,
                           numConcurrentMissions,
                           namespaceProperty,
                           ingressDomain,
@@ -100,6 +114,8 @@ type CleanOptions(kubeConfig: string,
                   logDebugPartitions: seq<string>,
                   logTracePartitions: seq<string>,
                   storageClass: string,
+                  containerMaxCpuMili: int,
+                  containerMaxMemMebi: int,
                   numConcurrentMissions: int,
                   namespaceProperty: string option,
                   ingressDomain: string,
@@ -109,6 +125,8 @@ type CleanOptions(kubeConfig: string,
                           logDebugPartitions,
                           logTracePartitions,
                           storageClass,
+                          containerMaxCpuMili,
+                          containerMaxMemMebi,
                           numConcurrentMissions,
                           namespaceProperty,
                           ingressDomain,
@@ -121,6 +139,8 @@ type LoadgenOptions(kubeConfig: string,
                     logDebugPartitions: seq<string>,
                     logTracePartitions: seq<string>,
                     storageClass: string,
+                    containerMaxCpuMili: int,
+                    containerMaxMemMebi: int,
                     numConcurrentMissions: int,
                     namespaceProperty: string option,
                     ingressDomain: string,
@@ -130,6 +150,8 @@ type LoadgenOptions(kubeConfig: string,
                           logDebugPartitions,
                           logTracePartitions,
                           storageClass,
+                          containerMaxCpuMili,
+                          containerMaxMemMebi,
                           numConcurrentMissions,
                           namespaceProperty,
                           ingressDomain,
@@ -141,6 +163,8 @@ type MissionOptions(kubeConfig: string,
                     numNodes: int,
                     logDebugPartitions: seq<string>,
                     logTracePartitions: seq<string>,
+                    containerMaxCpuMili: int,
+                    containerMaxMemMebi: int,
                     numConcurrentMissions: int,
                     namespaceProperty: string option,
                     ingressDomain: string,
@@ -169,6 +193,14 @@ type MissionOptions(kubeConfig: string,
 
     [<Option("trace", HelpText="Log-partitions to set to 'trace' level")>]
     member self.LogTracePartitions = logTracePartitions
+
+    [<Option("container-max-cpu-mili", HelpText="Maximum per-container CPU (in mili-CPUs)",
+             Required = false, Default = 0)>]
+    member self.ContainerMaxCpuMili = containerMaxCpuMili
+
+    [<Option("container-max-mem-mebi", HelpText="Maximum per-container memory (in MB)",
+             Required = false, Default = 0)>]
+    member self.ContainerMaxMemMebi = containerMaxMemMebi
 
     [<Option("num-concurrent-missions", HelpText="Number of missions being run concurrently (including this one)",
              Required = false, Default = 1)>]
@@ -261,7 +293,13 @@ let main argv =
     | :? SetupOptions as setup ->
       let _ = logToConsoleOnly()
       let (kube, ns) = ConnectToCluster setup.KubeConfig setup.NamespaceProperty
-      let nq = kube.GetQuotas ns
+      let mutable nq = kube.GetQuotas ns
+      if setup.ContainerMaxCpuMili > 0
+      then
+          nq <- { nq with ContainerMaxCpuMili = setup.ContainerMaxCpuMili }
+      if setup.ContainerMaxMemMebi > 0
+      then
+          nq <- { nq with ContainerMaxMemMebi = setup.ContainerMaxMemMebi }
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = setup.NumNodes }
       let ll = { LogDebugPartitions = List.ofSeq setup.LogDebugPartitions
                  LogTracePartitions = List.ofSeq setup.LogTracePartitions }
@@ -275,7 +313,13 @@ let main argv =
     | :? CleanOptions as clean ->
       let _ = logToConsoleOnly()
       let (kube, ns) = ConnectToCluster clean.KubeConfig clean.NamespaceProperty
-      let nq = { kube.GetQuotas ns with NumConcurrentMissions = clean.NumConcurrentMissions }
+      let mutable nq = { kube.GetQuotas ns with NumConcurrentMissions = clean.NumConcurrentMissions }
+      if clean.ContainerMaxCpuMili > 0
+      then
+          nq <- { nq with ContainerMaxCpuMili = clean.ContainerMaxCpuMili }
+      if clean.ContainerMaxMemMebi > 0
+      then
+          nq <- { nq with ContainerMaxMemMebi = clean.ContainerMaxMemMebi }
       let ll = { LogDebugPartitions = List.ofSeq clean.LogDebugPartitions
                  LogTracePartitions = List.ofSeq clean.LogTracePartitions }
       let sc = clean.StorageClass
@@ -288,7 +332,13 @@ let main argv =
     | :? LoadgenOptions as loadgen ->
       let _ = logToConsoleOnly()
       let (kube, ns) = ConnectToCluster loadgen.KubeConfig loadgen.NamespaceProperty
-      let nq = { kube.GetQuotas ns with NumConcurrentMissions = loadgen.NumConcurrentMissions }
+      let mutable nq = { kube.GetQuotas ns with NumConcurrentMissions = loadgen.NumConcurrentMissions }
+      if loadgen.ContainerMaxCpuMili > 0
+      then
+          nq <- { nq with ContainerMaxCpuMili = loadgen.ContainerMaxCpuMili }
+      if loadgen.ContainerMaxMemMebi > 0
+      then
+          nq <- { nq with ContainerMaxMemMebi = loadgen.ContainerMaxMemMebi }
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = loadgen.NumNodes }
       let ll = { LogDebugPartitions = List.ofSeq loadgen.LogDebugPartitions
                  LogTracePartitions = List.ofSeq loadgen.LogTracePartitions }
@@ -319,7 +369,13 @@ let main argv =
                 LogInfo "Connecting to Kubernetes cluster"
                 LogInfo "-----------------------------------"
                 let (kube, ns) = ConnectToCluster mission.KubeConfig mission.NamespaceProperty
-                let nq = { kube.GetQuotas ns with NumConcurrentMissions = mission.NumConcurrentMissions }
+                let mutable nq = { kube.GetQuotas ns with NumConcurrentMissions = mission.NumConcurrentMissions }
+                if mission.ContainerMaxCpuMili > 0
+                then
+                    nq <- { nq with ContainerMaxCpuMili = mission.ContainerMaxCpuMili }
+                if mission.ContainerMaxMemMebi > 0
+                then
+                    nq <- { nq with ContainerMaxMemMebi = mission.ContainerMaxMemMebi }
                 let destination = Destination(mission.Destination)
 
                 for m in mission.Missions do
