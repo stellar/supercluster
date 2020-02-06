@@ -93,6 +93,7 @@ type StellarCoreCfg =
       historyNodes : Map<string, string>
       historyGetCommands : Map<string, string>
       localHistory: bool
+      fullyConnected: bool
       maxSlotsToRemember: int}
 
     member self.ToTOML() : TomlTable =
@@ -144,6 +145,14 @@ type StellarCoreCfg =
         t.Add("AUTOMATIC_MAINTENANCE_COUNT", self.automaticMaintenanceCount) |> ignore
         t.Add("ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING", self.accelerateTime) |> ignore
         t.Add("ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING", self.generateLoad) |> ignore
+
+        if self.fullyConnected
+        then
+            let n = self.preferredPeers.Length
+            t.Add("TARGET_PEER_CONNECTIONS", n) |> ignore
+            t.Add("MAX_ADDITIONAL_PEER_CONNECTIONS", n) |> ignore
+            t.Add("MAX_PENDING_CONNECTIONS", n) |> ignore
+
         t.Add("QUORUM_INTERSECTION_CHECKER", false) |> ignore
         t.Add("MANUAL_CLOSE", self.manualClose) |> ignore
         t.Add("INVARIANT_CHECKS", self.invariantChecks) |> ignore
@@ -259,6 +268,7 @@ type NetworkCfg with
           historyNodes = self.HistoryNodes opts
           historyGetCommands = opts.historyGetCommands
           localHistory = opts.localHistory
+          fullyConnected = opts.fullyConnected
           maxSlotsToRemember = opts.maxSlotsToRemember }
 
     member self.StellarCoreCfg(c:CoreSet, i:int) : StellarCoreCfg =
@@ -285,4 +295,5 @@ type NetworkCfg with
           historyNodes = self.HistoryNodes c.options
           historyGetCommands = c.options.historyGetCommands
           localHistory = c.options.localHistory
+          fullyConnected = c.options.fullyConnected
           maxSlotsToRemember = c.options.maxSlotsToRemember }

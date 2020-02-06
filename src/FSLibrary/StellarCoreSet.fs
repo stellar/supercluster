@@ -68,6 +68,7 @@ type CoreSetOptions =
       image : string option
       initialization : CoreSetInitialization
       dumpDatabase: bool
+      fullyConnected: bool
       simulateApplyUsec : int
       maxSlotsToRemember : int }
 
@@ -92,6 +93,7 @@ type CoreSetOptions =
         image = None
         initialization = CoreSetInitialization.Default
         dumpDatabase = true
+        fullyConnected = false
         simulateApplyUsec = 0
         maxSlotsToRemember = 12 }
 
