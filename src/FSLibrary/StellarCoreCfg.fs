@@ -144,6 +144,7 @@ type StellarCoreCfg =
         t.Add("AUTOMATIC_MAINTENANCE_COUNT", self.automaticMaintenanceCount) |> ignore
         t.Add("ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING", self.accelerateTime) |> ignore
         t.Add("ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING", self.generateLoad) |> ignore
+        t.Add("QUORUM_INTERSECTION_CHECKER", false) |> ignore
         t.Add("MANUAL_CLOSE", self.manualClose) |> ignore
         t.Add("INVARIANT_CHECKS", self.invariantChecks) |> ignore
         t.Add("UNSAFE_QUORUM", self.unsafeQuorum) |> ignore
