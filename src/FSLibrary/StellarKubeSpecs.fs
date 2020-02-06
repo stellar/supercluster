@@ -35,22 +35,13 @@ let ContainerVolumeMounts : V1VolumeMount array =
        V1VolumeMount(name = CfgVal.cfgVolumeName,
                      mountPath = CfgVal.cfgVolumePath) |]
 
-
-let HistoryContainer =
-    V1Container
-        (name = "history",
-         image = "nginx",
-         command = [| "nginx" |],
-         args = [| "-c"; CfgVal.historyCfgFile; |],
-         volumeMounts = ContainerVolumeMounts )
-
-let PostgresContainer =
-    V1Container
-        (name = "postgres",
-         ports = [| V1ContainerPort(containerPort = 5432, name = "postgres") |],
-         image = "postgres:9.5",
-         volumeMounts = ContainerVolumeMounts)
-
+// Note: for the time being we use the same resource-requirements calculation
+// for each container in our pod, be it core, history or postgres. We just
+// multiply the number of pods by the number of containers-in-each-pod to get a
+// total container count, which is used as a divisor in these calculations. A
+// fancier calculation would deduct different amounts for nginx and postgres
+// (the former needs very little RAM, the latter quite a lot). But this seems to
+// work for now.
 let resourceRequirements (q:NetworkQuotas) (numContainers:int) : V1ResourceRequirements =
     let cpuReq = q.ContainerCpuReqMili numContainers
     let memReq = q.ContainerMemReqMebi numContainers
@@ -63,6 +54,22 @@ let resourceRequirements (q:NetworkQuotas) (numContainers:int) : V1ResourceRequi
     V1ResourceRequirements(requests = requests,
                            limits = limits)
 
+let HistoryContainer (q:NetworkQuotas) (numContainers:int) =
+    V1Container
+        (name = "history",
+         image = "nginx",
+         command = [| "nginx" |],
+         args = [| "-c"; CfgVal.historyCfgFile; |],
+         resources = resourceRequirements q numContainers,
+         volumeMounts = ContainerVolumeMounts )
+
+let PostgresContainer (q:NetworkQuotas) (numContainers:int) =
+    V1Container
+        (name = "postgres",
+         ports = [| V1ContainerPort(containerPort = 5432, name = "postgres") |],
+         image = "postgres:9.5",
+         resources = resourceRequirements q numContainers,
+         volumeMounts = ContainerVolumeMounts)
 
 let cfgFileArgs (configOpt:ConfigOption) : ShWord array =
     match configOpt with
@@ -220,9 +227,13 @@ type NetworkCfg with
                 | None -> [| CoreContainerForCommand self.quotas imageName maxPeers cfgOpt command [| |] |]
                 | Some(opts) ->
                 let initCmds = self.getInitCommands cfgOpt opts
-                let coreContainer = CoreContainerForCommand self.quotas imageName maxPeers cfgOpt command initCmds
+                let numContainers =
+                    match opts.dbType with
+                        | Postgres -> maxPeers * 2
+                        | _ -> maxPeers
+                let coreContainer = CoreContainerForCommand self.quotas imageName numContainers cfgOpt command initCmds
                 match opts.dbType with
-                    | Postgres -> [| coreContainer; PostgresContainer |]
+                    | Postgres -> [| coreContainer; PostgresContainer self.quotas numContainers |]
                     | _ -> [| coreContainer |]
 
         V1PodTemplateSpec
@@ -265,13 +276,17 @@ type NetworkCfg with
             | 0 -> runCmd
             | _ -> Array.append runCmd [| "--simulate-apply-per-op"; coreSet.options.simulateApplyUsec.ToString() |]
 
+        let numContainers =
+            match coreSet.options.dbType with
+                | Postgres -> maxPeers * 3 // core, history and postgres
+                | _ -> maxPeers * 2        // just core and history
         let containers = [| WithReadinessProbe
-                                (CoreContainerForCommand self.quotas imageName maxPeers cfgOpt runCmdWithOpts initCommands)
+                                (CoreContainerForCommand self.quotas imageName numContainers cfgOpt runCmdWithOpts initCommands)
                                 probeTimeout;
-                            HistoryContainer; |]
+                            HistoryContainer self.quotas numContainers; |]
         let containers  =
             match coreSet.options.dbType with
-                | Postgres -> Array.append containers [| PostgresContainer |]
+                | Postgres -> Array.append containers [| PostgresContainer self.quotas  numContainers |]
                 | _ -> containers
 
         let podSpec =
