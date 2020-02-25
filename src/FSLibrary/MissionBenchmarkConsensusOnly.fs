@@ -18,7 +18,8 @@ let benchmarkConsensusOnly (context : MissionContext) =
                                                localHistory = false
                                                simulateApplyUsec = 2000
                                                maxSlotsToRemember = 24
-                                               fullyConnected = true }
+                                               fullyConnected = true
+                                               dumpDatabase = false }
     context.ExecuteWithPerformanceReporter [coreSet] None (fun (formation: StellarFormation) (performanceReporter: PerformanceReporter) ->
         formation.WaitUntilSynced [coreSet]
         formation.UpgradeProtocolToLatest [coreSet]
