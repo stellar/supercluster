@@ -11,8 +11,8 @@ open StellarFormation
 
 let versionMixOldCatchupToNew (context : MissionContext) =
     let context = context.WithNominalLoad
-    let newImage = GetOrDefault context.image CfgVal.stellarCoreImageName
-    let oldImage = GetOrDefault context.oldImage CfgVal.stellarCoreImageName
+    let newImage = context.image 
+    let oldImage = GetOrDefault context.oldImage context.image
 
     let catchupOptions = { generatorImage = newImage; catchupImage = oldImage; versionImage = oldImage }
     let catchupSets = MakeCatchupSets catchupOptions

@@ -14,11 +14,9 @@ open StellarFormation
 open StellarJobExec
 
 let historyPubnetPerformance (context : MissionContext) =
-    let opts = { PubnetCoreSetOptions with
+    let opts = { PubnetCoreSetOptions context.image with
                      localHistory = false
-                     initialization = { PubnetCoreSetOptions.initialization with
-                                            newHist = false
-                                            forceScp = false } }
+                     initialization = CoreSetInitialization.OnlyNewDb }
 
     context.ExecuteJobs (Some(opts)) (Some(SDFMainNet))
         begin
@@ -26,12 +24,14 @@ let historyPubnetPerformance (context : MissionContext) =
 
             (formation.RunSingleJobWithTimeout context.destination
                  (Some(TimeSpan.FromMinutes(10.0)))
-                 [| "catchup"; "20000000/0" |])
+                 [| "catchup"; "20000000/0" |]
+                 context.image)
             |> formation.CheckAllJobsSucceeded
 
             (formation.RunSingleJobWithTimeout context.destination
                  (Some(TimeSpan.FromHours(4.0)))
-                 [| "catchup"; "20050000/50000" |])
+                 [| "catchup"; "20050000/50000" |]
+                 context.image)
             |> formation.CheckAllJobsSucceeded
 
         end

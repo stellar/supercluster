@@ -10,7 +10,7 @@ open StellarTransaction
 open StellarFormation
 
 let simplePayment (context : MissionContext) =
-    let coreSet = MakeLiveCoreSet "core" CoreSetOptions.Default
+    let coreSet = MakeLiveCoreSet "core" (CoreSetOptions.GetDefault context.image)
     context.Execute [coreSet] None (fun (formation: StellarFormation) ->
         formation.WaitUntilSynced [coreSet]
         formation.UpgradeProtocolToLatest [coreSet]

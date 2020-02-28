@@ -17,8 +17,7 @@ module CfgVal =
     let httpPort = 11626
     let labels = Map.ofSeq [ "app", "stellar-core" ]
     let labelSelector = "app = stellar-core"
-    let stellarCoreImageName = "stellar/stellar-core"
-    let stellarCoreBinPath = "/usr/local/bin/stellar-core"
+    let stellarCoreBinPath = "stellar-core"
     let stellarCoreContainerName (cmd:string) = "stellar-core-" + cmd
     let cfgVolumeName = "cfg-volume"
     let cfgVolumePath = "/cfg"

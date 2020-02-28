@@ -14,23 +14,21 @@ open StellarDataDump
 
 let databaseInplaceUpgrade (context : MissionContext) =
     let context = context.WithNominalLoad
-    let newImage = GetOrDefault context.image CfgVal.stellarCoreImageName
-    let oldImage = GetOrDefault context.oldImage CfgVal.stellarCoreImageName
+    let newImage = context.image 
+    let oldImage = GetOrDefault context.oldImage context.image 
 
     let quorumSet = Some(["core"])
     let beforeUpgradeCoreSet = MakeLiveCoreSet
                                  "before-upgrade"
-                                 { CoreSetOptions.Default with
+                                 { CoreSetOptions.GetDefault oldImage with
                                      nodeCount = 1
-                                     quorumSet = quorumSet
-                                     image = Some(oldImage) }
-    let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with quorumSet = quorumSet; image = Some(newImage) }
+                                     quorumSet = quorumSet }
+    let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.GetDefault newImage with quorumSet = quorumSet; }
     let afterUpgradeCoreSet = MakeDeferredCoreSet
                                  "after-upgrade"
-                                 { CoreSetOptions.Default with
+                                 { CoreSetOptions.GetDefault newImage with
                                      nodeCount = 1
                                      quorumSet = quorumSet
-                                     image = Some(newImage)
                                      initialization = { newDb = false
                                                         newHist = false
                                                         initialCatchup = false

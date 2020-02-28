@@ -43,6 +43,13 @@ type CoreSetInitialization =
         forceScp = false
         fetchDBFromPeer = None }
 
+    static member OnlyNewDb =
+      { newDb = true
+        newHist = false
+        initialCatchup = false
+        forceScp = false
+        fetchDBFromPeer = None }
+
     static member NoInitCmds =
       { newDb = false
         newHist = false
@@ -65,7 +72,7 @@ type CoreSetOptions =
       awaitSync : bool
       validate : bool
       catchupMode : CatchupMode
-      image : string option
+      image : string
       initialization : CoreSetInitialization
       dumpDatabase: bool
       fullyConnected: bool
@@ -75,7 +82,7 @@ type CoreSetOptions =
     member self.WithForceSCP (f:bool) =
         { self with initialization = { self.initialization with forceScp = f } }
 
-    static member Default =
+    static member GetDefault(image: string) =
       { nodeCount = 3
         dbType = Sqlite
         quorumSet = None
@@ -90,7 +97,7 @@ type CoreSetOptions =
         awaitSync = true
         validate = true
         catchupMode = CatchupComplete
-        image = None
+        image = image
         initialization = CoreSetInitialization.Default
         dumpDatabase = true
         fullyConnected = false

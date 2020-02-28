@@ -27,11 +27,9 @@ let historyTestnetParallelCatchup (context : MissionContext) =
 
     let catchupRangeStr i = sprintf "%d/%d" ((i+1) * ledgersPerJob) (ledgersPerJob + overlapLedgers)
     let jobArr = Array.init numJobs (fun i -> [| "catchup"; catchupRangeStr i|])
-    let opts = { TestnetCoreSetOptions with
+    let opts = { TestnetCoreSetOptions context.image with
                      localHistory = false
-                     initialization = { TestnetCoreSetOptions.initialization with
-                                            newHist = false
-                                            forceScp = false } }
+                     initialization = CoreSetInitialization.OnlyNewDb }
     context.ExecuteJobs (Some(opts)) (Some(SDFTestNet))
         begin
         fun (formation: StellarFormation) ->

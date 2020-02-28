@@ -11,7 +11,7 @@ open StellarNetworkData
 open StellarFormation
 
 let historyPubnetRecentCatchup (context : MissionContext) =
-    let set = { PubnetCoreSetOptions with nodeCount = 1; catchupMode = CatchupRecent(1001) }
+    let set = { PubnetCoreSetOptions context.image with nodeCount = 1; catchupMode = CatchupRecent(1001) }
     let coreSet = MakeLiveCoreSet "core" set
     context.Execute [coreSet] (Some(SDFMainNet)) (fun (formation: StellarFormation) ->
         formation.WaitUntilSynced [coreSet]

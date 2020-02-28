@@ -13,7 +13,7 @@ open StellarNetworkData
 open StellarFormation
 
 let protocolUpgradeTestnet (context : MissionContext) =
-    let set = { CoreSetOptions.Default with
+    let set = { CoreSetOptions.GetDefault context.image with
                   nodeCount = 1
                   quorumSet = Some(["core"])
                   historyNodes = Some([])

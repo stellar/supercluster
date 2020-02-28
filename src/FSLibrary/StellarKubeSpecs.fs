@@ -259,10 +259,7 @@ type NetworkCfg with
                               configMap = V1ConfigMapVolumeSource(name = self.CfgMapName))
         let dataVol = V1Volume(name = CfgVal.dataVolumeName,
                                emptyDir = V1EmptyDirVolumeSource(medium = "Memory"))
-        let imageName =
-            match coreSet.options.image with
-            | None -> CfgVal.stellarCoreImageName
-            | Some(x) -> x
+        let imageName = coreSet.options.image
 
         let cfgOpt = PeerSpecificConfigFile
 

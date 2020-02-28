@@ -9,7 +9,7 @@ open StellarMissionContext
 open StellarFormation
 
 let loadGeneration (context : MissionContext) =
-    let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with dumpDatabase = false }
+    let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.GetDefault context.image with dumpDatabase = false }
     let context = { context with numAccounts = 2000; numTxs = 2000; txRate = 20 }
     context.Execute [coreSet] None (fun (formation: StellarFormation) ->
         formation.WaitUntilSynced [coreSet]
