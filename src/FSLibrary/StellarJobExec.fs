@@ -80,14 +80,16 @@ type StellarFormation with
         (event.WaitHandle, ok)
 
     member self.RunSingleJob (destination:Destination)
-                             (job:(string array)) : Map<string,bool> =
-        self.RunSingleJobWithTimeout destination None job
+                             (job:(string array))
+                             (image:string) : Map<string,bool> =
+        self.RunSingleJobWithTimeout destination None job image
 
     member self.RunSingleJobWithTimeout (destination:Destination)
                                         (timeout:TimeSpan option)
-                                        (cmd:(string array)) : Map<string,bool> =
+                                        (cmd:(string array))
+                                        (image:string) : Map<string,bool> =
         let startTime = DateTime.UtcNow
-        let j = self.StartJobForCmd cmd
+        let j = self.StartJobForCmd cmd image
         let name = j.Metadata.Name
         let (waitHandle, ok) = self.WatchJob j
         let timeoutArg = match timeout with | None -> TimeSpan(0,0,0,0,-1) | Some x -> x
@@ -106,7 +108,8 @@ type StellarFormation with
 
     member self.RunParallelJobsInRandomOrder (parallelism:int)
                                              (destination:Destination)
-                                             (allJobs:((string array) array)) : Map<string,bool> =
+                                             (allJobs:((string array) array))
+                                             (image:string) : Map<string,bool> =
         let jobArr = Array.copy allJobs
         let shuffle (arr:'a array) =
             let rng = System.Random()
@@ -122,11 +125,12 @@ type StellarFormation with
             (fun _ -> (match jobQueue with
                        | [] -> None
                        | head::tail -> jobQueue <- tail
-                                       Some head))
+                                       Some head)) image
 
     member self.RunParallelJobs (parallelism:int)
                                 (destination:Destination)
                                 (nextJob:(unit->(string array) option))
+                                (image:string)
                                 : Map<string,bool> =
         let mutable running = Map.empty
         let mutable finished = Map.empty
@@ -142,7 +146,7 @@ type StellarFormation with
                      then finished
                      else waitJob()
                  | Some(cmd) ->
-                    let j = self.StartJobForCmd cmd
+                    let j = self.StartJobForCmd cmd image
                     let name = j.Metadata.Name
                     let (waitHandle, ok) = self.WatchJob j
                     running <- running.Add(name, (j, waitHandle, ok))
@@ -183,10 +187,10 @@ type StellarFormation with
         let pvc = self.NetworkCfg.ToDynamicPersistentVolumeClaimForJob n
         self.AddPersistentVolumeClaim pvc
 
-    member self.StartJobForCmd (cmd:string array) : V1Job =
+    member self.StartJobForCmd (cmd:string array) (image:string): V1Job =
         let jobNum = self.NextJobNum
         self.AddDynamicPersistentVolumeClaimForJob jobNum
-        self.StartJob (self.NetworkCfg.GetJobFor jobNum cmd)
+        self.StartJob (self.NetworkCfg.GetJobFor jobNum cmd image)
 
     member self.FinishJob (destination:Destination) (j:V1Job) : unit =
         // We need to dump the job logs as we go and mop up the jobs

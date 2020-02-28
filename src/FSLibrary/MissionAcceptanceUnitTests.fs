@@ -12,5 +12,5 @@ open StellarJobExec
 let acceptanceUnitTests (context : MissionContext) =
     context.ExecuteJobs None None
         (fun formation ->
-         formation.RunSingleJob context.destination [| "test"; "[acceptance]~[.]" |]
+         formation.RunSingleJob context.destination [| "test"; "[acceptance]~[.]" |] context.image
          |> formation.CheckAllJobsSucceeded)

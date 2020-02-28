@@ -33,6 +33,6 @@ let historyPubnetParallelCatchup (context : MissionContext) =
     context.ExecuteJobs (Some(opts)) (Some(SDFMainNet))
         begin
         fun (formation: StellarFormation) ->
-            (formation.RunParallelJobsInRandomOrder parallelism context.destination jobArr)
+            (formation.RunParallelJobsInRandomOrder parallelism context.destination jobArr context.image)
             |> formation.CheckAllJobsSucceeded
         end

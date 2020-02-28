@@ -208,12 +208,11 @@ type NetworkCfg with
                   | Postgres -> cmds // PG does not support that yet
                   | _ -> Array.append cmds (restoreDBStep coreSet i)
 
-    member self.GetJobPodTemplateSpec (jobName:string) (command: string array) : V1PodTemplateSpec =
+    member self.GetJobPodTemplateSpec (jobName:string) (command: string array) (image:string) : V1PodTemplateSpec =
         let cfgOpt = (if self.jobCoreSetOptions.IsNone
                       then NoConfigFile
                       else SharedJobConfigFile)
         let maxPeers = 1
-        let imageName = CfgVal.stellarCoreImageName
 
         let cfgVol = V1Volume(name = CfgVal.cfgVolumeName,
                               configMap = V1ConfigMapVolumeSource(name = self.CfgMapName))
@@ -224,14 +223,14 @@ type NetworkCfg with
 
         let containers  =
             match self.jobCoreSetOptions with
-                | None -> [| CoreContainerForCommand self.quotas imageName maxPeers cfgOpt command [| |] |]
+                | None -> [| CoreContainerForCommand self.quotas image maxPeers cfgOpt command [| |] |]
                 | Some(opts) ->
                 let initCmds = self.getInitCommands cfgOpt opts
                 let numContainers =
                     match opts.dbType with
                         | Postgres -> maxPeers * 2
                         | _ -> maxPeers
-                let coreContainer = CoreContainerForCommand self.quotas imageName numContainers cfgOpt command initCmds
+                let coreContainer = CoreContainerForCommand self.quotas image numContainers cfgOpt command initCmds
                 match opts.dbType with
                     | Postgres -> [| coreContainer; PostgresContainer self.quotas numContainers |]
                     | _ -> [| coreContainer |]
@@ -244,9 +243,9 @@ type NetworkCfg with
                  metadata = V1ObjectMeta(labels = CfgVal.labels,
                                          namespaceProperty = ns))
 
-    member self.GetJobFor (jobNum:int) (command: string array) : V1Job =
+    member self.GetJobFor (jobNum:int) (command: string array) (image:string) : V1Job =
         let jobName = self.JobName jobNum
-        let template = self.GetJobPodTemplateSpec jobName command
+        let template = self.GetJobPodTemplateSpec jobName command image
         V1Job(spec = V1JobSpec(template = template),
               metadata = self.NamespacedMeta jobName)
 
