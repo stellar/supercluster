@@ -13,7 +13,7 @@ open StellarFormation
 
 let historyGenerateAndCatchup (context : MissionContext) =
     let context = context.WithNominalLoad
-    let image = CfgVal.stellarCoreImageName
+    let image = context.image
     let catchupOptions = { generatorImage = image; catchupImage = image; versionImage = image }
     let catchupSets = MakeCatchupSets catchupOptions
     let sets = catchupSets.AllSetList()

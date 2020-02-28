@@ -11,24 +11,24 @@ open StellarFormation
 let complexTopology (context : MissionContext) =
     let context = context.WithNominalLoad
     let coreSet = MakeLiveCoreSet "core"
-                    { CoreSetOptions.Default with
+                    { CoreSetOptions.GetDefault context.image with
                         nodeCount = 4
                         quorumSet = Some(["core"])
                         accelerateTime = true }
     let publicSet = MakeLiveCoreSet "public"
-                      { CoreSetOptions.Default with
+                      { CoreSetOptions.GetDefault context.image with
                           nodeCount = 2
                           quorumSet = Some(["core"])
                           accelerateTime = true
-                          initialization = { CoreSetInitialization.Default with forceScp = false }
+                          initialization = CoreSetInitialization.DefaultNoForceSCP
                           validate = false }
     let orgSet = MakeLiveCoreSet "org"
-                   { CoreSetOptions.Default with
+                   { CoreSetOptions.GetDefault context.image with
                        nodeCount = 1
                        quorumSet = Some(["core"])
                        peers = Some(["public"])
                        accelerateTime = true
-                       initialization = { CoreSetInitialization.Default with forceScp = false }
+                       initialization = CoreSetInitialization.DefaultNoForceSCP
                        validate = false }
 
     context.Execute [coreSet; publicSet; orgSet] None (fun (formation: StellarFormation) ->

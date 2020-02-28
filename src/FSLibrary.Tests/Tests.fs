@@ -17,8 +17,8 @@ let ``Network nonce looks reasonable`` () =
     let nstr = nonce.ToString()
     Assert.Matches(Regex("^ssc-[a-f0-9]+$"), nstr)
 
-
-let coreSet = MakeLiveCoreSet "test" CoreSetOptions.Default
+let coreSetOptions = CoreSetOptions.GetDefault "stellar/stellar-core"
+let coreSet = MakeLiveCoreSet "test" coreSetOptions
 let quotas = MakeNetworkQuotas(1,1,1,1,1,1,1)
 let loglevels = { LogDebugPartitions=[]; LogTracePartitions=[] }
 let nameSpace = "stellar-supercluster"

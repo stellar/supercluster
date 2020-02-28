@@ -13,16 +13,14 @@ open StellarTransaction
 open StellarFormation
 
 let versionMixConsensus (context : MissionContext) =
-    let newImage = GetOrDefault context.image CfgVal.stellarCoreImageName
-    let oldImage = GetOrDefault context.oldImage CfgVal.stellarCoreImageName
+    let newImage = context.image
+    let oldImage = GetOrDefault context.oldImage context.image
 
-    let oldCoreSet = MakeLiveCoreSet "old-core" { CoreSetOptions.Default with
+    let oldCoreSet = MakeLiveCoreSet "old-core" { CoreSetOptions.GetDefault oldImage with
                                                       nodeCount = 4
-                                                      image = Some(oldImage)
                                                       quorumSet = Some(["old-core"]) }
-    let newCoreSet = MakeLiveCoreSet "new-core" { CoreSetOptions.Default with
+    let newCoreSet = MakeLiveCoreSet "new-core" { CoreSetOptions.GetDefault newImage with
                                                       nodeCount = 2
-                                                      image = Some(newImage)
                                                       quorumSet = Some(["old-core"]) }
     context.Execute [oldCoreSet; newCoreSet] None (fun (formation: StellarFormation) ->
         formation.WaitUntilSynced [oldCoreSet; newCoreSet]

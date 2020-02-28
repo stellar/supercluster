@@ -14,11 +14,9 @@ open StellarFormation
 open StellarJobExec
 
 let historyTestnetPerformance (context : MissionContext) =
-    let opts = { TestnetCoreSetOptions with
+    let opts = { TestnetCoreSetOptions context.image with
                      localHistory = false
-                     initialization = { TestnetCoreSetOptions.initialization with
-                                            newHist = false
-                                            forceScp = false } }
+                     initialization = CoreSetInitialization.OnlyNewDb }
 
     // Testnet is reset every quarter (~90 days) so this test is not _perfectly_
     // stable. It attempts to replay a 10k ledger prefix (a half day of traffic)
@@ -36,12 +34,14 @@ let historyTestnetPerformance (context : MissionContext) =
 
             (formation.RunSingleJobWithTimeout context.destination
                  (Some(TimeSpan.FromMinutes(10.0)))
-                 [| "catchup"; sprintf "%d/0" firstLedger |])
+                 [| "catchup"; sprintf "%d/0" firstLedger |]
+                 context.image)
             |> formation.CheckAllJobsSucceeded
 
             (formation.RunSingleJobWithTimeout context.destination
                  (Some(TimeSpan.FromHours(4.0)))
-                 [| "catchup"; sprintf "%d/%d" secondLedger delta |])
+                 [| "catchup"; sprintf "%d/%d" secondLedger delta |]
+                 context.image)
             |> formation.CheckAllJobsSucceeded
 
         end

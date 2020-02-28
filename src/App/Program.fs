@@ -36,7 +36,8 @@ type CommonOptions(kubeConfig: string,
                    numConcurrentMissions: int,
                    namespaceProperty: string option,
                    ingressDomain: string,
-                   probeTimeout: int) =
+                   probeTimeout: int,
+                   image: string) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file",
              Required = false, Default = "~/.kube/config")>]
@@ -82,6 +83,10 @@ type CommonOptions(kubeConfig: string,
              Required = false, Default = 5)>]
     member self.ProbeTimeout = probeTimeout
 
+    [<Option('i', "image", HelpText="Stellar-core image to use",
+             Required = false, Default = "stellar/stellar-core")>]
+    member self.Image = image
+
 
 [<Verb("setup", HelpText="Set up a new stellar-core cluster")>]
 type SetupOptions(kubeConfig: string,
@@ -94,7 +99,8 @@ type SetupOptions(kubeConfig: string,
                   numConcurrentMissions: int,
                   namespaceProperty: string option,
                   ingressDomain: string,
-                  probeTimeout: int) =
+                  probeTimeout: int,
+                  image: string) =
     inherit CommonOptions(kubeConfig,
                           numNodes,
                           logDebugPartitions,
@@ -105,7 +111,8 @@ type SetupOptions(kubeConfig: string,
                           numConcurrentMissions,
                           namespaceProperty,
                           ingressDomain,
-                          probeTimeout)
+                          probeTimeout,
+                          image)
 
 
 [<Verb("clean", HelpText="Clean all resources in a namespace")>]
@@ -119,7 +126,8 @@ type CleanOptions(kubeConfig: string,
                   numConcurrentMissions: int,
                   namespaceProperty: string option,
                   ingressDomain: string,
-                  probeTimeout: int) =
+                  probeTimeout: int,
+                  image: string) =
     inherit CommonOptions(kubeConfig,
                           numNodes,
                           logDebugPartitions,
@@ -130,7 +138,8 @@ type CleanOptions(kubeConfig: string,
                           numConcurrentMissions,
                           namespaceProperty,
                           ingressDomain,
-                          probeTimeout)
+                          probeTimeout,
+                          image)
 
 
 [<Verb("loadgen", HelpText="Run a load generation test")>]
@@ -144,7 +153,8 @@ type LoadgenOptions(kubeConfig: string,
                     numConcurrentMissions: int,
                     namespaceProperty: string option,
                     ingressDomain: string,
-                    probeTimeout: int) =
+                    probeTimeout: int,
+                    image: string) =
     inherit CommonOptions(kubeConfig,
                           numNodes,
                           logDebugPartitions,
@@ -155,7 +165,8 @@ type LoadgenOptions(kubeConfig: string,
                           numConcurrentMissions,
                           namespaceProperty,
                           ingressDomain,
-                          probeTimeout)
+                          probeTimeout,
+                          image)
 
 
 [<Verb("mission", HelpText="Run one or more named missions")>]
@@ -172,7 +183,7 @@ type MissionOptions(kubeConfig: string,
                     missions: string seq,
                     destination: string,
                     storageClass: string,
-                    image: string option,
+                    image: string,
                     oldImage: string option,
                     txRate: int,
                     maxTxRate: int,
@@ -230,7 +241,7 @@ type MissionOptions(kubeConfig: string,
     member self.StorageClass = storageClass
 
     [<Option('i', "image", HelpText="Stellar-core image to use",
-             Required = false)>]
+             Required = false, Default = "stellar/stellar-core")>]
     member self.Image = image
 
     [<Option('o', "old-image", HelpText="Stellar-core image to use as old-image",
@@ -300,7 +311,7 @@ let main argv =
       if setup.ContainerMaxMemMebi > 0
       then
           nq <- { nq with ContainerMaxMemMebi = setup.ContainerMaxMemMebi }
-      let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = setup.NumNodes }
+      let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.GetDefault setup.Image with nodeCount = setup.NumNodes }
       let ll = { LogDebugPartitions = List.ofSeq setup.LogDebugPartitions
                  LogTracePartitions = List.ofSeq setup.LogTracePartitions }
       let sc = setup.StorageClass
@@ -339,7 +350,7 @@ let main argv =
       if loadgen.ContainerMaxMemMebi > 0
       then
           nq <- { nq with ContainerMaxMemMebi = loadgen.ContainerMaxMemMebi }
-      let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.Default with nodeCount = loadgen.NumNodes }
+      let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.GetDefault loadgen.Image with nodeCount = loadgen.NumNodes }
       let ll = { LogDebugPartitions = List.ofSeq loadgen.LogDebugPartitions
                  LogTracePartitions = List.ofSeq loadgen.LogTracePartitions }
       let sc = loadgen.StorageClass

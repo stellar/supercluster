@@ -25,7 +25,7 @@ let GetOrDefault optional def =
 type MissionContext =
     { kube : Kubernetes
       destination : Destination
-      image : string option
+      image : string
       oldImage : string option
       txRate : int
       maxTxRate : int
