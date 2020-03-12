@@ -19,21 +19,34 @@ type ConfigOption =
     // Pass no '--conf' argument
     | NoConfigFile
 
-    // Pass a single '--conf /cfg/job.conf' argument, with content derived from
+    // Pass a single '--conf /cfg-job/stellar-core.cfg' argument, with content derived from
     // NetworkCfg.jobCoreSetOptions
     | SharedJobConfigFile
 
-    // Pass a single '--conf /cfg/$(STELLAR_CORE_PEER_SHORT_NAME).cfg' argument,
+    // Pass a single '--conf /cfg-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core.cfg' argument,
     // where the container is run in an environment with
     // STELLAR_CORE_PEER_SHORT_NAME set to self.PeerShortName so that the
     // container picks up a peer-specific config.
     | PeerSpecificConfigFile
 
-let ContainerVolumeMounts : V1VolumeMount array =
+let CoreContainerVolumeMounts (peerOrJobNames:string array) : V1VolumeMount array =
+    let arr =
+        Array.map (fun n -> V1VolumeMount(name = CfgVal.cfgVolumeName n,
+                                          readOnlyProperty = System.Nullable<bool>(true),
+                                          mountPath = CfgVal.cfgVolumePath n))
+            peerOrJobNames
+    Array.append arr [| V1VolumeMount(name = CfgVal.dataVolumeName,
+                                      mountPath = CfgVal.dataVolumePath) |]
+
+let PgContainerVolumeMounts : V1VolumeMount array =
     [| V1VolumeMount(name = CfgVal.dataVolumeName,
-                     mountPath = CfgVal.dataVolumePath)
-       V1VolumeMount(name = CfgVal.cfgVolumeName,
-                     mountPath = CfgVal.cfgVolumePath) |]
+                     mountPath = CfgVal.dataVolumePath) |]
+
+let HistoryContainerVolumeMounts : V1VolumeMount array =
+    [| V1VolumeMount(name = CfgVal.historyCfgVolumeName,
+                     mountPath = CfgVal.historyCfgVolumePath);
+       V1VolumeMount(name = CfgVal.dataVolumeName,
+                     mountPath = CfgVal.dataVolumePath) |]
 
 // Note: for the time being we use the same resource-requirements calculation
 // for each container in our pod, be it core, history or postgres. We just
@@ -59,9 +72,9 @@ let HistoryContainer (q:NetworkQuotas) (numContainers:int) =
         (name = "history",
          image = "nginx",
          command = [| "nginx" |],
-         args = [| "-c"; CfgVal.historyCfgFile; |],
+         args = [| "-c"; CfgVal.historyCfgFilePath; |],
          resources = resourceRequirements q numContainers,
-         volumeMounts = ContainerVolumeMounts )
+         volumeMounts = HistoryContainerVolumeMounts )
 
 let PostgresContainer (q:NetworkQuotas) (numContainers:int) =
     V1Container
@@ -69,17 +82,17 @@ let PostgresContainer (q:NetworkQuotas) (numContainers:int) =
          ports = [| V1ContainerPort(containerPort = 5432, name = "postgres") |],
          image = "postgres:9.5",
          resources = resourceRequirements q numContainers,
-         volumeMounts = ContainerVolumeMounts)
+         volumeMounts = PgContainerVolumeMounts)
 
 let cfgFileArgs (configOpt:ConfigOption) : ShWord array =
     match configOpt with
         | NoConfigFile -> [| |]
-        | SharedJobConfigFile -> Array.map ShWord.OfStr [| "--conf"; CfgVal.jobCfgFile |]
+        | SharedJobConfigFile -> Array.map ShWord.OfStr [| "--conf"; CfgVal.jobCfgFilePath |]
         | PeerSpecificConfigFile -> [| ShWord.OfStr "--conf";
                                        CfgVal.peerNameEnvCfgFileWord |]
 
 let CoreContainerForCommand (q:NetworkQuotas) (imageName:string) (numContainers:int) (configOpt:ConfigOption)
-                            (command:string array) (initCommands:ShCmd array) : V1Container =
+                            (command:string array) (initCommands:ShCmd array) (peerOrJobNames:string array) : V1Container =
 
     let peerNameFieldSel = V1ObjectFieldSelector(fieldPath = "metadata.name")
     let peerNameEnvVarSource = V1EnvVarSource(fieldRef = peerNameFieldSel)
@@ -109,7 +122,7 @@ let CoreContainerForCommand (q:NetworkQuotas) (imageName:string) (numContainers:
          args = [| "-x"; "-c"; allCmdsAndCleanup.ToString() |],
          env = [| peerNameEnvVar|],
          resources = resourceRequirements q numContainers,
-         volumeMounts = ContainerVolumeMounts)
+         volumeMounts = CoreContainerVolumeMounts peerOrJobNames)
 
 let WithReadinessProbe (container:V1Container) probeTimeout : V1Container =
     let httpPortStr = IntstrIntOrString(value = CfgVal.httpPort.ToString())
@@ -133,8 +146,10 @@ type NetworkCfg with
         V1ObjectMeta(name = name, labels = CfgVal.labels,
                      namespaceProperty = self.NamespaceProperty)
 
-    member self.HistoryConfig() : (string * string) =
-        (CfgVal.historyCfgFilename, sprintf "
+    member self.HistoryConfigMap() : V1ConfigMap =
+        let cfgmapname = self.HistoryCfgMapName
+        let filename = CfgVal.historyCfgFileName
+        let filedata = (sprintf "
           error_log /var/log/nginx.error_log debug;\n
           daemon off;
           user root root;
@@ -146,26 +161,36 @@ type NetworkCfg with
               root %s;\n
             }\n
           }" CfgVal.historyPath)
+        V1ConfigMap(metadata = self.NamespacedMeta cfgmapname,
+                    data = Map.empty.Add(filename, filedata))
 
-    member self.JobConfig(opts:CoreSetOptions) : (string * string) =
-        let cfg = self.StellarCoreCfgForJob opts
-        (CfgVal.jobCfgFilename, (cfg.ToString()))
+    member self.JobConfigMap(opts:CoreSetOptions) : V1ConfigMap =
+        let cfgmapname = self.JobCfgMapName
+        let filename = CfgVal.jobCfgFileName
+        let filedata = (self.StellarCoreCfgForJob opts).ToString()
+        V1ConfigMap(metadata = self.NamespacedMeta cfgmapname,
+                    data = Map.empty.Add(filename, filedata))
 
-    // Returns a ConfigMap dictionary that names "peer-0.cfg".."peer-N.cfg" to
-    // TOML config file data for each such config. Mounting this ConfigMap on a
-    // Pod will provide it access to _all_ the configs in the network, but it
-    // only needs to figure out its own name to pick the file that contains its
+    // Returns an array of ConfigMaps, each of which is a volume named
+    // peer-0-cfg .. peer-N-cfg, to be mounted on /peer-0-cfg .. /peer-N-cfg,
+    // and each containing a stellar-core.cfg TOML file for each peer.
+    // Mounting these ConfigMaps on a PodTemplate will provide Pods instantiated
+    // from the template with access to all the configs in the network, but each
+    // only needs to figure out its own name to pick the volume that contains its
     // config. This arrangement is a bit crude but makes it relatively easy to
     // get a node's config to it, and to browse the configuration of the entire
     // network eg. in the k8s dashboard.
-    member self.ToConfigMap() : V1ConfigMap =
-        let peerKeyValPair (coreSet: CoreSet) i = (self.PeerCfgName coreSet i, (self.StellarCoreCfg (coreSet, i)).ToString())
-        let cfgs = Array.append (self.MapAllPeers peerKeyValPair) [| self.HistoryConfig() |]
-        let cfgs = match self.jobCoreSetOptions with
-                   | None -> cfgs
-                   | Some(opts) -> Array.append cfgs [| self.JobConfig(opts) |]
-        V1ConfigMap(metadata = self.NamespacedMeta self.CfgMapName,
-                    data = Map.ofSeq cfgs)
+    member self.ToConfigMaps() : V1ConfigMap array =
+        let peerCfgMap (coreSet:CoreSet) (i:int) =
+            let cfgmapname = (self.PeerCfgMapName coreSet i)
+            let filename = CfgVal.peerCfgFileName
+            let filedata = (self.StellarCoreCfg (coreSet, i)).ToString()
+            V1ConfigMap(metadata = self.NamespacedMeta cfgmapname,
+                        data = Map.empty.Add(filename, filedata))
+        let cfgs = Array.append (self.MapAllPeers peerCfgMap) [| self.HistoryConfigMap() |]
+        match self.jobCoreSetOptions with
+            | None -> cfgs
+            | Some(opts) -> Array.append cfgs [| self.JobConfigMap(opts) |]
 
     member self.getInitCommands (configOpt:ConfigOption) (opts:CoreSetOptions) : ShCmd array =
         let cfgWords = cfgFileArgs configOpt
@@ -214,34 +239,33 @@ type NetworkCfg with
                       else SharedJobConfigFile)
         let maxPeers = 1
 
-        let cfgVol = V1Volume(name = CfgVal.cfgVolumeName,
-                              configMap = V1ConfigMapVolumeSource(name = self.CfgMapName))
-        let ns = self.NamespaceProperty
-        let pvcName = CfgVal.peristentVolumeClaimName ns jobName
+        let jobCfgVol = V1Volume(name = CfgVal.cfgVolumeName jobName,
+                                 configMap = V1ConfigMapVolumeSource(name = self.JobCfgMapName))
+        let pvcName = CfgVal.peristentVolumeClaimName jobName
         let dataVol = V1Volume(name = CfgVal.dataVolumeName,
                                persistentVolumeClaim = V1PersistentVolumeClaimVolumeSource(claimName = pvcName))
 
         let containers  =
             match self.jobCoreSetOptions with
-                | None -> [| CoreContainerForCommand self.quotas image maxPeers cfgOpt command [| |] |]
+                | None -> [| CoreContainerForCommand self.quotas image maxPeers cfgOpt command [| |] [|jobName|] |]
                 | Some(opts) ->
                 let initCmds = self.getInitCommands cfgOpt opts
                 let numContainers =
                     match opts.dbType with
                         | Postgres -> maxPeers * 2
                         | _ -> maxPeers
-                let coreContainer = CoreContainerForCommand self.quotas image numContainers cfgOpt command initCmds
+                let coreContainer = CoreContainerForCommand self.quotas image numContainers cfgOpt command initCmds [|jobName|]
                 match opts.dbType with
                     | Postgres -> [| coreContainer; PostgresContainer self.quotas numContainers |]
                     | _ -> [| coreContainer |]
 
         V1PodTemplateSpec
                 (spec = V1PodSpec (containers = containers,
-                                   volumes = [| cfgVol; dataVol |],
+                                   volumes = [| jobCfgVol; dataVol |],
                                    restartPolicy = "Never",
                                    shareProcessNamespace = System.Nullable<bool>(true)),
                  metadata = V1ObjectMeta(labels = CfgVal.labels,
-                                         namespaceProperty = ns))
+                                         namespaceProperty = self.NamespaceProperty))
 
     member self.GetJobFor (jobNum:int) (command: string array) (image:string) : V1Job =
         let jobName = self.JobName jobNum
@@ -254,15 +278,19 @@ type NetworkCfg with
     // /data/stellar.db with buckets in /data/buckets and history archive in
     // /data/history, forces SCP on next startup, and runs.
     member self.ToPodTemplateSpec (coreSet: CoreSet) probeTimeout : V1PodTemplateSpec =
-        let cfgVol = V1Volume(name = CfgVal.cfgVolumeName,
-                              configMap = V1ConfigMapVolumeSource(name = self.CfgMapName))
+        let peerCfgVolumes = self.MapAllPeers (fun cs i ->
+            let peerName = self.PeerShortName cs i
+            V1Volume(name = CfgVal.cfgVolumeName peerName,
+                     configMap = V1ConfigMapVolumeSource(name = self.PeerCfgMapName cs i)))
+        let peerNames = self.MapAllPeers self.PeerShortName
+        let historyCfgVolume = V1Volume(name = CfgVal.historyCfgVolumeName,
+                                        configMap = V1ConfigMapVolumeSource(name = self.HistoryCfgMapName))
         let dataVol = V1Volume(name = CfgVal.dataVolumeName,
                                emptyDir = V1EmptyDirVolumeSource(medium = "Memory"))
         let imageName = coreSet.options.image
 
         let cfgOpt = PeerSpecificConfigFile
-
-        let volumes = [| cfgVol; dataVol |]
+        let volumes = Array.append peerCfgVolumes [| dataVol; historyCfgVolume |]
         let maxPeers = max 1 self.MaxPeerCount
         let initCommands = self.getInitCommands cfgOpt coreSet.options
 
@@ -278,12 +306,13 @@ type NetworkCfg with
                 | _ -> 2        // just core and history
         let numContainers = maxPeers * containersPerPod
         let containers = [| WithReadinessProbe
-                                (CoreContainerForCommand self.quotas imageName numContainers cfgOpt runCmdWithOpts initCommands)
+                                (CoreContainerForCommand self.quotas imageName numContainers
+                                     cfgOpt runCmdWithOpts initCommands peerNames)
                                 probeTimeout;
                             HistoryContainer self.quotas numContainers; |]
         let containers =
             match coreSet.options.dbType with
-                | Postgres -> Array.append containers [| PostgresContainer self.quotas  numContainers |]
+                | Postgres -> Array.append containers [| PostgresContainer self.quotas numContainers |]
                 | _ -> containers
         assert(containersPerPod = containers.Length)
         let podSpec =
@@ -346,8 +375,7 @@ type NetworkCfg with
         self.MapAllPeers perPodService
 
     member self.ToDynamicPersistentVolumeClaim (jobOrPeerName:string) : V1PersistentVolumeClaim =
-        let ns = self.NamespaceProperty
-        let pvcName = CfgVal.peristentVolumeClaimName ns jobOrPeerName
+        let pvcName = CfgVal.peristentVolumeClaimName jobOrPeerName
         let meta = self.NamespacedMeta pvcName
         let accessModes = [|"ReadWriteOnce"|]
         // EBS gp2 volumes are provisioned at "3 IOPS per GB". We want a sustained

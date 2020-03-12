@@ -168,8 +168,9 @@ type Kubernetes with
         try
             namespaceContent.Add(self.CreateNamespacedService(body = nCfg.ToService(),
                                                               namespaceParameter = nsStr))
-            namespaceContent.Add(self.CreateNamespacedConfigMap(body = nCfg.ToConfigMap(),
-                                                                namespaceParameter = nsStr))
+            for cm in nCfg.ToConfigMaps() do
+                namespaceContent.Add(self.CreateNamespacedConfigMap(body = cm,
+                                                                    namespaceParameter = nsStr))
 
             let makeStatefulSet coreSet =
                 self.CreateNamespacedStatefulSet(body = nCfg.ToStatefulSet coreSet probeTimeout,

@@ -19,27 +19,31 @@ module CfgVal =
     let labelSelector = "app = stellar-core"
     let stellarCoreBinPath = "stellar-core"
     let stellarCoreContainerName (cmd:string) = "stellar-core-" + cmd
-    let cfgVolumeName = "cfg-volume"
-    let cfgVolumePath = "/cfg"
     let dataVolumeName = "data-volume"
     let dataVolumePath = "/data"
-    let peristentVolumeName ns name = sprintf "%s-pv-%s" ns name
-    let peristentVolumeClaimName ns name = sprintf "pvc-%s" name
+    let peristentVolumeClaimName peerOrJobName = sprintf "pvc-%s" peerOrJobName
     let databasePath = dataVolumePath + "/stellar.db"
     let historyPath = dataVolumePath + "/history"
     let bucketsDir = "buckets"
     let bucketsPath = dataVolumePath + "/" + bucketsDir
     let localHistName = "local"
     let peerNameEnvVarName = "STELLAR_CORE_PEER_SHORT_NAME"
-    let peerNameEnvCfgFile = cfgVolumePath + "/$(STELLAR_CORE_PEER_SHORT_NAME).cfg"
+    let peerCfgFileName = "stellar-core.cfg"
     let peerNameEnvCfgFileWord: ShWord =
-        ShWord.ShPieces [| ShBare (cfgVolumePath + "/");
-                           ShVar (ShName "STELLAR_CORE_PEER_SHORT_NAME");
-                           ShBare ".cfg" |]
-    let jobCfgFilename = "job.cfg"
-    let jobCfgFile = cfgVolumePath + "/" + jobCfgFilename
-    let historyCfgFilename = "nginx.conf"
-    let historyCfgFile = cfgVolumePath + "/" + historyCfgFilename
+        ShWord.ShPieces [| ShBare ("/cfg-");
+                           ShVar (ShName peerNameEnvVarName);
+                           ShBare ("/" + peerCfgFileName) |]
+    let cfgVolumeName peerOrJobName = sprintf "cfg-%s" peerOrJobName
+    let cfgVolumePath peerOrJobName = "/" + (cfgVolumeName peerOrJobName)
+    let jobCfgVolumeName = "cfg-job"
+    let jobCfgVolumePath = "/" + jobCfgVolumeName
+    let jobCfgFileName = "stellar-core.cfg"
+    let jobCfgFilePath = jobCfgVolumePath + "/" + jobCfgFileName
+
+    let historyCfgVolumeName = "cfg-history"
+    let historyCfgVolumePath = "/" + historyCfgVolumeName
+    let historyCfgFileName = "nginx.conf"
+    let historyCfgFilePath = historyCfgVolumePath + "/" + historyCfgFileName
 
     // pg configs
     let pgDb = "postgres"

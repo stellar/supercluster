@@ -166,9 +166,6 @@ type NetworkCfg =
     member self.PeerShortName (cs:CoreSet) (n:int) : string =
         sprintf "%s-%d" (self.PeerSetName cs) n
 
-    member self.PeerCfgName (cs:CoreSet) (n:int) : string =
-        sprintf "%s.cfg" (self.PeerShortName cs n)
-
     member self.ServiceName : string =
         sprintf "%s-stellar-core" self.Nonce
 
@@ -178,8 +175,14 @@ type NetworkCfg =
     member self.JobName(i:int) : string =
         sprintf "%s-stellar-core-job-%d" self.Nonce i
 
-    member self.CfgMapName : string =
-        sprintf "%s-stellar-core-cfg" self.Nonce
+    member self.PeerCfgMapName (cs:CoreSet) (i:int) : string =
+        sprintf "%s-cfg-map" (self.PeerShortName cs i)
+
+    member self.JobCfgMapName : string =
+        sprintf "%s-job-cfg-map" self.Nonce
+
+    member self.HistoryCfgMapName : string =
+        sprintf "%s-history-cfg-map" self.Nonce
 
     member self.PeerDNSName (cs:CoreSet) (n:int) : string =
         sprintf "%s.%s.%s.svc.cluster.local"
