@@ -97,7 +97,9 @@ type StellarCoreCfg =
       historyGetCommands : Map<string, string>
       localHistory: bool
       fullyConnected: bool
-      maxSlotsToRemember: int}
+      maxSlotsToRemember: int
+      maxBatchReadCount: int
+      maxBatchWriteCount: int}
 
     member self.ToTOML() : TomlTable =
         let t = Toml.Create()
@@ -144,6 +146,8 @@ type StellarCoreCfg =
                 | CatchupComplete -> 0
                 | CatchupRecent n -> n) |> ignore
         t.Add("MAX_SLOTS_TO_REMEMBER", self.maxSlotsToRemember) |> ignore
+        t.Add("MAX_BATCH_READ_COUNT", self.maxBatchReadCount) |> ignore
+        t.Add("MAX_BATCH_WRITE_COUNT", self.maxBatchWriteCount) |> ignore
         t.Add("AUTOMATIC_MAINTENANCE_PERIOD", self.automaticMaintenancePeriod) |> ignore
         t.Add("AUTOMATIC_MAINTENANCE_COUNT", self.automaticMaintenanceCount) |> ignore
         t.Add("ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING", self.accelerateTime) |> ignore
@@ -272,7 +276,9 @@ type NetworkCfg with
           historyGetCommands = opts.historyGetCommands
           localHistory = opts.localHistory
           fullyConnected = opts.fullyConnected
-          maxSlotsToRemember = opts.maxSlotsToRemember }
+          maxSlotsToRemember = opts.maxSlotsToRemember
+          maxBatchReadCount = opts.maxBatchReadCount
+          maxBatchWriteCount = opts.maxBatchWriteCount }
 
     member self.StellarCoreCfg(c:CoreSet, i:int) : StellarCoreCfg =
         { network = self
@@ -299,4 +305,6 @@ type NetworkCfg with
           historyGetCommands = c.options.historyGetCommands
           localHistory = c.options.localHistory
           fullyConnected = c.options.fullyConnected
-          maxSlotsToRemember = c.options.maxSlotsToRemember }
+          maxSlotsToRemember = c.options.maxSlotsToRemember
+          maxBatchReadCount = c.options.maxBatchReadCount
+          maxBatchWriteCount = c.options.maxBatchWriteCount }

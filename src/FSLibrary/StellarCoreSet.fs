@@ -77,7 +77,9 @@ type CoreSetOptions =
       dumpDatabase: bool
       fullyConnected: bool
       simulateApplyUsec : int
-      maxSlotsToRemember : int }
+      maxSlotsToRemember : int
+      maxBatchReadCount : int
+      maxBatchWriteCount : int }
 
     member self.WithForceSCP (f:bool) =
         { self with initialization = { self.initialization with forceScp = f } }
@@ -102,7 +104,9 @@ type CoreSetOptions =
         dumpDatabase = true
         fullyConnected = false
         simulateApplyUsec = 0
-        maxSlotsToRemember = 12 }
+        maxSlotsToRemember = 12
+        maxBatchReadCount = 1024
+        maxBatchWriteCount = 1024 }
 
     member self.InConsensusOnlyMode (simulateApply:int) =
         { self with simulateApplyUsec = simulateApply; initialization = CoreSetInitialization.NoInitCmds }
