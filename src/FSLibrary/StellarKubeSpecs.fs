@@ -272,19 +272,20 @@ type NetworkCfg with
             | 0 -> runCmd
             | _ -> Array.append runCmd [| "--simulate-apply-per-op"; coreSet.options.simulateApplyUsec.ToString() |]
 
-        let numContainers =
+        let containersPerPod =
             match coreSet.options.dbType with
-                | Postgres -> maxPeers * 3 // core, history and postgres
-                | _ -> maxPeers * 2        // just core and history
+                | Postgres -> 3 // core, history and postgres
+                | _ -> 2        // just core and history
+        let numContainers = maxPeers * containersPerPod
         let containers = [| WithReadinessProbe
                                 (CoreContainerForCommand self.quotas imageName numContainers cfgOpt runCmdWithOpts initCommands)
                                 probeTimeout;
                             HistoryContainer self.quotas numContainers; |]
-        let containers  =
+        let containers =
             match coreSet.options.dbType with
                 | Postgres -> Array.append containers [| PostgresContainer self.quotas  numContainers |]
                 | _ -> containers
-
+        assert(containersPerPod = containers.Length)
         let podSpec =
             V1PodSpec
                 (containers = containers,
