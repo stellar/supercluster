@@ -15,11 +15,11 @@ type Peer =
       coreSet: CoreSet
       peerNum: int }
 
-    member self.ShortName : string =
+    member self.ShortName : PeerShortName =
         self.networkCfg.PeerShortName self.coreSet self.peerNum
 
-    member self.DNSName : string =
-        self.networkCfg.PeerDNSName self.coreSet self.peerNum
+    member self.DnsName : PeerDnsName =
+        self.networkCfg.PeerDnsName self.coreSet self.peerNum
 
 
 type NetworkCfg with

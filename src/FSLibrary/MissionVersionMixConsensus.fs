@@ -18,10 +18,10 @@ let versionMixConsensus (context : MissionContext) =
 
     let oldCoreSet = MakeLiveCoreSet "old-core" { CoreSetOptions.GetDefault oldImage with
                                                       nodeCount = 4
-                                                      quorumSet = Some(["old-core"]) }
+                                                      quorumSet = Some([CoreSetName "old-core"]) }
     let newCoreSet = MakeLiveCoreSet "new-core" { CoreSetOptions.GetDefault newImage with
                                                       nodeCount = 2
-                                                      quorumSet = Some(["old-core"]) }
+                                                      quorumSet = Some([CoreSetName "old-core"]) }
     context.Execute [oldCoreSet; newCoreSet] None (fun (formation: StellarFormation) ->
         formation.WaitUntilSynced [oldCoreSet; newCoreSet]
         let peer = formation.NetworkCfg.GetPeer oldCoreSet 0

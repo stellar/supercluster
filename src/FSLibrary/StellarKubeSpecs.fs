@@ -220,7 +220,7 @@ type NetworkCfg with
         let cmds = Array.choose id [| waitForDB; newDb; newHist; initialCatchup; forceScp |]
 
         let restoreDBStep coreSet i : ShCmd array =
-          let dnsName = self.PeerDNSName coreSet i
+          let dnsName = self.PeerDnsName coreSet i
           [| ShCmd.OfStrs [| "curl"; "-sf"; "-o"; CfgVal.databasePath; CfgVal.databaseBackupURL dnsName |];
              ShCmd.OfStrs [| "curl"; "-sf"; "-o"; CfgVal.bucketsDownloadPath; CfgVal.bucketsBackupURL dnsName |];
              ShCmd.OfStrs [| "tar"; "xf"; CfgVal.bucketsDownloadPath; "-C"; CfgVal.dataVolumePath |] |]
@@ -280,9 +280,9 @@ type NetworkCfg with
     member self.ToPodTemplateSpec (coreSet: CoreSet) probeTimeout : V1PodTemplateSpec =
         let peerCfgVolumes = self.MapAllPeers (fun cs i ->
             let peerName = self.PeerShortName cs i
-            V1Volume(name = CfgVal.cfgVolumeName peerName,
+            V1Volume(name = CfgVal.cfgVolumeName peerName.StringName,
                      configMap = V1ConfigMapVolumeSource(name = self.PeerCfgMapName cs i)))
-        let peerNames = self.MapAllPeers self.PeerShortName
+        let peerNames = self.MapAllPeers self.PeerShortName |> Array.map (fun x -> x.StringName)
         let historyCfgVolume = V1Volume(name = CfgVal.historyCfgVolumeName,
                                         configMap = V1ConfigMapVolumeSource(name = self.HistoryCfgMapName))
         let dataVol = V1Volume(name = CfgVal.dataVolumeName,
@@ -345,7 +345,7 @@ type NetworkCfg with
                  serviceName = self.ServiceName,
                  template = self.ToPodTemplateSpec coreSet probeTimeout,
                  replicas = System.Nullable<int>(coreSet.CurrentCount))
-        let statefulSet = V1StatefulSet(metadata = self.NamespacedMeta (self.PeerSetName coreSet),
+        let statefulSet = V1StatefulSet(metadata = self.NamespacedMeta (self.StatefulSetName coreSet),
                                         spec = statefulSetSpec)
         statefulSet.Validate() |> ignore
         statefulSet
@@ -363,15 +363,15 @@ type NetworkCfg with
     member self.ToPerPodServices () : V1Service array =
         let perPodService (coreSet: CoreSet) i =
             let name = self.PeerShortName coreSet i
-            let dnsName = self.PeerDNSName coreSet i
+            let dnsName = self.PeerDnsName coreSet i
             let spec = V1ServiceSpec(``type`` = "ExternalName",
                                      ports =
                                       [|V1ServicePort(name = "core",
                                                       port = CfgVal.httpPort);
                                         V1ServicePort(name = "history",
                                                       port = 80)|],
-                                     externalName = dnsName)
-            V1Service(metadata = self.NamespacedMeta name, spec = spec)
+                                     externalName = dnsName.StringName)
+            V1Service(metadata = self.NamespacedMeta name.StringName, spec = spec)
         self.MapAllPeers perPodService
 
     member self.ToDynamicPersistentVolumeClaim (jobOrPeerName:string) : V1PersistentVolumeClaim =
@@ -397,19 +397,19 @@ type NetworkCfg with
     // cluster.
     member self.ToIngress () : Extensionsv1beta1Ingress =
         let httpPortStr = IntstrIntOrString(value = CfgVal.httpPort.ToString())
-        let coreBackend (pn:string) =
-            Extensionsv1beta1IngressBackend(serviceName = pn,
+        let coreBackend (pn:PeerShortName) =
+            Extensionsv1beta1IngressBackend(serviceName = pn.StringName,
                                             servicePort = httpPortStr)
-        let historyBackend (pn:string) : Extensionsv1beta1IngressBackend =
-            Extensionsv1beta1IngressBackend(serviceName = pn,
+        let historyBackend (pn:PeerShortName) : Extensionsv1beta1IngressBackend =
+            Extensionsv1beta1IngressBackend(serviceName = pn.StringName,
                                             servicePort = IntstrIntOrString(value = "80"))
         let corePath (coreSet: CoreSet) (i:int) : Extensionsv1beta1HTTPIngressPath =
             let pn = self.PeerShortName coreSet i
-            Extensionsv1beta1HTTPIngressPath(path = sprintf "/%s/core/" pn,
+            Extensionsv1beta1HTTPIngressPath(path = sprintf "/%s/core/" pn.StringName,
                                              backend = coreBackend pn)
         let historyPath (coreSet: CoreSet) (i:int) : Extensionsv1beta1HTTPIngressPath =
             let pn = self.PeerShortName coreSet i
-            Extensionsv1beta1HTTPIngressPath(path = sprintf "/%s/history/" pn,
+            Extensionsv1beta1HTTPIngressPath(path = sprintf "/%s/history/" pn.StringName,
                                              backend = historyBackend pn)
         let corePaths = self.MapAllPeers corePath
         let historyPaths = self.MapAllPeers historyPath

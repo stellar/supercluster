@@ -17,16 +17,17 @@ open System
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.Rest.Serialization
+open StellarCoreSet
 
 type StellarFormation with
 
-    member self.DumpLogs (destination:Destination) (podName:string) (containerName:string) =
+    member self.DumpLogs (destination:Destination) (podName:PeerShortName) (containerName:string) =
         let ns = self.NetworkCfg.NamespaceProperty
         try
-            let stream = self.Kube.ReadNamespacedPodLog(name = podName,
+            let stream = self.Kube.ReadNamespacedPodLog(name = podName.StringName,
                                                         namespaceParameter = ns,
                                                         container = containerName)
-            destination.WriteStream ns (sprintf "%s-%s.log" podName containerName) stream
+            destination.WriteStream ns (sprintf "%s-%s.log" podName.StringName containerName) stream
             stream.Close()
         with
         | x -> ()
@@ -38,7 +39,7 @@ type StellarFormation with
             let podName = pod.Metadata.Name
             for container in pod.Spec.Containers do
                 let containerName = container.Name
-                self.DumpLogs destination podName containerName
+                self.DumpLogs destination (PeerShortName podName) containerName
 
     member self.DumpPeerCommandLogs (destination:Destination) (command:string) (p:Peer) =
         let podName = self.NetworkCfg.PeerShortName p.coreSet p.peerNum
@@ -55,7 +56,7 @@ type StellarFormation with
     member self.BackupDatabaseToHistory (p:Peer) =
         let ns = self.NetworkCfg.NamespaceProperty
         let name = self.NetworkCfg.PeerShortName p.coreSet p.peerNum
-        let task = self.Kube.NamespacedPodExecAsync(name = name,
+        let task = self.Kube.NamespacedPodExecAsync(name = name.StringName,
                                                     ``namespace`` = ns,
                                                     command = [|"sqlite3"; CfgVal.databasePath;
                                                                 sprintf ".backup '%s'" CfgVal.databaseBackupPath |],
@@ -66,7 +67,7 @@ type StellarFormation with
         if task.GetAwaiter().GetResult() <> 0
         then failwith "Failed to back up database"
 
-        let task2 = self.Kube.NamespacedPodExecAsync(name = name,
+        let task2 = self.Kube.NamespacedPodExecAsync(name = name.StringName,
                                                      ``namespace`` = ns,
                                                      command = [|"tar"; "cf"; CfgVal.bucketsBackupPath;
                                                                  "-C"; CfgVal.dataVolumePath; CfgVal.bucketsDir |],
@@ -83,7 +84,7 @@ type StellarFormation with
             let name = self.NetworkCfg.PeerShortName p.coreSet p.peerNum
 
             let muxedStream = self.Kube.MuxedStreamNamespacedPodExecAsync(
-                                name = name,
+                                name = name.StringName,
                                 ``namespace`` = ns,
                                 command = [|"sqlite3"; CfgVal.databasePath; ".dump" |],
                                 container = "stellar-core-run",
@@ -97,9 +98,9 @@ type StellarFormation with
                            Nullable<ChannelIndex>())
             let errorReader = new StreamReader(error)
 
-            LogInfo "Dumping SQL database of peer %s" name
+            LogInfo "Dumping SQL database of peer %s" name.StringName
             muxedStream.Start()
-            destination.WriteStream ns (sprintf "%s.sql" name) stdOut
+            destination.WriteStream ns (sprintf "%s.sql" name.StringName) stdOut
             let errors = errorReader.ReadToEndAsync().GetAwaiter().GetResult()
             let returnMessage = SafeJsonConvert.DeserializeObject<V1Status>(errors);
             Kubernetes.GetExitCodeOrThrow(returnMessage) |> ignore

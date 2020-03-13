@@ -6,6 +6,24 @@ module StellarCoreSet
 
 open stellar_dotnet_sdk
 
+type PeerDnsName =
+    | PeerDnsName of string
+    member self.StringName =
+        match self with
+        | PeerDnsName(n) -> n
+
+type PeerShortName =
+    | PeerShortName of string
+    member self.StringName =
+        match self with
+        | PeerShortName(n) -> n
+
+type CoreSetName =
+    | CoreSetName of string
+    member self.StringName =
+        match self with
+        | CoreSetName(n) -> n
+
 type CatchupMode =
     | CatchupComplete
     | CatchupRecent of int
@@ -20,7 +38,7 @@ type CoreSetInitialization =
       newHist : bool
       initialCatchup : bool
       forceScp : bool
-      fetchDBFromPeer: (string * int) option }
+      fetchDBFromPeer: (CoreSetName * int) option }
 
     static member Default =
       { newDb = true
@@ -60,13 +78,13 @@ type CoreSetInitialization =
 type CoreSetOptions =
     { nodeCount : int
       dbType : DBType
-      quorumSet : string list option
-      quorumSetKeys : Map<string, KeyPair>
-      historyNodes : string list option
-      historyGetCommands : Map<string, string>
+      quorumSet : CoreSetName list option
+      quorumSetKeys : Map<PeerShortName, KeyPair>
+      historyNodes : CoreSetName list option
+      historyGetCommands : Map<PeerShortName, string>
       localHistory : bool
-      peers : string list option
-      peersDns : string list
+      peers : CoreSetName list option
+      peersDns : PeerDnsName list
       accelerateTime : bool
       unsafeQuorum : bool
       awaitSync : bool
@@ -112,7 +130,7 @@ type CoreSetOptions =
         { self with simulateApplyUsec = simulateApply; initialization = CoreSetInitialization.NoInitCmds }
 
 type CoreSet =
-    { name : string
+    { name : CoreSetName
       options : CoreSetOptions
       keys : KeyPair array
       live : bool }
@@ -131,13 +149,13 @@ type CoreSet =
 
 
 let MakeLiveCoreSet (name: string) (options: CoreSetOptions) : CoreSet =
-    { name = name
+    { name = CoreSetName name
       options = options
       keys = Array.init options.nodeCount (fun _ -> KeyPair.Random())
       live = true }
 
 let MakeDeferredCoreSet (name: string) (options: CoreSetOptions) : CoreSet =
-    { name = name
+    { name = CoreSetName name
       options = options
       keys = Array.init options.nodeCount (fun _ -> KeyPair.Random())
       live = false }

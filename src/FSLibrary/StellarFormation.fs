@@ -138,7 +138,7 @@ type StellarFormation(networkCfg: NetworkCfg,
     member self.WithLive name (live: bool) =
         networkCfg <- networkCfg.WithLive name live
         let coreSet = networkCfg.FindCoreSet name
-        let peerSetName = networkCfg.PeerSetName coreSet
+        let peerSetName = networkCfg.StatefulSetName coreSet
         let ss = kube.ReplaceNamespacedStatefulSet(
                    body = networkCfg.ToStatefulSet coreSet probeTimeout,
                    name = peerSetName,

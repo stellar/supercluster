@@ -15,7 +15,7 @@ open StellarFormation
 let protocolUpgradeTestnet (context : MissionContext) =
     let set = { CoreSetOptions.GetDefault context.image with
                   nodeCount = 1
-                  quorumSet = Some(["core"])
+                  quorumSet = Some([CoreSetName "core"])
                   historyNodes = Some([])
                   historyGetCommands = TestnetGetCommands
                   catchupMode = CatchupRecent(0)
