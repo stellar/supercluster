@@ -14,6 +14,42 @@ type HistoryArchiveState = JsonProvider<"json-type-samples/sample-stellar-histor
 let PubnetLatestHistoryArchiveState = "http://history.stellar.org/prd/core-live/core_live_001/.well-known/stellar-history.json"
 let TestnetLatestHistoryArchiveState = "http://history.stellar.org/prd/core-testnet/core_testnet_001/.well-known/stellar-history.json"
 
+type PubnetNode = JsonProvider<"json-pubnet-data/nodes.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
+
+let FullPubnetCoreSets (image:string) : CoreSet list =
+    let allPubnetNodes = PubnetNode.GetSamples() |> Array.filter (fun n -> n.Active)
+    let orgNodes, miscNodes =
+        Array.partition (fun (n:PubnetNode.Root) -> n.HomeDomain.IsSome) allPubnetNodes
+    let nodeToGeoLoc (n:PubnetNode.Root) : GeoLoc =
+        {lat = float n.GeoData.Latitude
+         lon = float n.GeoData.Longitude}
+    let pubnetOpts = { CoreSetOptions.GetDefault image with
+                         accelerateTime = false
+                         initialization = { CoreSetInitialization.Default with forceScp = false }
+                         dumpDatabase = false }
+    let miscCoreSets : CoreSet array =
+        Array.mapi
+            (fun i n ->
+                let coreSetOpts =
+                    { pubnetOpts with
+                        nodeCount = 1
+                        nodeLocs = Some [nodeToGeoLoc n] }
+                MakeLiveCoreSet (sprintf "misc-%d" i) coreSetOpts)
+            miscNodes
+    let groupedOrgNodes : (string * (PubnetNode.Root array)) array =
+        Array.groupBy (fun (n:PubnetNode.Root) -> n.HomeDomain.Value) orgNodes
+    let orgCoreSets : CoreSet array =
+        Array.map
+            (fun (k, nodes) ->
+                let coreSetOpts =
+                    { pubnetOpts with
+                        nodeCount = Array.length nodes
+                        nodeLocs = Some (List.map nodeToGeoLoc (List.ofArray nodes)) }
+                MakeLiveCoreSet k coreSetOpts)
+            groupedOrgNodes
+    Array.append miscCoreSets orgCoreSets |> List.ofArray
+
+
 let GetLatestPubnetLedgerNumber _ : int =
     let has = HistoryArchiveState.Load(PubnetLatestHistoryArchiveState)
     has.CurrentLedger
