@@ -35,6 +35,7 @@
     <Compile Include="MissionBenchmarkIncreaseTxRate.fs" />
     <Compile Include="MissionHistoryGenerateAndCatchup.fs" />
     <Compile Include="MissionHistoryPubnetMinimumCatchup.fs" />
+    <Compile Include="MissionSimulatePubnet.fs" />
     <Compile Include="MissionHistoryPubnetRecentCatchup.fs" />
     <Compile Include="MissionHistoryPubnetCompleteCatchup.fs" />
     <Compile Include="MissionHistoryPubnetParallelCatchup.fs" />
