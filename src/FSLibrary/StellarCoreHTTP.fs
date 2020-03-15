@@ -19,11 +19,11 @@ open StellarCorePeer
 // FSharp.Data.JsonProvider<> takes a sample of some JSON you want to load and
 // infers a static type for it.
 
-type Metrics = JsonProvider<"json-type-samples/sample-metrics.json", SampleIsList=true>
-type Info = JsonProvider<"json-type-samples/sample-info.json", SampleIsList=true>
-type TestAcc = JsonProvider<"json-type-samples/sample-testacc.json", SampleIsList=true>
-type Tx = JsonProvider<"json-type-samples/sample-tx.json", SampleIsList=true>
-type PerformanceCsv = CsvProvider<"csv-type-samples/sample-performance.csv", HasHeaders=true>
+type Metrics = JsonProvider<"json-type-samples/sample-metrics.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
+type Info = JsonProvider<"json-type-samples/sample-info.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
+type TestAcc = JsonProvider<"json-type-samples/sample-testacc.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
+type Tx = JsonProvider<"json-type-samples/sample-tx.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
+type PerformanceCsv = CsvProvider<"csv-type-samples/sample-performance.csv", HasHeaders=true, ResolutionFolder=__SOURCE_DIRECTORY__>
 
 
 type LoadGenMode =

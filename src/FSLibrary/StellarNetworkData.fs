@@ -10,7 +10,7 @@ open stellar_dotnet_sdk
 open StellarCoreSet
 open StellarNetworkCfg
 
-type HistoryArchiveState = JsonProvider<"json-type-samples/sample-stellar-history.json">
+type HistoryArchiveState = JsonProvider<"json-type-samples/sample-stellar-history.json", ResolutionFolder=__SOURCE_DIRECTORY__>
 let PubnetLatestHistoryArchiveState = "http://history.stellar.org/prd/core-live/core_live_001/.well-known/stellar-history.json"
 let TestnetLatestHistoryArchiveState = "http://history.stellar.org/prd/core-testnet/core_testnet_001/.well-known/stellar-history.json"
 
