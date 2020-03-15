@@ -75,8 +75,11 @@ type CoreSetInitialization =
         forceScp = false
         fetchDBFromPeer = None }
 
+type GeoLoc = {lat:float; lon:float}
+
 type CoreSetOptions =
     { nodeCount : int
+      nodeLocs : GeoLoc list option
       dbType : DBType
       quorumSet : CoreSetName list option
       quorumSetKeys : Map<PeerShortName, KeyPair>
@@ -104,6 +107,7 @@ type CoreSetOptions =
 
     static member GetDefault(image: string) =
       { nodeCount = 3
+        nodeLocs = None
         dbType = Sqlite
         quorumSet = None
         quorumSetKeys = Map.empty
