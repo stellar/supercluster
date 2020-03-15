@@ -88,3 +88,39 @@ let clusterQuotas : NetworkQuotas =
       NamespaceQuotaReqMemMebi = 22000
       NumConcurrentMissions = 1 }
 
+// Geographic calculations for simulated network delays.
+let greatCircleDistanceInKm (loc1:GeoLoc) (loc2:GeoLoc) : double =
+    // So-called "Haversine formula" for approximate distances
+
+    let earthRadiusInKm = 6371.0
+    let degreesToRadians deg = (System.Math.PI / 180.0) * deg
+    let lat1InRadians = degreesToRadians loc1.lat
+    let lat2InRadians = degreesToRadians loc2.lat
+    let deltaLatInDegrees = System.Math.Abs(loc2.lat-loc1.lat)
+    let deltaLonInDegrees = System.Math.Abs(loc2.lon-loc1.lon)
+    let deltaLatInRadians = degreesToRadians deltaLatInDegrees
+    let deltaLonInRadians = degreesToRadians deltaLonInDegrees
+    let sinHalfDeltaLat = System.Math.Sin(deltaLatInRadians/2.0)
+    let sinHalfDeltaLon = System.Math.Sin(deltaLonInRadians/2.0)
+    let a = ((sinHalfDeltaLat * sinHalfDeltaLat) +
+             (sinHalfDeltaLon * sinHalfDeltaLon *
+              System.Math.Cos(lat1InRadians) * System.Math.Cos(lat2InRadians)))
+    let c = 2.0 * System.Math.Atan2(System.Math.Sqrt(a), System.Math.Sqrt(1.0 - a))
+    earthRadiusInKm * c
+
+let networkDelayInMs (loc1:GeoLoc) (loc2:GeoLoc) : double =
+    let idealSpeedOfLightInFibre = 200.0 // km/ms
+    let km = greatCircleDistanceInKm loc1 loc2
+    let ms = km / idealSpeedOfLightInFibre
+    // Empirical slowdown is surprisingly variable: some paths (even long-distance ones)
+    // run at nearly 80% of the ideal speed of light in fibre; others barely 20%. We consider
+    // 50% or a 2x slowdown as "vaguely normal" with significant outliers; unfortunately
+    // to get much better you really need to know the path (eg. trans-atlantic happens to
+    // be very fast, but classifying a path as trans-atlantic vs. non is .. complicated!)
+    let empiricalSlowdownPastIdeal = 2.0
+    ms * empiricalSlowdownPastIdeal
+
+let networkPingInMs (loc1:GeoLoc) (loc2:GeoLoc) : double =
+    // A ping is a round trip, so double one-way delay.
+    2.0 * (networkDelayInMs loc1 loc2)
+
