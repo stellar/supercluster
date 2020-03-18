@@ -90,8 +90,8 @@ let FullPubnetCoreSets (image:string) : CoreSet list =
 
     let pubnetOpts = { CoreSetOptions.GetDefault image with
                          accelerateTime = false
-                         initialization = { CoreSetInitialization.Default with
-                                              forceScp = false }
+                         historyNodes = Some([])
+                         localHistory = false
                          dumpDatabase = false }
 
     let miscCoreSets : CoreSet array =
