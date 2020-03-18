@@ -13,19 +13,19 @@ let complexTopology (context : MissionContext) =
     let coreSet = MakeLiveCoreSet "core"
                     { CoreSetOptions.GetDefault context.image with
                         nodeCount = 4
-                        quorumSet = Some([CoreSetName "core"])
+                        quorumSet = CoreSetQuorum(CoreSetName "core")
                         accelerateTime = true }
     let publicSet = MakeLiveCoreSet "public"
                       { CoreSetOptions.GetDefault context.image with
                           nodeCount = 2
-                          quorumSet = Some([CoreSetName "core"])
+                          quorumSet = CoreSetQuorum(CoreSetName "core")
                           accelerateTime = true
                           initialization = CoreSetInitialization.DefaultNoForceSCP
                           validate = false }
     let orgSet = MakeLiveCoreSet "org"
                    { CoreSetOptions.GetDefault context.image with
                        nodeCount = 1
-                       quorumSet = Some([CoreSetName "core"])
+                       quorumSet = CoreSetQuorum(CoreSetName "core")
                        peers = Some([CoreSetName "public"])
                        accelerateTime = true
                        initialization = CoreSetInitialization.DefaultNoForceSCP

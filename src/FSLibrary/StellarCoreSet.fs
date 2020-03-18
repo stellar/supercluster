@@ -83,12 +83,22 @@ type CoreSetInitialization =
 
 type GeoLoc = {lat:float; lon:float}
 
+type QuorumSet = {
+    thresholdPercent: int option
+    validators: Map<PeerShortName, KeyPair>
+    innerQuorumSets: QuorumSet array
+}
+
+type QuorumSetSpec =
+    | CoreSetQuorum of CoreSetName
+    | ExplicitQuorum of QuorumSet
+    | AllPeersQuorum
+
 type CoreSetOptions =
     { nodeCount : int
       nodeLocs : GeoLoc list option
       dbType : DBType
-      quorumSet : CoreSetName list option
-      quorumSetKeys : Map<PeerShortName, KeyPair>
+      quorumSet : QuorumSetSpec
       historyNodes : CoreSetName list option
       historyGetCommands : Map<PeerShortName, string>
       localHistory : bool
@@ -115,8 +125,7 @@ type CoreSetOptions =
       { nodeCount = 3
         nodeLocs = None
         dbType = Sqlite
-        quorumSet = None
-        quorumSetKeys = Map.empty
+        quorumSet = AllPeersQuorum
         historyNodes = None
         historyGetCommands = Map.empty
         localHistory = true

@@ -17,7 +17,7 @@ let databaseInplaceUpgrade (context : MissionContext) =
     let newImage = context.image
     let oldImage = GetOrDefault context.oldImage context.image
 
-    let quorumSet = Some([CoreSetName("core")])
+    let quorumSet = CoreSetQuorum(CoreSetName("core"))
     let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.GetDefault newImage with quorumSet = quorumSet; }
 
     let beforeUpgradeCoreSet = MakeLiveCoreSet

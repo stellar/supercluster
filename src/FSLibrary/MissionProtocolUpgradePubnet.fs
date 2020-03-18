@@ -15,7 +15,7 @@ open StellarFormation
 let protocolUpgradePubnet (context : MissionContext) =
     let set = { CoreSetOptions.GetDefault context.image with
                   nodeCount = 1
-                  quorumSet = Some([CoreSetName "core"])
+                  quorumSet = CoreSetQuorum(CoreSetName "core")
                   historyNodes = Some([])
                   historyGetCommands = PubnetGetCommands
                   catchupMode = CatchupRecent(0)

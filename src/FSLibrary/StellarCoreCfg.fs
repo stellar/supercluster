@@ -92,7 +92,7 @@ type StellarCoreCfg =
       invariantChecks: string list
       unsafeQuorum : bool
       failureSafety : int
-      quorumSet : Map<PeerShortName, KeyPair>
+      quorumSet : QuorumSet
       historyNodes : Map<PeerShortName, PeerDnsName>
       historyGetCommands : Map<PeerShortName, string>
       localHistory: bool
@@ -103,11 +103,6 @@ type StellarCoreCfg =
 
     member self.ToTOML() : TomlTable =
         let t = Toml.Create()
-
-        let qset =
-            self.quorumSet
-            |> Map.toList
-            |> List.map (fun (k, v) -> sprintf "%s %s" v.Address k.StringName)
 
         let hist =
             Map.ofSeq [| ("get", sprintf "cp %s/{0} {1}" CfgVal.historyPath)
@@ -166,7 +161,19 @@ type StellarCoreCfg =
         t.Add("INVARIANT_CHECKS", self.invariantChecks) |> ignore
         t.Add("UNSAFE_QUORUM", self.unsafeQuorum) |> ignore
         t.Add("FAILURE_SAFETY", self.failureSafety) |> ignore
-        t.Add("QUORUM_SET", Map.ofSeq [| ("VALIDATORS", qset) |]) |> ignore
+
+        // Add tables (and subtables, recursively) for qsets.
+        let rec addQsetAt (label:string) (qs:QuorumSet) =
+            let validators : string array =
+                Map.toArray qs.validators
+                    |> Array.map (fun ((n:PeerShortName), (k:KeyPair)) ->
+                                     sprintf "%s %s" k.Address n.StringName)
+            t.Add(label, Map.ofList [ ("VALIDATORS", validators) ]) |> ignore
+            Array.iteri
+                (fun (i:int) (qs:QuorumSet) -> addQsetAt (sprintf "%s.sub%d" label i) qs)
+                qs.innerQuorumSets
+        addQsetAt "QUORUM_SET" self.quorumSet
+
         let localTab = t.Add("HISTORY", Toml.Create(), TomlObjectFactory.RequireTomlObject()).Added
         if self.localHistory
         then localTab.Add(CfgVal.localHistName, hist) |> ignore
@@ -226,18 +233,20 @@ type NetworkCfg with
     member self.DnsNames() : PeerDnsName array =
         List.map self.DnsNames self.CoreSetList |> Array.concat
 
-    member self.QuorumSet(o: CoreSetOptions) : Map<PeerShortName, KeyPair> =
-        let fromQuorumSet =
-            match o.quorumSet with
-            | None -> self.GetNameKeyListAll()
-            | Some(x) -> self.GetNameKeyList(x)
-
-        List.concat [fromQuorumSet |> List.ofArray; o.quorumSetKeys |> Map.toList] |> Map.ofList
+    member self.QuorumSet(o: CoreSetOptions) : QuorumSet =
+        let ofNameKeyList (nks:(PeerShortName * KeyPair) array) : QuorumSet =
+            { thresholdPercent = None
+              validators = Map.ofArray nks
+              innerQuorumSets = [||] }
+        match o.quorumSet with
+            | AllPeersQuorum -> ofNameKeyList (self.GetNameKeyListAll())
+            | CoreSetQuorum(ns) -> ofNameKeyList (self.GetNameKeyList [ns])
+            | ExplicitQuorum(e) -> e
 
     member self.HistoryNodes(o: CoreSetOptions) : Map<PeerShortName, PeerDnsName> =
         match o.historyNodes, o.quorumSet with
-        | None, None -> self.DnsNamesWithKey() |> Map.ofArray
-        | None, Some(x) -> self.DnsNamesWithKey(x) |> Map.ofArray
+        | None, CoreSetQuorum(x) -> self.DnsNamesWithKey([x]) |> Map.ofArray
+        | None, _ -> self.DnsNamesWithKey() |> Map.ofArray
         | Some(x), _ -> self.DnsNamesWithKey(x) |> Map.ofArray
 
     member self.PreferredPeers(o: CoreSetOptions) =

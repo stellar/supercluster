@@ -65,11 +65,15 @@ let PubnetGetCommands = [
                         PeerShortName "core_live_003", "curl -sf http://history.stellar.org/prd/core-live/core_live_003/{0} -o {1}"
                         ] |> Map.ofList
 
-let PubnetNodes = [
-                  PeerShortName "core_live_001", KeyPair.FromAccountId("GCGB2S2KGYARPVIA37HYZXVRM2YZUEXA6S33ZU5BUDC6THSB62LZSTYH")
-                  PeerShortName "core_live_002", KeyPair.FromAccountId("GCM6QMP3DLRPTAZW2UZPCPX2LF3SXWXKPMP3GKFZBDSF3QZGV2G5QSTK")
-                  PeerShortName "core_live_003", KeyPair.FromAccountId("GABMKJM6I25XI4K7U6XWMULOUQIQ27BCTMLS6BYYSOWKTBUXVRJSXHYQ")
-                  ] |> Map.ofList
+let PubnetQuorum : QuorumSet =
+                  { thresholdPercent = None
+                    validators = [
+                        PeerShortName "core_live_001", KeyPair.FromAccountId("GCGB2S2KGYARPVIA37HYZXVRM2YZUEXA6S33ZU5BUDC6THSB62LZSTYH")
+                        PeerShortName "core_live_002", KeyPair.FromAccountId("GCM6QMP3DLRPTAZW2UZPCPX2LF3SXWXKPMP3GKFZBDSF3QZGV2G5QSTK")
+                        PeerShortName "core_live_003", KeyPair.FromAccountId("GABMKJM6I25XI4K7U6XWMULOUQIQ27BCTMLS6BYYSOWKTBUXVRJSXHYQ")
+                        ] |> Map.ofList
+                    innerQuorumSets = [||]
+                  }
 
 let PubnetPeers = [
                   PeerDnsName "core-live4.stellar.org"
@@ -79,8 +83,7 @@ let PubnetPeers = [
 
 let PubnetCoreSetOptions (image: string) = {
                     CoreSetOptions.GetDefault image with
-                        quorumSet = Some([])
-                        quorumSetKeys = PubnetNodes
+                        quorumSet = ExplicitQuorum PubnetQuorum
                         historyGetCommands = PubnetGetCommands
                         peersDns = PubnetPeers
                         accelerateTime = false
@@ -93,11 +96,14 @@ let TestnetGetCommands = [
                          PeerShortName "core_testnet_003", "curl -sf http://history.stellar.org/prd/core-testnet/core_testnet_003/{0} -o {1}"
                          ] |> Map.ofList
 
-let TestnetNodes = [
-                   PeerShortName "core_testnet_001", KeyPair.FromAccountId("GDKXE2OZMJIPOSLNA6N6F2BVCI3O777I2OOC4BV7VOYUEHYX7RTRYA7Y")
-                   PeerShortName "core_testnet_002", KeyPair.FromAccountId("GCUCJTIYXSOXKBSNFGNFWW5MUQ54HKRPGJUTQFJ5RQXZXNOLNXYDHRAP")
-                   PeerShortName "core_testnet_003", KeyPair.FromAccountId("GC2V2EFSXN6SQTWVYA5EPJPBWWIMSD2XQNKUOHGEKB535AQE2I6IXV2Z")
-                   ] |> Map.ofList
+let TestnetQuorum : QuorumSet =
+                   { thresholdPercent = None
+                     validators = [
+                         PeerShortName "core_testnet_001", KeyPair.FromAccountId("GDKXE2OZMJIPOSLNA6N6F2BVCI3O777I2OOC4BV7VOYUEHYX7RTRYA7Y")
+                         PeerShortName "core_testnet_002", KeyPair.FromAccountId("GCUCJTIYXSOXKBSNFGNFWW5MUQ54HKRPGJUTQFJ5RQXZXNOLNXYDHRAP")
+                         PeerShortName "core_testnet_003", KeyPair.FromAccountId("GC2V2EFSXN6SQTWVYA5EPJPBWWIMSD2XQNKUOHGEKB535AQE2I6IXV2Z")
+                         ] |> Map.ofList
+                     innerQuorumSets = [||] }
 
 let TestnetPeers = [
                    PeerDnsName "core-testnet1.stellar.org"
@@ -107,8 +113,7 @@ let TestnetPeers = [
 
 let TestnetCoreSetOptions(image: string) = {
                     CoreSetOptions.GetDefault image with
-                         quorumSet = Some([])
-                         quorumSetKeys = TestnetNodes
+                         quorumSet = ExplicitQuorum TestnetQuorum
                          historyGetCommands = TestnetGetCommands
                          peersDns = TestnetPeers
                          accelerateTime = false
