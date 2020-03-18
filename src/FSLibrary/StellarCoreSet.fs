@@ -24,6 +24,12 @@ type CoreSetName =
         match self with
         | CoreSetName(n) -> n
 
+type HomeDomainName =
+    | HomeDomainName of string
+    member self.StringName =
+        match self with
+        | HomeDomainName(n) -> n
+
 type CatchupMode =
     | CatchupComplete
     | CatchupRecent of int
