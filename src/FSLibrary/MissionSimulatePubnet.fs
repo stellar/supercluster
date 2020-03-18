@@ -19,13 +19,13 @@ let simulatePubnet (context : MissionContext) =
     let findCoreSetWithHomeDomain (domain:string) : CoreSet =
         List.find (fun (cs:CoreSet) -> cs.name.StringName = domain) fullCoreSet
 
-    let sdf = findCoreSetWithHomeDomain "www.stellar.org"
-    let lobstr = findCoreSetWithHomeDomain "lobstr.co"
-    let keybase = findCoreSetWithHomeDomain "keybase.io"
-    let satoshipay = findCoreSetWithHomeDomain "satoshipay.io"
-    let wirex = findCoreSetWithHomeDomain "wirexapp.com"
-    let blockdaemon = findCoreSetWithHomeDomain "stellar.blockdaemon.com"
-    let coinqvest = findCoreSetWithHomeDomain "coinqvest.com"
+    let sdf = findCoreSetWithHomeDomain "www-stellar-org"
+    let lobstr = findCoreSetWithHomeDomain "lobstr-co"
+    let keybase = findCoreSetWithHomeDomain "keybase-io"
+    let satoshipay = findCoreSetWithHomeDomain "satoshipay-io"
+    let wirex = findCoreSetWithHomeDomain "wirexapp-com"
+    let blockdaemon = findCoreSetWithHomeDomain "stellar-blockdaemon-com"
+    let coinqvest = findCoreSetWithHomeDomain "coinqvest-com"
 
     let tier1 = [sdf; lobstr; keybase; satoshipay; wirex; blockdaemon; coinqvest]
 

@@ -7,8 +7,10 @@ module StellarNetworkData
 open FSharp.Data
 open stellar_dotnet_sdk
 
+open FSharp.Data
 open StellarCoreSet
 open StellarNetworkCfg
+open stellar_dotnet_sdk.responses.results
 
 type HistoryArchiveState = JsonProvider<"json-type-samples/sample-stellar-history.json", ResolutionFolder=__SOURCE_DIRECTORY__>
 let PubnetLatestHistoryArchiveState = "http://history.stellar.org/prd/core-live/core_live_001/.well-known/stellar-history.json"
@@ -17,37 +19,109 @@ let TestnetLatestHistoryArchiveState = "http://history.stellar.org/prd/core-test
 type PubnetNode = JsonProvider<"json-pubnet-data/nodes.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
 
 let FullPubnetCoreSets (image:string) : CoreSet list =
-    let allPubnetNodes = PubnetNode.GetSamples() |> Array.filter (fun n -> n.Active)
+
+    // Our dataset is the samples used to build the datatype: json-pubnet-data/nodes.json
+    let allPubnetNodes : PubnetNode.Root array =
+        PubnetNode.GetSamples()
+        |> Array.filter (fun n -> n.Active &&
+                                  ((n.QuorumSet.Validators.Length <> 0) ||
+                                   (n.QuorumSet.InnerQuorumSets.Length <> 0)))
+
+    // First we partition nodes in the network into those that have home domains and
+    // those that do not. We call the former "org" nodes and the latter "misc" nodes.
     let orgNodes, miscNodes =
         Array.partition (fun (n:PubnetNode.Root) -> n.HomeDomain.IsSome) allPubnetNodes
+
+    // We then group the org nodes by their home domains. The domain names are drawn
+    // from the HomeDomains of the public network but with periods replaced with dashes,
+    // so for example keybase.io turns into keybase-io.
+    let groupedOrgNodes : (HomeDomainName * PubnetNode.Root array) array =
+        Array.groupBy
+            begin
+                fun (n:PubnetNode.Root) ->
+                    let cleanOrgName = n.HomeDomain.Value.Replace('.', '-')
+                    HomeDomainName cleanOrgName
+            end
+            orgNodes
+
+    // Then build a map from accountID to HomeDomainName and index-within-domain
+    // for each org node.
+    let orgNodeHomeDomains : Map<string,(HomeDomainName * int)> =
+        Array.collect
+               begin
+                   fun ((hdn:HomeDomainName), (nodes:PubnetNode.Root array)) ->
+                       Array.mapi
+                           begin
+                               fun (i:int) (n:PubnetNode.Root) ->
+                                   (n.PublicKey, (hdn, i))
+                           end
+                           nodes
+               end
+               groupedOrgNodes
+        |> Map.ofArray
+
+    // Return either HomeDomainName name or a node-XXXXXX name derived from the pubkey.
+    let homeDomainNameForKey (pubkey:string) : HomeDomainName =
+        match orgNodeHomeDomains.TryFind pubkey with
+        | Some(s, _) -> s
+        | None -> HomeDomainName (sprintf "node-%s" (pubkey.Substring(0, 6)))
+
+    // Return either HomeDomainName-$i name or a node-XXXXXX-0 name derived from the pubkey.
+    let peerShortNameForKey (pubkey:string) : PeerShortName =
+        match orgNodeHomeDomains.TryFind pubkey with
+        | Some(s, i) -> PeerShortName (sprintf "%s-%d" s.StringName i)
+        | None -> PeerShortName (sprintf "node-%s-0" (pubkey.Substring(0, 6)))
+
+    // Recursively convert json qsets to typed QuorumSet type
+    let rec qsetOfNodeQset (q:PubnetNode.QuorumSet) : QuorumSet =
+        { thresholdPercent = None
+          validators = Array.map (fun k -> (peerShortNameForKey k,
+                                            KeyPair.FromAccountId k)) q.Validators
+                       |> Map.ofArray
+          innerQuorumSets = Array.map qsetOfNodeInnerQset q.InnerQuorumSets }
+    and qsetOfNodeInnerQset (iq:PubnetNode.InnerQuorumSet) : QuorumSet =
+        let q = new PubnetNode.QuorumSet(iq.JsonValue)
+        qsetOfNodeQset q
+
+    // Convert the json geolocation data to a typed GeoLoc type
     let nodeToGeoLoc (n:PubnetNode.Root) : GeoLoc =
         {lat = float n.GeoData.Latitude
          lon = float n.GeoData.Longitude}
+
     let pubnetOpts = { CoreSetOptions.GetDefault image with
                          accelerateTime = false
-                         initialization = { CoreSetInitialization.Default with forceScp = false }
+                         initialization = { CoreSetInitialization.Default with
+                                              forceScp = false }
                          dumpDatabase = false }
+
     let miscCoreSets : CoreSet array =
         Array.mapi
-            (fun i n ->
+            (fun (i:int) (n:PubnetNode.Root) ->
+                let hdn = homeDomainNameForKey n.PublicKey
+                let qset = qsetOfNodeQset n.QuorumSet
                 let coreSetOpts =
                     { pubnetOpts with
                         nodeCount = 1
+                        quorumSet = ExplicitQuorum qset
                         nodeLocs = Some [nodeToGeoLoc n] }
-                MakeLiveCoreSet (sprintf "misc-%d" i) coreSetOpts)
+                MakeLiveCoreSet hdn.StringName coreSetOpts)
             miscNodes
-    let groupedOrgNodes : (string * (PubnetNode.Root array)) array =
-        Array.groupBy (fun (n:PubnetNode.Root) -> n.HomeDomain.Value) orgNodes
+
     let orgCoreSets : CoreSet array =
         Array.map
-            (fun (k, nodes) ->
+            (fun ((hdn:HomeDomainName), (nodes:PubnetNode.Root array)) ->
+                assert(nodes.Length <> 0)
+                let qset = qsetOfNodeQset nodes.[0].QuorumSet
                 let coreSetOpts =
                     { pubnetOpts with
                         nodeCount = Array.length nodes
+                        quorumSet = ExplicitQuorum qset
                         nodeLocs = Some (List.map nodeToGeoLoc (List.ofArray nodes)) }
-                MakeLiveCoreSet k coreSetOpts)
+                MakeLiveCoreSet hdn.StringName coreSetOpts)
             groupedOrgNodes
-    Array.append miscCoreSets orgCoreSets |> List.ofArray
+
+    Array.append miscCoreSets orgCoreSets
+    |> List.ofArray
 
 
 let GetLatestPubnetLedgerNumber _ : int =
