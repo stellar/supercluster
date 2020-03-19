@@ -7,6 +7,7 @@ module StellarCoreCfg
 open stellar_dotnet_sdk
 open Nett
 
+open System.Text.RegularExpressions
 open StellarCoreSet
 open StellarNetworkCfg
 open StellarShellCmd
@@ -183,7 +184,12 @@ type StellarCoreCfg =
             localTab.Add(historyGetCommand.Key.StringName, getHist historyGetCommand.Value) |> ignore
         t
 
-    override self.ToString() : string = self.ToTOML().ToString()
+    override self.ToString() : string =
+        // Unfortunately Nett mis-quotes dotted keys -- it'll write out keys
+        // like ['QUORUM_SET.sub1'] which should be ['QUORUM_SET'.'sub1'] or
+        // just [QUORUM_SET.sub1] -- so we manually unquote these here. Sigh.
+        let nettStr = self.ToTOML().ToString()
+        Regex.Replace(nettStr, @"^\['([a-zA-Z0-9_\-\.]+)'\]$", "[$1]", RegexOptions.Multiline)
 
 // Extension to the NetworkCfg type to make StellarCoreCfg objects
 // for each of its peers. This just creates a default; if you want

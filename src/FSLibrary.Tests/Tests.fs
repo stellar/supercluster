@@ -77,6 +77,7 @@ type Tests(output:ITestOutputHelper) =
         let sdfCoreSet = List.find (fun cs -> cs.name = sdfCoreSetName) coreSets
         let cfg = nCfg.StellarCoreCfg(sdfCoreSet, 0)
         let toml = cfg.ToString()
+        Assert.Contains("[QUORUM_SET.sub1]", toml)
         Assert.Matches(Regex("VALIDATORS.*stellar-blockdaemon-com-0"), toml)
         Assert.Matches(Regex("VALIDATORS.*www-stellar-org-0"), toml)
         Assert.Matches(Regex("VALIDATORS.*keybase-io-0"), toml)
