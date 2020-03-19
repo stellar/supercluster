@@ -166,28 +166,36 @@ type Kubernetes with
         let nsStr = nCfg.NamespaceProperty
         let namespaceContent = NamespaceContent(self, nsStr)
         try
-            namespaceContent.Add(self.CreateNamespacedService(body = nCfg.ToService(),
+            let svc = nCfg.ToService()
+            LogInfo "Creating Service %s" svc.Metadata.Name
+            namespaceContent.Add(self.CreateNamespacedService(body = svc,
                                                               namespaceParameter = nsStr))
             for cm in nCfg.ToConfigMaps() do
+                LogInfo "Creating ConfigMap %s" cm.Metadata.Name
                 namespaceContent.Add(self.CreateNamespacedConfigMap(body = cm,
                                                                     namespaceParameter = nsStr))
 
             let makeStatefulSet coreSet =
-                self.CreateNamespacedStatefulSet(body = nCfg.ToStatefulSet coreSet probeTimeout,
+                let sts = nCfg.ToStatefulSet coreSet probeTimeout
+                LogInfo "Creating StatefulSet %s" sts.Metadata.Name
+                self.CreateNamespacedStatefulSet(body = sts,
                                                  namespaceParameter = nsStr)
             let statefulSets = List.map makeStatefulSet nCfg.CoreSetList
             for statefulSet in statefulSets do
                 namespaceContent.Add(statefulSet)
 
             for svc in nCfg.ToPerPodServices() do
+                LogInfo "Creating Per-Pod Service %s" svc.Metadata.Name
                 let service = self.CreateNamespacedService(namespaceParameter = nsStr,
                                                            body = svc)
                 namespaceContent.Add(service)
 
             if not (List.isEmpty statefulSets)
             then
+                let ing = nCfg.ToIngress()
+                LogInfo "Creating Ingress %s" ing.Metadata.Name
                 let ingress = self.CreateNamespacedIngress(namespaceParameter = nsStr,
-                                                           body = nCfg.ToIngress())
+                                                           body = ing)
                 namespaceContent.Add(ingress)
 
             let formation = new StellarFormation(networkCfg = nCfg,
