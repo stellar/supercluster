@@ -74,6 +74,12 @@ type DatabaseURL =
         | SQLite3File s -> sprintf "sqlite3://%s" s
         | PostgreSQL(d, u, p, h) -> sprintf "postgresql://dbname=%s user=%s password=%s host=%s" d u p h
 
+let curlGetCmd (uri:System.Uri) : string =
+    sprintf "curl -sf %s/{0} -o {1}" (uri.ToString())
+
+let curlGetCmdFromPeer (peer:PeerDnsName) : string =
+    curlGetCmd (System.UriBuilder("http", peer.StringName).Uri)
+
 // Represents the contents of a stellar-core.cfg file, along with method to
 // write it out to TOML.
 type StellarCoreCfg =
@@ -110,7 +116,7 @@ type StellarCoreCfg =
                          ("put", sprintf "cp {0} %s/{1}" CfgVal.historyPath)
                          ("mkdir", sprintf "mkdir -p %s/{0}" CfgVal.historyPath) |]
         let remoteHist (dnsName:PeerDnsName) =
-            Map.ofSeq [| ("get", sprintf "curl -sf http://%s/{0} -o {1}" dnsName.StringName) |]
+            Map.ofSeq [| ("get", curlGetCmdFromPeer dnsName) |]
         let getHist getCommand =
             Map.ofSeq [| ("get", getCommand) |]
 

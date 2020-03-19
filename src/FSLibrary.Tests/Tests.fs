@@ -78,6 +78,8 @@ type Tests(output:ITestOutputHelper) =
         let cfg = nCfg.StellarCoreCfg(sdfCoreSet, 0)
         let toml = cfg.ToString()
         Assert.Contains("[QUORUM_SET.sub1]", toml)
+        Assert.Contains("[HISTORY.www-stellar-org-0]", toml)
+        Assert.Contains("http://history.stellar.org/prd/core-live/core_live_001", toml)
         Assert.Matches(Regex("VALIDATORS.*stellar-blockdaemon-com-0"), toml)
         Assert.Matches(Regex("VALIDATORS.*www-stellar-org-0"), toml)
         Assert.Matches(Regex("VALIDATORS.*keybase-io-0"), toml)

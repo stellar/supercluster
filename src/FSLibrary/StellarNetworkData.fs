@@ -9,6 +9,7 @@ open stellar_dotnet_sdk
 
 open FSharp.Data
 open StellarCoreSet
+open StellarCoreCfg
 open StellarNetworkCfg
 open stellar_dotnet_sdk.responses.results
 
@@ -98,9 +99,20 @@ let FullPubnetCoreSets (image:string) : CoreSet list =
         {lat = float n.GeoData.Latitude
          lon = float n.GeoData.Longitude}
 
+    let historyGetCmds : Map<PeerShortName, string> =
+        Array.filter (fun (n:PubnetNode.Root) -> n.HistoryUrl.IsSome) orgNodes
+        |> Array.map
+               (fun (n:PubnetNode.Root) ->
+                   let shortName = peerShortNameForKey n.PublicKey
+                   let uri = System.Uri(n.HistoryUrl.Value)
+                   let cmd = curlGetCmd uri
+                   (shortName, cmd))
+        |> Map.ofArray
+
     let pubnetOpts = { CoreSetOptions.GetDefault image with
                          accelerateTime = false
                          historyNodes = Some([])
+                         historyGetCommands = historyGetCmds
                          localHistory = false
                          dumpDatabase = false }
 
