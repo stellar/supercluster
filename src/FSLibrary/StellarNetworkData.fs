@@ -34,13 +34,14 @@ let FullPubnetCoreSets (image:string) : CoreSet list =
 
     // We then group the org nodes by their home domains. The domain names are drawn
     // from the HomeDomains of the public network but with periods replaced with dashes,
-    // so for example keybase.io turns into keybase-io.
+    // and lowercased, so for example keybase.io turns into keybase-io.
     let groupedOrgNodes : (HomeDomainName * PubnetNode.Root array) array =
         Array.groupBy
             begin
                 fun (n:PubnetNode.Root) ->
                     let cleanOrgName = n.HomeDomain.Value.Replace('.', '-')
-                    HomeDomainName cleanOrgName
+                    let lowercase = cleanOrgName.ToLower()
+                    HomeDomainName lowercase
             end
             orgNodes
 
@@ -60,17 +61,26 @@ let FullPubnetCoreSets (image:string) : CoreSet list =
                groupedOrgNodes
         |> Map.ofArray
 
+    // When we don't have real HomeDomainNames (eg. for misc nodes) we use a
+    // node-XXXXXX name with the XXXXXX as the lowercased first 6 digits of the
+    // pubkey. Lowercase because kubernetes resource objects have to have all
+    // lowercase names.
+    let anonymousNodeName (pubkey:string) : string =
+        let extract = pubkey.Substring(0, 6)
+        let lowercase = extract.ToLower()
+        "node-" + lowercase
+
     // Return either HomeDomainName name or a node-XXXXXX name derived from the pubkey.
     let homeDomainNameForKey (pubkey:string) : HomeDomainName =
         match orgNodeHomeDomains.TryFind pubkey with
         | Some(s, _) -> s
-        | None -> HomeDomainName (sprintf "node-%s" (pubkey.Substring(0, 6)))
+        | None -> HomeDomainName (anonymousNodeName pubkey)
 
     // Return either HomeDomainName-$i name or a node-XXXXXX-0 name derived from the pubkey.
     let peerShortNameForKey (pubkey:string) : PeerShortName =
         match orgNodeHomeDomains.TryFind pubkey with
         | Some(s, i) -> PeerShortName (sprintf "%s-%d" s.StringName i)
-        | None -> PeerShortName (sprintf "node-%s-0" (pubkey.Substring(0, 6)))
+        | None -> PeerShortName ((anonymousNodeName pubkey) + "-0")
 
     // Recursively convert json qsets to typed QuorumSet type
     let rec qsetOfNodeQset (q:PubnetNode.QuorumSet) : QuorumSet =
