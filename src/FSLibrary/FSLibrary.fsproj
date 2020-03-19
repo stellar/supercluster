@@ -12,8 +12,8 @@
     <Compile Include="StellarShellCmd.fs" />
     <Compile Include="StellarCoreSet.fs" />
     <Compile Include="StellarNetworkCfg.fs" />
-    <Compile Include="StellarNetworkData.fs" />
     <Compile Include="StellarCoreCfg.fs" />
+    <Compile Include="StellarNetworkData.fs" />
     <Compile Include="StellarCorePeer.fs" />
     <Compile Include="StellarCoreHTTP.fs" />
     <Compile Include="StellarTransaction.fs" />
