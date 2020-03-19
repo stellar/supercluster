@@ -213,7 +213,7 @@ type NetworkCfg with
 
         let init = opts.initialization
         let newDb = runCoreIf init.newDb [| "new-db" |]
-        let newHist = runCoreIf init.newHist [| "new-hist"; CfgVal.localHistName |]
+        let newHist = runCoreIf (opts.localHistory && init.newHist) [| "new-hist"; CfgVal.localHistName |]
         let initialCatchup = runCoreIf init.initialCatchup [| "catchup"; "current/0" |]
         let forceScp = runCoreIf init.forceScp [| "force-scp" |]
 
