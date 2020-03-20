@@ -69,6 +69,13 @@ type Tests(output:ITestOutputHelper) =
         Assert.Equal(s, exp)
 
     [<Fact>]
+    member __.``Inverse threshold function is actually inverse`` () =
+        for sz = 1 to 20 do
+            for thr = 1 to sz do
+                let pct = percentOfThreshold sz thr
+                Assert.Equal(thr, thresholdOfPercent sz pct)
+
+    [<Fact>]
     member __.``Public network conversion looks reasonable`` () =
         let coreSets = FullPubnetCoreSets "stellar/stellar-core"
         let nCfg = MakeNetworkCfg coreSets nameSpace quotas loglevels storageclass ingress None

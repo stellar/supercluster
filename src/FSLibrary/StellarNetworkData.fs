@@ -85,7 +85,9 @@ let FullPubnetCoreSets (image:string) : CoreSet list =
 
     // Recursively convert json qsets to typed QuorumSet type
     let rec qsetOfNodeQset (q:PubnetNode.QuorumSet) : QuorumSet =
-        { thresholdPercent = None
+        let sz = q.Validators.Length + q.InnerQuorumSets.Length
+        let pct = percentOfThreshold sz (int(q.Threshold))
+        { thresholdPercent = Some pct
           validators = Array.map (fun k -> (peerShortNameForKey k,
                                             KeyPair.FromAccountId k)) q.Validators
                        |> Map.ofArray

@@ -60,6 +60,14 @@ module CfgVal =
     let bucketsBackupURL (host:PeerDnsName) = "http://" + host.StringName + "/buckets.tar.gz"
     let bucketsDownloadPath = dataVolumePath + "/buckets.tar.gz"
 
+// This is the formula stellar-core uses to calculate a threshold from
+// a percent.
+let thresholdOfPercent (sz:int) (pct:int) : int =
+    1 + (((sz * pct) - 1) / 100)
+
+// And this is (hopefully) its inverse!
+let percentOfThreshold (sz:int) (thr:int) : int =
+    1 + ((100 * (thr - 1)) / sz)
 
 // Symbolic type of the different sorts of DATABASE that can show up in a
 // stellar-core.cfg. Usually use SQLite3File of some path in a Pod's local
@@ -175,7 +183,11 @@ type StellarCoreCfg =
                 Map.toArray qs.validators
                     |> Array.map (fun ((n:PeerShortName), (k:KeyPair)) ->
                                      sprintf "%s %s" k.Address n.StringName)
-            t.Add(label, Map.ofList [ ("VALIDATORS", validators) ]) |> ignore
+            let innerTab = t.Add(label, Toml.Create(), TomlObjectFactory.RequireTomlObject()).Added
+            innerTab.Add("VALIDATORS", validators) |> ignore
+            match qs.thresholdPercent with
+            | None -> ()
+            | Some(pct) -> innerTab.Add("THRESHOLD_PERCENT", pct) |> ignore
             Array.iteri
                 (fun (i:int) (qs:QuorumSet) -> addQsetAt (sprintf "%s.sub%d" label i) qs)
                 qs.innerQuorumSets
