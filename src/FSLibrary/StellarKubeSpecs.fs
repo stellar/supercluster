@@ -343,6 +343,7 @@ type NetworkCfg with
             V1StatefulSetSpec
                 (selector = V1LabelSelector(matchLabels = CfgVal.labels),
                  serviceName = self.ServiceName,
+                 podManagementPolicy = "Parallel",
                  template = self.ToPodTemplateSpec coreSet probeTimeout,
                  replicas = System.Nullable<int>(coreSet.CurrentCount))
         let statefulSet = V1StatefulSet(metadata = self.NamespacedMeta (self.StatefulSetName coreSet),
