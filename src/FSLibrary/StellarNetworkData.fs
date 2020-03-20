@@ -128,6 +128,8 @@ let FullPubnetCoreSets (image:string) : CoreSet list =
                         nodeCount = 1
                         quorumSet = ExplicitQuorum qset
                         nodeLocs = Some [nodeToGeoLoc n] }
+                let shouldForceScp = n.IsValidator
+                let coreSetOpts = coreSetOpts.WithForceSCP shouldForceScp
                 MakeLiveCoreSet hdn.StringName coreSetOpts)
             miscNodes
 
@@ -141,6 +143,8 @@ let FullPubnetCoreSets (image:string) : CoreSet list =
                         nodeCount = Array.length nodes
                         quorumSet = ExplicitQuorum qset
                         nodeLocs = Some (List.map nodeToGeoLoc (List.ofArray nodes)) }
+                let shouldForceScp = nodes.[0].IsValidator
+                let coreSetOpts = coreSetOpts.WithForceSCP shouldForceScp
                 MakeLiveCoreSet hdn.StringName coreSetOpts)
             groupedOrgNodes
 
