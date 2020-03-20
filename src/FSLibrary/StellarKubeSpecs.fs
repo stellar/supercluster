@@ -210,14 +210,24 @@ type NetworkCfg with
               let sleep2 = [| "sleep"; "2" |]
               Some (ShCmd.Until pgIsReady sleep2)
           | _ -> None
-
+        let waitForTime : ShCmd Option =
+            match opts.syncStartupDelay with
+            | None -> None
+            | Some(n) ->
+                let now:int64 = System.DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+                let deadline = now + int64(n)
+                let getTime = ShCmd.DefVarSub "NOW" [| "date"; "+%s" |]
+                let checkTime = ShCmd.OfStrs [|"test"; "${NOW}"; "-ge"; deadline.ToString()|]
+                let getAndCheckTime = ShCmd.ShSeq [| getTime; checkTime  |]
+                let sleep = ShCmd.OfStrs [| "sleep"; "1" |]
+                Some (ShCmd.ShUntil(getAndCheckTime, sleep))
         let init = opts.initialization
         let newDb = runCoreIf init.newDb [| "new-db" |]
         let newHist = runCoreIf (opts.localHistory && init.newHist) [| "new-hist"; CfgVal.localHistName |]
         let initialCatchup = runCoreIf init.initialCatchup [| "catchup"; "current/0" |]
         let forceScp = runCoreIf init.forceScp [| "force-scp" |]
 
-        let cmds = Array.choose id [| waitForDB; newDb; newHist; initialCatchup; forceScp |]
+        let cmds = Array.choose id [| waitForDB; waitForTime; newDb; newHist; initialCatchup; forceScp |]
 
         let restoreDBStep coreSet i : ShCmd array =
           let dnsName = self.PeerDnsName coreSet i

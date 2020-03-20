@@ -98,6 +98,7 @@ type CoreSetOptions =
     { nodeCount : int
       nodeLocs : GeoLoc list option
       dbType : DBType
+      syncStartupDelay : int option
       quorumSet : QuorumSetSpec
       historyNodes : CoreSetName list option
       historyGetCommands : Map<PeerShortName, string>
@@ -125,6 +126,7 @@ type CoreSetOptions =
       { nodeCount = 3
         nodeLocs = None
         dbType = Sqlite
+        syncStartupDelay = None
         quorumSet = AllPeersQuorum
         historyNodes = None
         historyGetCommands = Map.empty

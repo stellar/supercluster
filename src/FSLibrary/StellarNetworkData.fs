@@ -115,6 +115,10 @@ let FullPubnetCoreSets (image:string) : CoreSet list =
                          accelerateTime = false
                          historyNodes = Some([])
                          historyGetCommands = historyGetCmds
+                         // We need to use a synchronized startup delay
+                         // for networks as large as this, otherwise it loses
+                         // sync before all the nodes are online.
+                         syncStartupDelay = Some(60)
                          localHistory = false
                          dumpDatabase = false }
 
