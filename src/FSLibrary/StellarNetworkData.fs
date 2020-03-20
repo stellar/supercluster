@@ -28,6 +28,25 @@ let FullPubnetCoreSets (image:string) : CoreSet list =
                                   ((n.QuorumSet.Validators.Length <> 0) ||
                                    (n.QuorumSet.InnerQuorumSets.Length <> 0)))
 
+    // For each pubkey in the pubnet, we map it to an actual KeyPair (with a private
+    // key) to use in the simulation. It's important to keep these straight! The keys
+    // in the pubnet are _not_ used in the simulation. They are used as node identities
+    // throughout the rest of this function, as strings called "pubkey", but should not
+    // appear in the final CoreSets we're building.
+    let mutable pubnetKeyToSimKey : Map<string,KeyPair> =
+        Array.map (fun (n:PubnetNode.Root) -> (n.PublicKey, KeyPair.Random())) allPubnetNodes
+        |> Map.ofArray
+
+    // Not every pubkey used in the qsets is represented in the base set of pubnet nodes,
+    // so we lazily extend the set here with new mappings as we discover new pubkeys.
+    let getSimKey (pubkey:string) : KeyPair =
+        match pubnetKeyToSimKey.TryFind pubkey with
+        | Some(k) -> k
+        | None ->
+            let k = KeyPair.Random()
+            pubnetKeyToSimKey <- pubnetKeyToSimKey.Add(pubkey, k)
+            k
+
     // First we partition nodes in the network into those that have home domains and
     // those that do not. We call the former "org" nodes and the latter "misc" nodes.
     let orgNodes, miscNodes =
@@ -67,7 +86,8 @@ let FullPubnetCoreSets (image:string) : CoreSet list =
     // pubkey. Lowercase because kubernetes resource objects have to have all
     // lowercase names.
     let anonymousNodeName (pubkey:string) : string =
-        let extract = pubkey.Substring(0, 6)
+        let simkey = (getSimKey pubkey).Address
+        let extract = simkey.Substring(0, 6)
         let lowercase = extract.ToLower()
         "node-" + lowercase
 
@@ -88,8 +108,7 @@ let FullPubnetCoreSets (image:string) : CoreSet list =
         let sz = q.Validators.Length + q.InnerQuorumSets.Length
         let pct = percentOfThreshold sz (int(q.Threshold))
         { thresholdPercent = Some pct
-          validators = Array.map (fun k -> (peerShortNameForKey k,
-                                            KeyPair.FromAccountId k)) q.Validators
+          validators = Array.map (fun k -> (peerShortNameForKey k, getSimKey k)) q.Validators
                        |> Map.ofArray
           innerQuorumSets = Array.map qsetOfNodeInnerQset q.InnerQuorumSets }
     and qsetOfNodeInnerQset (iq:PubnetNode.InnerQuorumSet) : QuorumSet =
@@ -122,6 +141,12 @@ let FullPubnetCoreSets (image:string) : CoreSet list =
                          localHistory = false
                          dumpDatabase = false }
 
+    let makeCoreSetWithExplicitKeys (hdn:HomeDomainName) (options:CoreSetOptions) (keys:KeyPair array) =
+        { name = CoreSetName (hdn.StringName)
+          options = options
+          keys = keys
+          live = true }
+
     let miscCoreSets : CoreSet array =
         Array.mapi
             (fun (i:int) (n:PubnetNode.Root) ->
@@ -134,7 +159,8 @@ let FullPubnetCoreSets (image:string) : CoreSet list =
                         nodeLocs = Some [nodeToGeoLoc n] }
                 let shouldForceScp = n.IsValidator
                 let coreSetOpts = coreSetOpts.WithForceSCP shouldForceScp
-                MakeLiveCoreSet hdn.StringName coreSetOpts)
+                let keys = [|getSimKey n.PublicKey|]
+                makeCoreSetWithExplicitKeys hdn coreSetOpts keys)
             miscNodes
 
     let orgCoreSets : CoreSet array =
@@ -149,7 +175,8 @@ let FullPubnetCoreSets (image:string) : CoreSet list =
                         nodeLocs = Some (List.map nodeToGeoLoc (List.ofArray nodes)) }
                 let shouldForceScp = nodes.[0].IsValidator
                 let coreSetOpts = coreSetOpts.WithForceSCP shouldForceScp
-                MakeLiveCoreSet hdn.StringName coreSetOpts)
+                let keys = Array.map (fun (n:PubnetNode.Root) -> getSimKey n.PublicKey) nodes
+                makeCoreSetWithExplicitKeys hdn coreSetOpts keys)
             groupedOrgNodes
 
     Array.append miscCoreSets orgCoreSets
