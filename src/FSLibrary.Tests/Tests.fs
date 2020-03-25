@@ -9,6 +9,7 @@ open StellarShellCmd
 open StellarNetworkCfg
 open StellarKubeSpecs
 open StellarNetworkData
+open StellarNetworkDelays
 open Xunit.Abstractions
 
 
@@ -235,3 +236,22 @@ type Tests(output:ITestOutputHelper) =
         // Calculated approximation: 854ms, 17ms
         Assert.InRange(greatCircleDistanceInKm Falkenstein Purfleet, 850.0, 860.0)
         Assert.InRange(networkPingInMs Falkenstein Purfleet, 15.0, 20.0)
+
+    [<Fact>]
+    member __.``Traffic control commands are reasonable`` () =
+        let Ashburn = {lat = 38.89511; lon = -77.03637}
+        let Beauharnois = {lat = 45.2986777; lon= -73.9288762}
+        let Chennai = {lat = 13.08784; lon = 80.27847}
+        let n1 = PeerShortName "n1"
+        let ip1 = "192.168.1.236"
+        let n2 = PeerShortName "n2"
+        let ip2 = "192.168.1.237"
+        let cmds = getNetworkDelayCommands Ashburn [(n1,Beauharnois,ip1);
+                                                    (n2,Chennai,ip2)]
+        let cmdStr = cmds.ToString()
+        Assert.Contains(ip1, cmdStr)
+        Assert.Contains(ip2, cmdStr)
+        let delay1 = int(networkDelayInMs Ashburn Beauharnois)
+        let delay2 = int(networkDelayInMs Ashburn Chennai)
+        Assert.Contains(sprintf "netem delay %dms" delay1, cmdStr)
+        Assert.Contains(sprintf "netem delay %dms" delay2, cmdStr)
