@@ -51,7 +51,7 @@ let networkPingInMs (loc1:GeoLoc) (loc2:GeoLoc) : double =
     // A ping is a round trip, so double one-way delay.
     2.0 * (networkDelayInMs loc1 loc2)
 
-let getNetworkDelayCommands (loc1:GeoLoc) (locsAndIps:(PeerShortName * GeoLoc * string) list) : ShCmd =
+let getNetworkDelayCommands (loc1:GeoLoc) (locsAndIps:(PeerShortName * GeoLoc * string) list) : ShCmd array =
     // Traffic shaping happens using the 'tc' command on linux. This is a
     // complicated command. We build up the commands in pieces.
 
@@ -130,9 +130,9 @@ let getNetworkDelayCommands (loc1:GeoLoc) (locsAndIps:(PeerShortName * GeoLoc * 
             locsAndIps
         |> List.concat |> Array.ofList
 
-    ShCmd.ShSeq (Array.append
-                     [| setDeviceTxQlen; clearRootQdisc; addRootQdisc |]
-                     perIpCmds)
+    (Array.append
+                 [| setDeviceTxQlen; clearRootQdisc; addRootQdisc |]
+                 perIpCmds)
 
 
 type StellarFormation with
@@ -162,5 +162,28 @@ type StellarFormation with
     member self.InstallNetworkDelays(coreSetList: CoreSet list) : unit =
         let locsAndIps = self.GetPeerLocsAndIps coreSetList
         for (peerName, loc1, _ip1) in locsAndIps do
-            let cmd = getNetworkDelayCommands loc1 locsAndIps
-            self.RunRemoteCommand(peerName, cmd)
+            let mutable cmds = getNetworkDelayCommands loc1 locsAndIps
+            while cmds.Length > 0 do
+                // Apparently -- goodness knows why! -- we can only send
+                // "moderately large" commands over stdin, 4kb or less;
+                // any more and dotnet's IO-tasking system deadlocks (???).
+                //
+                // We approximate this limit here with "30 commands at a time"
+                // which should be well within the limit given the size of
+                // commands we're sending (almost all < 100 bytes).
+                //
+                // Note also: fsharp array slicing syntax is range-inclusive
+                // and _mostly_ throws if you index past the last element,
+                // except it allows you to ask for the slice beginning at
+                // the array's length, which is the empty slice.
+                //
+                //  That is: x.[x.Length..] is an empty slice, whereas
+                //           x.[..x.Length] is an error. Awesome!
+                let lastCmdIdx = cmds.Length - 1
+                let chunkLimInc = min lastCmdIdx 30
+                let chunk = cmds.[..chunkLimInc]
+                let blockCmd = ShCmd.ShSeq chunk
+                let nextChunkStart = min (chunkLimInc+1) cmds.Length
+                cmds <- cmds.[nextChunkStart..]
+                self.RunRemoteCommand(peerName, blockCmd)
+            done

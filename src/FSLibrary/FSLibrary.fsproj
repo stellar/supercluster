@@ -65,4 +65,7 @@
     <PackageReference Include="Serilog.Sinks.File" Version="4.0.0" />
     <PackageReference Include="stellar-dotnet-sdk" Version="2.2.39" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CSLibrary\CSLibrary.csproj" />
+  </ItemGroup>
 </Project>
