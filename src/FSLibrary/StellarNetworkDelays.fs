@@ -168,9 +168,9 @@ type StellarFormation with
                 // "moderately large" commands over stdin, 4kb or less;
                 // any more and dotnet's IO-tasking system deadlocks (???).
                 //
-                // We approximate this limit here with "30 commands at a time"
+                // We approximate this limit here with "50 commands at a time"
                 // which should be well within the limit given the size of
-                // commands we're sending (almost all < 100 bytes).
+                // commands we're sending (average 75 bytes).
                 //
                 // Note also: fsharp array slicing syntax is range-inclusive
                 // and _mostly_ throws if you index past the last element,
@@ -180,7 +180,7 @@ type StellarFormation with
                 //  That is: x.[x.Length..] is an empty slice, whereas
                 //           x.[..x.Length] is an error. Awesome!
                 let lastCmdIdx = cmds.Length - 1
-                let chunkLimInc = min lastCmdIdx 30
+                let chunkLimInc = min lastCmdIdx 50
                 let chunk = cmds.[..chunkLimInc]
                 let blockCmd = ShCmd.ShSeq chunk
                 let nextChunkStart = min (chunkLimInc+1) cmds.Length

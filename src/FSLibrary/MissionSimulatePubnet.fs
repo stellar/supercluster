@@ -30,7 +30,7 @@ let simulatePubnet (context : MissionContext) =
     let tier1 = [sdf; lobstr; keybase; satoshipay; wirex; blockdaemon; coinqvest]
 
     context.Execute fullCoreSet None (fun (formation: StellarFormation) ->
-        formation.InstallNetworkDelays tier1
+        formation.InstallNetworkDelays fullCoreSet
         formation.WaitUntilSynced tier1
         formation.UpgradeProtocolToLatest tier1
         formation.UpgradeMaxTxSize tier1 1000000
