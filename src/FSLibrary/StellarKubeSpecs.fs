@@ -122,17 +122,18 @@ let CoreContainerForCommand (q:NetworkQuotas) (imageName:string) (numContainers:
          args = [| "-x"; "-c"; allCmdsAndCleanup.ToString() |],
          env = [| peerNameEnvVar|],
          resources = resourceRequirements q numContainers,
+         securityContext = V1SecurityContext(capabilities = V1Capabilities(add = [|"NET_ADMIN"|])),
          volumeMounts = CoreContainerVolumeMounts peerOrJobNames)
 
-let WithReadinessProbe (container:V1Container) probeTimeout : V1Container =
+let WithLivenessProbe (container:V1Container) probeTimeout : V1Container =
     let httpPortStr = IntstrIntOrString(value = CfgVal.httpPort.ToString())
-    let readyProbe = V1Probe(periodSeconds = System.Nullable<int>(1),
-                             initialDelaySeconds = System.Nullable<int>(1),
-                             failureThreshold = System.Nullable<int>(60),
-                             timeoutSeconds = System.Nullable<int>(probeTimeout),
-                             httpGet = V1HTTPGetAction(path = "/info",
-                                                       port = httpPortStr))
-    container.ReadinessProbe <- readyProbe
+    let liveProbe = V1Probe(periodSeconds = System.Nullable<int>(1),
+                            initialDelaySeconds = System.Nullable<int>(120),
+                            failureThreshold = System.Nullable<int>(60),
+                            timeoutSeconds = System.Nullable<int>(probeTimeout),
+                            httpGet = V1HTTPGetAction(path = "/info",
+                                                      port = httpPortStr))
+    container.LivenessProbe <- liveProbe
     container
 
 // Extend NetworkCfg type with methods for producing various Kubernetes objects.
@@ -315,7 +316,7 @@ type NetworkCfg with
                 | Postgres -> 3 // core, history and postgres
                 | _ -> 2        // just core and history
         let numContainers = maxPeers * containersPerPod
-        let containers = [| WithReadinessProbe
+        let containers = [| WithLivenessProbe
                                 (CoreContainerForCommand self.quotas imageName numContainers
                                      cfgOpt runCmdWithOpts initCommands peerNames)
                                 probeTimeout;
