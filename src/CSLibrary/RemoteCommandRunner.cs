@@ -19,6 +19,10 @@ namespace CSLibrary
                 // There appears to be a bug / feature that makes a deadlock if we run this
                 // code with more data sent than about 4096 bytes. This appears to be some
                 // kind of buffering issue but in any case you should stay below!
+                //
+                // Possibly this is happening on the server, for example this bug suggests
+                // the ingress we're using (traefik) might truncate websocket messages
+                // at 4096 bytes: https://github.com/containous/traefik/issues/5083
                 throw new ArgumentException("passing shell command >= 4096 bytes");
             }
 

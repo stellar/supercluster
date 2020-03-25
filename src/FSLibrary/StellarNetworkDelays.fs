@@ -166,7 +166,8 @@ type StellarFormation with
             while cmds.Length > 0 do
                 // Apparently -- goodness knows why! -- we can only send
                 // "moderately large" commands over stdin, 4kb or less;
-                // any more and dotnet's IO-tasking system deadlocks (???).
+                // any more and dotnet's IO-tasking system deadlocks, or
+                // something fails in the transport layer, or such (???).
                 //
                 // We approximate this limit here with "50 commands at a time"
                 // which should be well within the limit given the size of
