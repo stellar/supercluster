@@ -11,9 +11,9 @@ open StellarCoreSet
 open StellarMissionContext
 open StellarFormation
 open StellarNetworkData
+open StellarNetworkDelays
 
 let simulatePubnet (context : MissionContext) =
-    let context = context.WithNominalLoad
     let fullCoreSet = FullPubnetCoreSets context.image
 
     let findCoreSetWithHomeDomain (domain:string) : CoreSet =
@@ -30,8 +30,10 @@ let simulatePubnet (context : MissionContext) =
     let tier1 = [sdf; lobstr; keybase; satoshipay; wirex; blockdaemon; coinqvest]
 
     context.Execute fullCoreSet None (fun (formation: StellarFormation) ->
+        formation.InstallNetworkDelays tier1
         formation.WaitUntilSynced tier1
         formation.UpgradeProtocolToLatest tier1
+        formation.UpgradeMaxTxSize tier1 1000000
 
         formation.RunLoadgen sdf context.GenerateAccountCreationLoad
         formation.RunLoadgen sdf context.GeneratePaymentLoad
