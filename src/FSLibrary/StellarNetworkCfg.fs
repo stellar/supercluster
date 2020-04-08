@@ -138,7 +138,8 @@ type NetworkCfg =
       quotas: NetworkQuotas
       logLevels: LogLevels
       storageClass: string
-      ingressDomain : string }
+      ingressDomain : string
+      exportToPrometheus: bool }
 
     member self.FindCoreSet (n:CoreSetName) : CoreSet =
         Map.find n self.coreSets
@@ -207,6 +208,7 @@ let MakeNetworkCfg
         (logLevels: LogLevels)
         (storageClass: string)
         (ingressDomain: string)
+        (exportToPrometheus: bool)
         (passphrase: NetworkPassphrase option) : NetworkCfg =
     let nonce = MakeNetworkNonce()
     { networkNonce = nonce
@@ -219,4 +221,5 @@ let MakeNetworkCfg
       quotas = quotas
       logLevels = logLevels
       storageClass = storageClass
-      ingressDomain = ingressDomain }
+      ingressDomain = ingressDomain
+      exportToPrometheus = exportToPrometheus }

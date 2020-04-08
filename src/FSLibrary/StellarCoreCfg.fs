@@ -16,6 +16,7 @@ open StellarShellCmd
 // paths, labels, etc.
 module CfgVal =
     let httpPort = 11626
+    let prometheusExporterPort = 9473
     let labels = Map.ofSeq [ "app", "stellar-core" ]
     let labelSelector = "app = stellar-core"
     let stellarCoreBinPath = "stellar-core"

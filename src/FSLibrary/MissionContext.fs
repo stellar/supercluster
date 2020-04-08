@@ -35,6 +35,7 @@ type MissionContext =
       quotas: NetworkQuotas
       logLevels: LogLevels
       ingressDomain : string
+      exportToPrometheus : bool
       storageClass : string
       namespaceProperty : string
       keepData : bool
@@ -47,7 +48,9 @@ type MissionContext =
                 self.quotas
                 self.logLevels
                 self.storageClass
-                self.ingressDomain passphrase
+                self.ingressDomain
+                self.exportToPrometheus
+                passphrase
         self.kube.MakeFormation networkCfg self.keepData self.probeTimeout
 
     member self.MakeFormationForJob (opts:CoreSetOptions option) (passphrase: NetworkPassphrase option) : StellarFormation =
@@ -57,7 +60,9 @@ type MissionContext =
                 self.quotas
                 self.logLevels
                 self.storageClass
-                self.ingressDomain passphrase
+                self.ingressDomain
+                self.exportToPrometheus
+                passphrase
         let networkCfg = { networkCfg with jobCoreSetOptions = opts }
         self.kube.MakeFormation networkCfg self.keepData self.probeTimeout
 

@@ -184,6 +184,9 @@ type Kubernetes with
             for statefulSet in statefulSets do
                 namespaceContent.Add(statefulSet)
 
+            if nCfg.exportToPrometheus
+            then LogInfo "Core metrics will be exported to prometheus"
+
             for svc in nCfg.ToPerPodServices() do
                 LogInfo "Creating Per-Pod Service %s" svc.Metadata.Name
                 let service = self.CreateNamespacedService(namespaceParameter = nsStr,
