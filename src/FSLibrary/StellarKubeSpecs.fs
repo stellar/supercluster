@@ -4,6 +4,7 @@
 
 module StellarKubeSpecs
 
+open StellarCoreCfg
 open k8s.Models
 
 open StellarNetworkCfg
@@ -83,6 +84,13 @@ let PostgresContainer (q:NetworkQuotas) (numContainers:int) =
          image = "postgres:9.5",
          resources = resourceRequirements q numContainers,
          volumeMounts = PgContainerVolumeMounts)
+
+let PrometheusExporterSidecarContainer (q:NetworkQuotas) (numContainers:int) =
+    V1Container(name = "prom-exp",
+                ports = [| V1ContainerPort(containerPort = CfgVal.prometheusExporterPort,
+                                           name = "prom-exp") |],
+                image = "stellar/stellar-core-prometheus-exporter:latest",
+                resources = resourceRequirements q numContainers)
 
 let cfgFileArgs (configOpt:ConfigOption) : ShWord array =
     match configOpt with
@@ -311,10 +319,12 @@ type NetworkCfg with
             | 0 -> runCmd
             | _ -> Array.append runCmd [| "--simulate-apply-per-op"; coreSet.options.simulateApplyUsec.ToString() |]
 
-        let containersPerPod =
-            match coreSet.options.dbType with
-                | Postgres -> 3 // core, history and postgres
-                | _ -> 2        // just core and history
+        let usePostgres = (coreSet.options.dbType = Postgres)
+        let numBaseContainers = 2 // core and history
+        let numPrometheusContainers = if self.exportToPrometheus then 1 else 0
+        let numPostgresContainers = if usePostgres then 1 else 0
+        let containersPerPod = numBaseContainers + numPrometheusContainers + numPostgresContainers
+
         let numContainers = maxPeers * containersPerPod
         let containers = [| WithLivenessProbe
                                 (CoreContainerForCommand self.quotas imageName numContainers
@@ -322,9 +332,13 @@ type NetworkCfg with
                                 probeTimeout;
                             HistoryContainer self.quotas numContainers; |]
         let containers =
-            match coreSet.options.dbType with
-                | Postgres -> Array.append containers [| PostgresContainer self.quotas numContainers |]
-                | _ -> containers
+            if usePostgres
+            then Array.append containers [| PostgresContainer self.quotas numContainers |]
+            else containers
+        let containers =
+            if self.exportToPrometheus
+            then Array.append containers [| PrometheusExporterSidecarContainer self.quotas numContainers |]
+            else containers
         assert(containersPerPod = containers.Length)
         let podSpec =
             V1PodSpec
@@ -376,12 +390,17 @@ type NetworkCfg with
         let perPodService (coreSet: CoreSet) i =
             let name = self.PeerShortName coreSet i
             let dnsName = self.PeerDnsName coreSet i
+            let ports = [|V1ServicePort(name = "core",
+                                        port = CfgVal.httpPort);
+                          V1ServicePort(name = "history",
+                                        port = 80)|]
+            let ports =
+                if self.exportToPrometheus
+                then Array.append ports [| V1ServicePort( name = "prom-exp",
+                                                          port = CfgVal.prometheusExporterPort) |]
+                else ports
             let spec = V1ServiceSpec(``type`` = "ExternalName",
-                                     ports =
-                                      [|V1ServicePort(name = "core",
-                                                      port = CfgVal.httpPort);
-                                        V1ServicePort(name = "history",
-                                                      port = 80)|],
+                                     ports = ports,
                                      externalName = dnsName.StringName)
             V1Service(metadata = self.NamespacedMeta name.StringName, spec = spec)
         self.MapAllPeers perPodService

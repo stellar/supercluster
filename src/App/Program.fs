@@ -36,6 +36,7 @@ type CommonOptions(kubeConfig: string,
                    numConcurrentMissions: int,
                    namespaceProperty: string option,
                    ingressDomain: string,
+                   exportToPrometheus: bool,
                    probeTimeout: int,
                    image: string) =
 
@@ -79,6 +80,9 @@ type CommonOptions(kubeConfig: string,
              Required = false, Default = "local")>]
     member self.IngressDomain = ingressDomain
 
+    [<Option("export-to-prometheus", HelpText="Whether to export core metrics to prometheus")>]
+    member self.ExportToPrometheus : bool = exportToPrometheus
+
     [<Option("probe-timeout", HelpText="Timeout for liveness probe",
              Required = false, Default = 5)>]
     member self.ProbeTimeout = probeTimeout
@@ -99,6 +103,7 @@ type SetupOptions(kubeConfig: string,
                   numConcurrentMissions: int,
                   namespaceProperty: string option,
                   ingressDomain: string,
+                  exportToPrometheus: bool,
                   probeTimeout: int,
                   image: string) =
     inherit CommonOptions(kubeConfig,
@@ -111,6 +116,7 @@ type SetupOptions(kubeConfig: string,
                           numConcurrentMissions,
                           namespaceProperty,
                           ingressDomain,
+                          exportToPrometheus,
                           probeTimeout,
                           image)
 
@@ -126,6 +132,7 @@ type CleanOptions(kubeConfig: string,
                   numConcurrentMissions: int,
                   namespaceProperty: string option,
                   ingressDomain: string,
+                  exportToPrometheus: bool,
                   probeTimeout: int,
                   image: string) =
     inherit CommonOptions(kubeConfig,
@@ -138,6 +145,7 @@ type CleanOptions(kubeConfig: string,
                           numConcurrentMissions,
                           namespaceProperty,
                           ingressDomain,
+                          exportToPrometheus,
                           probeTimeout,
                           image)
 
@@ -153,6 +161,7 @@ type LoadgenOptions(kubeConfig: string,
                     numConcurrentMissions: int,
                     namespaceProperty: string option,
                     ingressDomain: string,
+                    exportToPrometheus: bool,
                     probeTimeout: int,
                     image: string) =
     inherit CommonOptions(kubeConfig,
@@ -165,6 +174,7 @@ type LoadgenOptions(kubeConfig: string,
                           numConcurrentMissions,
                           namespaceProperty,
                           ingressDomain,
+                          exportToPrometheus,
                           probeTimeout,
                           image)
 
@@ -179,6 +189,7 @@ type MissionOptions(kubeConfig: string,
                     numConcurrentMissions: int,
                     namespaceProperty: string option,
                     ingressDomain: string,
+                    exportToPrometheus: bool,
                     probeTimeout: int,
                     missions: string seq,
                     destination: string,
@@ -224,6 +235,9 @@ type MissionOptions(kubeConfig: string,
     [<Option("ingress-domain", HelpText="Domain in which to configure ingress host",
              Required = false, Default = "local")>]
     member self.IngressDomain = ingressDomain
+
+    [<Option("export-to-prometheus", HelpText="Whether to export core metrics to prometheus")>]
+    member self.ExportToPrometheus : bool = exportToPrometheus
 
     [<Option("probe-timeout", HelpText="Timeout for liveness probe",
              Required = false, Default = 5)>]
@@ -316,7 +330,7 @@ let main argv =
                  LogTracePartitions = List.ofSeq setup.LogTracePartitions }
       let sc = setup.StorageClass
       let nCfg = MakeNetworkCfg [coreSet] ns nq ll sc
-                                setup.IngressDomain None
+                                setup.IngressDomain setup.ExportToPrometheus None
       use formation = kube.MakeFormation nCfg false setup.ProbeTimeout
       formation.ReportStatus()
       0
@@ -335,7 +349,7 @@ let main argv =
                  LogTracePartitions = List.ofSeq clean.LogTracePartitions }
       let sc = clean.StorageClass
       let nCfg = MakeNetworkCfg [] ns nq ll sc
-                                clean.IngressDomain None
+                                clean.IngressDomain clean.ExportToPrometheus None
       use formation = kube.MakeEmptyFormation nCfg
       formation.CleanNamespace()
       0
@@ -355,7 +369,7 @@ let main argv =
                  LogTracePartitions = List.ofSeq loadgen.LogTracePartitions }
       let sc = loadgen.StorageClass
       let nCfg = MakeNetworkCfg [coreSet] ns nq ll sc
-                                loadgen.IngressDomain None
+                                loadgen.IngressDomain loadgen.ExportToPrometheus None
       use formation = kube.MakeFormation nCfg false loadgen.ProbeTimeout
       formation.RunLoadgenAndCheckNoErrors coreSet
       formation.ReportStatus()
@@ -406,6 +420,7 @@ let main argv =
                                                quotas = nq
                                                logLevels = ll
                                                ingressDomain = mission.IngressDomain
+                                               exportToPrometheus = mission.ExportToPrometheus
                                                storageClass = mission.StorageClass
                                                namespaceProperty = ns
                                                keepData = mission.KeepData

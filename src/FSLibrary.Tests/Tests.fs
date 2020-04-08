@@ -26,7 +26,8 @@ let loglevels = { LogDebugPartitions=[]; LogTracePartitions=[] }
 let nameSpace = "stellar-supercluster"
 let storageclass = "default"
 let ingress = "local"
-let nCfg = MakeNetworkCfg [coreSet] nameSpace quotas loglevels storageclass ingress None
+let exportToPrometheus = false
+let nCfg = MakeNetworkCfg [coreSet] nameSpace quotas loglevels storageclass ingress exportToPrometheus None
 
 type Tests(output:ITestOutputHelper) =
 
@@ -78,7 +79,7 @@ type Tests(output:ITestOutputHelper) =
     [<Fact>]
     member __.``Public network conversion looks reasonable`` () =
         let coreSets = FullPubnetCoreSets "stellar/stellar-core"
-        let nCfg = MakeNetworkCfg coreSets nameSpace quotas loglevels storageclass ingress None
+        let nCfg = MakeNetworkCfg coreSets nameSpace quotas loglevels storageclass ingress false None
         let sdfCoreSetName = CoreSetName "www-stellar-org"
         Assert.Contains(coreSets, fun cs -> cs.name = sdfCoreSetName)
         let sdfCoreSet = List.find (fun cs -> cs.name = sdfCoreSetName) coreSets
