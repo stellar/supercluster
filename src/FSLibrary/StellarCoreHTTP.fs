@@ -19,11 +19,11 @@ open StellarCorePeer
 // FSharp.Data.JsonProvider<> takes a sample of some JSON you want to load and
 // infers a static type for it.
 
-type Metrics = JsonProvider<"json-type-samples/sample-metrics.json", SampleIsList=true>
-type Info = JsonProvider<"json-type-samples/sample-info.json", SampleIsList=true>
-type TestAcc = JsonProvider<"json-type-samples/sample-testacc.json", SampleIsList=true>
-type Tx = JsonProvider<"json-type-samples/sample-tx.json", SampleIsList=true>
-type PerformanceCsv = CsvProvider<"csv-type-samples/sample-performance.csv", HasHeaders=true>
+type Metrics = JsonProvider<"json-type-samples/sample-metrics.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
+type Info = JsonProvider<"json-type-samples/sample-info.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
+type TestAcc = JsonProvider<"json-type-samples/sample-testacc.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
+type Tx = JsonProvider<"json-type-samples/sample-tx.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
+type PerformanceCsv = CsvProvider<"csv-type-samples/sample-performance.csv", HasHeaders=true, ResolutionFolder=__SOURCE_DIRECTORY__>
 
 
 type LoadGenMode =
@@ -111,7 +111,7 @@ type Peer with
     member self.URL (path:string) : string =
         sprintf "http://%s/%s/core/%s"
             self.networkCfg.IngressHostName
-            self.ShortName
+            self.ShortName.StringName
             path
 
     member self.GetState() =
@@ -172,7 +172,7 @@ type Peer with
         RetryUntilTrue
             (fun _ -> self.GetLedgerNum() >= n)
             (fun _ -> LogInfo "Waiting for ledger %d on %s: %s"
-                              n self.ShortName (self.GetStatusOrState()))
+                              n self.ShortName.StringName (self.GetStatusOrState()))
 
     member self.WaitForFewLedgers (count:int) =
         self.WaitForLedgerNum (self.GetLedgerNum() + count)
@@ -191,7 +191,7 @@ type Peer with
         if includeTxInternalErrors
         then raiseIfNonzero m.LedgerTransactionInternalError.Count
                  "ledger.transaction.internal-error"
-        LogInfo "No errors found on %s" self.ShortName
+        LogInfo "No errors found on %s" self.ShortName.StringName
 
     member self.CheckConsistencyWith (other:Peer) =
         let shortHash (v:string) : string = v.Remove 6
@@ -206,11 +206,11 @@ type Peer with
                                 | None -> false
                                 | Some w when v = w ->
                                     LogInfo "found agreeing ledger %d = %s on %s and %s"
-                                        k (shortHash v) self.ShortName other.ShortName
+                                        k (shortHash v) self.ShortName.StringName other.ShortName.StringName
                                     true
                                 | Some w ->
                                     LogError "Inconsistent peers: ledger %d = %s on %s and %s on %s"
-                                       k (shortHash v) self.ShortName (shortHash w) other.ShortName
+                                       k (shortHash v) self.ShortName.StringName (shortHash w) other.ShortName.StringName
                                     raise (InconsistentPeersException (self, other))
                     end
                         ours
@@ -256,7 +256,6 @@ type Peer with
             (fun _ -> LogWarn "Waiting for account %s to exist, to read seqnum" accName)
 
     member self.GenerateLoad (loadGen: LoadGen) : string =
-        let m = self.GetMetrics
         WebExceptionRetry DefaultRetry
             (fun _ -> Http.RequestString(httpMethod="GET",
                                          url=self.URL "generateload",
@@ -293,7 +292,7 @@ type Peer with
             (fun _ ->
                 if self.GetState() <> "Synced!"
                 then
-                    (NodeLostSyncException self.ShortName) |> raise
+                    (NodeLostSyncException self.ShortName.StringName) |> raise
 
                 let m = self.GetMetrics()
                 if (MeterCountOr 0 m.LoadgenRunFailed) <> 0
@@ -314,7 +313,7 @@ type Peer with
                 )
             (fun _ ->
                 LogInfo "Waiting until %s is ready: %s"
-                    self.ShortName (self.GetStatusOrState()))
+                    self.ShortName.StringName (self.GetStatusOrState()))
 
     member self.WaitUntilSynced() =
         RetryUntilTrue
@@ -323,7 +322,7 @@ type Peer with
                 )
             (fun _ ->
                 LogInfo "Waiting until %s is synced: %s"
-                    self.ShortName (self.GetStatusOrState()))
+                    self.ShortName.StringName (self.GetStatusOrState()))
 
 let ReportAllPeerStatus (nCfg:NetworkCfg) =
     nCfg.EachPeer
@@ -332,6 +331,6 @@ let ReportAllPeerStatus (nCfg:NetworkCfg) =
             let info = p.GetInfo()
             let metrics = p.GetMetrics()
             LogInfo "Peer '%s' startedOn '%s', state '%s', overlay reading %.1f bytes/sec"
-                      p.ShortName (info.StartedOn.ToString())
+                      p.ShortName.StringName (info.StartedOn.ToString())
                       info.State metrics.OverlayByteRead.MeanRate
         end

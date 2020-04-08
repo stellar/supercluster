@@ -6,6 +6,7 @@ module StellarPerformanceReporter
 
 open StellarCoreHTTP
 open StellarCorePeer
+open StellarCoreSet
 open StellarDestination
 open StellarNetworkCfg
 open System
@@ -108,7 +109,7 @@ type PerformanceRow =
 
 type PerformanceReporter(networkCfg: NetworkCfg) =
     let networkCfg = networkCfg
-    let mutable data: Map<string, List<PerformanceRow>> = Map.empty
+    let mutable data: Map<PeerShortName, List<PerformanceRow>> = Map.empty
 
     member self.GetPerformanceMetrics (p: Peer) (loadGen: LoadGen) =
         let metrics = p.GetMetrics()
@@ -153,6 +154,6 @@ type PerformanceReporter(networkCfg: NetworkCfg) =
             if data.ContainsKey name
             then
                 let csv = new PerformanceCsv(data.[name] |> (Seq.map toCsvRow) |> Seq.toList)
-                destination.WriteString ns (sprintf "%s.perf" name) (csv.SaveToString('\t'))
+                destination.WriteString ns (sprintf "%s.perf" name.StringName) (csv.SaveToString('\t'))
 
         networkCfg.EachPeer (dumpPeerPerformanceMetrics destination networkCfg.NamespaceProperty)

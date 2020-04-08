@@ -28,6 +28,7 @@ open MissionProtocolUpgradeTestnet
 open MissionProtocolUpgradePubnet
 open MissionDatabaseInplaceUpgrade
 open MissionAcceptanceUnitTests
+open MissionSimulatePubnet
 open StellarMissionContext
 
 type Mission = (MissionContext -> unit)
@@ -59,4 +60,5 @@ let allMissions : Map<string, Mission> =
         ("ProtocolUpgradePubnet", protocolUpgradePubnet)
         ("DatabaseInplaceUpgrade", databaseInplaceUpgrade)
         ("AcceptanceUnitTests", acceptanceUnitTests)
+        ("SimulatePubnet", simulatePubnet)
     |]

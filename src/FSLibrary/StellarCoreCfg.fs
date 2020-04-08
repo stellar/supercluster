@@ -7,6 +7,7 @@ module StellarCoreCfg
 open stellar_dotnet_sdk
 open Nett
 
+open System.Text.RegularExpressions
 open StellarCoreSet
 open StellarNetworkCfg
 open StellarShellCmd
@@ -55,10 +56,18 @@ module CfgVal =
     // to transfer files from one peer to another over HTTP via nginx + curl
     let databaseBackupPath = historyPath + "/stellar-backup.db"
     let bucketsBackupPath = historyPath + "/buckets.tar.gz"
-    let databaseBackupURL (host:string) = "http://" + host + "/stellar-backup.db"
-    let bucketsBackupURL (host:string) = "http://" + host + "/buckets.tar.gz"
+    let databaseBackupURL (host:PeerDnsName) = "http://" + host.StringName + "/stellar-backup.db"
+    let bucketsBackupURL (host:PeerDnsName) = "http://" + host.StringName + "/buckets.tar.gz"
     let bucketsDownloadPath = dataVolumePath + "/buckets.tar.gz"
 
+// This is the formula stellar-core uses to calculate a threshold from
+// a percent.
+let thresholdOfPercent (sz:int) (pct:int) : int =
+    1 + (((sz * pct) - 1) / 100)
+
+// And this is (hopefully) its inverse!
+let percentOfThreshold (sz:int) (thr:int) : int =
+    1 + ((100 * (thr - 1)) / sz)
 
 // Symbolic type of the different sorts of DATABASE that can show up in a
 // stellar-core.cfg. Usually use SQLite3File of some path in a Pod's local
@@ -73,6 +82,12 @@ type DatabaseURL =
         | SQLite3File s -> sprintf "sqlite3://%s" s
         | PostgreSQL(d, u, p, h) -> sprintf "postgresql://dbname=%s user=%s password=%s host=%s" d u p h
 
+let curlGetCmd (uri:System.Uri) : string =
+    sprintf "curl -sf %s/{0} -o {1}" (uri.ToString())
+
+let curlGetCmdFromPeer (peer:PeerDnsName) : string =
+    curlGetCmd (System.UriBuilder("http", peer.StringName).Uri)
+
 // Represents the contents of a stellar-core.cfg file, along with method to
 // write it out to TOML.
 type StellarCoreCfg =
@@ -82,7 +97,7 @@ type StellarCoreCfg =
       nodeSeed : KeyPair
       nodeIsValidator : bool
       runStandalone : bool
-      preferredPeers : string list
+      preferredPeers : PeerDnsName list
       catchupMode: CatchupMode
       automaticMaintenancePeriod: int
       automaticMaintenanceCount: int
@@ -92,9 +107,9 @@ type StellarCoreCfg =
       invariantChecks: string list
       unsafeQuorum : bool
       failureSafety : int
-      quorumSet : Map<string, KeyPair>
-      historyNodes : Map<string, string>
-      historyGetCommands : Map<string, string>
+      quorumSet : QuorumSet
+      historyNodes : Map<PeerShortName, PeerDnsName>
+      historyGetCommands : Map<PeerShortName, string>
       localHistory: bool
       fullyConnected: bool
       maxSlotsToRemember: int
@@ -104,17 +119,12 @@ type StellarCoreCfg =
     member self.ToTOML() : TomlTable =
         let t = Toml.Create()
 
-        let qset =
-            self.quorumSet
-            |> Map.toList
-            |> List.map (fun (k, v) -> sprintf "%s %s" v.Address k)
-
         let hist =
             Map.ofSeq [| ("get", sprintf "cp %s/{0} {1}" CfgVal.historyPath)
                          ("put", sprintf "cp {0} %s/{1}" CfgVal.historyPath)
                          ("mkdir", sprintf "mkdir -p %s/{0}" CfgVal.historyPath) |]
-        let remoteHist dnsName =
-            Map.ofSeq [| ("get", sprintf "curl -sf http://%s/{0} -o {1}" dnsName) |]
+        let remoteHist (dnsName:PeerDnsName) =
+            Map.ofSeq [| ("get", curlGetCmdFromPeer dnsName) |]
         let getHist getCommand =
             Map.ofSeq [| ("get", getCommand) |]
 
@@ -129,6 +139,7 @@ type StellarCoreCfg =
                 self.network.logLevels.LogTracePartitions
 
         let logLevelCommands = List.append debugLevelCommands traceLevelCommands
+        let preferredPeers = List.map (fun (x:PeerDnsName) -> x.StringName) self.preferredPeers
 
         t.Add("DATABASE", self.database.ToString()) |> ignore
         t.Add("HTTP_PORT", int64(CfgVal.httpPort)) |> ignore
@@ -138,7 +149,7 @@ type StellarCoreCfg =
         t.Add("NODE_SEED", self.nodeSeed.SecretSeed) |> ignore
         t.Add("NODE_IS_VALIDATOR", self.nodeIsValidator) |> ignore
         t.Add("RUN_STANDALONE", self.runStandalone) |> ignore
-        t.Add("PREFERRED_PEERS", self.preferredPeers) |> ignore
+        t.Add("PREFERRED_PEERS", preferredPeers) |> ignore
         t.Add("COMMANDS", logLevelCommands) |> ignore
         t.Add("CATCHUP_COMPLETE", self.catchupMode = CatchupComplete) |> ignore
         t.Add("CATCHUP_RECENT",
@@ -165,17 +176,38 @@ type StellarCoreCfg =
         t.Add("INVARIANT_CHECKS", self.invariantChecks) |> ignore
         t.Add("UNSAFE_QUORUM", self.unsafeQuorum) |> ignore
         t.Add("FAILURE_SAFETY", self.failureSafety) |> ignore
-        t.Add("QUORUM_SET", Map.ofSeq [| ("VALIDATORS", qset) |]) |> ignore
+
+        // Add tables (and subtables, recursively) for qsets.
+        let rec addQsetAt (label:string) (qs:QuorumSet) =
+            let validators : string array =
+                Map.toArray qs.validators
+                    |> Array.map (fun ((n:PeerShortName), (k:KeyPair)) ->
+                                     sprintf "%s %s" k.Address n.StringName)
+            let innerTab = t.Add(label, Toml.Create(), TomlObjectFactory.RequireTomlObject()).Added
+            innerTab.Add("VALIDATORS", validators) |> ignore
+            match qs.thresholdPercent with
+            | None -> ()
+            | Some(pct) -> innerTab.Add("THRESHOLD_PERCENT", pct) |> ignore
+            Array.iteri
+                (fun (i:int) (qs:QuorumSet) -> addQsetAt (sprintf "%s.sub%d" label i) qs)
+                qs.innerQuorumSets
+        addQsetAt "QUORUM_SET" self.quorumSet
+
         let localTab = t.Add("HISTORY", Toml.Create(), TomlObjectFactory.RequireTomlObject()).Added
         if self.localHistory
         then localTab.Add(CfgVal.localHistName, hist) |> ignore
         for historyNode in self.historyNodes do
-            localTab.Add(historyNode.Key, remoteHist historyNode.Value) |> ignore
+            localTab.Add(historyNode.Key.StringName, remoteHist historyNode.Value) |> ignore
         for historyGetCommand in self.historyGetCommands do
-            localTab.Add(historyGetCommand.Key, getHist historyGetCommand.Value) |> ignore
+            localTab.Add(historyGetCommand.Key.StringName, getHist historyGetCommand.Value) |> ignore
         t
 
-    override self.ToString() : string = self.ToTOML().ToString()
+    override self.ToString() : string =
+        // Unfortunately Nett mis-quotes dotted keys -- it'll write out keys
+        // like ['QUORUM_SET.sub1'] which should be ['QUORUM_SET'.'sub1'] or
+        // just [QUORUM_SET.sub1] -- so we manually unquote these here. Sigh.
+        let nettStr = self.ToTOML().ToString()
+        Regex.Replace(nettStr, @"^\['([a-zA-Z0-9_\-\.]+)'\]$", "[$1]", RegexOptions.Multiline)
 
 // Extension to the NetworkCfg type to make StellarCoreCfg objects
 // for each of its peers. This just creates a default; if you want
@@ -184,59 +216,61 @@ type StellarCoreCfg =
 type NetworkCfg with
 
     // Returns a map containing all (shortname, keypair) pairs of a given CoreSet.
-    member self.GetNameKeyList (coreSet: CoreSet) : (string * KeyPair) array =
+    member self.GetNameKeyList (coreSet: CoreSet) : (PeerShortName * KeyPair) array =
         let map = Array.mapi (fun i k -> (self.PeerShortName coreSet i, k))
         map coreSet.keys
 
     // Returns a map containing the union of all (shortname, keypair) pairs of all
     // named CoreSets listed in the `coreSetNames` argument.
-    member self.GetNameKeyList (coreSetNames: string list) : (string * KeyPair) array =
+    member self.GetNameKeyList (coreSetNames: CoreSetName list) : (PeerShortName * KeyPair) array =
         List.map (self.FindCoreSet >> self.GetNameKeyList) coreSetNames |> Array.concat
 
     // Returns an array of all (shortname, keypair) pairs of all CoreSets.
-    member self.GetNameKeyListAll() : (string * KeyPair) array =
+    member self.GetNameKeyListAll() : (PeerShortName * KeyPair) array =
         List.map self.GetNameKeyList self.CoreSetList |> Array.concat
 
     // Returns an array of all (shortname, dnsname) pairs of a given CoreSet.
-    member self.DnsNamesWithKey(coreSet: CoreSet) : (string * string) array =
-        let map = Array.mapi (fun i k -> (self.PeerShortName coreSet i, self.PeerDNSName coreSet i))
+    member self.DnsNamesWithKey(coreSet: CoreSet) : (PeerShortName * PeerDnsName) array =
+        let map = Array.mapi (fun i k -> (self.PeerShortName coreSet i, self.PeerDnsName coreSet i))
         map coreSet.keys
 
     // Returns an array of all (shortname, dnsname) pairs of all named CoreSets
     // listed in the `coreSetNames` argument.
-    member self.DnsNamesWithKey(coreSetNames:string list) : (string * string) array =
+    member self.DnsNamesWithKey(coreSetNames:CoreSetName list) : (PeerShortName * PeerDnsName) array =
         List.map (self.FindCoreSet >> self.DnsNamesWithKey) coreSetNames |> Array.concat
 
     // Returns an array of all (shortname, dnsname) pairs of all CoreSets.
-    member self.DnsNamesWithKey() : (string * string) array =
+    member self.DnsNamesWithKey() : (PeerShortName * PeerDnsName) array =
         List.map self.DnsNamesWithKey self.CoreSetList |> Array.concat
 
     // Returns an array of dnsnames of a given CoreSet.
-    member self.DnsNames(coreSet: CoreSet) : string array =
-        let map = Array.mapi (fun i k -> (self.PeerDNSName coreSet i))
+    member self.DnsNames(coreSet: CoreSet) : PeerDnsName array =
+        let map = Array.mapi (fun i k -> (self.PeerDnsName coreSet i))
         map coreSet.keys
 
     // Returns an array of dnsnames of all named Coresets listed in the
     // `coreSetNames` argument.
-    member self.DnsNames(coreSetNames:string list) : string array =
+    member self.DnsNames(coreSetNames:CoreSetName list) : PeerDnsName array =
         List.map (self.FindCoreSet >> self.DnsNames) coreSetNames |> Array.concat
 
     // Returns an array of dnsnames of all Coresets.
-    member self.DnsNames() : string array =
+    member self.DnsNames() : PeerDnsName array =
         List.map self.DnsNames self.CoreSetList |> Array.concat
 
-    member self.QuorumSet(o: CoreSetOptions) : Map<string, KeyPair> =
-        let fromQuorumSet =
-            match o.quorumSet with
-            | None -> self.GetNameKeyListAll()
-            | Some(x) -> self.GetNameKeyList(x)
+    member self.QuorumSet(o: CoreSetOptions) : QuorumSet =
+        let ofNameKeyList (nks:(PeerShortName * KeyPair) array) : QuorumSet =
+            { thresholdPercent = None
+              validators = Map.ofArray nks
+              innerQuorumSets = [||] }
+        match o.quorumSet with
+            | AllPeersQuorum -> ofNameKeyList (self.GetNameKeyListAll())
+            | CoreSetQuorum(ns) -> ofNameKeyList (self.GetNameKeyList [ns])
+            | ExplicitQuorum(e) -> e
 
-        List.concat [fromQuorumSet |> List.ofArray; o.quorumSetKeys |> Map.toList] |> Map.ofList
-
-    member self.HistoryNodes(o: CoreSetOptions) : Map<string, string> =
+    member self.HistoryNodes(o: CoreSetOptions) : Map<PeerShortName, PeerDnsName> =
         match o.historyNodes, o.quorumSet with
-        | None, None -> self.DnsNamesWithKey() |> Map.ofArray
-        | None, Some(x) -> self.DnsNamesWithKey(x) |> Map.ofArray
+        | None, CoreSetQuorum(x) -> self.DnsNamesWithKey([x]) |> Map.ofArray
+        | None, _ -> self.DnsNamesWithKey() |> Map.ofArray
         | Some(x), _ -> self.DnsNamesWithKey(x) |> Map.ofArray
 
     member self.PreferredPeers(o: CoreSetOptions) =

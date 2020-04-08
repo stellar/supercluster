@@ -133,14 +133,14 @@ type NetworkCfg =
     { networkNonce : NetworkNonce
       networkPassphrase : NetworkPassphrase
       namespaceProperty : string
-      coreSets : Map<string,CoreSet>
+      coreSets : Map<CoreSetName,CoreSet>
       jobCoreSetOptions : CoreSetOptions option
       quotas: NetworkQuotas
       logLevels: LogLevels
       storageClass: string
       ingressDomain : string }
 
-    member self.FindCoreSet (n:string) : CoreSet =
+    member self.FindCoreSet (n:CoreSetName) : CoreSet =
         Map.find n self.coreSets
 
     member self.Nonce : string =
@@ -160,11 +160,11 @@ type NetworkCfg =
     member self.CoreSetList : CoreSet list =
         Map.toList self.coreSets |> List.map (fun (_, v) -> v)
 
-    member self.PeerSetName (cs:CoreSet) : string =
-        sprintf "%s-peer-%s" self.Nonce cs.name
+    member self.StatefulSetName (cs:CoreSet) : string =
+        sprintf "%s-sts-%s" self.Nonce cs.name.StringName
 
-    member self.PeerShortName (cs:CoreSet) (n:int) : string =
-        sprintf "%s-%d" (self.PeerSetName cs) n
+    member self.PeerShortName (cs:CoreSet) (n:int) : PeerShortName =
+        PeerShortName (sprintf "%s-%d" (self.StatefulSetName cs) n)
 
     member self.ServiceName : string =
         sprintf "%s-stellar-core" self.Nonce
@@ -176,7 +176,7 @@ type NetworkCfg =
         sprintf "%s-stellar-core-job-%d" self.Nonce i
 
     member self.PeerCfgMapName (cs:CoreSet) (i:int) : string =
-        sprintf "%s-cfg-map" (self.PeerShortName cs i)
+        sprintf "%s-cfg-map" (self.PeerShortName cs i).StringName
 
     member self.JobCfgMapName : string =
         sprintf "%s-job-cfg-map" self.Nonce
@@ -184,11 +184,12 @@ type NetworkCfg =
     member self.HistoryCfgMapName : string =
         sprintf "%s-history-cfg-map" self.Nonce
 
-    member self.PeerDNSName (cs:CoreSet) (n:int) : string =
-        sprintf "%s.%s.%s.svc.cluster.local"
-            (self.PeerShortName cs n)
-            self.ServiceName
-            self.namespaceProperty
+    member self.PeerDnsName (cs:CoreSet) (n:int) : PeerDnsName =
+        let s = sprintf "%s.%s.%s.svc.cluster.local"
+                    (self.PeerShortName cs n).StringName
+                    self.ServiceName
+                    self.namespaceProperty
+        PeerDnsName s
 
     member self.IngressHostName : string =
         sprintf "%s.%s" self.Nonce self.ingressDomain

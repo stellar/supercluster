@@ -6,6 +6,30 @@ module StellarCoreSet
 
 open stellar_dotnet_sdk
 
+type PeerDnsName =
+    | PeerDnsName of string
+    member self.StringName =
+        match self with
+        | PeerDnsName(n) -> n
+
+type PeerShortName =
+    | PeerShortName of string
+    member self.StringName =
+        match self with
+        | PeerShortName(n) -> n
+
+type CoreSetName =
+    | CoreSetName of string
+    member self.StringName =
+        match self with
+        | CoreSetName(n) -> n
+
+type HomeDomainName =
+    | HomeDomainName of string
+    member self.StringName =
+        match self with
+        | HomeDomainName(n) -> n
+
 type CatchupMode =
     | CatchupComplete
     | CatchupRecent of int
@@ -20,7 +44,7 @@ type CoreSetInitialization =
       newHist : bool
       initialCatchup : bool
       forceScp : bool
-      fetchDBFromPeer: (string * int) option }
+      fetchDBFromPeer: (CoreSetName * int) option }
 
     static member Default =
       { newDb = true
@@ -57,16 +81,30 @@ type CoreSetInitialization =
         forceScp = false
         fetchDBFromPeer = None }
 
+type GeoLoc = {lat:float; lon:float}
+
+type QuorumSet = {
+    thresholdPercent: int option
+    validators: Map<PeerShortName, KeyPair>
+    innerQuorumSets: QuorumSet array
+}
+
+type QuorumSetSpec =
+    | CoreSetQuorum of CoreSetName
+    | ExplicitQuorum of QuorumSet
+    | AllPeersQuorum
+
 type CoreSetOptions =
     { nodeCount : int
+      nodeLocs : GeoLoc list option
       dbType : DBType
-      quorumSet : string list option
-      quorumSetKeys : Map<string, KeyPair>
-      historyNodes : string list option
-      historyGetCommands : Map<string, string>
+      syncStartupDelay : int option
+      quorumSet : QuorumSetSpec
+      historyNodes : CoreSetName list option
+      historyGetCommands : Map<PeerShortName, string>
       localHistory : bool
-      peers : string list option
-      peersDns : string list
+      peers : CoreSetName list option
+      peersDns : PeerDnsName list
       accelerateTime : bool
       unsafeQuorum : bool
       awaitSync : bool
@@ -86,9 +124,10 @@ type CoreSetOptions =
 
     static member GetDefault(image: string) =
       { nodeCount = 3
+        nodeLocs = None
         dbType = Sqlite
-        quorumSet = None
-        quorumSetKeys = Map.empty
+        syncStartupDelay = None
+        quorumSet = AllPeersQuorum
         historyNodes = None
         historyGetCommands = Map.empty
         localHistory = true
@@ -112,7 +151,7 @@ type CoreSetOptions =
         { self with simulateApplyUsec = simulateApply; initialization = CoreSetInitialization.NoInitCmds }
 
 type CoreSet =
-    { name : string
+    { name : CoreSetName
       options : CoreSetOptions
       keys : KeyPair array
       live : bool }
@@ -131,13 +170,13 @@ type CoreSet =
 
 
 let MakeLiveCoreSet (name: string) (options: CoreSetOptions) : CoreSet =
-    { name = name
+    { name = CoreSetName name
       options = options
       keys = Array.init options.nodeCount (fun _ -> KeyPair.Random())
       live = true }
 
 let MakeDeferredCoreSet (name: string) (options: CoreSetOptions) : CoreSet =
-    { name = name
+    { name = CoreSetName name
       options = options
       keys = Array.init options.nodeCount (fun _ -> KeyPair.Random())
       live = false }

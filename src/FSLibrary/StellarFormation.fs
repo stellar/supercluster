@@ -9,7 +9,6 @@ open k8s.Models
 
 open Logging
 open StellarNetworkCfg
-open StellarCoreCfg
 open StellarCoreSet
 open StellarKubeSpecs
 open StellarCorePeer
@@ -17,7 +16,6 @@ open StellarCoreHTTP
 open StellarTransaction
 open StellarNamespaceContent
 open System
-open Microsoft.Rest
 
 // Typically you want to instantiate one of these per mission / test scenario,
 // and run methods on it. Unlike most other types in this library it's a class
@@ -138,7 +136,7 @@ type StellarFormation(networkCfg: NetworkCfg,
     member self.WithLive name (live: bool) =
         networkCfg <- networkCfg.WithLive name live
         let coreSet = networkCfg.FindCoreSet name
-        let peerSetName = networkCfg.PeerSetName coreSet
+        let peerSetName = networkCfg.StatefulSetName coreSet
         let ss = kube.ReplaceNamespacedStatefulSet(
                    body = networkCfg.ToStatefulSet coreSet probeTimeout,
                    name = peerSetName,

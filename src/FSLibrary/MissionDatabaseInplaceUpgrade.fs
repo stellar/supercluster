@@ -14,16 +14,19 @@ open StellarDataDump
 
 let databaseInplaceUpgrade (context : MissionContext) =
     let context = context.WithNominalLoad
-    let newImage = context.image 
-    let oldImage = GetOrDefault context.oldImage context.image 
+    let newImage = context.image
+    let oldImage = GetOrDefault context.oldImage context.image
 
-    let quorumSet = Some(["core"])
+    let quorumSet = CoreSetQuorum(CoreSetName("core"))
+    let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.GetDefault newImage with quorumSet = quorumSet; }
+
     let beforeUpgradeCoreSet = MakeLiveCoreSet
                                  "before-upgrade"
                                  { CoreSetOptions.GetDefault oldImage with
                                      nodeCount = 1
                                      quorumSet = quorumSet }
-    let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.GetDefault newImage with quorumSet = quorumSet; }
+
+    let fetchFromPeer = Some(CoreSetName("before-upgrade"), 0)
     let afterUpgradeCoreSet = MakeDeferredCoreSet
                                  "after-upgrade"
                                  { CoreSetOptions.GetDefault newImage with
@@ -33,7 +36,7 @@ let databaseInplaceUpgrade (context : MissionContext) =
                                                         newHist = false
                                                         initialCatchup = false
                                                         forceScp = false
-                                                        fetchDBFromPeer = Some("before-upgrade", 0) } }
+                                                        fetchDBFromPeer = fetchFromPeer } }
 
     context.Execute [beforeUpgradeCoreSet; coreSet; afterUpgradeCoreSet] None (fun (formation: StellarFormation) ->
       formation.WaitUntilSynced [beforeUpgradeCoreSet; coreSet]
