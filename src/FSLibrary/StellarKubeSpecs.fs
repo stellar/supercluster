@@ -339,6 +339,10 @@ type NetworkCfg with
             if self.exportToPrometheus
             then Array.append containers [| PrometheusExporterSidecarContainer self.quotas numContainers |]
             else containers
+        let annotations =
+            if self.exportToPrometheus
+            then Map.ofList [("prometheus.io/scrape", "true")]
+            else Map.empty
         assert(containersPerPod = containers.Length)
         let podSpec =
             V1PodSpec
@@ -347,6 +351,7 @@ type NetworkCfg with
         V1PodTemplateSpec
                 (spec = podSpec,
                  metadata = V1ObjectMeta(labels = CfgVal.labels,
+                                         annotations = annotations,
                                          namespaceProperty = self.NamespaceProperty))
 
     // Returns a single "headless" (clusterIP=None) Service with the same name
