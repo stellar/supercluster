@@ -111,7 +111,7 @@ type Peer with
     member self.URL (path:string) : string =
         sprintf "http://%s/%s/core/%s"
             self.networkCfg.IngressHostName
-            self.ShortName.StringName
+            self.PodName.StringName
             path
 
     member self.GetState() =

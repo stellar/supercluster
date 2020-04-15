@@ -136,12 +136,12 @@ type StellarFormation(networkCfg: NetworkCfg,
     member self.WithLive name (live: bool) =
         networkCfg <- networkCfg.WithLive name live
         let coreSet = networkCfg.FindCoreSet name
-        let peerSetName = networkCfg.StatefulSetName coreSet
+        let stsName = networkCfg.StatefulSetName coreSet
         let ss = kube.ReplaceNamespacedStatefulSet(
                    body = networkCfg.ToStatefulSet coreSet probeTimeout,
-                   name = peerSetName,
+                   name = stsName.StringName,
                    namespaceParameter = networkCfg.NamespaceProperty)
-        let newSets = statefulSets |> List.filter (fun x -> x.Metadata.Name <> peerSetName)
+        let newSets = statefulSets |> List.filter (fun x -> x.Metadata.Name <> stsName.StringName)
         statefulSets <- ss :: newSets
         self.WaitForAllReplicasReady ss
 

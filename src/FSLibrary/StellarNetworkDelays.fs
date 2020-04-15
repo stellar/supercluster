@@ -51,7 +51,7 @@ let networkPingInMs (loc1:GeoLoc) (loc2:GeoLoc) : double =
     // A ping is a round trip, so double one-way delay.
     2.0 * (networkDelayInMs loc1 loc2)
 
-let getNetworkDelayCommands (loc1:GeoLoc) (locsAndIps:(PeerShortName * GeoLoc * string) list) : ShCmd array =
+let getNetworkDelayCommands (loc1:GeoLoc) (locsAndIps:(PodName * GeoLoc * string) list) : ShCmd array =
     // Traffic shaping happens using the 'tc' command on linux. This is a
     // complicated command. We build up the commands in pieces.
 
@@ -138,7 +138,7 @@ let getNetworkDelayCommands (loc1:GeoLoc) (locsAndIps:(PeerShortName * GeoLoc * 
 type StellarFormation with
     // Returns a (geoloc, ipaddr) pair for each peer we have a GeoLoc for in any
     // of the provided CoreSets. Return value is for InstallNetworkDelays below.
-    member self.GetPeerLocsAndIps(coreSetList: CoreSet list) : (PeerShortName * GeoLoc * string) list =
+    member self.GetPeerLocsAndIps(coreSetList: CoreSet list) : (PodName * GeoLoc * string) list =
         let ns = self.NetworkCfg.NamespaceProperty
         List.collect
             begin fun (cs:CoreSet) ->
@@ -147,10 +147,10 @@ type StellarFormation with
                 | Some(locs) ->
                     List.mapi
                         begin fun (i:int) (loc:GeoLoc) ->
-                            let shortName = self.NetworkCfg.PeerShortName cs i
-                            let (pod:V1Pod) = self.Kube.ReadNamespacedPod(name = shortName.StringName,
+                            let podName = self.NetworkCfg.PodName cs i
+                            let (pod:V1Pod) = self.Kube.ReadNamespacedPod(name = podName.StringName,
                                                                           namespaceParameter = ns)
-                            (shortName, loc, pod.Status.PodIP)
+                            (podName, loc, pod.Status.PodIP)
                         end
                         locs
             end

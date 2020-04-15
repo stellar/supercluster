@@ -109,7 +109,7 @@ type PerformanceRow =
 
 type PerformanceReporter(networkCfg: NetworkCfg) =
     let networkCfg = networkCfg
-    let mutable data: Map<PeerShortName, List<PerformanceRow>> = Map.empty
+    let mutable data: Map<PodName, List<PerformanceRow>> = Map.empty
 
     member self.GetPerformanceMetrics (p: Peer) (loadGen: LoadGen) =
         let metrics = p.GetMetrics()
@@ -137,20 +137,20 @@ type PerformanceReporter(networkCfg: NetworkCfg) =
         f()
         networkCfg.EachPeer (fun p->
             let metrics = self.GetPerformanceMetrics p loadGen
-            if not (data.ContainsKey(p.ShortName))
+            if not (data.ContainsKey(p.PodName))
             then
-                data <- data.Add(p.ShortName, [])
+                data <- data.Add(p.PodName, [])
             else
                 true |> ignore
-            let newPeerData = List.append data.[p.ShortName] [metrics]
-            data <- Map.add p.ShortName newPeerData data
+            let newPeerData = List.append data.[p.PodName] [metrics]
+            data <- Map.add p.PodName newPeerData data
         )
 
     member self.DumpPerformanceMetrics (destination: Destination) =
         let dumpPeerPerformanceMetrics (destination: Destination) ns (p: Peer) =
             let toCsvRow (x: PerformanceRow) =
                 x.ToCsvRow()
-            let name = p.ShortName
+            let name = p.PodName
             if data.ContainsKey name
             then
                 let csv = new PerformanceCsv(data.[name] |> (Seq.map toCsvRow) |> Seq.toList)

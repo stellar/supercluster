@@ -298,10 +298,10 @@ type NetworkCfg with
     // /data/history, forces SCP on next startup, and runs.
     member self.ToPodTemplateSpec (coreSet: CoreSet) probeTimeout : V1PodTemplateSpec =
         let peerCfgVolumes = self.MapAllPeers (fun cs i ->
-            let peerName = self.PeerShortName cs i
+            let peerName = self.PodName cs i
             V1Volume(name = CfgVal.cfgVolumeName peerName.StringName,
                      configMap = V1ConfigMapVolumeSource(name = self.PeerCfgMapName cs i)))
-        let peerNames = self.MapAllPeers self.PeerShortName |> Array.map (fun x -> x.StringName)
+        let peerNames = self.MapAllPeers self.PodName |> Array.map (fun x -> x.StringName)
         let historyCfgVolume = V1Volume(name = CfgVal.historyCfgVolumeName,
                                         configMap = V1ConfigMapVolumeSource(name = self.HistoryCfgMapName))
         let dataVol = V1Volume(name = CfgVal.dataVolumeName,
@@ -376,7 +376,7 @@ type NetworkCfg with
                  podManagementPolicy = "Parallel",
                  template = self.ToPodTemplateSpec coreSet probeTimeout,
                  replicas = System.Nullable<int>(coreSet.CurrentCount))
-        let statefulSet = V1StatefulSet(metadata = self.NamespacedMeta (self.StatefulSetName coreSet),
+        let statefulSet = V1StatefulSet(metadata = self.NamespacedMeta (self.StatefulSetName coreSet).StringName,
                                         spec = statefulSetSpec)
         statefulSet.Validate() |> ignore
         statefulSet
@@ -393,7 +393,7 @@ type NetworkCfg with
     // do).
     member self.ToPerPodServices () : V1Service array =
         let perPodService (coreSet: CoreSet) i =
-            let name = self.PeerShortName coreSet i
+            let name = self.PodName coreSet i
             let dnsName = self.PeerDnsName coreSet i
             let ports = [|V1ServicePort(name = "core",
                                         port = CfgVal.httpPort);
@@ -433,18 +433,18 @@ type NetworkCfg with
     // cluster.
     member self.ToIngress () : Extensionsv1beta1Ingress =
         let httpPortStr = IntstrIntOrString(value = CfgVal.httpPort.ToString())
-        let coreBackend (pn:PeerShortName) =
+        let coreBackend (pn:PodName) =
             Extensionsv1beta1IngressBackend(serviceName = pn.StringName,
                                             servicePort = httpPortStr)
-        let historyBackend (pn:PeerShortName) : Extensionsv1beta1IngressBackend =
+        let historyBackend (pn:PodName) : Extensionsv1beta1IngressBackend =
             Extensionsv1beta1IngressBackend(serviceName = pn.StringName,
                                             servicePort = IntstrIntOrString(value = "80"))
         let corePath (coreSet: CoreSet) (i:int) : Extensionsv1beta1HTTPIngressPath =
-            let pn = self.PeerShortName coreSet i
+            let pn = self.PodName coreSet i
             Extensionsv1beta1HTTPIngressPath(path = sprintf "/%s/core/" pn.StringName,
                                              backend = coreBackend pn)
         let historyPath (coreSet: CoreSet) (i:int) : Extensionsv1beta1HTTPIngressPath =
-            let pn = self.PeerShortName coreSet i
+            let pn = self.PodName coreSet i
             Extensionsv1beta1HTTPIngressPath(path = sprintf "/%s/history/" pn.StringName,
                                              backend = historyBackend pn)
         let corePaths = self.MapAllPeers corePath

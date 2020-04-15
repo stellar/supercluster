@@ -161,11 +161,14 @@ type NetworkCfg =
     member self.CoreSetList : CoreSet list =
         Map.toList self.coreSets |> List.map (fun (_, v) -> v)
 
-    member self.StatefulSetName (cs:CoreSet) : string =
-        sprintf "%s-sts-%s" self.Nonce cs.name.StringName
+    member self.StatefulSetName (cs:CoreSet) : StatefulSetName =
+        StatefulSetName (sprintf "%s-sts-%s" self.Nonce cs.name.StringName)
+
+    member self.PodName (cs:CoreSet) (n:int) : PodName =
+        PodName (sprintf "%s-%d" (self.StatefulSetName cs).StringName n)
 
     member self.PeerShortName (cs:CoreSet) (n:int) : PeerShortName =
-        PeerShortName (sprintf "%s-%d" (self.StatefulSetName cs) n)
+        PeerShortName (sprintf "%s-%d" cs.name.StringName n)
 
     member self.ServiceName : string =
         sprintf "%s-stellar-core" self.Nonce
@@ -177,7 +180,7 @@ type NetworkCfg =
         sprintf "%s-stellar-core-job-%d" self.Nonce i
 
     member self.PeerCfgMapName (cs:CoreSet) (i:int) : string =
-        sprintf "%s-cfg-map" (self.PeerShortName cs i).StringName
+        sprintf "%s-cfg-map" (self.PodName cs i).StringName
 
     member self.JobCfgMapName : string =
         sprintf "%s-job-cfg-map" self.Nonce
@@ -187,7 +190,7 @@ type NetworkCfg =
 
     member self.PeerDnsName (cs:CoreSet) (n:int) : PeerDnsName =
         let s = sprintf "%s.%s.%s.svc.cluster.local"
-                    (self.PeerShortName cs n).StringName
+                    (self.PodName cs n).StringName
                     self.ServiceName
                     self.namespaceProperty
         PeerDnsName s

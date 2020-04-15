@@ -27,7 +27,7 @@ type StellarFormation with
     // on k8s side (+-based), so any commands with spaces (eg. all the composite ones) will
     // fail. Stdin (over websockets!)is a little more robust.
 
-    member self.RunRemoteCommand(peer: PeerShortName, cmd: ShCmd) : unit =
+    member self.RunRemoteCommand(peer: PodName, cmd: ShCmd) : unit =
         let cmdStr = cmd.ToString()
         let truncated = if cmdStr.Length > 20
                         then cmdStr.Substring(0, 20) + "..."

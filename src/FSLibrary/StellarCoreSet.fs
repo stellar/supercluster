@@ -6,24 +6,53 @@ module StellarCoreSet
 
 open stellar_dotnet_sdk
 
+// A PodName followed by the (nonce-qualified) service DNS suffix for a
+// given network, such as
+// ssc-483463dbb624-sts-www-stellar-org-io-0.ssc-483463dbb624-stellar-core.sandbox.svc.cluster.local
 type PeerDnsName =
     | PeerDnsName of string
     member self.StringName =
         match self with
         | PeerDnsName(n) -> n
 
+// A StatefulSetName followed by a number, such as ssc-483463dbb624-sts-core-0
+// or ssc-483463dbb624-sts-www-stellar-org-2. These are the names that
+// kubernetes will assign to pods in a statefulset as it instantiates the pod
+// template.
+type PodName =
+    | PodName of string
+    member self.StringName =
+        match self with
+        | PodName(n) -> n
+
+// A nonce-qualified CoreSetName like ssc-483463dbb624-sts-www-stellar-org that
+// can be used to identify a statefulset in kubernetes without colliding with
+// others in the namespace.
+type StatefulSetName =
+    | StatefulSetName of string
+    member self.StringName =
+        match self with
+        | StatefulSetName(n) -> n
+
+// A CoreSetName followed by a number, such as core-0 or
+// www-stellar-org-1. Identifies a peer within a statefulset in places that are
+// already qualified (eg. pod labels for use in prometheus time series)
 type PeerShortName =
     | PeerShortName of string
     member self.StringName =
         match self with
         | PeerShortName(n) -> n
 
+// A short symbolic name like "core" or one derived from a HomeDomainName like
+// "www-stellar-org", used in deriving statefulset names.
 type CoreSetName =
     | CoreSetName of string
     member self.StringName =
         match self with
         | CoreSetName(n) -> n
 
+// A name like "www.stellar.org" used in grouping nodes in a qset. Also used to
+// derive CoreSetNames by changing dots to hyphens.
 type HomeDomainName =
     | HomeDomainName of string
     member self.StringName =

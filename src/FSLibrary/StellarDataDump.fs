@@ -21,7 +21,7 @@ open StellarCoreSet
 
 type StellarFormation with
 
-    member self.DumpLogs (destination:Destination) (podName:PeerShortName) (containerName:string) =
+    member self.DumpLogs (destination:Destination) (podName:PodName) (containerName:string) =
         let ns = self.NetworkCfg.NamespaceProperty
         try
             let stream = self.Kube.ReadNamespacedPodLog(name = podName.StringName,
@@ -39,10 +39,10 @@ type StellarFormation with
             let podName = pod.Metadata.Name
             for container in pod.Spec.Containers do
                 let containerName = container.Name
-                self.DumpLogs destination (PeerShortName podName) containerName
+                self.DumpLogs destination (PodName podName) containerName
 
     member self.DumpPeerCommandLogs (destination:Destination) (command:string) (p:Peer) =
-        let podName = self.NetworkCfg.PeerShortName p.coreSet p.peerNum
+        let podName = self.NetworkCfg.PodName p.coreSet p.peerNum
         let containerName = CfgVal.stellarCoreContainerName command
         self.DumpLogs destination podName containerName
 
@@ -55,7 +55,7 @@ type StellarFormation with
 
     member self.BackupDatabaseToHistory (p:Peer) =
         let ns = self.NetworkCfg.NamespaceProperty
-        let name = self.NetworkCfg.PeerShortName p.coreSet p.peerNum
+        let name = self.NetworkCfg.PodName p.coreSet p.peerNum
         let task = self.Kube.NamespacedPodExecAsync(name = name.StringName,
                                                     ``namespace`` = ns,
                                                     command = [|"sqlite3"; CfgVal.databasePath;
@@ -81,7 +81,7 @@ type StellarFormation with
     member self.DumpPeerDatabase (destination : Destination) (p:Peer) =
         try
             let ns = self.NetworkCfg.NamespaceProperty
-            let name = self.NetworkCfg.PeerShortName p.coreSet p.peerNum
+            let name = self.NetworkCfg.PodName p.coreSet p.peerNum
 
             let muxedStream = self.Kube.MuxedStreamNamespacedPodExecAsync(
                                 name = name.StringName,

@@ -18,6 +18,9 @@ type Peer =
     member self.ShortName : PeerShortName =
         self.networkCfg.PeerShortName self.coreSet self.peerNum
 
+    member self.PodName : PodName =
+        self.networkCfg.PodName self.coreSet self.peerNum
+
     member self.DnsName : PeerDnsName =
         self.networkCfg.PeerDnsName self.coreSet self.peerNum
 
