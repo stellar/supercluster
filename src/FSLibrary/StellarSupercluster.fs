@@ -184,9 +184,6 @@ type Kubernetes with
             for statefulSet in statefulSets do
                 namespaceContent.Add(statefulSet)
 
-            if nCfg.exportToPrometheus
-            then LogInfo "Core metrics will be exported to prometheus"
-
             for svc in nCfg.ToPerPodServices() do
                 LogInfo "Creating Per-Pod Service %s" svc.Metadata.Name
                 let service = self.CreateNamespacedService(namespaceParameter = nsStr,
@@ -207,6 +204,26 @@ type Kubernetes with
                                                  namespaceContent = namespaceContent,
                                                  probeTimeout = probeTimeout)
             formation.WaitForAllReplicasOnAllSetsReady()
+
+            if nCfg.exportToPrometheus
+            then
+                LogInfo "Core metrics will be exported to prometheus"
+                nCfg.MapAllPeers
+                    begin
+                        fun (cs:CoreSet) (i:int) ->
+                            let podName = nCfg.PodName cs i
+                            let shortName = nCfg.PeerShortName cs i
+                            let pod : V1Pod = self.ReadNamespacedPod(name = podName.StringName,
+                                                                     namespaceParameter = nCfg.NamespaceProperty)
+                            LogInfo "Setting pod %s label short_name = %s" podName.StringName shortName.StringName
+                            pod.Metadata.Labels.Add("short_name", shortName.StringName) |> ignore
+                            self.ReplaceNamespacedPod(body = pod,
+                                                      name = podName.StringName,
+                                                      namespaceParameter = nCfg.NamespaceProperty)
+                    end
+                |> ignore
+
+
             formation
         with
         | x ->
