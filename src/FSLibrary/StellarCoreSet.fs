@@ -144,7 +144,7 @@ type CoreSetOptions =
         fullyConnected = false
         simulateApplyUsec = 0
         maxSlotsToRemember = 12
-        maxBatchReadCount = 1024
+        maxBatchReadCount = 1
         maxBatchWriteCount = 1024 }
 
     member self.InConsensusOnlyMode (simulateApply:int) =
