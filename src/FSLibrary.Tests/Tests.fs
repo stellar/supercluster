@@ -46,7 +46,7 @@ type Tests(output:ITestOutputHelper) =
         Assert.Contains("DATABASE = \"sqlite3:///data/stellar.db\"", toml)
         Assert.Contains("BUCKET_DIR_PATH = \"/data/buckets\"", toml)
         Assert.Contains("PREFERRED_PEERS = [\"" + peer0DNS + "\", \"" + peer1DNS + "\", \"" + peer2DNS + "\"]", toml)
-        Assert.Contains("[HISTORY." + nonceStr + "-sts-test-0]", toml)
+        Assert.Contains("[HISTORY.test-0]", toml)
         Assert.Contains("\"curl -sf http://" + peer0DNS + "/{0} -o {1}\"", toml)
 
 
@@ -249,7 +249,11 @@ type Tests(output:ITestOutputHelper) =
         let ip2 = "192.168.1.237"
         let cmds = getNetworkDelayCommands Ashburn [(n1,Beauharnois,ip1);
                                                     (n2,Chennai,ip2)]
-        let cmdStr = cmds.ToString()
+           
+        let mutable cmdStr = ""
+        for item in cmds do
+            cmdStr <- cmdStr + (item.ToString())
+
         Assert.Contains(ip1, cmdStr)
         Assert.Contains(ip2, cmdStr)
         let delay1 = int(networkDelayInMs Ashburn Beauharnois)

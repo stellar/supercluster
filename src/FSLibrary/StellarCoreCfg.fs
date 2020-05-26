@@ -84,7 +84,7 @@ type DatabaseURL =
         | PostgreSQL(d, u, p, h) -> sprintf "postgresql://dbname=%s user=%s password=%s host=%s" d u p h
 
 let curlGetCmd (uri:System.Uri) : string =
-    sprintf "curl -sf %s/{0} -o {1}" (uri.ToString())
+    sprintf "curl -sf %s{0} -o {1}" (uri.ToString())
 
 let curlGetCmdFromPeer (peer:PeerDnsName) : string =
     curlGetCmd (System.UriBuilder("http", peer.StringName).Uri)
