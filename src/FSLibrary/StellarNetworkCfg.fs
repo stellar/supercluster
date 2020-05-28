@@ -201,6 +201,13 @@ type NetworkCfg =
     member self.WithLive name (live: bool) =
         let coreSet = self.FindCoreSet(name).WithLive live
         { self with coreSets = self.coreSets.Add(name, coreSet) }
+    
+    member self.IsJobMode : bool =
+        if self.jobCoreSetOptions = None 
+        then
+            false
+        else
+            true
 
 // Generates a fresh network of size n, with fresh keypairs for each node, and a
 // random nonce to isolate the network.
