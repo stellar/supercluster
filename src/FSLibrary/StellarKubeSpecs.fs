@@ -30,14 +30,20 @@ type ConfigOption =
     // container picks up a peer-specific config.
     | PeerSpecificConfigFile
 
-let CoreContainerVolumeMounts (peerOrJobNames:string array) : V1VolumeMount array =
-    let arr =
-        Array.map (fun n -> V1VolumeMount(name = CfgVal.cfgVolumeName n,
-                                          readOnlyProperty = System.Nullable<bool>(true),
-                                          mountPath = CfgVal.cfgVolumePath n))
-            peerOrJobNames
-    Array.append arr [| V1VolumeMount(name = CfgVal.dataVolumeName,
+let CoreContainerVolumeMounts (peerOrJobNames:string array) (configOpt:ConfigOption) : V1VolumeMount array =
+    let arr = [| V1VolumeMount(name = CfgVal.dataVolumeName,
                                       mountPath = CfgVal.dataVolumePath) |]
+
+    match configOpt with
+        | NoConfigFile -> arr
+        | SharedJobConfigFile -> Array.append arr [| V1VolumeMount(name = CfgVal.jobCfgVolumeName,
+                                                         readOnlyProperty = System.Nullable<bool>(true),
+                                                         mountPath = CfgVal.jobCfgVolumePath) |]
+        | PeerSpecificConfigFile -> Array.append arr ( Array.map (fun n -> 
+                                        V1VolumeMount(name = CfgVal.cfgVolumeName n,
+                                            readOnlyProperty = System.Nullable<bool>(true),
+                                            mountPath = CfgVal.cfgVolumePath n)) 
+            peerOrJobNames )
 
 let PgContainerVolumeMounts : V1VolumeMount array =
     [| V1VolumeMount(name = CfgVal.dataVolumeName,
@@ -131,7 +137,7 @@ let CoreContainerForCommand (q:NetworkQuotas) (imageName:string) (numContainers:
          env = [| peerNameEnvVar|],
          resources = resourceRequirements q numContainers,
          securityContext = V1SecurityContext(capabilities = V1Capabilities(add = [|"NET_ADMIN"|])),
-         volumeMounts = CoreContainerVolumeMounts peerOrJobNames)
+         volumeMounts = CoreContainerVolumeMounts peerOrJobNames configOpt)
 
 let WithLivenessProbe (container:V1Container) probeTimeout : V1Container =
     let httpPortStr = IntstrIntOrString(value = CfgVal.httpPort.ToString())
@@ -258,7 +264,7 @@ type NetworkCfg with
                       else SharedJobConfigFile)
         let maxPeers = 1
 
-        let jobCfgVol = V1Volume(name = CfgVal.cfgVolumeName jobName,
+        let jobCfgVol = V1Volume(name = CfgVal.jobCfgVolumeName,
                                  configMap = V1ConfigMapVolumeSource(name = self.JobCfgMapName))
         let pvcName = CfgVal.peristentVolumeClaimName jobName
         let dataVol = V1Volume(name = CfgVal.dataVolumeName,
@@ -298,9 +304,14 @@ type NetworkCfg with
     // /data/history, forces SCP on next startup, and runs.
     member self.ToPodTemplateSpec (coreSet: CoreSet) probeTimeout : V1PodTemplateSpec =
         let peerCfgVolumes = self.MapAllPeers (fun cs i ->
-            let peerName = self.PodName cs i
-            V1Volume(name = CfgVal.cfgVolumeName peerName.StringName,
-                     configMap = V1ConfigMapVolumeSource(name = self.PeerCfgMapName cs i)))
+           let peerName = self.PodName cs i
+           if self.IsJobMode
+                then V1Volume(name = CfgVal.jobCfgVolumeName,
+                        configMap = V1ConfigMapVolumeSource(name = self.JobCfgMapName))
+                else
+                    V1Volume(name = CfgVal.cfgVolumeName peerName.StringName,
+                         configMap = V1ConfigMapVolumeSource(name = self.PeerCfgMapName cs i)))
+
         let peerNames = self.MapAllPeers self.PodName |> Array.map (fun x -> x.StringName)
         let historyCfgVolume = V1Volume(name = CfgVal.historyCfgVolumeName,
                                         configMap = V1ConfigMapVolumeSource(name = self.HistoryCfgMapName))
