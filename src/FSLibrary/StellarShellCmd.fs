@@ -104,6 +104,7 @@ type ShRedir =
 type ShCmd =
     | ShCmd of ShWord array                      // word word word ... (as a command)
     | ShDef of (ShName * ShWord)                 // name=word
+    | ShExDef of (ShName * ShWord)               // export name=word
     | ShDefSub of (ShName * ShWord array)        // name=`word word word ...`
     | ShRedir of (ShCmd * ShRedir)               // cmd >foo (see ShRedir)
     | ShPipe of ShCmd array                      // { cmd | cmd | ...; }
@@ -129,6 +130,9 @@ type ShCmd =
 
     static member DefVarSub (s:string) (ss:string array) : ShCmd =
         ShDefSub (ShName s, Array.map ShWord.OfStr ss)
+    
+    static member ExDefVar (s:string) (ss:string) : ShCmd =
+        ShExDef (ShName s, ShPieces [|(ShBare ss)|])
 
     static member IfThen (i:string array) (t:string array) : ShCmd =
         ShIf ((ShCmd.OfStrs i), (ShCmd.OfStrs t), [| |], None)
@@ -183,6 +187,7 @@ type ShCmd =
        match self with
            | ShCmd ws -> words ws
            | ShDef (n, v) -> sprintf "%O=%O" n v
+           | ShExDef (n, v) -> sprintf "export %O=%O" n v
            | ShDefSub (n, ws) -> sprintf "%O=`%s`" n (words ws)
            | ShRedir (w, r) -> sprintf "%O %O" w r
            | ShPipe cs -> seq cs " | "

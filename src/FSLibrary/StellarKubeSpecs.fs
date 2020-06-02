@@ -214,7 +214,23 @@ type NetworkCfg with
                                (Array.append [| CfgVal.stellarCoreBinPath |] args))
             ShCmd (Array.append cmdAndArgs cfgWords)
         let nonSimulation = opts.simulateApplyUsec = 0
-        let runCoreIf flag args = if flag && nonSimulation then Some (runCore args) else None
+        let runCoreIf flag args = if flag && nonSimulation then Some (runCore args) else None 
+
+        let setPgHost: ShCmd Option = 
+            match opts.dbType with
+              | Postgres -> Some (ShCmd.ExDefVar "PGHOST" CfgVal.pgHost)
+              | _ -> None
+
+        let setPgUser: ShCmd Option = 
+            match opts.dbType with
+              | Postgres -> Some (ShCmd.ExDefVar "PGUSER" CfgVal.pgUser)
+              | _ -> None
+
+        let createDbs: ShCmd Option array = 
+            match opts.dbType with
+              | Postgres -> [| for i in 0 .. 9 -> Some(ShCmd.OfStrs [| "createdb"; "test" + i.ToString() |]) |]
+              | _ -> [||]
+
         let waitForDB: ShCmd Option =
           match opts.dbType with
           | Postgres ->
@@ -242,7 +258,7 @@ type NetworkCfg with
         let initialCatchup = runCoreIf init.initialCatchup [| "catchup"; "current/0" |]
         let forceScp = runCoreIf init.forceScp [| "force-scp" |]
 
-        let cmds = Array.choose id [| waitForDB; waitForTime; newDb; newHist; initialCatchup; forceScp |]
+        let cmds = Array.choose id (Array.append ([| waitForDB; setPgUser; setPgHost; waitForTime; newDb; newHist; initialCatchup; forceScp |]) createDbs)
 
         let restoreDBStep coreSet i : ShCmd array =
           let dnsName = self.PeerDnsName coreSet i
