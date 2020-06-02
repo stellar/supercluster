@@ -45,10 +45,10 @@ type StellarFormation with
             let js = self.Kube.ReadNamespacedJob(name=name, namespaceParameter=ns)
             let jobCompleted = js.Status.CompletionTime.HasValue
             let jobActive = js.Status.Active.GetValueOrDefault(0)
-            if jobCompleted && jobActive = 0
+            let jobFailed = js.Status.Failed.GetValueOrDefault(0)
+            if (jobCompleted && jobActive = 0) || jobFailed >  0 
             then
                 let jobSucceeded = js.Status.Succeeded.GetValueOrDefault(0)
-                let jobFailed = js.Status.Failed.GetValueOrDefault(0)
                 LogInfo "Finished job %s: %d fail / %d success"
                     name jobFailed jobSucceeded
                 ok := (jobFailed = 0) && (jobSucceeded = 1)
