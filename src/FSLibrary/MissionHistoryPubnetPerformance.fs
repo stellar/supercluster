@@ -25,13 +25,13 @@ let historyPubnetPerformance (context : MissionContext) =
             (formation.RunSingleJobWithTimeout context.destination
                  (Some(TimeSpan.FromMinutes(10.0)))
                  [| "catchup"; "20000000/0" |]
-                 context.image)
+                 context.image true)
             |> formation.CheckAllJobsSucceeded
 
             (formation.RunSingleJobWithTimeout context.destination
                  (Some(TimeSpan.FromHours(4.0)))
                  [| "catchup"; "20050000/50000" |]
-                 context.image)
+                 context.image true)
             |> formation.CheckAllJobsSucceeded
 
         end

@@ -274,10 +274,10 @@ type NetworkCfg with
                   | Postgres -> cmds // PG does not support that yet
                   | _ -> Array.append cmds (restoreDBStep coreSet i)
 
-    member self.GetJobPodTemplateSpec (jobName:string) (command: string array) (image:string) : V1PodTemplateSpec =
-        let cfgOpt = (if self.jobCoreSetOptions.IsNone
-                      then NoConfigFile
-                      else SharedJobConfigFile)
+    member self.GetJobPodTemplateSpec (jobName:string) (command: string array) (image:string) (useConfigFile:bool) : V1PodTemplateSpec =
+        let cfgOpt = (if useConfigFile
+                      then SharedJobConfigFile
+                      else NoConfigFile)
         let maxPeers = 1
 
         let jobCfgVol = V1Volume(name = CfgVal.jobCfgVolumeName,
@@ -308,9 +308,9 @@ type NetworkCfg with
                  metadata = V1ObjectMeta(labels = CfgVal.labels,
                                          namespaceProperty = self.NamespaceProperty))
 
-    member self.GetJobFor (jobNum:int) (command: string array) (image:string) : V1Job =
+    member self.GetJobFor (jobNum:int) (command: string array) (image:string) (useConfigFile:bool) : V1Job =
         let jobName = self.JobName jobNum
-        let template = self.GetJobPodTemplateSpec jobName command image
+        let template = self.GetJobPodTemplateSpec jobName command image useConfigFile
         V1Job(spec = V1JobSpec(template = template),
               metadata = self.NamespacedMeta jobName)
 
