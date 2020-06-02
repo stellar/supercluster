@@ -124,7 +124,7 @@ let CoreContainerForCommand (q:NetworkQuotas) (imageName:string) (numContainers:
     let exit = ShCmd (Array.map toShPieces [| ShBare "exit"; ShVar statusName;|])
 
     // Kill any outstanding processes, such as PG
-    let killPs = ShCmd.OfStrs [| "killall5"; "-INT"; |]
+    let killPs = ShCmd.OfStrs [| "killall5"; "-2"; |]
 
     // Regardless of success or failure, get status and cleanup after core's run
     let allCmds = ShAnd (Array.append initCommands [| ShCmd cmdWords; |])
