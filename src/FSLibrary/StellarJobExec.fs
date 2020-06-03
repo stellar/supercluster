@@ -45,10 +45,10 @@ type StellarFormation with
             let js = self.Kube.ReadNamespacedJob(name=name, namespaceParameter=ns)
             let jobCompleted = js.Status.CompletionTime.HasValue
             let jobActive = js.Status.Active.GetValueOrDefault(0)
-            if jobCompleted && jobActive = 0
+            let jobFailed = js.Status.Failed.GetValueOrDefault(0)
+            if (jobCompleted && jobActive = 0) || jobFailed >  0 
             then
                 let jobSucceeded = js.Status.Succeeded.GetValueOrDefault(0)
-                let jobFailed = js.Status.Failed.GetValueOrDefault(0)
                 LogInfo "Finished job %s: %d fail / %d success"
                     name jobFailed jobSucceeded
                 ok := (jobFailed = 0) && (jobSucceeded = 1)
@@ -81,15 +81,17 @@ type StellarFormation with
 
     member self.RunSingleJob (destination:Destination)
                              (job:(string array))
-                             (image:string) : Map<string,bool> =
-        self.RunSingleJobWithTimeout destination None job image
+                             (image:string)
+                             (useConfigFile:bool) : Map<string,bool> =
+        self.RunSingleJobWithTimeout destination None job image useConfigFile
 
     member self.RunSingleJobWithTimeout (destination:Destination)
                                         (timeout:TimeSpan option)
                                         (cmd:(string array))
-                                        (image:string) : Map<string,bool> =
+                                        (image:string) 
+                                        (useConfigFile:bool) : Map<string,bool> =
         let startTime = DateTime.UtcNow
-        let j = self.StartJobForCmd cmd image
+        let j = self.StartJobForCmd cmd image useConfigFile
         let name = j.Metadata.Name
         let (waitHandle, ok) = self.WatchJob j
         let timeoutArg = match timeout with | None -> TimeSpan(0,0,0,0,-1) | Some x -> x
@@ -146,7 +148,7 @@ type StellarFormation with
                      then finished
                      else waitJob()
                  | Some(cmd) ->
-                    let j = self.StartJobForCmd cmd image
+                    let j = self.StartJobForCmd cmd image true
                     let name = j.Metadata.Name
                     let (waitHandle, ok) = self.WatchJob j
                     running <- running.Add(name, (j, waitHandle, ok))
@@ -187,10 +189,10 @@ type StellarFormation with
         let pvc = self.NetworkCfg.ToDynamicPersistentVolumeClaimForJob n
         self.AddPersistentVolumeClaim pvc
 
-    member self.StartJobForCmd (cmd:string array) (image:string): V1Job =
+    member self.StartJobForCmd (cmd:string array) (image:string) (useConfigFile:bool): V1Job =
         let jobNum = self.NextJobNum
         self.AddDynamicPersistentVolumeClaimForJob jobNum
-        self.StartJob (self.NetworkCfg.GetJobFor jobNum cmd image)
+        self.StartJob (self.NetworkCfg.GetJobFor jobNum cmd image useConfigFile)
 
     member self.FinishJob (destination:Destination) (j:V1Job) : unit =
         // We need to dump the job logs as we go and mop up the jobs

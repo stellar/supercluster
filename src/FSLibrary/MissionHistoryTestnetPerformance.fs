@@ -35,13 +35,15 @@ let historyTestnetPerformance (context : MissionContext) =
             (formation.RunSingleJobWithTimeout context.destination
                  (Some(TimeSpan.FromMinutes(10.0)))
                  [| "catchup"; sprintf "%d/0" firstLedger |]
-                 context.image)
+                 context.image 
+                 true)
             |> formation.CheckAllJobsSucceeded
 
             (formation.RunSingleJobWithTimeout context.destination
                  (Some(TimeSpan.FromHours(4.0)))
                  [| "catchup"; sprintf "%d/%d" secondLedger delta |]
-                 context.image)
+                 context.image 
+                 true)
             |> formation.CheckAllJobsSucceeded
 
         end

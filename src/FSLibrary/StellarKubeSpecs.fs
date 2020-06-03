@@ -124,7 +124,7 @@ let CoreContainerForCommand (q:NetworkQuotas) (imageName:string) (numContainers:
     let exit = ShCmd (Array.map toShPieces [| ShBare "exit"; ShVar statusName;|])
 
     // Kill any outstanding processes, such as PG
-    let killPs = ShCmd.OfStrs [| "killall5"; "-INT"; |]
+    let killPs = ShCmd.OfStrs [| "killall5"; "-2"; |]
 
     // Regardless of success or failure, get status and cleanup after core's run
     let allCmds = ShAnd (Array.append initCommands [| ShCmd cmdWords; |])
@@ -214,7 +214,23 @@ type NetworkCfg with
                                (Array.append [| CfgVal.stellarCoreBinPath |] args))
             ShCmd (Array.append cmdAndArgs cfgWords)
         let nonSimulation = opts.simulateApplyUsec = 0
-        let runCoreIf flag args = if flag && nonSimulation then Some (runCore args) else None
+        let runCoreIf flag args = if flag && nonSimulation then Some (runCore args) else None 
+
+        let setPgHost: ShCmd Option = 
+            match opts.dbType with
+              | Postgres -> Some (ShCmd.ExDefVar "PGHOST" CfgVal.pgHost)
+              | _ -> None
+
+        let setPgUser: ShCmd Option = 
+            match opts.dbType with
+              | Postgres -> Some (ShCmd.ExDefVar "PGUSER" CfgVal.pgUser)
+              | _ -> None
+
+        let createDbs: ShCmd Option array = 
+            match opts.dbType with
+              | Postgres -> [| for i in 0 .. 9 -> Some(ShCmd.OfStrs [| "createdb"; "test" + i.ToString() |]) |]
+              | _ -> [||]
+
         let waitForDB: ShCmd Option =
           match opts.dbType with
           | Postgres ->
@@ -242,7 +258,7 @@ type NetworkCfg with
         let initialCatchup = runCoreIf init.initialCatchup [| "catchup"; "current/0" |]
         let forceScp = runCoreIf init.forceScp [| "force-scp" |]
 
-        let cmds = Array.choose id [| waitForDB; waitForTime; newDb; newHist; initialCatchup; forceScp |]
+        let cmds = Array.choose id (Array.append ([| waitForDB; setPgUser; setPgHost; waitForTime; newDb; newHist; initialCatchup; forceScp |]) createDbs)
 
         let restoreDBStep coreSet i : ShCmd array =
           let dnsName = self.PeerDnsName coreSet i
@@ -258,10 +274,10 @@ type NetworkCfg with
                   | Postgres -> cmds // PG does not support that yet
                   | _ -> Array.append cmds (restoreDBStep coreSet i)
 
-    member self.GetJobPodTemplateSpec (jobName:string) (command: string array) (image:string) : V1PodTemplateSpec =
-        let cfgOpt = (if self.jobCoreSetOptions.IsNone
-                      then NoConfigFile
-                      else SharedJobConfigFile)
+    member self.GetJobPodTemplateSpec (jobName:string) (command: string array) (image:string) (useConfigFile:bool) : V1PodTemplateSpec =
+        let cfgOpt = (if useConfigFile
+                      then SharedJobConfigFile
+                      else NoConfigFile)
         let maxPeers = 1
 
         let jobCfgVol = V1Volume(name = CfgVal.jobCfgVolumeName,
@@ -292,9 +308,9 @@ type NetworkCfg with
                  metadata = V1ObjectMeta(labels = CfgVal.labels,
                                          namespaceProperty = self.NamespaceProperty))
 
-    member self.GetJobFor (jobNum:int) (command: string array) (image:string) : V1Job =
+    member self.GetJobFor (jobNum:int) (command: string array) (image:string) (useConfigFile:bool) : V1Job =
         let jobName = self.JobName jobNum
-        let template = self.GetJobPodTemplateSpec jobName command image
+        let template = self.GetJobPodTemplateSpec jobName command image useConfigFile
         V1Job(spec = V1JobSpec(template = template),
               metadata = self.NamespacedMeta jobName)
 

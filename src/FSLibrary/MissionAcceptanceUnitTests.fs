@@ -9,8 +9,14 @@ open StellarMissionContext
 open StellarFormation
 open StellarJobExec
 
-let acceptanceUnitTests (context : MissionContext) =
-    context.ExecuteJobs None None
+let acceptanceUnitTests (context : MissionContext) = 
+    let opts = { CoreSetOptions.GetDefault context.image with
+                    dbType = Postgres
+                    localHistory = false
+                    nodeCount = 1
+                    initialization = CoreSetInitialization.NoInitCmds
+                     }
+    context.ExecuteJobs (Some(opts)) None
         (fun formation ->
-         formation.RunSingleJob context.destination [| "test"; "[acceptance]~[.]" |] context.image
+         formation.RunSingleJob context.destination [| "test"; "[acceptance]~[.]" |] context.image false
          |> formation.CheckAllJobsSucceeded)
