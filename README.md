@@ -42,7 +42,7 @@ Early experimentation so far suggests that the combination of improved observabi
 
 ~~~
 
-$ kubectl --kubeconfig ~/.kube/your-cluster-config describe ingress --all-namespaces
+$ kubectl --kubeconfig ~/.kube/your-cluster-config describe ingress
 Name:             stellar-core-ingress
 Namespace:        ssc-f4a1c9b0c3d0
 Address:          127.0.0.1
