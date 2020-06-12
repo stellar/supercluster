@@ -31,6 +31,8 @@ type MissionContext =
       maxTxRate : int
       numAccounts : int
       numTxs : int
+      spikeSize : int
+      spikeInterval : int
       numNodes : int
       quotas: NetworkQuotas
       logLevels: LogLevels
@@ -120,6 +122,8 @@ type MissionContext =
       { mode = GenerateAccountCreationLoad
         accounts = self.numAccounts
         txs = 0
+        spikesize = 0
+        spikeinterval = 0
         // Use conservative rate for account creation, as the network may quickly get overloaded
         txrate = 5
         offset = 0
@@ -130,5 +134,7 @@ type MissionContext =
         accounts = self.numAccounts
         txs = self.numTxs
         txrate = self.txRate
+        spikesize = self.spikeSize
+        spikeinterval = self.spikeInterval
         offset = 0
         batchsize = 100 }

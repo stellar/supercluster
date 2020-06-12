@@ -40,6 +40,8 @@ type LoadGen =
     { mode: LoadGenMode
       accounts: int
       txs: int
+      spikesize: int
+      spikeinterval: int
       txrate: int
       offset: int
       batchsize: int }
@@ -50,6 +52,8 @@ type LoadGen =
            ("accounts", self.accounts.ToString());
            ("txs", self.txs.ToString());
            ("txrate", self.txrate.ToString());
+           ("spikesize", self.spikesize.ToString());
+           ("spikeinterval", self.spikeinterval.ToString());
            ("batchsize", self.batchsize.ToString());
         ]
 
@@ -58,6 +62,8 @@ let DefaultAccountCreationLoadGen =
     { mode = GenerateAccountCreationLoad
       accounts = 1000
       txs = 0
+      spikesize = 0
+      spikeinterval = 0
       txrate = 10
       offset = 0
       batchsize = 100 }

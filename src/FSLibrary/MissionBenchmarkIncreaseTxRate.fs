@@ -24,6 +24,8 @@ let benchmarkIncreaseTxRate (context : MissionContext) =
             let loadGen = { mode = GeneratePaymentLoad
                             accounts = context.numAccounts
                             txs = context.numTxs
+                            spikesize = context.spikeSize
+                            spikeinterval = context.spikeInterval
                             txrate = txRate
                             offset = 0
                             batchsize = 100 }

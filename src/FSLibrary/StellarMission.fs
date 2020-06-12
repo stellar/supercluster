@@ -7,6 +7,7 @@ module StellarMission
 open MissionSimplePayment
 open MissionComplexTopology
 open MissionLoadGeneration
+open MissionLoadGenerationWithSpikes
 open MissionBenchmarkBaseline
 open MissionBenchmarkConsensusOnly
 open MissionBenchmarkIncreaseTxRate
@@ -39,6 +40,7 @@ let allMissions : Map<string, Mission> =
         ("SimplePayment", simplePayment)
         ("ComplexTopology", complexTopology)
         ("LoadGeneration", loadGeneration)
+        ("LoadGenerationWithSpikes", loadGenerationWithSpikes)
         ("BenchmarkBaseline", benchmarkBaseline)
         ("BenchmarkConsensusOnly", benchmarkConsensusOnly)
         ("BenchmarkIncreaseTxRate", benchmarkIncreaseTxRate)
