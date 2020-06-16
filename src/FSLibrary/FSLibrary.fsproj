@@ -32,6 +32,7 @@
     <Compile Include="MissionSimplePayment.fs" />
     <Compile Include="MissionComplexTopology.fs" />
     <Compile Include="MissionLoadGeneration.fs" />
+    <Compile Include="MissionLoadGenerationWithSpikes.fs" />
     <Compile Include="MissionBenchmarkBaseline.fs" />
     <Compile Include="MissionBenchmarkConsensusOnly.fs" />
     <Compile Include="MissionBenchmarkIncreaseTxRate.fs" />

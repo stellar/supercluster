@@ -200,6 +200,8 @@ type MissionOptions(kubeConfig: string,
                     maxTxRate: int,
                     numAccounts: int,
                     numTxs: int,
+                    spikeSize: int,
+                    spikeInterval: int,
                     keepData: bool) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file",
@@ -277,6 +279,14 @@ type MissionOptions(kubeConfig: string,
     [<Option("num-txs", HelpText="Number of transactions for benchamarks and load generation tests",
              Required = false, Default = 100000)>]
     member self.NumTxs = numTxs
+
+    [<Option("spike-size", HelpText="Number of transactions per spike for benchamarks and load generation tests",
+             Required = false, Default = 100000)>]
+    member self.SpikeSize = spikeSize
+
+    [<Option("spike-interval", HelpText="A spike will occur every spikeInterval seconds for benchamarks and load generation tests",
+             Required = false, Default = 0)>]
+    member self.SpikeInterval = spikeInterval
 
     [<Option("keep-data", HelpText="Keeps namespaces and persistent volumes after mission fails",
              Required = false, Default = false)>]
@@ -416,6 +426,8 @@ let main argv =
                                                maxTxRate = mission.MaxTxRate
                                                numAccounts = mission.NumAccounts
                                                numTxs = mission.NumTxs
+                                               spikeSize = mission.SpikeSize
+                                               spikeInterval = mission.SpikeInterval
                                                numNodes = mission.NumNodes
                                                quotas = nq
                                                logLevels = ll
