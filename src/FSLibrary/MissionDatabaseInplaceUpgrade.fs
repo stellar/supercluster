@@ -52,6 +52,7 @@ let databaseInplaceUpgrade (context : MissionContext) =
 
       formation.BackupDatabaseToHistory peer
       formation.Start afterUpgradeCoreSet.name
+      formation.WaitUntilSynced [afterUpgradeCoreSet]
 
       formation.RunLoadgen afterUpgradeCoreSet context.GenerateAccountCreationLoad
       formation.RunLoadgen afterUpgradeCoreSet context.GeneratePaymentLoad
