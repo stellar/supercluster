@@ -46,7 +46,10 @@ namespace CSLibrary
         {
             using (var mstr =
                await kube.MuxedStreamNamespacedPodExecAsync(name: podName, @namespace: ns,
-                   command: new []{"/bin/sh"}, container: containerName,
+                   // We specifically use /bin/bash here to avoid hitting Almquist
+                   // /bin/sh shells popular in several container distros that have
+                   // an even smaller input limit -- 1024 bytes!
+                   command: new []{"/bin/bash"}, container: containerName,
                    stdin: true).ConfigureAwait(false))
             using (System.IO.Stream stdIn = mstr.GetStream(null, ChannelIndex.StdIn))
             using (System.IO.Stream error = mstr.GetStream(ChannelIndex.Error, null))
