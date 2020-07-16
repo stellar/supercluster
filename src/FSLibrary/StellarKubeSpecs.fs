@@ -84,10 +84,13 @@ let HistoryContainer (q:NetworkQuotas) (numContainers:int) =
          volumeMounts = HistoryContainerVolumeMounts )
 
 let PostgresContainer (q:NetworkQuotas) (numContainers:int) =
+    let passwordEnvVar = V1EnvVar(name = "POSTGRES_PASSWORD",
+                                  value = CfgVal.pgPassword)
     V1Container
         (name = "postgres",
+         env = [| passwordEnvVar; |],
          ports = [| V1ContainerPort(containerPort = 5432, name = "postgres") |],
-         image = "postgres:9.5",
+         image = "postgres:9.5.22",
          resources = resourceRequirements q numContainers,
          volumeMounts = PgContainerVolumeMounts)
 
