@@ -138,7 +138,7 @@ let FullPubnetCoreSets (image:string) : CoreSet list =
                          // for networks as large as this, otherwise it loses
                          // sync before all the nodes are online.
                          syncStartupDelay = Some(30)
-                         simulateApplyUsec = 2000
+                         simulateApplyUsec = 1200
                          localHistory = false
                          dumpDatabase = false }
 
