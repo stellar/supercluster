@@ -8,6 +8,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Logging.fs" />
+    <Compile Include="ApiRateLimit.fs" />
     <Compile Include="PollRetry.fs" />
     <Compile Include="StellarShellCmd.fs" />
     <Compile Include="StellarCoreSet.fs" />

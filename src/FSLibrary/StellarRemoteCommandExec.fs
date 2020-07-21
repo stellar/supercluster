@@ -41,6 +41,7 @@ type StellarFormation with
         // Further, we also have to add a trailing "\n" to get it to run at all.
         let fullCmdStr = fullCmdWithExit.ToString() + "\n"
 
+        self.sleepUntilNextRateLimitedApiCallTime()
         let res = RemoteCommandRunner.RunRemoteCommand(kube = self.Kube,
                                                        ns = self.NetworkCfg.NamespaceProperty,
                                                        podName = peer.StringName,

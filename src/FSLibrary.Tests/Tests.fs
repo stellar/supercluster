@@ -27,7 +27,10 @@ let nameSpace = "stellar-supercluster"
 let storageclass = "default"
 let ingress = "local"
 let exportToPrometheus = false
-let nCfg = MakeNetworkCfg [coreSet] nameSpace quotas loglevels storageclass ingress exportToPrometheus None
+let passOpt : NetworkPassphrase option = None
+let apiRateLimit = 10
+let nCfg = MakeNetworkCfg [coreSet] nameSpace quotas loglevels storageclass ingress
+               exportToPrometheus passOpt apiRateLimit
 
 type Tests(output:ITestOutputHelper) =
 
@@ -79,7 +82,8 @@ type Tests(output:ITestOutputHelper) =
     [<Fact>]
     member __.``Public network conversion looks reasonable`` () =
         let coreSets = FullPubnetCoreSets "stellar/stellar-core"
-        let nCfg = MakeNetworkCfg coreSets nameSpace quotas loglevels storageclass ingress false None
+        let nCfg = MakeNetworkCfg coreSets nameSpace quotas loglevels storageclass ingress
+                       exportToPrometheus passOpt apiRateLimit
         let sdfCoreSetName = CoreSetName "www-stellar-org"
         Assert.Contains(coreSets, fun cs -> cs.name = sdfCoreSetName)
         let sdfCoreSet = List.find (fun cs -> cs.name = sdfCoreSetName) coreSets
@@ -249,7 +253,7 @@ type Tests(output:ITestOutputHelper) =
         let ip2 = "192.168.1.237"
         let cmds = getNetworkDelayCommands Ashburn [(n1,Beauharnois,ip1);
                                                     (n2,Chennai,ip2)]
-           
+
         let mutable cmdStr = ""
         for item in cmds do
             cmdStr <- cmdStr + (item.ToString())

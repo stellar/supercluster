@@ -41,7 +41,8 @@ type MissionContext =
       storageClass : string
       namespaceProperty : string
       keepData : bool
-      probeTimeout : int }
+      probeTimeout : int
+      apiRateLimit: int }
 
     member self.MakeFormation (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option) : StellarFormation =
         let networkCfg =
@@ -53,6 +54,7 @@ type MissionContext =
                 self.ingressDomain
                 self.exportToPrometheus
                 passphrase
+                self.apiRateLimit
         self.kube.MakeFormation networkCfg self.keepData self.probeTimeout
 
     member self.MakeFormationForJob (opts:CoreSetOptions option) (passphrase: NetworkPassphrase option) : StellarFormation =
@@ -65,6 +67,7 @@ type MissionContext =
                 self.ingressDomain
                 self.exportToPrometheus
                 passphrase
+                self.apiRateLimit
         let networkCfg = { networkCfg with jobCoreSetOptions = opts }
         self.kube.MakeFormation networkCfg self.keepData self.probeTimeout
 

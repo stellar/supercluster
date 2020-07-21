@@ -38,7 +38,8 @@ type CommonOptions(kubeConfig: string,
                    ingressDomain: string,
                    exportToPrometheus: bool,
                    probeTimeout: int,
-                   image: string) =
+                   image: string,
+                   apiRateLimit: int) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file",
              Required = false, Default = "~/.kube/config")>]
@@ -91,6 +92,9 @@ type CommonOptions(kubeConfig: string,
              Required = false, Default = "stellar/stellar-core")>]
     member self.Image = image
 
+    [<Option("api-rate-limit", HelpText="Limit of kubernetes API requests per second to make",
+             Required = false, Default = 10)>]
+    member self.ApiRateLimit = apiRateLimit
 
 [<Verb("setup", HelpText="Set up a new stellar-core cluster")>]
 type SetupOptions(kubeConfig: string,
@@ -105,7 +109,8 @@ type SetupOptions(kubeConfig: string,
                   ingressDomain: string,
                   exportToPrometheus: bool,
                   probeTimeout: int,
-                  image: string) =
+                  image: string,
+                  apiRateLimit: int) =
     inherit CommonOptions(kubeConfig,
                           numNodes,
                           logDebugPartitions,
@@ -118,7 +123,8 @@ type SetupOptions(kubeConfig: string,
                           ingressDomain,
                           exportToPrometheus,
                           probeTimeout,
-                          image)
+                          image,
+                          apiRateLimit)
 
 
 [<Verb("clean", HelpText="Clean all resources in a namespace")>]
@@ -134,7 +140,8 @@ type CleanOptions(kubeConfig: string,
                   ingressDomain: string,
                   exportToPrometheus: bool,
                   probeTimeout: int,
-                  image: string) =
+                  image: string,
+                  apiRateLimit: int) =
     inherit CommonOptions(kubeConfig,
                           numNodes,
                           logDebugPartitions,
@@ -147,7 +154,8 @@ type CleanOptions(kubeConfig: string,
                           ingressDomain,
                           exportToPrometheus,
                           probeTimeout,
-                          image)
+                          image,
+                          apiRateLimit)
 
 
 [<Verb("loadgen", HelpText="Run a load generation test")>]
@@ -163,7 +171,8 @@ type LoadgenOptions(kubeConfig: string,
                     ingressDomain: string,
                     exportToPrometheus: bool,
                     probeTimeout: int,
-                    image: string) =
+                    image: string,
+                    apiRateLimit: int) =
     inherit CommonOptions(kubeConfig,
                           numNodes,
                           logDebugPartitions,
@@ -176,7 +185,8 @@ type LoadgenOptions(kubeConfig: string,
                           ingressDomain,
                           exportToPrometheus,
                           probeTimeout,
-                          image)
+                          image,
+                          apiRateLimit)
 
 
 [<Verb("mission", HelpText="Run one or more named missions")>]
@@ -202,7 +212,8 @@ type MissionOptions(kubeConfig: string,
                     numTxs: int,
                     spikeSize: int,
                     spikeInterval: int,
-                    keepData: bool) =
+                    keepData: bool,
+                    apiRateLimit: int) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file",
              Required = false, Default = "~/.kube/config")>]
@@ -292,6 +303,11 @@ type MissionOptions(kubeConfig: string,
              Required = false, Default = false)>]
     member self.KeepData = keepData
 
+    [<Option("api-rate-limit", HelpText="Limit of kubernetes API requests per second to make",
+             Required = false, Default = 10)>]
+    member self.ApiRateLimit = apiRateLimit
+
+
 
 [<Verb("poll", HelpText="Poll a running stellar-core cluster for status")>]
 type PollOptions(kubeConfig: string, namespaceProperty: string option) =
@@ -340,7 +356,7 @@ let main argv =
                  LogTracePartitions = List.ofSeq setup.LogTracePartitions }
       let sc = setup.StorageClass
       let nCfg = MakeNetworkCfg [coreSet] ns nq ll sc
-                                setup.IngressDomain setup.ExportToPrometheus None
+                                setup.IngressDomain setup.ExportToPrometheus None setup.ApiRateLimit
       use formation = kube.MakeFormation nCfg false setup.ProbeTimeout
       formation.ReportStatus()
       0
@@ -359,7 +375,7 @@ let main argv =
                  LogTracePartitions = List.ofSeq clean.LogTracePartitions }
       let sc = clean.StorageClass
       let nCfg = MakeNetworkCfg [] ns nq ll sc
-                                clean.IngressDomain clean.ExportToPrometheus None
+                                clean.IngressDomain clean.ExportToPrometheus None clean.ApiRateLimit
       use formation = kube.MakeEmptyFormation nCfg
       formation.CleanNamespace()
       0
@@ -379,7 +395,7 @@ let main argv =
                  LogTracePartitions = List.ofSeq loadgen.LogTracePartitions }
       let sc = loadgen.StorageClass
       let nCfg = MakeNetworkCfg [coreSet] ns nq ll sc
-                                loadgen.IngressDomain loadgen.ExportToPrometheus None
+                                loadgen.IngressDomain loadgen.ExportToPrometheus None loadgen.ApiRateLimit
       use formation = kube.MakeFormation nCfg false loadgen.ProbeTimeout
       formation.RunLoadgenAndCheckNoErrors coreSet
       formation.ReportStatus()
@@ -436,7 +452,8 @@ let main argv =
                                                storageClass = mission.StorageClass
                                                namespaceProperty = ns
                                                keepData = mission.KeepData
-                                               probeTimeout = mission.ProbeTimeout }
+                                               probeTimeout = mission.ProbeTimeout
+                                               apiRateLimit = mission.ApiRateLimit }
                         allMissions.[m] missionContext
                     with
                     // This looks ridiculous but it's how you coax the .NET runtime

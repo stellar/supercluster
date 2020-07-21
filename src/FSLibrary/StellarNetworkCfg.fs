@@ -139,7 +139,8 @@ type NetworkCfg =
       logLevels: LogLevels
       storageClass: string
       ingressDomain : string
-      exportToPrometheus: bool }
+      exportToPrometheus: bool
+      apiRateLimitRequestsPerSecond: int }
 
     member self.FindCoreSet (n:CoreSetName) : CoreSet =
         Map.find n self.coreSets
@@ -201,9 +202,9 @@ type NetworkCfg =
     member self.WithLive name (live: bool) =
         let coreSet = self.FindCoreSet(name).WithLive live
         { self with coreSets = self.coreSets.Add(name, coreSet) }
-    
+
     member self.IsJobMode : bool =
-        if self.jobCoreSetOptions = None 
+        if self.jobCoreSetOptions = None
         then
             false
         else
@@ -219,7 +220,8 @@ let MakeNetworkCfg
         (storageClass: string)
         (ingressDomain: string)
         (exportToPrometheus: bool)
-        (passphrase: NetworkPassphrase option) : NetworkCfg =
+        (passphrase: NetworkPassphrase option)
+        (apiRateLimit: int): NetworkCfg =
     let nonce = MakeNetworkNonce()
     { networkNonce = nonce
       networkPassphrase = match passphrase with
@@ -232,4 +234,5 @@ let MakeNetworkCfg
       logLevels = logLevels
       storageClass = storageClass
       ingressDomain = ingressDomain
-      exportToPrometheus = exportToPrometheus }
+      exportToPrometheus = exportToPrometheus
+      apiRateLimitRequestsPerSecond = apiRateLimit }

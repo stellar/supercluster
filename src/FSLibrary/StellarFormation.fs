@@ -17,6 +17,7 @@ open StellarTransaction
 open StellarNamespaceContent
 open System
 
+
 // Typically you want to instantiate one of these per mission / test scenario,
 // and run methods on it. Unlike most other types in this library it's a class
 // type with a fair amount of internal mutable state, and implements
@@ -36,6 +37,9 @@ type StellarFormation(networkCfg: NetworkCfg,
     let probeTimeout = probeTimeout
     let mutable disposed = false
     let mutable jobNumber = 0
+
+    member self.sleepUntilNextRateLimitedApiCallTime () =
+        ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(networkCfg.apiRateLimitRequestsPerSecond)
 
     member self.NamespaceContent =
         namespaceContent
@@ -115,10 +119,12 @@ type StellarFormation(networkCfg: NetworkCfg,
             let action = System.Action<WatchEventType, V1StatefulSet>(handler)
             let reinstall = System.Action(installHandler)
             if not event.IsSet
-            then kube.WatchNamespacedStatefulSetAsync(name = name,
-                                                      ``namespace`` = ns,
-                                                      onEvent = action,
-                                                      onClosed = reinstall) |> ignore
+            then
+                self.sleepUntilNextRateLimitedApiCallTime()
+                kube.WatchNamespacedStatefulSetAsync(name = name,
+                                                    ``namespace`` = ns,
+                                                    onEvent = action,
+                                                    onClosed = reinstall) |> ignore
         installHandler()
         event.Wait() |> ignore
         LogInfo "All replicas on %s/%s ready" ns name
@@ -137,6 +143,7 @@ type StellarFormation(networkCfg: NetworkCfg,
         networkCfg <- networkCfg.WithLive name live
         let coreSet = networkCfg.FindCoreSet name
         let stsName = networkCfg.StatefulSetName coreSet
+        self.sleepUntilNextRateLimitedApiCallTime()
         let ss = kube.ReplaceNamespacedStatefulSet(
                    body = networkCfg.ToStatefulSet coreSet probeTimeout,
                    name = stsName.StringName,
@@ -156,6 +163,7 @@ type StellarFormation(networkCfg: NetworkCfg,
 
     member self.AddPersistentVolumeClaim (pvc:V1PersistentVolumeClaim) : unit =
         let ns = networkCfg.NamespaceProperty
+        self.sleepUntilNextRateLimitedApiCallTime()
         let claim = self.Kube.CreateNamespacedPersistentVolumeClaim(body = pvc,
                                                                     namespaceParameter = ns)
         namespaceContent.Add(claim)

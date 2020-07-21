@@ -148,6 +148,7 @@ type StellarFormation with
                     List.mapi
                         begin fun (i:int) (loc:GeoLoc) ->
                             let podName = self.NetworkCfg.PodName cs i
+                            self.sleepUntilNextRateLimitedApiCallTime()
                             let (pod:V1Pod) = self.Kube.ReadNamespacedPod(name = podName.StringName,
                                                                           namespaceParameter = ns)
                             (podName, loc, pod.Status.PodIP)

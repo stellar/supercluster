@@ -24,6 +24,7 @@ type StellarFormation with
     member self.DumpLogs (destination:Destination) (podName:PodName) (containerName:string) =
         let ns = self.NetworkCfg.NamespaceProperty
         try
+            self.sleepUntilNextRateLimitedApiCallTime()
             let stream = self.Kube.ReadNamespacedPodLog(name = podName.StringName,
                                                         namespaceParameter = ns,
                                                         container = containerName)
@@ -34,6 +35,7 @@ type StellarFormation with
 
     member self.DumpJobLogs (destination:Destination) (jobName:string) =
         let ns = self.NetworkCfg.NamespaceProperty
+        self.sleepUntilNextRateLimitedApiCallTime()
         for pod in self.Kube.ListNamespacedPod(namespaceParameter = ns,
                                                labelSelector="job-name=" + jobName).Items do
             let podName = pod.Metadata.Name
@@ -56,6 +58,7 @@ type StellarFormation with
     member self.BackupDatabaseToHistory (p:Peer) =
         let ns = self.NetworkCfg.NamespaceProperty
         let name = self.NetworkCfg.PodName p.coreSet p.peerNum
+        self.sleepUntilNextRateLimitedApiCallTime()
         let task = self.Kube.NamespacedPodExecAsync(name = name.StringName,
                                                     ``namespace`` = ns,
                                                     command = [|"sqlite3"; CfgVal.databasePath;
@@ -67,6 +70,7 @@ type StellarFormation with
         if task.GetAwaiter().GetResult() <> 0
         then failwith "Failed to back up database"
 
+        self.sleepUntilNextRateLimitedApiCallTime()
         let task2 = self.Kube.NamespacedPodExecAsync(name = name.StringName,
                                                      ``namespace`` = ns,
                                                      command = [|"tar"; "cf"; CfgVal.bucketsBackupPath;
@@ -83,6 +87,7 @@ type StellarFormation with
             let ns = self.NetworkCfg.NamespaceProperty
             let name = self.NetworkCfg.PodName p.coreSet p.peerNum
 
+            self.sleepUntilNextRateLimitedApiCallTime()
             let muxedStream = self.Kube.MuxedStreamNamespacedPodExecAsync(
                                 name = name.StringName,
                                 ``namespace`` = ns,

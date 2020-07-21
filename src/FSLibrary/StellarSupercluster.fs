@@ -156,7 +156,7 @@ type Kubernetes with
         new StellarFormation(networkCfg = nCfg,
                              kube = self,
                              statefulSets = [],
-                             namespaceContent = NamespaceContent(self, nCfg.NamespaceProperty),
+                             namespaceContent = NamespaceContent(self, nCfg.apiRateLimitRequestsPerSecond, nCfg.NamespaceProperty),
                              probeTimeout = 1)
 
 
@@ -164,20 +164,24 @@ type Kubernetes with
     // Ingress for a given NetworkCfg, then waits for it to be ready.
     member self.MakeFormation (nCfg: NetworkCfg) (keepData: bool) (probeTimeout: int) : StellarFormation =
         let nsStr = nCfg.NamespaceProperty
-        let namespaceContent = NamespaceContent(self, nsStr)
+        let namespaceContent = NamespaceContent(self, nCfg.apiRateLimitRequestsPerSecond, nsStr)
+        let rps = nCfg.apiRateLimitRequestsPerSecond
         try
             let svc = nCfg.ToService()
             LogInfo "Creating Service %s" svc.Metadata.Name
+            ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(rps)
             namespaceContent.Add(self.CreateNamespacedService(body = svc,
                                                               namespaceParameter = nsStr))
             for cm in nCfg.ToConfigMaps() do
                 LogInfo "Creating ConfigMap %s" cm.Metadata.Name
+                ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(rps)
                 namespaceContent.Add(self.CreateNamespacedConfigMap(body = cm,
                                                                     namespaceParameter = nsStr))
 
             let makeStatefulSet coreSet =
                 let sts = nCfg.ToStatefulSet coreSet probeTimeout
                 LogInfo "Creating StatefulSet %s" sts.Metadata.Name
+                ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(rps)
                 self.CreateNamespacedStatefulSet(body = sts,
                                                  namespaceParameter = nsStr)
             let statefulSets = List.map makeStatefulSet nCfg.CoreSetList
@@ -186,6 +190,7 @@ type Kubernetes with
 
             for svc in nCfg.ToPerPodServices() do
                 LogInfo "Creating Per-Pod Service %s" svc.Metadata.Name
+                ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(rps)
                 let service = self.CreateNamespacedService(namespaceParameter = nsStr,
                                                            body = svc)
                 namespaceContent.Add(service)
@@ -194,6 +199,7 @@ type Kubernetes with
             then
                 let ing = nCfg.ToIngress()
                 LogInfo "Creating Ingress %s" ing.Metadata.Name
+                ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(rps)
                 let ingress = self.CreateNamespacedIngress(namespaceParameter = nsStr,
                                                            body = ing)
                 namespaceContent.Add(ingress)
@@ -213,10 +219,12 @@ type Kubernetes with
                         fun (cs:CoreSet) (i:int) ->
                             let podName = nCfg.PodName cs i
                             let shortName = nCfg.PeerShortName cs i
+                            ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(rps)
                             let pod : V1Pod = self.ReadNamespacedPod(name = podName.StringName,
                                                                      namespaceParameter = nCfg.NamespaceProperty)
                             LogInfo "Setting pod %s label short_name = %s" podName.StringName shortName.StringName
                             pod.Metadata.Labels.Add("short_name", shortName.StringName) |> ignore
+                            ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(rps)
                             self.ReplaceNamespacedPod(body = pod,
                                                       name = podName.StringName,
                                                       namespaceParameter = nCfg.NamespaceProperty)

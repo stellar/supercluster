@@ -23,6 +23,7 @@ type StellarFormation with
     member self.StartJob (j:V1Job) : V1Job =
         try
             let ns = self.NetworkCfg.NamespaceProperty
+            self.sleepUntilNextRateLimitedApiCallTime()
             let j = self.Kube.CreateNamespacedJob(body=j,
                                                   namespaceParameter = ns)
             self.NamespaceContent.Add(j)
@@ -42,11 +43,12 @@ type StellarFormation with
         let event = new System.Threading.ManualResetEventSlim(false)
 
         let checkStatus _ =
+            self.sleepUntilNextRateLimitedApiCallTime()
             let js = self.Kube.ReadNamespacedJob(name=name, namespaceParameter=ns)
             let jobCompleted = js.Status.CompletionTime.HasValue
             let jobActive = js.Status.Active.GetValueOrDefault(0)
             let jobFailed = js.Status.Failed.GetValueOrDefault(0)
-            if (jobCompleted && jobActive = 0) || jobFailed >  0 
+            if (jobCompleted && jobActive = 0) || jobFailed >  0
             then
                 let jobSucceeded = js.Status.Succeeded.GetValueOrDefault(0)
                 LogInfo "Finished job %s: %d fail / %d success"
@@ -72,6 +74,7 @@ type StellarFormation with
                     then checkStatus()
                 let action = System.Action<WatchEventType, V1Job>(handler)
                 let reinstall = System.Action((fun _ -> installHandler false))
+                self.sleepUntilNextRateLimitedApiCallTime()
                 self.Kube.WatchNamespacedJobAsync(name = name,
                                                   ``namespace`` = ns,
                                                   onEvent = action,
@@ -88,7 +91,7 @@ type StellarFormation with
     member self.RunSingleJobWithTimeout (destination:Destination)
                                         (timeout:TimeSpan option)
                                         (cmd:(string array))
-                                        (image:string) 
+                                        (image:string)
                                         (useConfigFile:bool) : Map<string,bool> =
         let startTime = DateTime.UtcNow
         let j = self.StartJobForCmd cmd image useConfigFile

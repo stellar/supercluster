@@ -6,8 +6,10 @@ module StellarNamespaceContent
 
 open k8s
 open k8s.Models
+open Logging
 
 type NamespaceContent(kube: Kubernetes,
+                      apiRateLimit: int,
                       namespaceProperty: string) =
 
     let kube = kube
@@ -18,7 +20,6 @@ type NamespaceContent(kube: Kubernetes,
     let persistentVolumeClaims: Set<string> ref = ref Set.empty
     let ingresses: Set<string> ref = ref Set.empty
     let jobs: Set<string> ref = ref Set.empty
-
     let ignoreError f =
         try
             f() |> ignore
@@ -26,26 +27,38 @@ type NamespaceContent(kube: Kubernetes,
             | x -> ()
 
     let delService(name: string) =
+        LogInfo "Deleting Service %s" name
+        ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(apiRateLimit)
         ignoreError (fun _ -> kube.DeleteNamespacedService(namespaceParameter = namespaceProperty,
                                                            name = name, propagationPolicy = "Foreground"))
 
     let delConfigMap(name: string) =
+        LogInfo "Deleting ConfigMap %s" name
+        ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(apiRateLimit)
         ignoreError (fun _ -> kube.DeleteNamespacedConfigMap(namespaceParameter = namespaceProperty,
                                                              name = name, propagationPolicy = "Foreground"))
 
     let delStatefulSet(name: string) =
+        LogInfo "Deleting StatefulSet %s" name
+        ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(apiRateLimit)
         ignoreError (fun _ -> kube.DeleteNamespacedStatefulSet(namespaceParameter = namespaceProperty,
                                                                name = name, propagationPolicy = "Foreground"))
 
     let delPersistentVolumeClaim(name: string) =
+        LogInfo "Deleting PersistentVolumeClaim %s" name
+        ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(apiRateLimit)
         ignoreError (fun _ -> kube.DeleteNamespacedPersistentVolumeClaim(namespaceParameter = namespaceProperty,
                                                                          name = name, propagationPolicy = "Foreground"))
 
     let delIngress(name: string) =
+        LogInfo "Deleting Ingress %s" name
+        ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(apiRateLimit)
         ignoreError (fun _ -> kube.DeleteNamespacedIngress(namespaceParameter = namespaceProperty, name = name,
                                                            propagationPolicy = "Foreground"))
 
     let delJob(name: string) =
+        LogInfo "Deleting Job %s" name
+        ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(apiRateLimit)
         ignoreError (fun _ -> kube.DeleteNamespacedJob(namespaceParameter = namespaceProperty, name = name,
                                                        propagationPolicy = "Foreground"))
 
@@ -104,15 +117,21 @@ type NamespaceContent(kube: Kubernetes,
         delOne delJob jobs job.Metadata.Name
 
     member self.AddAll() =
+        ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(apiRateLimit)
         for s in kube.ListNamespacedService(namespaceParameter = namespaceProperty).Items do
             self.Add(s)
+        ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(apiRateLimit)
         for c in kube.ListNamespacedConfigMap(namespaceParameter = namespaceProperty).Items do
             self.Add(c)
+        ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(apiRateLimit)
         for s in kube.ListNamespacedStatefulSet(namespaceParameter = namespaceProperty).Items do
             self.Add(s)
+        ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(apiRateLimit)
         for c in kube.ListNamespacedPersistentVolumeClaim(namespaceParameter = namespaceProperty).Items do
             self.Add(c)
+        ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(apiRateLimit)
         for i in kube.ListNamespacedIngress(namespaceParameter = namespaceProperty).Items do
             self.Add(i)
+        ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(apiRateLimit)
         for i in kube.ListNamespacedJob(namespaceParameter = namespaceProperty).Items do
             self.Add(i)
