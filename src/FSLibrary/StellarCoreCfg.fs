@@ -165,12 +165,15 @@ type StellarCoreCfg =
         t.Add("ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING", self.accelerateTime) |> ignore
         t.Add("ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING", self.generateLoad) |> ignore
 
+        let n = self.preferredPeers.Length
         if self.fullyConnected
         then
-            let n = self.preferredPeers.Length
             t.Add("TARGET_PEER_CONNECTIONS", n) |> ignore
             t.Add("MAX_ADDITIONAL_PEER_CONNECTIONS", n) |> ignore
             t.Add("MAX_PENDING_CONNECTIONS", n) |> ignore
+        else
+            t.Add("TARGET_PEER_CONNECTIONS", 16) |> ignore
+            t.Add("MAX_ADDITIONAL_PEER_CONNECTIONS", min n 128) |> ignore
 
         t.Add("QUORUM_INTERSECTION_CHECKER", false) |> ignore
         t.Add("MANUAL_CLOSE", self.manualClose) |> ignore
