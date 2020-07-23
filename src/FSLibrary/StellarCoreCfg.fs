@@ -170,7 +170,6 @@ type StellarCoreCfg =
         then
             t.Add("TARGET_PEER_CONNECTIONS", n) |> ignore
             t.Add("MAX_ADDITIONAL_PEER_CONNECTIONS", n) |> ignore
-            t.Add("MAX_PENDING_CONNECTIONS", n) |> ignore
         else
             t.Add("TARGET_PEER_CONNECTIONS", 16) |> ignore
             t.Add("MAX_ADDITIONAL_PEER_CONNECTIONS", min n 128) |> ignore
