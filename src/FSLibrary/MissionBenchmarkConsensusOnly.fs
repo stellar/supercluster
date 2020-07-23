@@ -19,7 +19,6 @@ let benchmarkConsensusOnly (context : MissionContext) =
                                                simulateApplyUsec = 2000
                                                maxSlotsToRemember = 24
                                                syncStartupDelay = Some(30)
-                                               fullyConnected = true
                                                dumpDatabase = false }
     context.ExecuteWithPerformanceReporter [coreSet] None (fun (formation: StellarFormation) (performanceReporter: PerformanceReporter) ->
         formation.WaitUntilSynced [coreSet]

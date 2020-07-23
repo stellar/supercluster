@@ -112,7 +112,6 @@ type StellarCoreCfg =
       historyNodes : Map<PeerShortName, PeerDnsName>
       historyGetCommands : Map<PeerShortName, string>
       localHistory: bool
-      fullyConnected: bool
       maxSlotsToRemember: int
       maxBatchReadCount: int
       maxBatchWriteCount: int}
@@ -165,12 +164,9 @@ type StellarCoreCfg =
         t.Add("ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING", self.accelerateTime) |> ignore
         t.Add("ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING", self.generateLoad) |> ignore
 
-        if self.fullyConnected
-        then
-            let n = self.preferredPeers.Length
-            t.Add("TARGET_PEER_CONNECTIONS", n) |> ignore
-            t.Add("MAX_ADDITIONAL_PEER_CONNECTIONS", n) |> ignore
-            t.Add("MAX_PENDING_CONNECTIONS", n) |> ignore
+        let n = self.preferredPeers.Length
+        t.Add("TARGET_PEER_CONNECTIONS", 16) |> ignore
+        t.Add("MAX_ADDITIONAL_PEER_CONNECTIONS", min n 128) |> ignore
 
         t.Add("QUORUM_INTERSECTION_CHECKER", false) |> ignore
         t.Add("MANUAL_CLOSE", self.manualClose) |> ignore
@@ -310,7 +306,6 @@ type NetworkCfg with
           historyNodes = self.HistoryNodes opts
           historyGetCommands = opts.historyGetCommands
           localHistory = opts.localHistory
-          fullyConnected = opts.fullyConnected
           maxSlotsToRemember = opts.maxSlotsToRemember
           maxBatchReadCount = opts.maxBatchReadCount
           maxBatchWriteCount = opts.maxBatchWriteCount }
@@ -339,7 +334,6 @@ type NetworkCfg with
           historyNodes = self.HistoryNodes c.options
           historyGetCommands = c.options.historyGetCommands
           localHistory = c.options.localHistory
-          fullyConnected = c.options.fullyConnected
           maxSlotsToRemember = c.options.maxSlotsToRemember
           maxBatchReadCount = c.options.maxBatchReadCount
           maxBatchWriteCount = c.options.maxBatchWriteCount }
