@@ -142,7 +142,6 @@ type CoreSetOptions =
       image : string
       initialization : CoreSetInitialization
       dumpDatabase: bool
-      fullyConnected: bool
       simulateApplyUsec : int
       maxSlotsToRemember : int
       maxBatchReadCount : int
@@ -170,7 +169,6 @@ type CoreSetOptions =
         image = image
         initialization = CoreSetInitialization.Default
         dumpDatabase = true
-        fullyConnected = false
         simulateApplyUsec = 0
         maxSlotsToRemember = 12
         maxBatchReadCount = 1
