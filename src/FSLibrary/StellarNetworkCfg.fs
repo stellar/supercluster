@@ -46,6 +46,50 @@ type LogLevels =
 //
 // So we want to set limit as high as possible and request as low as
 // possible, within the constraints of these quotas and maximums.
+//
+// Or we _would_ if it weren't for a further bug. Or maybe-bug. Maybe
+// feature. People disagree on this point. See:
+//
+// https://github.com/kubernetes/kubernetes/issues/43916
+//
+// TL;DR: there is a kubernetes / kubelet view of "memory pressure"
+// that is subtly and significantly different than the kernel's own
+// idea of "memory pressure".
+//
+// In more detail: the kubelet conveys the memory limit to the kernel
+// as a cgroup memory limit, and the kernel is then willing to fill
+// up all the memory in that limit with page cache entries because
+// why not? They're discardable any time the kernel feels it's under
+// actual memory pressure. The kernel is working as designed.
+//
+// But the kubelet _also_ measures "memory usage" of the pods it has
+// admitted and evicts them on the basis of that "memory usage" being
+// too high for the amount of memory it has; and the memory usage it
+// measures is the "working set" (not RSS) of the processes in the pod.
+// The working set _includes_ the page cache entries that the kernel
+// is holding on to, so even if the kernel _would_ free them all under
+// pressure, it's not given an opportunity to: the kubelet will
+// prematurely evict (or fail to admit) a pod on the basis of its flawed
+// idea of being under memory pressure.
+//
+// The only possibly defensible explanation for this is that the kubelet
+// wants to be absolutely 100% certain it will never ever experience
+// the kernel's response to memory pressure, because that would be
+// _potentially_ bad, like the kernel _could_ find itself unable to
+// free cached pages fast enough and start thrashing, or something. It's
+// pretty hazy why this was chosen, and it might be a bug. It might also
+// be that the authors never notice it because they mostly run low-IO
+// workloads like web servers.
+//
+// But in the meantime, the upshot is if we set _memory_ limits high,
+// an IO-intensive pod will (to kubernetes' flawed perspective) use
+// up the entirety of (or a lot of) its limit and thereby cause cluster
+// wide memory pressure, possibly evicting or blocking new pods.
+//
+// The "fix" / workaround is to set limit to a level that we actually
+// think is a reasonable RSS limit for a given stellar-core container,
+// and when the page cache exceeds that limit it will start dropping
+// pages rather than expanding further.
 
 type NetworkQuotas =
     { ContainerMaxCpuMili: int
@@ -62,6 +106,18 @@ type NetworkQuotas =
             self.NamespaceQuotaLimCpuMili self.NamespaceQuotaLimMemMebi
             self.NamespaceQuotaReqCpuMili self.NamespaceQuotaReqMemMebi
             self.NumConcurrentMissions
+
+    member self.AdjustedToCompensateForKubeletMemoryPressureBug() : NetworkQuotas =
+        // Adjust the quotas structure to work around the bug mentioned in the
+        // comment above, https://github.com/kubernetes/kubernetes/issues/43916
+        //
+        // The largest memory-usage we see in practice is about 300mb,
+        // running core under address sanitizer with
+        // ASAN_OPTIONS=quarantine_size_mb=1:malloc_context_size=5
+        // We give it a little more room here just in case.
+        let practicalFixedLimMemMebi = 350
+        { self with
+            ContainerMaxMemMebi = practicalFixedLimMemMebi }
 
     member self.ContainerCpuReqMili (numContainers:int) : int =
         let divisor = numContainers * self.NumConcurrentMissions
