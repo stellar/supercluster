@@ -18,6 +18,66 @@ open System
 open System.Threading
 open Microsoft.Rest
 
+
+type JobStatusTable() =
+    let mutable running = Map.empty
+    let mutable finished = Map.empty
+    let mutable pendingFinished = []
+
+    member self.NoteRunning (name:string) (j:V1Job) =
+        Monitor.Enter self
+        assert (not (running.ContainsKey(name)))
+        assert (not (finished.ContainsKey(name)))
+        running <- running.Add(name, j)
+        Monitor.Exit self
+
+    member self.NoteFinished (name:string) (ok:bool) =
+        Monitor.Enter self
+        assert running.ContainsKey(name)
+        assert (not (finished.ContainsKey(name)))
+        pendingFinished <- (Map.find name running, ok) :: pendingFinished
+        running <- running.Remove(name)
+        finished <- finished.Add(name, ok)
+        Monitor.PulseAll self
+        Monitor.Exit self
+
+    member self.IsFinished (name:string) : bool =
+        Monitor.Enter self
+        let b = finished.ContainsKey name
+        Monitor.Exit self
+        b
+
+    member self.WaitForNextFinishWithTimeout(timeout:TimeSpan) : bool =
+        Monitor.Enter self
+        let n = finished.Count
+        let mutable signalled = true
+        while n = finished.Count && signalled do
+          signalled <- Monitor.Wait(self, timeout)
+        Monitor.Exit self
+        signalled
+
+    member self.WaitForNextFinish() : (V1Job * bool) =
+        Monitor.Enter self
+        while pendingFinished.IsEmpty do
+          Monitor.Wait self |> ignore
+        let res = pendingFinished.Head
+        pendingFinished <- pendingFinished.Tail
+        Monitor.Exit self
+        res
+
+    member self.NumRunning() : int =
+        Monitor.Enter self
+        let n = running.Count
+        Monitor.Exit self
+        n
+
+    member self.GetFinishedTable() : Map<string,bool> =
+        Monitor.Enter self
+        let m = finished
+        Monitor.Exit self
+        m
+
+
 type StellarFormation with
 
     member self.StartJob (j:V1Job) : V1Job =
@@ -36,11 +96,9 @@ type StellarFormation with
             reraise()
 
 
-    member self.WatchJob (j:V1Job) : (System.Threading.WaitHandle * bool ref) =
+    member self.WatchJob (j:V1Job) (jst:JobStatusTable) =
         let name = j.Metadata.Name
         let ns = j.Metadata.NamespaceProperty
-        let ok = ref false
-        let event = new System.Threading.ManualResetEventSlim(false)
 
         let checkStatus _ =
             self.sleepUntilNextRateLimitedApiCallTime()
@@ -48,13 +106,13 @@ type StellarFormation with
             let jobCompleted = js.Status.CompletionTime.HasValue
             let jobActive = js.Status.Active.GetValueOrDefault(0)
             let jobFailed = js.Status.Failed.GetValueOrDefault(0)
-            if (jobCompleted && jobActive = 0) || jobFailed >  0
+            if (jobCompleted && jobActive = 0) || jobFailed > 0
             then
                 let jobSucceeded = js.Status.Succeeded.GetValueOrDefault(0)
                 LogInfo "Finished job %s: %d fail / %d success"
                     name jobFailed jobSucceeded
-                ok := (jobFailed = 0) && (jobSucceeded = 1)
-                event.Set() |> ignore
+                let ok = (jobFailed = 0) && (jobSucceeded = 1)
+                jst.NoteFinished name ok
 
         // Unfortunately event "watches" time out and get disconnected,
         // and periodically also drop events, so we can neither rely on
@@ -64,13 +122,16 @@ type StellarFormation with
         // triggered by any event.
         let rec installHandler (firstWait:bool) =
             if firstWait
-            then LogInfo "Waiting for job %s" name
-            else LogInfo "Continuing to wait for job %s" name
+            then
+                LogInfo "Waiting for job %s" name
+                jst.NoteRunning name j
+            else
+                LogInfo "Continuing to wait for job %s" name
             checkStatus()
-            if not event.IsSet
+            if not (jst.IsFinished name)
             then
                 let handler (ety:WatchEventType) (job:V1Job) =
-                    if (not event.IsSet)
+                    if (not (jst.IsFinished name))
                     then checkStatus()
                 let action = System.Action<WatchEventType, V1Job>(handler)
                 let reinstall = System.Action((fun _ -> installHandler false))
@@ -80,7 +141,6 @@ type StellarFormation with
                                                   onEvent = action,
                                                   onClosed = reinstall) |> ignore
         installHandler true
-        (event.WaitHandle, ok)
 
     member self.RunSingleJob (destination:Destination)
                              (job:(string array))
@@ -96,15 +156,16 @@ type StellarFormation with
         let startTime = DateTime.UtcNow
         let j = self.StartJobForCmd cmd image useConfigFile
         let name = j.Metadata.Name
-        let (waitHandle, ok) = self.WatchJob j
+        let jst = new JobStatusTable()
+        self.WatchJob j jst
         let timeoutArg = match timeout with | None -> TimeSpan(0,0,0,0,-1) | Some x -> x
-        let signalled = waitHandle.WaitOne(timeoutArg)
+        let signalled = jst.WaitForNextFinishWithTimeout timeoutArg
         let endTime = DateTime.UtcNow
         if signalled
         then
             LogInfo "Job finished after %O (timeout %O): '%s'"
                 (endTime - startTime) timeoutArg (String.Join(" ", cmd))
-            Map.add name (!ok) Map.empty
+            jst.GetFinishedTable()
         else
             let err = (sprintf "Timeout while waiting %O for job '%s'"
                            timeoutArg (String.Join(" ", cmd)))
@@ -137,36 +198,31 @@ type StellarFormation with
                                 (nextJob:(unit->(string array) option))
                                 (image:string)
                                 : Map<string,bool> =
-        let mutable running = Map.empty
-        let mutable finished = Map.empty
+        let jst = new JobStatusTable()
+
         let rec loop _ =
-            if running.Count < parallelism
+            if jst.NumRunning() < parallelism
             then addJob()
             else waitJob()
 
         and addJob _ =
             match nextJob() with
                  | None ->
-                     if running.IsEmpty
-                     then finished
+                     if jst.NumRunning() = 0
+                     then jst.GetFinishedTable()
                      else waitJob()
                  | Some(cmd) ->
                     let j = self.StartJobForCmd cmd image true
                     let name = j.Metadata.Name
-                    let (waitHandle, ok) = self.WatchJob j
-                    running <- running.Add(name, (j, waitHandle, ok))
+                    self.WatchJob j jst
                     loop()
 
         and waitJob _ =
-            let triples = Map.toArray running
-            let handles = Array.map (fun (_, (_, handle, _)) -> handle) triples
-            let i = System.Threading.WaitHandle.WaitAny(handles)
-            let (n, (j, _, ok)) = triples.[i]
-            if !ok
-            then LogInfo "Job %s passed" n
-            else LogInfo "Job %s failed" n
-            finished <- finished.Add(n, (!ok))
-            running <- running.Remove n
+            let (j, ok) = jst.WaitForNextFinish()
+            let name = j.Metadata.Name
+            if ok
+            then LogInfo "Job %s passed" name
+            else LogInfo "Job %s failed" name
             self.FinishJob destination j
             loop()
 
