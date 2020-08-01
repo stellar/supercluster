@@ -23,21 +23,45 @@ type JobStatusTable() =
     let mutable running = Map.empty
     let mutable finished = Map.empty
     let mutable pendingFinished = []
+    let mutable pendingObsoleteTasks = []
 
-    member self.NoteRunning (name:string) (j:V1Job) =
+    member self.NoteRunning (name:string) (j:V1Job) (task:Tasks.Task<Watcher<V1Job>>) =
         Monitor.Enter self
+
+        // We bounce tasks off the pendingObsoleteTasks list because
+        // NoteRunning is called from the onClosed callback when the
+        // task hasn't actually finished running and we can't Dispose
+        // of it yet. We _can_ call Dispose on tasks from the previous
+        // call to NoteRunning; we then queue up the current task for
+        // Disposal on the _next_ call.
+        for (name, t:Tasks.Task<Watcher<V1Job>>) in pendingObsoleteTasks do
+                t.Dispose()
+            done
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        pendingObsoleteTasks <- []
+        match Map.tryFind name running with
+            | None -> ()
+            | Some((_, t)) ->
+                pendingObsoleteTasks <- (name, t) :: pendingObsoleteTasks
+                running <- Map.remove name running
+
         assert (not (running.ContainsKey(name)))
         assert (not (finished.ContainsKey(name)))
-        running <- running.Add(name, j)
+        running <- running.Add(name, (j, task))
         Monitor.Exit self
 
     member self.NoteFinished (name:string) (ok:bool) =
         Monitor.Enter self
         assert running.ContainsKey(name)
         assert (not (finished.ContainsKey(name)))
-        pendingFinished <- (Map.find name running, ok) :: pendingFinished
+        let (job, task) = Map.find name running
+        pendingObsoleteTasks <- (name, task) :: pendingObsoleteTasks
+        pendingFinished <- (job, ok) :: pendingFinished
+        System.Threading.Interlocked.MemoryBarrier();
         running <- running.Remove(name)
         finished <- finished.Add(name, ok)
+        LogInfo "Awakening any waiters"
         Monitor.PulseAll self
         Monitor.Exit self
 
@@ -49,17 +73,20 @@ type JobStatusTable() =
 
     member self.WaitForNextFinishWithTimeout(timeout:TimeSpan) : bool =
         Monitor.Enter self
-        let n = finished.Count
         let mutable signalled = true
-        while n = finished.Count && signalled do
+        while pendingFinished.IsEmpty && signalled do
           signalled <- Monitor.Wait(self, timeout)
+        if not pendingFinished.IsEmpty
+        then pendingFinished <- pendingFinished.Tail
         Monitor.Exit self
         signalled
 
     member self.WaitForNextFinish() : (V1Job * bool) =
         Monitor.Enter self
         while pendingFinished.IsEmpty do
+          LogInfo "Waiting for next finish"
           Monitor.Wait self |> ignore
+          LogInfo "Woke from waiting for next finish"
         let res = pendingFinished.Head
         pendingFinished <- pendingFinished.Tail
         Monitor.Exit self
@@ -68,6 +95,12 @@ type JobStatusTable() =
     member self.NumRunning() : int =
         Monitor.Enter self
         let n = running.Count
+        Monitor.Exit self
+        n
+
+    member self.NumFinished() : int =
+        Monitor.Enter self
+        let n = finished.Count
         Monitor.Exit self
         n
 
@@ -124,7 +157,6 @@ type StellarFormation with
             if firstWait
             then
                 LogInfo "Waiting for job %s" name
-                jst.NoteRunning name j
             else
                 LogInfo "Continuing to wait for job %s" name
             checkStatus()
@@ -136,10 +168,12 @@ type StellarFormation with
                 let action = System.Action<WatchEventType, V1Job>(handler)
                 let reinstall = System.Action((fun _ -> installHandler false))
                 self.sleepUntilNextRateLimitedApiCallTime()
-                self.Kube.WatchNamespacedJobAsync(name = name,
-                                                  ``namespace`` = ns,
-                                                  onEvent = action,
-                                                  onClosed = reinstall) |> ignore
+                let task = self.Kube.WatchNamespacedJobAsync(name = name,
+                                                             ``namespace`` = ns,
+                                                             onEvent = action,
+                                                             onClosed = reinstall)
+                jst.NoteRunning name j task
+
         installHandler true
 
     member self.RunSingleJob (destination:Destination)
@@ -199,41 +233,47 @@ type StellarFormation with
                                 (image:string)
                                 : Map<string,bool> =
         let jst = new JobStatusTable()
+        let mutable moreJobs = true
 
-        let rec loop _ =
-            if jst.NumRunning() < parallelism
-            then addJob()
-            else waitJob()
-
-        and addJob _ =
-            match nextJob() with
-                 | None ->
-                     if jst.NumRunning() = 0
-                     then jst.GetFinishedTable()
-                     else waitJob()
-                 | Some(cmd) ->
-                    let j = self.StartJobForCmd cmd image true
-                    let name = j.Metadata.Name
-                    self.WatchJob j jst
-                    loop()
-
-        and waitJob _ =
+        let waitJob () : unit =
             let (j, ok) = jst.WaitForNextFinish()
             let name = j.Metadata.Name
             if ok
             then LogInfo "Job %s passed" name
             else LogInfo "Job %s failed" name
-            self.FinishJob destination j
-            loop()
+            try
+                self.FinishJob destination j
+            with
+                | e ->
+                    LogError "Error occurred during cleanup of job %s" name
+                    raise e
+            LogInfo "Finished cleaning up after job %s" name
+
+        let addJob () : unit =
+            match nextJob() with
+                 | None ->
+                     if jst.NumRunning() = 0
+                     then moreJobs <- false
+                     else waitJob()
+                 | Some(cmd) ->
+                    let j = self.StartJobForCmd cmd image true
+                    self.WatchJob j jst
 
         let oldConfig = self.NetworkCfg
         let c = parallelism * self.NetworkCfg.quotas.NumConcurrentMissions
         self.SetNetworkCfg { self.NetworkCfg with
                                  quotas = { self.NetworkCfg.quotas with
                                                 NumConcurrentMissions = c } }
-        let res = loop()
+
+        while moreJobs do
+            if jst.NumRunning() < parallelism
+            then addJob()
+            else waitJob()
+        done
+        LogInfo "Finished parallel-job loop"
+
         self.SetNetworkCfg oldConfig
-        res
+        jst.GetFinishedTable()
 
     member self.CheckAllJobsSucceeded (jobs:Map<string,bool>) =
         let anyBad = ref false
