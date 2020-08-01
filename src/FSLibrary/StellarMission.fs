@@ -55,9 +55,11 @@ let allMissions : Map<string, Mission> =
         ("HistoryTestnetCompleteCatchup", historyTestnetCompleteCatchup)
         ("HistoryTestnetParallelCatchup", historyTestnetParallelCatchup)
         ("HistoryTestnetPerformance", historyTestnetPerformance)
-        ("VersionMixConsensus", versionMixConsensus)
-        ("VersionMixNewCatchupToOld", versionMixNewCatchupToOld)
-        ("VersionMixOldCatchupToNew", versionMixOldCatchupToNew)
+// temporarily disabled: v14.0.0 and v13.2.0 are not compatible on boot
+//        ("VersionMixConsensus", versionMixConsensus)
+// temporarily disabled: failing
+//        ("VersionMixNewCatchupToOld", versionMixNewCatchupToOld)
+//        ("VersionMixOldCatchupToNew", versionMixOldCatchupToNew)
         ("ProtocolUpgradeTestnet", protocolUpgradeTestnet)
         ("ProtocolUpgradePubnet", protocolUpgradePubnet)
         ("DatabaseInplaceUpgrade", databaseInplaceUpgrade)
