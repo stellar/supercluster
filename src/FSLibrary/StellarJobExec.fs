@@ -149,14 +149,15 @@ type StellarFormation with
         // state of the job every time the handler is (re)installed _or_
         // triggered by any event.
         let rec installHandler (firstWait:bool) =
-            if firstWait
-            then
-                LogInfo "Waiting for job %s" name
-            else
-                LogInfo "Continuing to wait for job %s" name
             checkStatus()
-            if not (jst.IsFinished name)
-            then
+            if jst.IsFinished name
+            then LogInfo "Dropping handler for completed job %s" name
+            else
+                if firstWait
+                then
+                    LogInfo "Starting to wait for job %s" name
+                else
+                    LogInfo "Continuing to wait for job %s" name
                 let handler (ety:WatchEventType) (job:V1Job) =
                     if (not (jst.IsFinished name))
                     then checkStatus()
