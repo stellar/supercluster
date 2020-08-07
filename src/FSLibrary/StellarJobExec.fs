@@ -26,89 +26,84 @@ type JobStatusTable() =
     let mutable pendingObsoleteTasks = []
 
     member self.NoteRunning (name:string) (j:V1Job) (task:Tasks.Task<Watcher<V1Job>>) =
-        Monitor.Enter self
+        lock self
+            begin fun _ ->
+                // We bounce tasks off the pendingObsoleteTasks list because
+                // NoteRunning is called from the onClosed callback when the
+                // task hasn't actually finished running and we can't Dispose
+                // of it yet. We _can_ call Dispose on tasks from the previous
+                // call to NoteRunning; we then queue up the current task for
+                // Disposal on the _next_ call.
+                for (name, t:Tasks.Task<Watcher<V1Job>>) in pendingObsoleteTasks do
+                        if t <> null && t.IsCompleted
+                        then t.Dispose()
+                    done
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                pendingObsoleteTasks <- []
+                match Map.tryFind name running with
+                    | None -> ()
+                    | Some((_, t)) ->
+                        pendingObsoleteTasks <- (name, t) :: pendingObsoleteTasks
+                        running <- Map.remove name running
 
-        // We bounce tasks off the pendingObsoleteTasks list because
-        // NoteRunning is called from the onClosed callback when the
-        // task hasn't actually finished running and we can't Dispose
-        // of it yet. We _can_ call Dispose on tasks from the previous
-        // call to NoteRunning; we then queue up the current task for
-        // Disposal on the _next_ call.
-        for (name, t:Tasks.Task<Watcher<V1Job>>) in pendingObsoleteTasks do
-                t.Dispose()
-            done
-        GC.Collect();
-        GC.WaitForPendingFinalizers();
-        pendingObsoleteTasks <- []
-        match Map.tryFind name running with
-            | None -> ()
-            | Some((_, t)) ->
-                pendingObsoleteTasks <- (name, t) :: pendingObsoleteTasks
-                running <- Map.remove name running
-
-        assert (not (running.ContainsKey(name)))
-        assert (not (finished.ContainsKey(name)))
-        running <- running.Add(name, (j, task))
-        Monitor.Exit self
+                assert (not (running.ContainsKey(name)))
+                assert (not (finished.ContainsKey(name)))
+                running <- running.Add(name, (j, task))
+                Interlocked.MemoryBarrier()
+            end
 
     member self.NoteFinished (name:string) (ok:bool) =
-        Monitor.Enter self
-        assert running.ContainsKey(name)
-        assert (not (finished.ContainsKey(name)))
-        let (job, task) = Map.find name running
-        pendingObsoleteTasks <- (name, task) :: pendingObsoleteTasks
-        pendingFinished <- (job, ok) :: pendingFinished
-        System.Threading.Interlocked.MemoryBarrier();
-        running <- running.Remove(name)
-        finished <- finished.Add(name, ok)
-        LogInfo "Awakening any waiters"
-        Monitor.PulseAll self
-        Monitor.Exit self
+        lock self
+            begin fun _ ->
+                assert running.ContainsKey(name)
+                assert (not (finished.ContainsKey(name)))
+                let (job, task) = Map.find name running
+                pendingObsoleteTasks <- (name, task) :: pendingObsoleteTasks
+                pendingFinished <- (job, ok) :: pendingFinished
+                running <- running.Remove(name)
+                finished <- finished.Add(name, ok)
+                LogInfo "Awakening any waiters"
+                Interlocked.MemoryBarrier();
+                Monitor.PulseAll self
+            end
 
     member self.IsFinished (name:string) : bool =
-        Monitor.Enter self
-        let b = finished.ContainsKey name
-        Monitor.Exit self
-        b
+        lock self (fun _ -> finished.ContainsKey name)
 
     member self.WaitForNextFinishWithTimeout(timeout:TimeSpan) : bool =
-        Monitor.Enter self
-        let mutable signalled = true
-        while pendingFinished.IsEmpty && signalled do
-          signalled <- Monitor.Wait(self, timeout)
-        if not pendingFinished.IsEmpty
-        then pendingFinished <- pendingFinished.Tail
-        Monitor.Exit self
-        signalled
+        lock self
+            begin fun _ ->
+                let mutable signalled = true
+                while pendingFinished.IsEmpty && signalled do
+                  signalled <- Monitor.Wait(self, timeout)
+                if not pendingFinished.IsEmpty
+                then pendingFinished <- pendingFinished.Tail
+                Interlocked.MemoryBarrier()
+                signalled
+            end
 
     member self.WaitForNextFinish() : (V1Job * bool) =
-        Monitor.Enter self
-        while pendingFinished.IsEmpty do
-          LogInfo "Waiting for next finish"
-          Monitor.Wait self |> ignore
-          LogInfo "Woke from waiting for next finish"
-        let res = pendingFinished.Head
-        pendingFinished <- pendingFinished.Tail
-        Monitor.Exit self
-        res
+        lock self
+            begin fun _ ->
+                while pendingFinished.IsEmpty do
+                  LogInfo "Waiting for next finish"
+                  Monitor.Wait self |> ignore
+                  LogInfo "Woke from waiting for next finish"
+                let res = pendingFinished.Head
+                pendingFinished <- pendingFinished.Tail
+                Interlocked.MemoryBarrier()
+                res
+            end
 
     member self.NumRunning() : int =
-        Monitor.Enter self
-        let n = running.Count
-        Monitor.Exit self
-        n
+        lock self (fun _ -> running.Count)
 
     member self.NumFinished() : int =
-        Monitor.Enter self
-        let n = finished.Count
-        Monitor.Exit self
-        n
+        lock self (fun _ -> finished.Count)
 
     member self.GetFinishedTable() : Map<string,bool> =
-        Monitor.Enter self
-        let m = finished
-        Monitor.Exit self
-        m
+        lock self (fun _ -> finished)
 
 
 type StellarFormation with
