@@ -96,6 +96,9 @@ type JobStatusTable() =
                 res
             end
 
+    member self.HavePendingFinished() : bool =
+        lock self (fun _ -> not pendingFinished.IsEmpty)
+
     member self.NumRunning() : int =
         lock self (fun _ -> running.Count)
 
@@ -131,15 +134,15 @@ type StellarFormation with
         let checkStatus _ =
             self.sleepUntilNextRateLimitedApiCallTime()
             let js = self.Kube.ReadNamespacedJob(name=name, namespaceParameter=ns)
-            let jobCompleted = js.Status.CompletionTime.HasValue
-            let jobActive = js.Status.Active.GetValueOrDefault(0)
-            let jobFailed = js.Status.Failed.GetValueOrDefault(0)
-            if (jobCompleted && jobActive = 0) || jobFailed > 0
+            let jobIsCompleted = js.Status.CompletionTime.HasValue
+            let jobActivePodCount = js.Status.Active.GetValueOrDefault(0)
+            let jobFailedPodCount = js.Status.Failed.GetValueOrDefault(0)
+            let jobSucceededPodCount = js.Status.Succeeded.GetValueOrDefault(0)
+            if (jobIsCompleted && jobActivePodCount = 0) || jobFailedPodCount > 0
             then
-                let jobSucceeded = js.Status.Succeeded.GetValueOrDefault(0)
                 LogInfo "Finished job %s: %d fail / %d success"
-                    name jobFailed jobSucceeded
-                let ok = (jobFailed = 0) && (jobSucceeded = 1)
+                    name jobFailedPodCount jobSucceededPodCount
+                let ok = (jobFailedPodCount = 0) && (jobSucceededPodCount = 1)
                 jst.NoteFinished name ok
 
         // Unfortunately event "watches" time out and get disconnected,
@@ -231,7 +234,33 @@ type StellarFormation with
         let jst = new JobStatusTable()
         let mutable moreJobs = true
 
+        let mutable podBuildupCheckCount = 0
+        let checkPendingPodBuildup () : unit =
+            podBuildupCheckCount <- podBuildupCheckCount + 1
+            if podBuildupCheckCount >= 100
+            then
+                begin
+                    podBuildupCheckCount <- 0
+                    // We check to see if there are pods that have been in "Pending"
+                    // state for more than 10 minutes. This typically means the cluster
+                    // is low on fixed resources and isn't actually going to be able to
+                    // run our parallel-job-set to completion, so we prefer to fail early
+                    // in this case.
+                    let ns = self.NetworkCfg.NamespaceProperty
+                    LogInfo "Checking for pod buildup"
+                    for pod in self.Kube.ListNamespacedPod(namespaceParameter=ns).Items do
+                        if pod.Status.Phase = "Pending" &&
+                           pod.Metadata.CreationTimestamp.HasValue &&
+                           DateTime.UtcNow.Subtract(pod.Metadata.CreationTimestamp.Value).Minutes > 10
+                        then
+                            failwith (sprintf "Pod '%s' has been 'Pending' for more than 10 minutes, cluster resources likely exhausted"
+                                          pod.Metadata.Name)
+                    done
+                    LogInfo "Did not find pod buildup"
+                end
+
         let waitJob () : unit =
+            LogInfo "Waiting for next job to finish"
             let (j, ok) = jst.WaitForNextFinish()
             let name = j.Metadata.Name
             if ok
@@ -246,6 +275,7 @@ type StellarFormation with
             LogInfo "Finished cleaning up after job %s" name
 
         let addJob () : unit =
+            LogInfo "Adding a job (numRunning = %d)" (jst.NumRunning())
             match nextJob() with
                  | None ->
                      if jst.NumRunning() = 0
@@ -262,6 +292,9 @@ type StellarFormation with
                                                 NumConcurrentMissions = c } }
 
         while moreJobs do
+            checkPendingPodBuildup()
+            if jst.HavePendingFinished()
+            then waitJob()
             if jst.NumRunning() < parallelism
             then addJob()
             else waitJob()
@@ -300,5 +333,24 @@ type StellarFormation with
         // huge amounts of idle EBS storage allocated.
         let pvc = self.NetworkCfg.ToDynamicPersistentVolumeClaim j.Metadata.Name
         self.NamespaceContent.Del(pvc)
-
         self.NamespaceContent.Del(j)
+
+        let mutable pvcLingering = true
+        while pvcLingering do
+            let ns = pvc.Metadata.NamespaceProperty
+            let name = pvc.Metadata.Name
+
+            let pvc2 =
+                try
+                    self.Kube.ReadNamespacedPersistentVolumeClaim(name = name,
+                                                                  namespaceParameter = ns)
+                with
+                    | _ -> null
+
+            if pvc2 = null
+            then pvcLingering <- false
+            else
+                begin
+                    LogInfo "Waiting for PVC %s to stop existing" name
+                    Thread.Sleep(5000)
+                end
