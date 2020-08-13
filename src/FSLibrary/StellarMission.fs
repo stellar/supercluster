@@ -16,6 +16,7 @@ open MissionHistoryPubnetMinimumCatchup
 open MissionHistoryPubnetRecentCatchup
 open MissionHistoryPubnetCompleteCatchup
 open MissionHistoryPubnetParallelCatchup
+open MissionHistoryPubnetParallelCatchupExtrawide
 open MissionHistoryPubnetPerformance
 open MissionHistoryTestnetMinimumCatchup
 open MissionHistoryTestnetRecentCatchup
@@ -49,6 +50,7 @@ let allMissions : Map<string, Mission> =
         ("HistoryPubnetRecentCatchup", historyPubnetRecentCatchup)
         ("HistoryPubnetCompleteCatchup", historyPubnetCompleteCatchup)
         ("HistoryPubnetParallelCatchup", historyPubnetParallelCatchup)
+        ("HistoryPubnetParallelCatchupExtrawide", historyPubnetParallelCatchupExtrawide)
         ("HistoryPubnetPerformance", historyPubnetPerformance)
         ("HistoryTestnetMinimumCatchup", historyTestnetMinimumCatchup)
         ("HistoryTestnetRecentCatchup", historyTestnetRecentCatchup)

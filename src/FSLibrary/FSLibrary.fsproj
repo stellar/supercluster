@@ -43,6 +43,7 @@
     <Compile Include="MissionHistoryPubnetRecentCatchup.fs" />
     <Compile Include="MissionHistoryPubnetCompleteCatchup.fs" />
     <Compile Include="MissionHistoryPubnetParallelCatchup.fs" />
+    <Compile Include="MissionHistoryPubnetParallelCatchupExtrawide.fs" />
     <Compile Include="MissionHistoryPubnetPerformance.fs" />
     <Compile Include="MissionHistoryTestnetCompleteCatchup.fs" />
     <Compile Include="MissionHistoryTestnetRecentCatchup.fs" />
