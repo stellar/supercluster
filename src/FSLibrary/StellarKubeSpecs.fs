@@ -115,6 +115,8 @@ let CoreContainerForCommand (q:NetworkQuotas) (imageName:string) (numContainers:
     let peerNameEnvVarSource = V1EnvVarSource(fieldRef = peerNameFieldSel)
     let peerNameEnvVar = V1EnvVar(name = CfgVal.peerNameEnvVarName,
                                   valueFrom = peerNameEnvVarSource)
+    let asanOptionsEnvVar = V1EnvVar(name = CfgVal.asanOptionsEnvVarName,
+                              value = CfgVal.asanOptionsEnvVarValue)
     let cfgWords = cfgFileArgs configOpt
     let containerName = CfgVal.stellarCoreContainerName (Array.get command 0)
     let cmdWords = Array.concat [ [| ShWord.OfStr CfgVal.stellarCoreBinPath |];
@@ -137,7 +139,7 @@ let CoreContainerForCommand (q:NetworkQuotas) (imageName:string) (numContainers:
         (name = containerName, image = imageName,
          command = [| "/bin/sh" |],
          args = [| "-x"; "-c"; allCmdsAndCleanup.ToString() |],
-         env = [| peerNameEnvVar|],
+         env = [| peerNameEnvVar; asanOptionsEnvVar |],
          resources = resourceRequirements q numContainers,
          securityContext = V1SecurityContext(capabilities = V1Capabilities(add = [|"NET_ADMIN"|])),
          volumeMounts = CoreContainerVolumeMounts peerOrJobNames configOpt)

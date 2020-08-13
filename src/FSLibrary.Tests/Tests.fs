@@ -11,6 +11,7 @@ open StellarKubeSpecs
 open StellarNetworkData
 open StellarNetworkDelays
 open Xunit.Abstractions
+open k8s
 
 
 [<Fact>]
@@ -264,3 +265,39 @@ type Tests(output:ITestOutputHelper) =
         let delay2 = int(networkDelayInMs Ashburn Chennai)
         Assert.Contains(sprintf "netem delay %dms" delay1, cmdStr)
         Assert.Contains(sprintf "netem delay %dms" delay2, cmdStr)
+
+    [<Fact>]
+    member __.``JobStatusTable concurrency control does not deadlock`` () =
+        let jst = StellarJobExec.JobStatusTable()
+        let addJob (n:int) =
+            let job = null
+            let task = new System.Threading.Tasks.Task<Watcher<Models.V1Job>>( fun () -> null )
+            jst.NoteRunning (sprintf "t%d" n) job task
+
+        let rmJob (n:int) =
+            jst.NoteFinished (sprintf "t%d" n) true
+
+        let waitJob _ =
+            jst.WaitForNextFinish() |> ignore
+
+        let n = 10
+        let spin i =
+            for j = 1 to n do
+                let k = (n * i) + j
+                addJob k
+                output.WriteLine(sprintf "added job %d" k)
+                System.Threading.Thread.Sleep (i * 5)
+                rmJob k
+                output.WriteLine(sprintf "removed job %d" k)
+            done
+
+        for i = 1 to n do
+            System.Threading.Tasks.Task.Run(fun _ -> spin i) |> ignore
+        done
+        while jst.NumFinished() < (n*n) do
+            output.WriteLine("Waiting...")
+            waitJob ()
+            output.WriteLine("Woke up!")
+        done
+        output.WriteLine("All done!")
+

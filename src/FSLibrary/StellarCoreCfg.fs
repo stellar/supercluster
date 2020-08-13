@@ -30,6 +30,8 @@ module CfgVal =
     let bucketsPath = dataVolumePath + "/" + bucketsDir
     let localHistName = "local"
     let peerNameEnvVarName = "STELLAR_CORE_PEER_SHORT_NAME"
+    let asanOptionsEnvVarName = "ASAN_OPTIONS"
+    let asanOptionsEnvVarValue = "quarantine_size_mb=1:malloc_context_size=5"
     let peerCfgFileName = "stellar-core.cfg"
     let peerNameEnvCfgFileWord: ShWord =
         ShWord.ShPieces [| ShBare ("/cfg-");

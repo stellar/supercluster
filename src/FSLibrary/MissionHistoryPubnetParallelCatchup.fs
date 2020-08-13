@@ -13,12 +13,12 @@ open StellarFormation
 open StellarJobExec
 
 let historyPubnetParallelCatchup (context : MissionContext) =
-    let checkpointsPerJob = 1000
+    let checkpointsPerJob = 250
     let ledgersPerCheckpoint = 64
-    let ledgersPerJob = checkpointsPerJob * ledgersPerCheckpoint  // 64,000
-    let totalLedgers = GetLatestPubnetLedgerNumber()              // ~25 million ish
-    let numJobs = (totalLedgers / ledgersPerJob)                  // 400 ish
-    let parallelism = 32
+    let ledgersPerJob = checkpointsPerJob * ledgersPerCheckpoint  // 16,000
+    let totalLedgers = GetLatestPubnetLedgerNumber()              // ~30 million ish
+    let numJobs = (totalLedgers / ledgersPerJob)                  // 1800 ish
+    let parallelism = 128
     let overlapCheckpoints = 5
     let overlapLedgers = overlapCheckpoints * ledgersPerCheckpoint
 
