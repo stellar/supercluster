@@ -234,27 +234,31 @@ type StellarFormation with
         let jst = new JobStatusTable()
         let mutable moreJobs = true
 
-        let mutable podBuildupCheckCount = 0
+        // We check to see if there are pods that have been in "Pending"
+        // state for more than 30 minutes. This typically means the cluster
+        // is low on fixed resources and isn't actually going to be able to
+        // run our parallel-job-set to completion, so we prefer to fail early
+        // in this case.
+        let podBuildupTimeoutMinutes = 30
+        let podBuildupCheckMinutes = 3
+        let mutable lastPodBuildupCheckTime = DateTime.UtcNow
         let checkPendingPodBuildup () : unit =
-            podBuildupCheckCount <- podBuildupCheckCount + 1
-            if podBuildupCheckCount >= 100
+            let now = DateTime.UtcNow
+            if now.Subtract(lastPodBuildupCheckTime).Minutes >= podBuildupCheckMinutes
             then
                 begin
-                    podBuildupCheckCount <- 0
-                    // We check to see if there are pods that have been in "Pending"
-                    // state for more than 10 minutes. This typically means the cluster
-                    // is low on fixed resources and isn't actually going to be able to
-                    // run our parallel-job-set to completion, so we prefer to fail early
-                    // in this case.
+                    lastPodBuildupCheckTime <- now
                     let ns = self.NetworkCfg.NamespaceProperty
                     LogInfo "Checking for pod buildup"
                     for pod in self.Kube.ListNamespacedPod(namespaceParameter=ns).Items do
-                        if pod.Status.Phase = "Pending" &&
+                        if (pod.Status.Phase = "Pending" ||
+                            (pod.Status.ContainerStatuses.Count > 0 &&
+                             pod.Status.ContainerStatuses.[0].Ready = false)) &&
                            pod.Metadata.CreationTimestamp.HasValue &&
-                           DateTime.UtcNow.Subtract(pod.Metadata.CreationTimestamp.Value).Minutes > 10
+                           now.Subtract(pod.Metadata.CreationTimestamp.Value).Minutes > podBuildupTimeoutMinutes
                         then
-                            failwith (sprintf "Pod '%s' has been 'Pending' for more than 10 minutes, cluster resources likely exhausted"
-                                          pod.Metadata.Name)
+                            failwith (sprintf "Pod '%s' has been 'Pending' for more than %d minutes, cluster resources likely exhausted"
+                                          pod.Metadata.Name podBuildupTimeoutMinutes)
                     done
                     LogInfo "Did not find pod buildup"
                 end
