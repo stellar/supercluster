@@ -177,19 +177,18 @@ type StellarFormation(networkCfg: NetworkCfg,
         let upgradeTime = System.DateTime.UtcNow.AddSeconds(15.0)
         networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.UpgradeProtocol version upgradeTime)
         let peer = networkCfg.GetPeer coreSetList.[0] 0
-        peer.WaitForFewLedgers(5) |> ignore
+        peer.WaitForProtocol(version) |> ignore
 
     member self.UpgradeProtocolToLatest (coreSetList: CoreSet list) =
-        let upgradeTime = System.DateTime.UtcNow.AddSeconds(15.0)
-        networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.UpgradeProtocolToLatest upgradeTime)
         let peer = networkCfg.GetPeer coreSetList.[0] 0
-        peer.WaitForFewLedgers(5) |> ignore
+        let latest = peer.GetSupportedProtocolVersion()
+        self.UpgradeProtocol coreSetList latest
 
     member self.UpgradeMaxTxSize (coreSetList: CoreSet list) (maxTxSize: int) =
         let upgradeTime = System.DateTime.UtcNow.AddSeconds(15.0)
         networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.UpgradeMaxTxSize maxTxSize upgradeTime)
         let peer = networkCfg.GetPeer coreSetList.[0] 0
-        peer.WaitForFewLedgers(5) |> ignore
+        peer.WaitForMaxTxSetSize maxTxSize |> ignore
 
     member self.ReportStatus () =
         ReportAllPeerStatus networkCfg

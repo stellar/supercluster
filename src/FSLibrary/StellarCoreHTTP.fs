@@ -141,6 +141,9 @@ type Peer with
     member self.GetLedgerNum() : int =
         self.GetInfo().Ledger.Num
 
+    member self.GetMaxTxSetSize() : int =
+        self.GetInfo().Ledger.MaxTxSetSize
+
     member self.GetLedgerProtocolVersion() : int =
         self.GetInfo().Ledger.Version
 
@@ -185,6 +188,20 @@ type Peer with
 
     member self.WaitForNextLedger() =
         self.WaitForFewLedgers(1)
+
+    member self.WaitForProtocol (n:int) =
+        RetryUntilTrue
+            (fun _ -> self.GetLedgerProtocolVersion() = n)
+            (fun _ -> LogInfo "Waiting for protocol %d on %s" n self.ShortName.StringName)
+
+    member self.WaitForLatestProtocol() =
+        let latest = self.GetSupportedProtocolVersion()
+        self.WaitForProtocol latest
+
+    member self.WaitForMaxTxSetSize(n:int) =
+       RetryUntilTrue
+            (fun _ -> self.GetMaxTxSetSize() = n)
+            (fun _ -> LogInfo "Waiting for MaxTxSize=%d on %s" n self.ShortName.StringName)
 
     member self.CheckNoErrorMetrics(includeTxInternalErrors:bool) =
         let raiseIfNonzero (c:int) (n:string) =
