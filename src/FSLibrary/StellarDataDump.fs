@@ -11,6 +11,7 @@ open Logging
 open StellarCoreCfg
 open StellarCorePeer
 open StellarFormation
+open StellarShellCmd
 open System.IO
 open StellarDestination
 open System
@@ -59,28 +60,24 @@ type StellarFormation with
         let ns = self.NetworkCfg.NamespaceProperty
         let name = self.NetworkCfg.PodName p.coreSet p.peerNum
         self.sleepUntilNextRateLimitedApiCallTime()
+        let stop_cmd = ShCmd.OfStrs [| "killall5"; "-19" |]
+        let cont_cmd = ShCmd.OfStrs [| "killall5"; "-18" |]
+        let backup_sql_cmd = ShCmd.OfStrs [|
+            "sqlite3"; CfgVal.databasePath; sprintf ".backup \"%s\"" CfgVal.databaseBackupPath
+        |]
+        let backup_bucket_cmd = ShCmd.OfStrs [|
+            "tar"; "cf"; CfgVal.bucketsBackupPath; "-C"; CfgVal.dataVolumePath; CfgVal.bucketsDir
+        |]
+        let cmd = ShCmd.ShAnd [| stop_cmd; backup_sql_cmd; backup_bucket_cmd; cont_cmd |]
         let task = self.Kube.NamespacedPodExecAsync(name = name.StringName,
                                                     ``namespace`` = ns,
-                                                    command = [|"sqlite3"; CfgVal.databasePath;
-                                                                sprintf ".backup '%s'" CfgVal.databaseBackupPath |],
+                                                    command = [| "/bin/sh"; "-x"; "-c"; cmd.ToString() |],
                                                     container = "stellar-core-run",
                                                     tty = false,
                                                     action = ExecAsyncCallback(fun _ _ _ -> Task.CompletedTask),
                                                     cancellationToken = CancellationToken())
         if task.GetAwaiter().GetResult() <> 0
-        then failwith "Failed to back up database"
-
-        self.sleepUntilNextRateLimitedApiCallTime()
-        let task2 = self.Kube.NamespacedPodExecAsync(name = name.StringName,
-                                                     ``namespace`` = ns,
-                                                     command = [|"tar"; "cf"; CfgVal.bucketsBackupPath;
-                                                                 "-C"; CfgVal.dataVolumePath; CfgVal.bucketsDir |],
-                                                     container = "stellar-core-run",
-                                                     tty = false,
-                                                     action = ExecAsyncCallback(fun _ _ _ -> Task.CompletedTask),
-                                                     cancellationToken = CancellationToken())
-        if task2.GetAwaiter().GetResult() <> 0
-        then failwith "Failed to back up buckets"
+        then failwith "Failed to back up database and buckets"
 
     member self.DumpPeerDatabase (destination : Destination) (p:Peer) =
         try
