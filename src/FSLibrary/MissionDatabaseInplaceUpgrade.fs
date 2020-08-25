@@ -52,6 +52,8 @@ let databaseInplaceUpgrade (context : MissionContext) =
 
       formation.BackupDatabaseToHistory peer
       formation.Start afterUpgradeCoreSet.name
+      let afterPeer = formation.NetworkCfg.GetPeer afterUpgradeCoreSet 0
+      afterPeer.WaitForAuthenticatedPeers 4
       formation.WaitUntilSynced [afterUpgradeCoreSet]
 
       formation.RunLoadgen afterUpgradeCoreSet context.GenerateAccountCreationLoad

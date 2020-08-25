@@ -347,6 +347,12 @@ type Peer with
                 LogInfo "Waiting until %s is synced: %s"
                     self.ShortName.StringName (self.GetStatusOrState()))
 
+    member self.WaitForAuthenticatedPeers(n:int) =
+        RetryUntilTrue
+            (fun _ -> self.GetInfo().Peers.AuthenticatedCount >= n)
+            (fun _ -> LogInfo "Waiting until %s has >= %d authenticated peers"
+                          self.ShortName.StringName n)
+
 let ReportAllPeerStatus (nCfg:NetworkCfg) =
     nCfg.EachPeer
         begin
