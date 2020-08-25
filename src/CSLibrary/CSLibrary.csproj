@@ -5,7 +5,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="KubernetesClient" Version="1.5.25" />
+    <PackageReference Include="KubernetesClient" Version="2.0.29" />
     <PackageReference Include="Serilog" Version="2.8.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="3.1.1" />
     <PackageReference Include="stellar-dotnet-sdk" Version="5.0.0" />
