@@ -148,8 +148,6 @@ type Kubernetes with
                                 resToMemMebi q.Status.Hard "requests.memory" nq.NamespaceQuotaReqMemMebi }
         done
         LogInfo "Using quotas: %O" nq
-        let nq = nq.AdjustedToCompensateForKubeletMemoryPressureBug()
-        LogInfo "Adjusted quotas to avoid k8s bug: %O" nq
         nq
 
     // Creates a minimal formation on which to run Jobs; no StatefulSets,

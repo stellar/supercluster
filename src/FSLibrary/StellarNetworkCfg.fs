@@ -107,7 +107,7 @@ type NetworkQuotas =
             self.NamespaceQuotaReqCpuMili self.NamespaceQuotaReqMemMebi
             self.NumConcurrentMissions
 
-    member self.AdjustedToCompensateForKubeletMemoryPressureBug() : NetworkQuotas =
+    member self.AdjustedToCompensateForKubeletMemoryPressureBug(numContainers:int) : NetworkQuotas =
         // Adjust the quotas structure to work around the bug mentioned in the
         // comment above, https://github.com/kubernetes/kubernetes/issues/43916
         //
@@ -115,9 +115,19 @@ type NetworkQuotas =
         // running core under address sanitizer with
         // ASAN_OPTIONS=quarantine_size_mb=1:malloc_context_size=5
         // We give it a little more room here just in case.
-        let practicalFixedLimMemMebi = 350
-        { self with
-            ContainerMaxMemMebi = practicalFixedLimMemMebi }
+        //
+        // Or rather, we _would_ just use this fixed limit if it weren't for
+        // yet _another_ countervailing consideration, which is that some of our
+        // jobs run a relatively small number of containers but need each to
+        // use as much memory as they can (eg. the acceptance unit tests);
+        // so in the case of a small number of containers we _don't_ adjust
+        // the limit downwards.
+        if numContainers < 10
+        then self
+        else
+            let practicalFixedLimMemMebi = 350
+            { self with
+                ContainerMaxMemMebi = practicalFixedLimMemMebi }
 
     member self.ContainerCpuReqMili (numContainers:int) : int =
         let divisor = numContainers * self.NumConcurrentMissions

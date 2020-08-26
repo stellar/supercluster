@@ -63,6 +63,7 @@ let HistoryContainerVolumeMounts : V1VolumeMount array =
 // (the former needs very little RAM, the latter quite a lot). But this seems to
 // work for now.
 let resourceRequirements (q:NetworkQuotas) (numContainers:int) : V1ResourceRequirements =
+    let q = q.AdjustedToCompensateForKubeletMemoryPressureBug(numContainers)
     let cpuReq = q.ContainerCpuReqMili numContainers
     let memReq = q.ContainerMemReqMebi numContainers
     let cpuLim = q.ContainerCpuLimMili numContainers
