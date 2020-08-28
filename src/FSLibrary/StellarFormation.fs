@@ -169,6 +169,10 @@ type StellarFormation(networkCfg: NetworkCfg,
         namespaceContent.Add(claim)
 
     member self.WaitUntilSynced (coreSetList: CoreSet list) =
+        coreSetList |> List.iter (fun coreSet ->
+            if coreSet.CurrentCount = 0
+            then failwith ("Coreset " + coreSet.name.StringName + " is not live"))
+            
         networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.WaitUntilSynced())
 
     // When upgrading multiple nodes, configure upgrade time a bit ahead to ensure nodes have enough
