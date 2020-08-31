@@ -175,6 +175,12 @@ type StellarFormation(networkCfg: NetworkCfg,
             
         networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.WaitUntilSynced())
 
+    member self.WaitUntilConnected (coreSetList: CoreSet list) (connections: int) =
+        networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.WaitUntilConnected connections)
+
+    member self.ManualClose (coreSetList: CoreSet list) =
+        networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.ManualClose())
+
     // When upgrading multiple nodes, configure upgrade time a bit ahead to ensure nodes have enough
     // of a buffer to set upgrades
     member self.UpgradeProtocol (coreSetList: CoreSet list) (version: int) =
