@@ -14,7 +14,7 @@ open StellarNetworkData
 open StellarNetworkDelays
 
 let simulatePubnet (context : MissionContext) =
-    let fullCoreSet = FullPubnetCoreSets context.image
+    let fullCoreSet = FullPubnetCoreSets context.image true
 
     let findCoreSetWithHomeDomain (domain:string) : CoreSet =
         List.find (fun (cs:CoreSet) -> cs.name.StringName = domain) fullCoreSet
@@ -30,8 +30,13 @@ let simulatePubnet (context : MissionContext) =
     let tier1 = [sdf; lobstr; keybase; satoshipay; wirex; blockdaemon; coinqvest]
 
     context.Execute fullCoreSet None (fun (formation: StellarFormation) ->
-        // Wait for network setup first, to fail as soon as
-        // possible in case of a misconfiguration
+        // Setup overlay connections first before manually closing
+        // ledger, which kick off consensus
+        formation.WaitUntilConnected fullCoreSet 16
+        formation.ManualClose tier1
+
+        // Wait until the whole network is synced before proceeding,
+        // to fail asap in case of a misconfiguration
         formation.WaitUntilSynced fullCoreSet
         formation.InstallNetworkDelays fullCoreSet
         formation.UpgradeProtocolToLatest tier1

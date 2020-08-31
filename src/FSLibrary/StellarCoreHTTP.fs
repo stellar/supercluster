@@ -283,6 +283,10 @@ type Peer with
             (fun _ -> Http.RequestString(httpMethod="GET",
                                          url=self.URL "generateload",
                                          query=loadGen.ToQuery))
+    member self.ManualClose() =
+        WebExceptionRetry DefaultRetry
+            (fun _ -> Http.RequestString(httpMethod="GET",
+                                         url = self.URL "manualclose")) |> ignore
 
     member self.SubmitSignedTransaction (tx:Transaction) : Tx.Root =
         let b64 = tx.ToEnvelopeXdrBase64()
@@ -328,6 +332,15 @@ type Peer with
                             (MeterCountOr 0 m.LoadgenRunStart)
                             (MeterCountOr 0 m.LoadgenAccountCreated) loadGen.accounts
                             (MeterCountOr 0 m.LoadgenTxnAttempted) loadGen.txs)
+
+    member self.WaitUntilConnected(connections:int) =
+        RetryUntilTrue
+            (fun _ ->
+                self.GetInfo().Peers.AuthenticatedCount >= connections
+                )
+            (fun _ ->
+                LogInfo "Waiting until %s is connected: currently %d connections"
+                    self.ShortName.StringName (self.GetInfo().Peers.AuthenticatedCount))
 
     member self.WaitUntilReady() =
         RetryUntilTrue

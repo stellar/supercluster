@@ -11,6 +11,7 @@ open StellarNetworkCfg
 open StellarCoreCfg
 open StellarCoreSet
 open StellarShellCmd
+open System.Text.RegularExpressions
 
 // Containers that run stellar-core may or may-not have a final '--conf'
 // argument appended to their command-line. The argument is specified one of 3
@@ -351,6 +352,24 @@ type NetworkCfg with
             match coreSet.options.simulateApplyUsec with
             | 0 -> runCmd
             | _ -> Array.append runCmd [| "--simulate-apply-per-op"; coreSet.options.simulateApplyUsec.ToString() |]
+
+        let firstProtocolWithDefaultForceSCP = 14
+        let getCoreVersion (coreVersion: string) =
+            let m = Regex.Match(coreVersion, "[0-9]([0-9]?).[0-9]([0-9]?).[0-9]([0-9]?)")
+            if m.Success then Some(m.Value)
+            else None
+
+        let imageProtoVersion =
+            match (getCoreVersion coreSet.options.image) with
+            | None -> firstProtocolWithDefaultForceSCP
+            | Some v -> int (v.Split '.').[0]
+
+        let runCmdWithOpts =
+            match coreSet.options.initialization.forceScp with
+            | true -> runCmdWithOpts
+            | false -> if (imageProtoVersion >= firstProtocolWithDefaultForceSCP)
+                       then Array.append runCmdWithOpts [| "--wait-for-consensus" |]
+                       else runCmdWithOpts
 
         let usePostgres = (coreSet.options.dbType = Postgres)
         let numBaseContainers = 2 // core and history

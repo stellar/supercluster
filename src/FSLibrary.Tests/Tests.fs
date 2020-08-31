@@ -82,7 +82,7 @@ type Tests(output:ITestOutputHelper) =
 
     [<Fact>]
     member __.``Public network conversion looks reasonable`` () =
-        let coreSets = FullPubnetCoreSets "stellar/stellar-core"
+        let coreSets = FullPubnetCoreSets "stellar/stellar-core" false
         let nCfg = MakeNetworkCfg coreSets nameSpace quotas loglevels storageclass ingress
                        exportToPrometheus passOpt apiRateLimit
         let sdfCoreSetName = CoreSetName "www-stellar-org"

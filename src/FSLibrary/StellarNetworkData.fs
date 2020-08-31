@@ -19,7 +19,7 @@ let TestnetLatestHistoryArchiveState = "http://history.stellar.org/prd/core-test
 
 type PubnetNode = JsonProvider<"json-pubnet-data/nodes.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
 
-let FullPubnetCoreSets (image:string) : CoreSet list =
+let FullPubnetCoreSets (image:string) (manualclose:bool) : CoreSet list =
 
     // Our dataset is the samples used to build the datatype: json-pubnet-data/nodes.json
     let allPubnetNodes : PubnetNode.Root array =
@@ -158,7 +158,7 @@ let FullPubnetCoreSets (image:string) : CoreSet list =
                         nodeCount = 1
                         quorumSet = ExplicitQuorum qset
                         nodeLocs = Some [nodeToGeoLoc n] }
-                let shouldForceScp = n.IsValidator
+                let shouldForceScp = n.IsValidator && not manualclose
                 let coreSetOpts = coreSetOpts.WithForceSCP shouldForceScp
                 let keys = [|getSimKey n.PublicKey|]
                 makeCoreSetWithExplicitKeys hdn coreSetOpts keys)
@@ -174,7 +174,7 @@ let FullPubnetCoreSets (image:string) : CoreSet list =
                         nodeCount = Array.length nodes
                         quorumSet = ExplicitQuorum qset
                         nodeLocs = Some (List.map nodeToGeoLoc (List.ofArray nodes)) }
-                let shouldForceScp = nodes.[0].IsValidator
+                let shouldForceScp = nodes.[0].IsValidator && not manualclose
                 let coreSetOpts = coreSetOpts.WithForceSCP shouldForceScp
                 let keys = Array.map (fun (n:PubnetNode.Root) -> getSimKey n.PublicKey) nodes
                 makeCoreSetWithExplicitKeys hdn coreSetOpts keys)
