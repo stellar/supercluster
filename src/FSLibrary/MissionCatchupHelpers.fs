@@ -9,6 +9,7 @@ open StellarCorePeer
 open StellarCoreSet
 open StellarMissionContext
 open StellarFormation
+open Logging
 
 type CatchupMissionOptions =
     { generatorImage : string
@@ -22,6 +23,20 @@ type CatchupSets =
 
     member self.AllSetList () =
         List.concat [[self.generatorSet]; self.deferredSetList; [self.versionSet]]
+
+let MakeRecentCatchupSet (options: CatchupMissionOptions) =
+    let generatorOptions = { CoreSetOptions.GetDefault options.generatorImage with nodeCount = 1; quorumSet = CoreSetQuorum(CoreSetName "generator"); accelerateTime = true; }
+    let generatorSet = MakeLiveCoreSet "generator" generatorOptions
+
+    let recentOptions = { CoreSetOptions.GetDefault options.catchupImage with catchupMode = CatchupRecent(5); nodeCount = 1; quorumSet = CoreSetQuorum(CoreSetName "generator"); accelerateTime = true; initialization = CoreSetInitialization.DefaultNoForceSCP }
+    let recentSet = MakeDeferredCoreSet "recent1" recentOptions
+
+    let versionOptions = { CoreSetOptions.GetDefault options.versionImage with nodeCount = 1; quorumSet = CoreSetQuorum(CoreSetName "version"); accelerateTime = true; }
+    let versionSet = MakeLiveCoreSet "version" versionOptions
+
+    { generatorSet = generatorSet
+      deferredSetList = [recentSet]
+      versionSet = versionSet}
 
 let MakeCatchupSets (options: CatchupMissionOptions) =
     let generatorOptions = { CoreSetOptions.GetDefault options.generatorImage with nodeCount = 1; quorumSet = CoreSetQuorum(CoreSetName "generator"); accelerateTime = true; }
@@ -72,10 +87,10 @@ let MakeCatchupSets (options: CatchupMissionOptions) =
                          recent3Set ]
       versionSet = versionSet}
 
-let doCatchup (context: MissionContext) (formation: StellarFormation) (catchupSets: CatchupSets) =
-    let versionPeer = formation.NetworkCfg.GetPeer catchupSets.versionSet 0
-    let version = versionPeer.GetSupportedProtocolVersion()
+let doCatchupForVersion (context: MissionContext) (formation: StellarFormation) (catchupSets: CatchupSets) (version: int) =
     formation.Stop (CoreSetName "version")
+
+    LogInfo "Upgrading generator peer to protocol version %d " version
     let generatorPeer = formation.NetworkCfg.GetPeer catchupSets.generatorSet 0
     generatorPeer.UpgradeProtocol version System.DateTime.UtcNow
     if context.numTxs > 100
@@ -89,3 +104,8 @@ let doCatchup (context: MissionContext) (formation: StellarFormation) (catchupSe
         formation.Start set.name
         let peer = formation.NetworkCfg.GetPeer set 0
         peer.WaitForLedgerNum 40
+
+let doCatchup (context: MissionContext) (formation: StellarFormation) (catchupSets: CatchupSets) =
+    let versionPeer = formation.NetworkCfg.GetPeer catchupSets.versionSet 0
+    let version = versionPeer.GetSupportedProtocolVersion()
+    doCatchupForVersion context formation catchupSets version

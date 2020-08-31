@@ -6,6 +6,7 @@ module MissionHistoryGenerateAndCatchup
 
 open MissionCatchupHelpers
 open StellarCoreHTTP
+open StellarCorePeer
 open StellarMissionContext
 open StellarFormation
 open StellarSupercluster
@@ -14,10 +15,23 @@ let historyGenerateAndCatchup (context : MissionContext) =
     let context = context.WithNominalLoad
     let image = context.image
     let catchupOptions = { generatorImage = image; catchupImage = image; versionImage = image }
-    let catchupSets = MakeCatchupSets catchupOptions
+    let catchupSets = MakeRecentCatchupSet catchupOptions
     let sets = catchupSets.AllSetList()
 
+    let mutable maxVersion = 0
+    
     context.Execute sets None (fun (formation: StellarFormation) ->
         formation.WaitUntilAllLiveSynced()
+
+        let versionPeer = formation.NetworkCfg.GetPeer catchupSets.versionSet 0
+        maxVersion <- versionPeer.GetSupportedProtocolVersion()
+
         doCatchup context formation catchupSets
     )
+
+    for i in 0 .. (maxVersion - 1) do
+        let contextCopy =  context.WithNominalLoad
+        contextCopy.Execute sets None (fun (formation: StellarFormation) ->
+            formation.WaitUntilAllLiveSynced()
+            doCatchupForVersion contextCopy formation catchupSets i
+        )
