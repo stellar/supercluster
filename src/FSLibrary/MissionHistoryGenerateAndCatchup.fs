@@ -19,6 +19,6 @@ let historyGenerateAndCatchup (context : MissionContext) =
     let sets = catchupSets.AllSetList()
 
     context.Execute sets None (fun (formation: StellarFormation) ->
-        formation.WaitUntilAllLiveSynced
+        formation.WaitUntilAllLiveSynced()
         doCatchup context formation catchupSets
     )
