@@ -55,19 +55,17 @@ let HistoryContainerVolumeMounts : V1VolumeMount array =
        V1VolumeMount(name = CfgVal.dataVolumeName,
                      mountPath = CfgVal.dataVolumePath) |]
 
-// Note: for the time being we use the same resource-requirements calculation
-// for each container in our pod, be it core, history or postgres. We just
-// multiply the number of pods by the number of containers-in-each-pod to get a
-// total container count, which is used as a divisor in these calculations. A
-// fancier calculation would deduct different amounts for nginx and postgres
-// (the former needs very little RAM, the latter quite a lot). But this seems to
-// work for now.
-let resourceRequirements (q:NetworkQuotas) (numContainers:int) : V1ResourceRequirements =
+// Calculate container quotas based on the total number of containers of all
+// types (be it core, history or postgres) and assigned weight. Weight helps
+// assign more or less resources to certain containers (for instance, core containers
+// typically require more RAM/CPU than history containers)
+// Note that when assigning weight, total cluster capacity must not be exceeded.
+let resourceRequirements (q:NetworkQuotas) (numContainers:int) (weight:float): V1ResourceRequirements =
     let q = q.AdjustedToCompensateForKubeletMemoryPressureBug(numContainers)
-    let cpuReq = q.ContainerCpuReqMili numContainers
-    let memReq = q.ContainerMemReqMebi numContainers
-    let cpuLim = q.ContainerCpuLimMili numContainers
-    let memLim = q.ContainerMemLimMebi numContainers
+    let cpuReq = q.ContainerCpuReqMili weight numContainers
+    let memReq = q.ContainerMemReqMebi weight numContainers
+    let cpuLim = q.ContainerCpuLimMili weight numContainers
+    let memLim = q.ContainerMemLimMebi weight numContainers
     let requests = dict["cpu", ResourceQuantity(sprintf "%dm" cpuReq);
                         "memory", ResourceQuantity(sprintf "%dMi" memReq)]
     let limits = dict["cpu", ResourceQuantity(sprintf "%dm" cpuLim);
@@ -81,7 +79,7 @@ let HistoryContainer (q:NetworkQuotas) (numContainers:int) =
          image = "nginx",
          command = [| "nginx" |],
          args = [| "-c"; CfgVal.historyCfgFilePath; |],
-         resources = resourceRequirements q numContainers,
+         resources = resourceRequirements q numContainers 0.5,
          volumeMounts = HistoryContainerVolumeMounts )
 
 let PostgresContainer (q:NetworkQuotas) (numContainers:int) =
@@ -92,7 +90,7 @@ let PostgresContainer (q:NetworkQuotas) (numContainers:int) =
          env = [| passwordEnvVar; |],
          ports = [| V1ContainerPort(containerPort = 5432, name = "postgres") |],
          image = "postgres:9.5.22",
-         resources = resourceRequirements q numContainers,
+         resources = resourceRequirements q numContainers 1.0,
          volumeMounts = PgContainerVolumeMounts)
 
 let PrometheusExporterSidecarContainer (q:NetworkQuotas) (numContainers:int) =
@@ -100,7 +98,7 @@ let PrometheusExporterSidecarContainer (q:NetworkQuotas) (numContainers:int) =
                 ports = [| V1ContainerPort(containerPort = CfgVal.prometheusExporterPort,
                                            name = "prom-exp") |],
                 image = "stellar/stellar-core-prometheus-exporter:latest",
-                resources = resourceRequirements q numContainers)
+                resources = resourceRequirements q numContainers 1.0)
 
 let cfgFileArgs (configOpt:ConfigOption) : ShWord array =
     match configOpt with
@@ -141,7 +139,8 @@ let CoreContainerForCommand (q:NetworkQuotas) (imageName:string) (numContainers:
          command = [| "/bin/sh" |],
          args = [| "-x"; "-c"; allCmdsAndCleanup.ToString() |],
          env = [| peerNameEnvVar; asanOptionsEnvVar |],
-         resources = resourceRequirements q numContainers,
+         // Core container are assigned greater weight, as they use for resources
+         resources = resourceRequirements q numContainers 1.5,
          securityContext = V1SecurityContext(capabilities = V1Capabilities(add = [|"NET_ADMIN"|])),
          volumeMounts = CoreContainerVolumeMounts peerOrJobNames configOpt)
 
