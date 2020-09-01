@@ -18,6 +18,6 @@ let versionMixOldCatchupToNew (context : MissionContext) =
     let catchupSets = MakeCatchupSets catchupOptions
     let sets = catchupSets.AllSetList()
     context.Execute sets None (fun (formation: StellarFormation) ->
-        formation.WaitUntilSynced sets
+        formation.WaitUntilAllLiveSynced
         doCatchup context formation catchupSets
     )
