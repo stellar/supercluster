@@ -31,5 +31,5 @@ let versionMixConsensus (context : MissionContext) =
         formation.CreateAccount oldCoreSet UserAlice
         formation.CreateAccount oldCoreSet UserBob
         formation.Pay oldCoreSet UserAlice UserBob
-        formation.Pay newCoreSet UserAlice UserBob
+        formation.Pay newCoreSet UserBob UserAlice
     )
