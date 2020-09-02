@@ -203,6 +203,12 @@ type Peer with
             (fun _ -> self.GetMaxTxSetSize() = n)
             (fun _ -> LogInfo "Waiting for MaxTxSize=%d on %s" n self.ShortName.StringName)
 
+    member self.WaitForNextSeq (src: string) (n:int64) =
+        let desiredSeq = n + int64(1)
+        RetryUntilTrue
+            (fun _ -> self.GetTestAccSeq(src) >= desiredSeq)
+            (fun _ -> LogInfo "Waiting for seqnum=%d for account %s" desiredSeq src)
+
     member self.CheckNoErrorMetrics(includeTxInternalErrors:bool) =
         let raiseIfNonzero (c:int) (n:string) =
             if c <> 0
