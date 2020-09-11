@@ -235,11 +235,11 @@ type StellarFormation with
         let mutable moreJobs = true
 
         // We check to see if there are pods that have been in "Pending"
-        // state for more than 30 minutes. This typically means the cluster
+        // state for more than 120 minutes. This typically means the cluster
         // is low on fixed resources and isn't actually going to be able to
         // run our parallel-job-set to completion, so we prefer to fail early
         // in this case.
-        let podBuildupTimeoutMinutes = 30
+        let podBuildupTimeoutMinutes = 120
         let podBuildupCheckMinutes = 3
         let mutable lastPodBuildupCheckTime = DateTime.UtcNow
         let checkPendingPodBuildup () : unit =
