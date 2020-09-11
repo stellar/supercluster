@@ -220,9 +220,11 @@ type StellarFormation(networkCfg: NetworkCfg,
     member self.Pay (coreSet: CoreSet) (src: Username) (dst: Username) =
         let peer = networkCfg.GetPeer coreSet 0
         let tx = peer.TxPayment src dst
+        let seq = peer.GetTestAccSeq (src.ToString())
+
         LogInfo "paying from account %O to %O on %O" src dst self
         peer.SubmitSignedTransaction tx |> ignore
-        peer.WaitForNextLedger() |> ignore
+        peer.WaitForNextSeq (src.ToString()) seq |> ignore
         LogInfo "sent payment from %O (%O) to %O (%O) on %O"
             src (peer.GetSeqAndBalance src)
             dst (peer.GetSeqAndBalance dst)
