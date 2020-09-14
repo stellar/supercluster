@@ -456,10 +456,13 @@ let main argv =
                                                apiRateLimit = mission.ApiRateLimit }
                         allMissions.[m] missionContext
                     with
+                    // The exception handling below is required even if we weren't logging.
                     // This looks ridiculous but it's how you coax the .NET runtime
                     // to actually run the IDisposable Dispose methods on uncaught
                     // exceptions. Sigh.
-                    | x -> reraise()
+                    | x -> 
+                        LogError "Exception thrown. Message = %s - StackTrace =%s" x.Message x.StackTrace
+                        reraise()
                     LogInfo "-----------------------------------"
                     LogInfo "Finished mission: %s" m
                     LogInfo "-----------------------------------"
