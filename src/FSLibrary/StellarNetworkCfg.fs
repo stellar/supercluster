@@ -125,35 +125,31 @@ type NetworkQuotas =
         if numContainers < 10
         then self
         else
-            let practicalFixedLimMemMebi = 600
+            let practicalFixedLimMemMebi = 350
             { self with
                 ContainerMaxMemMebi = practicalFixedLimMemMebi }
 
-    member self.ContainerCpuReqMili (weight:float) (numContainers:int) : int =
+    member self.ContainerCpuReqMili (numContainers:int) : int =
         let divisor = numContainers * self.NumConcurrentMissions
         let nsFrac = self.NamespaceQuotaReqCpuMili / divisor
-        let weightedNsFran = System.Convert.ToInt32((float nsFrac) * weight)
-        let lim = (self.ContainerCpuLimMili weight numContainers)
-        min 100 (min weightedNsFran lim)
+        let lim = (self.ContainerCpuLimMili numContainers)
+        min 100 (min nsFrac lim)
 
-    member self.ContainerCpuLimMili (weight:float) (numContainers:int) : int =
+    member self.ContainerCpuLimMili (numContainers:int) : int =
        let divisor = numContainers * self.NumConcurrentMissions
        let nsFrac = self.NamespaceQuotaLimCpuMili / divisor
-       let weightedNsFran = System.Convert.ToInt32((float nsFrac) * weight)
-       min weightedNsFran self.ContainerMaxCpuMili
+       min nsFrac self.ContainerMaxCpuMili
 
-    member self.ContainerMemReqMebi (weight:float) (numContainers:int) : int =
+    member self.ContainerMemReqMebi (numContainers:int) : int =
         let divisor = numContainers * self.NumConcurrentMissions
         let nsFrac = self.NamespaceQuotaReqMemMebi / divisor
-        let weightedNsFran = System.Convert.ToInt32((float nsFrac) * weight)
-        let lim = (self.ContainerMemLimMebi weight numContainers)
-        min 100 (min weightedNsFran lim)
+        let lim = (self.ContainerMemLimMebi numContainers)
+        min 100 (min nsFrac lim)
 
-    member self.ContainerMemLimMebi (weight:float) (numContainers:int) : int =
+    member self.ContainerMemLimMebi (numContainers:int) : int =
         let divisor = numContainers * self.NumConcurrentMissions
         let nsFrac = self.NamespaceQuotaLimMemMebi / divisor
-        let weightedNsFran = System.Convert.ToInt32((float nsFrac) * weight)
-        min weightedNsFran self.ContainerMaxMemMebi
+        min nsFrac self.ContainerMaxMemMebi
 
 
 let MakeNetworkQuotas (containerMaxCpuMili: int,
