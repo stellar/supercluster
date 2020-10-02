@@ -4,13 +4,13 @@
 
 module MissionVersionMixConsensus
 
-open StellarCoreCfg
 open StellarCoreHTTP
 open StellarCorePeer
 open StellarCoreSet
 open StellarMissionContext
 open StellarTransaction
 open StellarFormation
+open StellarSupercluster
 
 let versionMixConsensus (context : MissionContext) =
     let newImage = context.image

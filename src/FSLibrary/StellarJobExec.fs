@@ -13,7 +13,6 @@ open StellarDestination
 open StellarDataDump
 open StellarFormation
 open StellarKubeSpecs
-open StellarNamespaceContent
 open System
 open System.Threading
 open Microsoft.Rest
@@ -34,7 +33,7 @@ type JobStatusTable() =
                 // of it yet. We _can_ call Dispose on tasks from the previous
                 // call to NoteRunning; we then queue up the current task for
                 // Disposal on the _next_ call.
-                for (name, t:Tasks.Task<Watcher<V1Job>>) in pendingObsoleteTasks do
+                for (_, t:Tasks.Task<Watcher<V1Job>>) in pendingObsoleteTasks do
                         if t <> null && t.IsCompleted
                         then t.Dispose()
                     done
@@ -300,10 +299,12 @@ type StellarFormation with
                     self.WatchJob j jst
 
         let oldConfig = self.NetworkCfg
-        let c = parallelism * self.NetworkCfg.quotas.NumConcurrentMissions
+        let c = parallelism * self.NetworkCfg.missionContext.quotas.NumConcurrentMissions
+        let ctx = { self.NetworkCfg.missionContext with
+                        quotas = { self.NetworkCfg.missionContext.quotas with
+                                       NumConcurrentMissions = c } }
         self.SetNetworkCfg { self.NetworkCfg with
-                                 quotas = { self.NetworkCfg.quotas with
-                                                NumConcurrentMissions = c } }
+                                 missionContext = ctx }
 
         while moreJobs do
             checkPendingPodBuildup()

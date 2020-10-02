@@ -4,13 +4,13 @@
 
 module MissionDatabaseInplaceUpgrade
 
-open StellarCoreCfg
 open StellarCoreHTTP
 open StellarCorePeer
 open StellarCoreSet
 open StellarMissionContext
 open StellarFormation
 open StellarDataDump
+open StellarSupercluster
 
 let databaseInplaceUpgrade (context : MissionContext) =
     let context = context.WithNominalLoad

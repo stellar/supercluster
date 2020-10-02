@@ -11,6 +11,7 @@ open StellarNetworkCfg
 open StellarNetworkData
 open StellarFormation
 open StellarJobExec
+open StellarSupercluster
 
 let historyPubnetParallelCatchupExtrawide (context : MissionContext) =
     let checkpointsPerJob = 250

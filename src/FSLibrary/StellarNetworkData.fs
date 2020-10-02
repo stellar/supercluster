@@ -7,11 +7,9 @@ module StellarNetworkData
 open FSharp.Data
 open stellar_dotnet_sdk
 
-open FSharp.Data
 open StellarCoreSet
 open StellarCoreCfg
-open StellarNetworkCfg
-open stellar_dotnet_sdk.responses.results
+open StellarMissionContext
 
 type HistoryArchiveState = JsonProvider<"json-type-samples/sample-stellar-history.json", ResolutionFolder=__SOURCE_DIRECTORY__>
 let PubnetLatestHistoryArchiveState = "http://history.stellar.org/prd/core-live/core_live_001/.well-known/stellar-history.json"

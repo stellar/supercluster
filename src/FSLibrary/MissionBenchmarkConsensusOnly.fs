@@ -5,11 +5,12 @@
 module MissionBenchmarkConsensusOnly
 
 open StellarCoreHTTP
-open StellarCorePeer
 open StellarCoreSet
 open StellarMissionContext
 open StellarPerformanceReporter
 open StellarFormation
+open StellarSupercluster
+
 
 let benchmarkConsensusOnly (context : MissionContext) =
     let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.GetDefault context.image with

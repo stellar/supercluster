@@ -9,18 +9,16 @@ open k8s.Models
 open k8s.KubeConfigModels
 
 open Logging
+open StellarDataDump
+open StellarMissionContext
 open StellarNetworkCfg
 open StellarNetworkData
 open StellarFormation
-open StellarCoreCfg
 open StellarCoreSet
 open StellarKubeSpecs
-open StellarCorePeer
-open StellarCoreHTTP
-open StellarTransaction
 open StellarNamespaceContent
+open StellarPerformanceReporter
 open System
-open Microsoft.Rest
 open System.Collections.Generic
 
 let ExpandHomeDirTilde (s:string) : string =
@@ -169,16 +167,15 @@ type Kubernetes with
         new StellarFormation(networkCfg = nCfg,
                              kube = self,
                              statefulSets = [],
-                             namespaceContent = NamespaceContent(self, nCfg.apiRateLimitRequestsPerSecond, nCfg.NamespaceProperty),
-                             probeTimeout = 1)
+                             namespaceContent = NamespaceContent(self, nCfg.missionContext.apiRateLimit, nCfg.NamespaceProperty))
 
 
     // Creates a full-featured formation involving a StatefulSet, Service, and
     // Ingress for a given NetworkCfg, then waits for it to be ready.
-    member self.MakeFormation (nCfg: NetworkCfg) (keepData: bool) (probeTimeout: int) : StellarFormation =
+    member self.MakeFormation (nCfg: NetworkCfg) : StellarFormation =
         let nsStr = nCfg.NamespaceProperty
-        let namespaceContent = NamespaceContent(self, nCfg.apiRateLimitRequestsPerSecond, nsStr)
-        let rps = nCfg.apiRateLimitRequestsPerSecond
+        let namespaceContent = NamespaceContent(self, nCfg.missionContext.apiRateLimit, nsStr)
+        let rps = nCfg.missionContext.apiRateLimit
         try
             let svc = nCfg.ToService()
             LogInfo "Creating Service %s" svc.Metadata.Name
@@ -192,7 +189,7 @@ type Kubernetes with
                                                                     namespaceParameter = nsStr))
 
             let makeStatefulSet coreSet =
-                let sts = nCfg.ToStatefulSet coreSet probeTimeout
+                let sts = nCfg.ToStatefulSet coreSet
                 LogInfo "Creating StatefulSet %s" sts.Metadata.Name
                 ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(rps)
                 self.CreateNamespacedStatefulSet(body = sts,
@@ -220,11 +217,10 @@ type Kubernetes with
             let formation = new StellarFormation(networkCfg = nCfg,
                                                  kube = self,
                                                  statefulSets = statefulSets,
-                                                 namespaceContent = namespaceContent,
-                                                 probeTimeout = probeTimeout)
+                                                 namespaceContent = namespaceContent)
             formation.WaitForAllReplicasOnAllSetsReady()
 
-            if nCfg.exportToPrometheus
+            if nCfg.missionContext.exportToPrometheus
             then
                 LogInfo "Core metrics will be exported to prometheus"
                 nCfg.MapAllPeers
@@ -248,7 +244,7 @@ type Kubernetes with
             formation
         with
         | x ->
-            if keepData
+            if nCfg.missionContext.keepData
             then
                 LogError "Exception while building formation, keeping resources for run '%s' in namespace '%s' for debug"
                              nCfg.Nonce
@@ -260,3 +256,65 @@ type Kubernetes with
                 namespaceContent.Cleanup()
             reraise()
 
+
+// Formations are _created_ by calling methods on MissionContexts, and
+// various MissionContext.Execute* methods drive formation setup and teardown.
+// The methods are extensions that have to be defined after Formation itself,
+// so they reside here.
+type MissionContext with
+
+    member self.MakeFormation (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option) : StellarFormation =
+        let networkCfg = MakeNetworkCfg self coreSetList passphrase
+        self.kube.MakeFormation networkCfg
+
+    member self.MakeFormationForJob (opts:CoreSetOptions option) (passphrase: NetworkPassphrase option) : StellarFormation =
+        let networkCfg = MakeNetworkCfg self [] passphrase
+        let networkCfg = { networkCfg with jobCoreSetOptions = opts }
+        self.kube.MakeFormation networkCfg
+
+    member self.ExecuteJobs (opts:CoreSetOptions option)
+                            (passphrase:NetworkPassphrase option)
+                            (run:StellarFormation->unit) =
+      use formation = self.MakeFormationForJob opts passphrase
+      try
+          try
+              run formation
+          finally
+              formation.DumpJobData self.destination
+      with
+      | x -> (if self.keepData then formation.KeepData()
+              reraise())
+
+    member self.Execute (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option) (run:StellarFormation->unit) : unit =
+      use formation = self.MakeFormation coreSetList passphrase
+      try
+          try
+              formation.WaitUntilReady()
+              run formation
+              formation.CheckNoErrorsAndPairwiseConsistency()
+          finally
+             formation.DumpData self.destination
+      with
+      | x -> (
+                if self.keepData then formation.KeepData()
+                reraise()
+             )
+
+    member self.ExecuteWithPerformanceReporter
+            (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option)
+            (run:StellarFormation->PerformanceReporter->unit) : unit =
+      use formation = self.MakeFormation coreSetList passphrase
+      let performanceReporter = PerformanceReporter formation.NetworkCfg
+      try
+          try
+              formation.WaitUntilReady()
+              run formation performanceReporter
+              formation.CheckNoErrorsAndPairwiseConsistency()
+          finally
+              performanceReporter.DumpPerformanceMetrics self.destination
+              formation.DumpData self.destination
+      with
+      | x -> (
+                if self.keepData then formation.KeepData()
+                reraise()
+             )

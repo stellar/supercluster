@@ -7,6 +7,8 @@ module MissionLoadGeneration
 open StellarCoreSet
 open StellarMissionContext
 open StellarFormation
+open StellarSupercluster
+open StellarCoreHTTP
 
 let loadGeneration (context : MissionContext) =
     let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.GetDefault context.image with dumpDatabase = false }

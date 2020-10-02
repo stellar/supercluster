@@ -6,10 +6,11 @@ module MissionAcceptanceUnitTests
 
 open StellarCoreSet
 open StellarMissionContext
-open StellarFormation
+open StellarSupercluster
 open StellarJobExec
 
-let acceptanceUnitTests (context : MissionContext) = 
+let acceptanceUnitTests (context : MissionContext) =
+    let context = { context with coreResources = AcceptanceTestResources }
     let opts = { CoreSetOptions.GetDefault context.image with
                     dbType = Postgres
                     localHistory = false

@@ -5,11 +5,12 @@
 module MissionBenchmarkIncreaseTxRate
 
 open StellarCoreHTTP
-open StellarCorePeer
 open StellarCoreSet
 open StellarMissionContext
 open StellarPerformanceReporter
 open StellarFormation
+open StellarSupercluster
+
 
 let benchmarkIncreaseTxRate (context : MissionContext) =
     let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.GetDefault context.image with nodeCount = context.numNodes; accelerateTime = false; }

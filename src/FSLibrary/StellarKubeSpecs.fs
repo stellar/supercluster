@@ -7,8 +7,8 @@ module StellarKubeSpecs
 open StellarCoreCfg
 open k8s.Models
 
+open StellarMissionContext
 open StellarNetworkCfg
-open StellarCoreCfg
 open StellarCoreSet
 open StellarShellCmd
 open System.Text.RegularExpressions
@@ -46,6 +46,50 @@ let CoreContainerVolumeMounts (peerOrJobNames:string array) (configOpt:ConfigOpt
                                             mountPath = CfgVal.cfgVolumePath n)) 
             peerOrJobNames )
 
+let makeResourceRequirements (cpuReqMili:int)
+                             (memReqMebi:int)
+                             (cpuLimMili:int)
+                             (memLimMebi:int) : V1ResourceRequirements =
+    let requests = dict["cpu", ResourceQuantity(sprintf "%dm" cpuReqMili);
+                        "memory", ResourceQuantity(sprintf "%dMi" memReqMebi)]
+    let limits = dict["cpu", ResourceQuantity(sprintf "%dm" cpuLimMili);
+                      "memory", ResourceQuantity(sprintf "%dMi" memLimMebi)]
+    V1ResourceRequirements(requests = requests,
+                           limits = limits)
+
+let PgResourceRequirements : V1ResourceRequirements =
+    // Postgres needs 1 vCPU and 1GB RAM.
+    makeResourceRequirements 1000 1024 1000 1024
+
+let HistoryResourceRequirements: V1ResourceRequirements =
+    // Nginx needs 0.01 vCPU and 32MB RAM. It's small.
+    makeResourceRequirements 10 32 10 32
+
+let PrometheusExporterSidecarResourceRequirements: V1ResourceRequirements =
+    // The prometheus exporter sidecar needs 0.01 vCPU and 64MB RAM.
+    makeResourceRequirements 10 64 10 32
+
+let SimulatePubnetCoreResourceRequirements: V1ResourceRequirements =
+    // When simulating pubnet, we give each container
+    // 256MB RAM and 0.1 vCPUs, bursting to 1vCPU and 600MB
+    makeResourceRequirements 100 256 1000 600
+
+let ParallelCatchupCoreResourceRequirements: V1ResourceRequirements =
+    // When doing parallel catchup, we give each container
+    // 256MB RAM and 0.1 vCPUs, bursting to 1vCPU and 600MB
+    makeResourceRequirements 100 256 1000 600
+
+let SmallTestCoreResourceRequirements: V1ResourceRequirements =
+    // When running most missions, there are few core nodes, so each
+    // gets 1 vCPU and 256MB RAM guaranteed.
+    makeResourceRequirements 1000 256 1000 256
+
+let AcceptanceTestCoreResourceRequirements: V1ResourceRequirements =
+    // When running acceptance tests we need to give a single core a very large
+    // amount of memory because these tests are memory-intensive. 4 vCPU and 4GB
+    // RAM required.
+    makeResourceRequirements 4000 4096 4000 4096
+
 let PgContainerVolumeMounts : V1VolumeMount array =
     [| V1VolumeMount(name = CfgVal.dataVolumeName,
                      mountPath = CfgVal.dataVolumePath) |]
@@ -55,6 +99,7 @@ let HistoryContainerVolumeMounts : V1VolumeMount array =
                      mountPath = CfgVal.historyCfgVolumePath);
        V1VolumeMount(name = CfgVal.dataVolumeName,
                      mountPath = CfgVal.dataVolumePath) |]
+
 
 // Note: for the time being we use the same resource-requirements calculation
 // for each container in our pod, be it core, history or postgres. We just
@@ -69,12 +114,7 @@ let resourceRequirements (q:NetworkQuotas) (numContainers:int) : V1ResourceRequi
     let memReq = q.ContainerMemReqMebi numContainers
     let cpuLim = q.ContainerCpuLimMili numContainers
     let memLim = q.ContainerMemLimMebi numContainers
-    let requests = dict["cpu", ResourceQuantity(sprintf "%dm" cpuReq);
-                        "memory", ResourceQuantity(sprintf "%dMi" memReq)]
-    let limits = dict["cpu", ResourceQuantity(sprintf "%dm" cpuLim);
-                      "memory", ResourceQuantity(sprintf "%dMi" memLim)]
-    V1ResourceRequirements(requests = requests,
-                           limits = limits)
+    makeResourceRequirements cpuReq memReq cpuLim memLim
 
 let HistoryContainer (q:NetworkQuotas) (numContainers:int) =
     V1Container
@@ -82,7 +122,7 @@ let HistoryContainer (q:NetworkQuotas) (numContainers:int) =
          image = "nginx",
          command = [| "nginx" |],
          args = [| "-c"; CfgVal.historyCfgFilePath; |],
-         resources = resourceRequirements q numContainers,
+         resources = HistoryResourceRequirements,
          volumeMounts = HistoryContainerVolumeMounts )
 
 let PostgresContainer (q:NetworkQuotas) (numContainers:int) =
@@ -93,7 +133,7 @@ let PostgresContainer (q:NetworkQuotas) (numContainers:int) =
          env = [| passwordEnvVar; |],
          ports = [| V1ContainerPort(containerPort = 5432, name = "postgres") |],
          image = "postgres:9.5.22",
-         resources = resourceRequirements q numContainers,
+         resources = PgResourceRequirements,
          volumeMounts = PgContainerVolumeMounts)
 
 let PrometheusExporterSidecarContainer (q:NetworkQuotas) (numContainers:int) =
@@ -101,7 +141,7 @@ let PrometheusExporterSidecarContainer (q:NetworkQuotas) (numContainers:int) =
                 ports = [| V1ContainerPort(containerPort = CfgVal.prometheusExporterPort,
                                            name = "prom-exp") |],
                 image = "stellar/stellar-core-prometheus-exporter:latest",
-                resources = resourceRequirements q numContainers)
+                resources = PrometheusExporterSidecarResourceRequirements)
 
 let cfgFileArgs (configOpt:ConfigOption) : ShWord array =
     match configOpt with
@@ -111,6 +151,7 @@ let cfgFileArgs (configOpt:ConfigOption) : ShWord array =
                                        CfgVal.peerNameEnvCfgFileWord |]
 
 let CoreContainerForCommand (q:NetworkQuotas) (imageName:string) (numContainers:int) (configOpt:ConfigOption)
+                            (cr:CoreResources)
                             (command:string array) (initCommands:ShCmd array) (peerOrJobNames:string array) : V1Container =
 
     let peerNameFieldSel = V1ObjectFieldSelector(fieldPath = "metadata.name")
@@ -137,16 +178,23 @@ let CoreContainerForCommand (q:NetworkQuotas) (imageName:string) (numContainers:
     let allCmds = ShAnd (Array.append initCommands [| ShCmd cmdWords; |])
     let allCmdsAndCleanup = ShSeq [| allCmds; exitStatusDef; killPs; exit; |]
 
+    let res =
+        match cr with
+            | SmallTestResources -> SmallTestCoreResourceRequirements
+            | AcceptanceTestResources -> AcceptanceTestCoreResourceRequirements
+            | SimulatePubnetResources -> SimulatePubnetCoreResourceRequirements
+            | ParallelCatchupResources -> ParallelCatchupCoreResourceRequirements
+
     V1Container
         (name = containerName, image = imageName,
          command = [| "/bin/sh" |],
          args = [| "-x"; "-c"; allCmdsAndCleanup.ToString() |],
          env = [| peerNameEnvVar; asanOptionsEnvVar |],
-         resources = resourceRequirements q numContainers,
+         resources = res,
          securityContext = V1SecurityContext(capabilities = V1Capabilities(add = [|"NET_ADMIN"|])),
          volumeMounts = CoreContainerVolumeMounts peerOrJobNames configOpt)
 
-let WithLivenessProbe (container:V1Container) probeTimeout : V1Container =
+let WithLivenessProbe (container:V1Container) (probeTimeout:int) : V1Container =
     let httpPortStr = IntstrIntOrString(value = CfgVal.httpPort.ToString())
     let liveProbe = V1Probe(periodSeconds = System.Nullable<int>(1),
                             initialDelaySeconds = System.Nullable<int>(120),
@@ -293,18 +341,20 @@ type NetworkCfg with
         let dataVol = V1Volume(name = CfgVal.dataVolumeName,
                                persistentVolumeClaim = V1PersistentVolumeClaimVolumeSource(claimName = pvcName))
 
+        let quotas = self.missionContext.quotas
+        let res = self.missionContext.coreResources
         let containers  =
             match self.jobCoreSetOptions with
-                | None -> [| CoreContainerForCommand self.quotas image maxPeers cfgOpt command [| |] [|jobName|] |]
+                | None -> [| CoreContainerForCommand quotas image maxPeers cfgOpt res command [| |] [|jobName|] |]
                 | Some(opts) ->
                 let initCmds = self.getInitCommands cfgOpt opts
                 let numContainers =
                     match opts.dbType with
                         | Postgres -> maxPeers * 2
                         | _ -> maxPeers
-                let coreContainer = CoreContainerForCommand self.quotas image numContainers cfgOpt command initCmds [|jobName|]
+                let coreContainer = CoreContainerForCommand quotas image numContainers cfgOpt res command initCmds [|jobName|]
                 match opts.dbType with
-                    | Postgres -> [| coreContainer; PostgresContainer self.quotas numContainers |]
+                    | Postgres -> [| coreContainer; PostgresContainer quotas numContainers |]
                     | _ -> [| coreContainer |]
 
         V1PodTemplateSpec
@@ -325,7 +375,7 @@ type NetworkCfg with
     // volume on /data. Then initializes a local stellar-core database in
     // /data/stellar.db with buckets in /data/buckets and history archive in
     // /data/history, forces SCP on next startup, and runs.
-    member self.ToPodTemplateSpec (coreSet: CoreSet) probeTimeout : V1PodTemplateSpec =
+    member self.ToPodTemplateSpec (coreSet: CoreSet) : V1PodTemplateSpec =
         let peerCfgVolumes = self.MapAllPeers (fun cs i ->
            let peerName = self.PodName cs i
            if self.IsJobMode
@@ -373,26 +423,29 @@ type NetworkCfg with
 
         let usePostgres = (coreSet.options.dbType = Postgres)
         let numBaseContainers = 2 // core and history
-        let numPrometheusContainers = if self.exportToPrometheus then 1 else 0
+        let exportToPrometheus = self.missionContext.exportToPrometheus
+        let numPrometheusContainers = if exportToPrometheus then 1 else 0
         let numPostgresContainers = if usePostgres then 1 else 0
         let containersPerPod = numBaseContainers + numPrometheusContainers + numPostgresContainers
 
         let numContainers = maxPeers * containersPerPod
+        let quotas = self.missionContext.quotas
+        let res = self.missionContext.coreResources
         let containers = [| WithLivenessProbe
-                                (CoreContainerForCommand self.quotas imageName numContainers
-                                     cfgOpt runCmdWithOpts initCommands peerNames)
-                                probeTimeout;
-                            HistoryContainer self.quotas numContainers; |]
+                                (CoreContainerForCommand quotas imageName numContainers
+                                     cfgOpt res runCmdWithOpts initCommands peerNames)
+                                self.missionContext.probeTimeout;
+                            HistoryContainer quotas numContainers; |]
         let containers =
             if usePostgres
-            then Array.append containers [| PostgresContainer self.quotas numContainers |]
+            then Array.append containers [| PostgresContainer quotas numContainers |]
             else containers
         let containers =
-            if self.exportToPrometheus
-            then Array.append containers [| PrometheusExporterSidecarContainer self.quotas numContainers |]
+            if exportToPrometheus
+            then Array.append containers [| PrometheusExporterSidecarContainer quotas numContainers |]
             else containers
         let annotations =
-            if self.exportToPrometheus
+            if exportToPrometheus
             then Map.ofList [("prometheus.io/scrape", "true")]
             else Map.empty
         assert(containersPerPod = containers.Length)
@@ -420,13 +473,13 @@ type NetworkCfg with
 
     // Returns a StatefulSet object that will build stellar-core Pods named
     // peer-0 .. peer-N, and bind them to the generic "peer" Service above.
-    member self.ToStatefulSet (coreSet: CoreSet) probeTimeout : V1StatefulSet =
+    member self.ToStatefulSet (coreSet: CoreSet) : V1StatefulSet =
         let statefulSetSpec =
             V1StatefulSetSpec
                 (selector = V1LabelSelector(matchLabels = CfgVal.labels),
                  serviceName = self.ServiceName,
                  podManagementPolicy = "Parallel",
-                 template = self.ToPodTemplateSpec coreSet probeTimeout,
+                 template = self.ToPodTemplateSpec coreSet,
                  replicas = System.Nullable<int>(coreSet.CurrentCount))
         let statefulSet = V1StatefulSet(metadata = self.NamespacedMeta (self.StatefulSetName coreSet).StringName,
                                         spec = statefulSetSpec)
@@ -452,7 +505,7 @@ type NetworkCfg with
                           V1ServicePort(name = "history",
                                         port = 80)|]
             let ports =
-                if self.exportToPrometheus
+                if self.missionContext.exportToPrometheus
                 then Array.append ports [| V1ServicePort( name = "prom-exp",
                                                           port = CfgVal.prometheusExporterPort) |]
                 else ports
@@ -471,7 +524,7 @@ type NetworkCfg with
         let requests = dict["storage", ResourceQuantity("1Ti")]
         let requirements = V1ResourceRequirements(requests = requests)
         let spec = V1PersistentVolumeClaimSpec(accessModes = accessModes,
-                                               storageClassName = self.storageClass,
+                                               storageClassName = self.missionContext.storageClass,
                                                resources = requirements)
         V1PersistentVolumeClaim(metadata = meta, spec = spec)
 

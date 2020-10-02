@@ -9,6 +9,7 @@ open stellar_dotnet_sdk
 
 open PollRetry
 open Logging
+open StellarMissionContext
 open StellarNetworkCfg
 open StellarCorePeer
 
@@ -56,6 +57,32 @@ type LoadGen =
            ("spikeinterval", self.spikeinterval.ToString());
            ("batchsize", self.batchsize.ToString());
         ]
+
+type MissionContext with
+
+    member self.WithNominalLoad : MissionContext =
+      { self with numTxs = 100; numAccounts = 100 }
+
+    member self.GenerateAccountCreationLoad : LoadGen =
+      { mode = GenerateAccountCreationLoad
+        accounts = self.numAccounts
+        txs = 0
+        spikesize = 0
+        spikeinterval = 0
+        // Use conservative rate for account creation, as the network may quickly get overloaded
+        txrate = 5
+        offset = 0
+        batchsize = 100 }
+
+    member self.GeneratePaymentLoad : LoadGen =
+      { mode = GeneratePaymentLoad
+        accounts = self.numAccounts
+        txs = self.numTxs
+        txrate = self.txRate
+        spikesize = self.spikeSize
+        spikeinterval = self.spikeInterval
+        offset = 0
+        batchsize = 100 }
 
 
 let DefaultAccountCreationLoadGen =

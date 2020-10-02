@@ -26,20 +26,18 @@ open System
 type StellarFormation(networkCfg: NetworkCfg,
                       kube: Kubernetes,
                       statefulSets: V1StatefulSet list,
-                      namespaceContent: NamespaceContent,
-                      probeTimeout: int) =
+                      namespaceContent: NamespaceContent) =
 
     let mutable networkCfg = networkCfg
     let kube = kube
     let mutable statefulSets = statefulSets
     let mutable keepData = false
     let namespaceContent = namespaceContent
-    let probeTimeout = probeTimeout
     let mutable disposed = false
     let mutable jobNumber = 0
 
     member self.sleepUntilNextRateLimitedApiCallTime () =
-        ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(networkCfg.apiRateLimitRequestsPerSecond)
+        ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(networkCfg.missionContext.apiRateLimit)
 
     member self.NamespaceContent =
         namespaceContent
@@ -145,7 +143,7 @@ type StellarFormation(networkCfg: NetworkCfg,
         let stsName = networkCfg.StatefulSetName coreSet
         self.sleepUntilNextRateLimitedApiCallTime()
         let ss = kube.ReplaceNamespacedStatefulSet(
-                   body = networkCfg.ToStatefulSet coreSet probeTimeout,
+                   body = networkCfg.ToStatefulSet coreSet,
                    name = stsName.StringName,
                    namespaceParameter = networkCfg.NamespaceProperty)
         let newSets = statefulSets |> List.filter (fun x -> x.Metadata.Name <> stsName.StringName)

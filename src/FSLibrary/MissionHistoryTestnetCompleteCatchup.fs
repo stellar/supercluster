@@ -9,6 +9,7 @@ open StellarMissionContext
 open StellarNetworkCfg
 open StellarNetworkData
 open StellarFormation
+open StellarSupercluster
 
 let historyTestnetCompleteCatchup (context : MissionContext) =
     let set = { TestnetCoreSetOptions context.image with nodeCount = 1; catchupMode = CatchupComplete }

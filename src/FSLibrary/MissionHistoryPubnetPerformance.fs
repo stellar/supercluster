@@ -4,7 +4,6 @@
 
 module MissionHistoryPubnetPerformance
 
-open Logging
 open System
 open StellarCoreSet
 open StellarMissionContext
@@ -12,6 +11,7 @@ open StellarNetworkCfg
 open StellarNetworkData
 open StellarFormation
 open StellarJobExec
+open StellarSupercluster
 
 let historyPubnetPerformance (context : MissionContext) =
     let opts = { PubnetCoreSetOptions context.image with

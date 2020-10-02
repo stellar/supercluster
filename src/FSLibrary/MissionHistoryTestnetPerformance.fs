@@ -4,7 +4,6 @@
 
 module MissionHistoryTestnetPerformance
 
-open Logging
 open System
 open StellarCoreSet
 open StellarMissionContext
@@ -12,6 +11,7 @@ open StellarNetworkCfg
 open StellarNetworkData
 open StellarFormation
 open StellarJobExec
+open StellarSupercluster
 
 let historyTestnetPerformance (context : MissionContext) =
     let opts = { TestnetCoreSetOptions context.image with

@@ -11,6 +11,7 @@ open StellarMissionContext
 open StellarNetworkCfg
 open StellarNetworkData
 open StellarFormation
+open StellarSupercluster
 
 let protocolUpgradeTestnet (context : MissionContext) =
     let set = { CoreSetOptions.GetDefault context.image with
