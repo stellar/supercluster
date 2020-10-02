@@ -99,6 +99,7 @@ type StellarFormation(networkCfg: NetworkCfg,
     member self.WaitForAllReplicasReady (ss : V1StatefulSet) =
         let name = ss.Metadata.Name
         let ns = ss.Metadata.NamespaceProperty
+        let mutable forbiddenEvent = None
         use event = new System.Threading.ManualResetEventSlim(false)
 
         // This pattern of a recursive handler-install routine that reinstalls
@@ -110,6 +111,18 @@ type StellarFormation(networkCfg: NetworkCfg,
                 LogInfo "Saw event for statefulset %s: %s" name (ety.ToString())
                 if not event.IsSet
                 then
+                    // First we check to see if we've been woken up because a FailedCreate + forbidden
+                    // event occurred; this happens typically when we exceed quotas on a cluster or
+                    // some other policy reason.
+                    let fs = sprintf "involvedObject.name=%s" name
+                    for ev in self.Kube.ListNamespacedEvent(namespaceParameter=ns, fieldSelector=fs).Items do
+                        if ev.Reason = "FailedCreate" && ev.Message.Contains("forbidden")
+                        then
+                            // If so, we record the causal event and wake up the waiter.
+                            forbiddenEvent <- Some(ev)
+                            event.Set()
+                    // Assuming we weren't failed, we look to see how the sts is doing in terms
+                    // of creating the number of ready replicas we asked for.
                     let n = ss.Status.ReadyReplicas.GetValueOrDefault(0)
                     let k = ss.Spec.Replicas.GetValueOrDefault(0)
                     LogInfo "StatefulSet %s/%s: %d/%d replicas ready" ns name n k;
@@ -125,6 +138,10 @@ type StellarFormation(networkCfg: NetworkCfg,
                                                     onClosed = reinstall) |> ignore
         installHandler()
         event.Wait() |> ignore
+        match forbiddenEvent with
+            | None -> ()
+            | Some(ev) -> failwith (sprintf "Statefulset %s pod creation forbidden: %s"
+                                          name ev.Message)
         LogInfo "All replicas on %s/%s ready" ns name
 
     // Watches the provided StatefulSet until the count of ready replicas equals the
