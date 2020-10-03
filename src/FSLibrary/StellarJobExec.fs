@@ -269,7 +269,7 @@ type StellarFormation with
             let name = j.Metadata.Name
             if ok
             then LogInfo "Job %s passed" name
-            else LogInfo "Job %s failed" name
+            else failwith ("Job " + name + " failed")
             try
                 self.FinishJob destination j
             with

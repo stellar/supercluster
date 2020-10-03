@@ -32,7 +32,6 @@ let ExpandHomeDirTilde (s:string) : string =
     else
         s
 
-
 // Loads a config file and builds a Kubernetes client object connected to the
 // cluster described by it. Takes an optional explicit namespace and returns a
 // resolved namespace, which will be taken from the config file if no explicit
@@ -123,8 +122,14 @@ type Kubernetes with
             else dflt
 
         let mutable nq = clusterQuotas
-
+           
+        // This is the first API call we make, so make sure we get information from the cluster.
+        // We've seen null return values when the connection had an expired certificate.
         let ranges = self.ListNamespacedLimitRange(namespaceParameter=namespaceProperty)
+        
+        if isNull ranges
+        then failwith "First API call failed - This is most likely due to a connection or certificate issue"
+
         for r in ranges.Items do
             for limit in r.Spec.Limits do
                 if limit.Type = "Container"

@@ -5,6 +5,7 @@
 open CSLibrary
 open CommandLine
 open Serilog
+open k8s
 
 open Logging
 open StellarCoreSet
@@ -13,6 +14,8 @@ open StellarNetworkCfg
 open StellarMission
 open StellarMissionContext
 open StellarSupercluster
+
+open System.Threading
 
 
 type KubeOption(kubeConfig: string,
@@ -429,6 +432,19 @@ let main argv =
                     nq <- { nq with ContainerMaxMemMebi = mission.ContainerMaxMemMebi }
                 let destination = Destination(mission.Destination)
 
+                let hearbeatHandler _ =
+                        try
+                            let ranges = kube.ListNamespacedLimitRange(namespaceParameter=ns)
+                            if isNull ranges
+                            then failwith "Connection issue!" 
+                        with
+                        | x ->
+                            LogError "Connection issue!"
+                            reraise()
+                        
+                // Poll cluster every minute to make sure we don't have any issues
+                let timer = new System.Threading.Timer(TimerCallback(hearbeatHandler), null, 1000, 60000);
+
                 for m in mission.Missions do
                     LogInfo "-----------------------------------"
                     LogInfo "Starting mission: %s" m
@@ -466,6 +482,8 @@ let main argv =
                     LogInfo "-----------------------------------"
                     LogInfo "Finished mission: %s" m
                     LogInfo "-----------------------------------"
+
+                timer.Dispose()            
                 0
             end
 
