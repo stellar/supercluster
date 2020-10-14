@@ -56,7 +56,8 @@ type JobStatusTable() =
     member self.NoteFinished (name:string) (ok:bool) =
         lock self
             begin fun _ ->
-                assert running.ContainsKey(name)
+                if (not (running.ContainsKey(name))) then ()
+                else
                 assert (not (finished.ContainsKey(name)))
                 let (job, task) = Map.find name running
                 pendingObsoleteTasks <- (name, task) :: pendingObsoleteTasks
@@ -83,13 +84,14 @@ type JobStatusTable() =
                 signalled
             end
 
-    member self.WaitForNextFinish() : (V1Job * bool) =
+    member self.WaitForNextFinish (checkJobs) (timeout:TimeSpan) : (V1Job * bool) =
         lock self
             begin fun _ ->
                 while pendingFinished.IsEmpty do
-                  LogInfo "Waiting for next finish"
-                  Monitor.Wait self |> ignore
-                  LogInfo "Woke from waiting for next finish"
+                    LogInfo "Waiting for next finish"
+                    Monitor.Wait(self, timeout) |> ignore
+                    LogInfo "Woke from waiting for next finish" 
+                    checkJobs()
                 let res = pendingFinished.Head
                 pendingFinished <- pendingFinished.Tail
                 Interlocked.MemoryBarrier()
@@ -125,7 +127,6 @@ type StellarFormation with
             LogError "err: %s" w.Response.Content
             LogError "err: %s" w.Response.ReasonPhrase
             reraise()
-
 
     member self.WatchJob (j:V1Job) (jst:JobStatusTable) =
         let name = j.Metadata.Name
@@ -265,7 +266,16 @@ type StellarFormation with
 
         let waitJob () : unit =
             LogInfo "Waiting for next job to finish"
-            let (j, ok) = jst.WaitForNextFinish()
+
+            // We monitor the jobs in case the watch handlers drop due to a connection issue 
+            let checkJobs = fun () -> 
+                for job in self.Kube.ListNamespacedJob(namespaceParameter=self.NetworkCfg.NamespaceProperty ).Items do
+                    if (job.Status.CompletionTime.HasValue && job.Status.Succeeded.GetValueOrDefault(0) > 0)
+                    then jst.NoteFinished job.Metadata.Name true
+                    else if(job.Status.Failed.GetValueOrDefault(0) > 0)
+                    then jst.NoteFinished job.Metadata.Name false
+
+            let (j, ok) = jst.WaitForNextFinish (checkJobs) (TimeSpan(0,10,0))
             let name = j.Metadata.Name
             if ok
             then LogInfo "Job %s passed" name

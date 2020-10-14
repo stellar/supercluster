@@ -1,6 +1,7 @@
 module Tests
 
 open Xunit
+open System
 open System.Text.RegularExpressions
 
 open StellarCoreSet
@@ -276,9 +277,9 @@ type Tests(output:ITestOutputHelper) =
 
         let rmJob (n:int) =
             jst.NoteFinished (sprintf "t%d" n) true
-
+        
         let waitJob _ =
-            jst.WaitForNextFinish() |> ignore
+            jst.WaitForNextFinish (fun () -> ()) (TimeSpan(0,10,0)) |> ignore
 
         let n = 10
         let spin i =
