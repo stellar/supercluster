@@ -42,7 +42,6 @@ let ctx : MissionContext =
     namespaceProperty = "stellar-supercluster"
     quotas = MakeNetworkQuotas(1,1,1,1,1,1,1)
     logLevels = { LogDebugPartitions=[]; LogTracePartitions=[] }
-    storageClass = "default"
     ingressDomain = "local"
     exportToPrometheus = false
     probeTimeout = 10

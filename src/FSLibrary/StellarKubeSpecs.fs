@@ -337,9 +337,8 @@ type NetworkCfg with
 
         let jobCfgVol = V1Volume(name = CfgVal.jobCfgVolumeName,
                                  configMap = V1ConfigMapVolumeSource(name = self.JobCfgMapName))
-        let pvcName = CfgVal.peristentVolumeClaimName jobName
         let dataVol = V1Volume(name = CfgVal.dataVolumeName,
-                               persistentVolumeClaim = V1PersistentVolumeClaimVolumeSource(claimName = pvcName))
+                               emptyDir = V1EmptyDirVolumeSource())
 
         let quotas = self.missionContext.quotas
         let res = self.missionContext.coreResources
@@ -514,22 +513,6 @@ type NetworkCfg with
                                      externalName = dnsName.StringName)
             V1Service(metadata = self.NamespacedMeta name.StringName, spec = spec)
         self.MapAllPeers perPodService
-
-    member self.ToDynamicPersistentVolumeClaim (jobOrPeerName:string) : V1PersistentVolumeClaim =
-        let pvcName = CfgVal.peristentVolumeClaimName jobOrPeerName
-        let meta = self.NamespacedMeta pvcName
-        let accessModes = [|"ReadWriteOnce"|]
-        // EBS gp2 volumes are provisioned at "3 IOPS per GB". We want a sustained
-        // 3000 IOPS performance level, which means we request a 1TiB volume.
-        let requests = dict["storage", ResourceQuantity("1Ti")]
-        let requirements = V1ResourceRequirements(requests = requests)
-        let spec = V1PersistentVolumeClaimSpec(accessModes = accessModes,
-                                               storageClassName = self.missionContext.storageClass,
-                                               resources = requirements)
-        V1PersistentVolumeClaim(metadata = meta, spec = spec)
-
-    member self.ToDynamicPersistentVolumeClaimForJob (jobNum:int) : V1PersistentVolumeClaim =
-        self.ToDynamicPersistentVolumeClaim (self.JobName jobNum)
 
     // Returns an Ingress object with rules that map URLs http://$ingressHost/peer-N/foo
     // to the per-Pod Service within the current networkCfg named peer-N (which then, via

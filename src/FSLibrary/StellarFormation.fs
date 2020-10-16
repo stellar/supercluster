@@ -176,13 +176,6 @@ type StellarFormation(networkCfg: NetworkCfg,
     member self.WaitUntilReady () =
         networkCfg.EachPeer (fun p -> p.WaitUntilReady())
 
-    member self.AddPersistentVolumeClaim (pvc:V1PersistentVolumeClaim) : unit =
-        let ns = networkCfg.NamespaceProperty
-        self.sleepUntilNextRateLimitedApiCallTime()
-        let claim = self.Kube.CreateNamespacedPersistentVolumeClaim(body = pvc,
-                                                                    namespaceParameter = ns)
-        namespaceContent.Add(claim)
-    
     member self.WaitUntilAllLiveSynced () =
         networkCfg.EachPeer (fun p -> p.WaitUntilSynced())
 

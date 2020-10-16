@@ -182,7 +182,6 @@ type MissionContext =
       namespaceProperty : string
       quotas: NetworkQuotas
       logLevels: LogLevels
-      storageClass : string
       ingressDomain : string
       exportToPrometheus : bool
       probeTimeout : int

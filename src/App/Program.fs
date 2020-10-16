@@ -33,7 +33,6 @@ type CommonOptions(kubeConfig: string,
                    numNodes: int,
                    logDebugPartitions: seq<string>,
                    logTracePartitions: seq<string>,
-                   storageClass: string,
                    containerMaxCpuMili: int,
                    containerMaxMemMebi: int,
                    numConcurrentMissions: int,
@@ -57,10 +56,6 @@ type CommonOptions(kubeConfig: string,
 
     [<Option("trace", HelpText="Log-partitions to set to 'trace' level")>]
     member self.LogTracePartitions = logTracePartitions
-
-    [<Option("storage-class", HelpText="Storage class name to use for dynamically provisioning persistent volume claims",
-             Required = false, Default = "default")>]
-    member self.StorageClass = storageClass
 
     [<Option("container-max-cpu-mili", HelpText="Maximum per-container CPU (in mili-CPUs)",
              Required = false, Default = 0)>]
@@ -104,7 +99,6 @@ type SetupOptions(kubeConfig: string,
                   numNodes: int,
                   logDebugPartitions: seq<string>,
                   logTracePartitions: seq<string>,
-                  storageClass: string,
                   containerMaxCpuMili: int,
                   containerMaxMemMebi: int,
                   numConcurrentMissions: int,
@@ -118,7 +112,6 @@ type SetupOptions(kubeConfig: string,
                           numNodes,
                           logDebugPartitions,
                           logTracePartitions,
-                          storageClass,
                           containerMaxCpuMili,
                           containerMaxMemMebi,
                           numConcurrentMissions,
@@ -135,7 +128,6 @@ type CleanOptions(kubeConfig: string,
                   numNodes: int,
                   logDebugPartitions: seq<string>,
                   logTracePartitions: seq<string>,
-                  storageClass: string,
                   containerMaxCpuMili: int,
                   containerMaxMemMebi: int,
                   numConcurrentMissions: int,
@@ -149,7 +141,6 @@ type CleanOptions(kubeConfig: string,
                           numNodes,
                           logDebugPartitions,
                           logTracePartitions,
-                          storageClass,
                           containerMaxCpuMili,
                           containerMaxMemMebi,
                           numConcurrentMissions,
@@ -166,7 +157,6 @@ type LoadgenOptions(kubeConfig: string,
                     numNodes: int,
                     logDebugPartitions: seq<string>,
                     logTracePartitions: seq<string>,
-                    storageClass: string,
                     containerMaxCpuMili: int,
                     containerMaxMemMebi: int,
                     numConcurrentMissions: int,
@@ -180,7 +170,6 @@ type LoadgenOptions(kubeConfig: string,
                           numNodes,
                           logDebugPartitions,
                           logTracePartitions,
-                          storageClass,
                           containerMaxCpuMili,
                           containerMaxMemMebi,
                           numConcurrentMissions,
@@ -206,7 +195,6 @@ type MissionOptions(kubeConfig: string,
                     probeTimeout: int,
                     missions: string seq,
                     destination: string,
-                    storageClass: string,
                     image: string,
                     oldImage: string option,
                     txRate: int,
@@ -265,10 +253,6 @@ type MissionOptions(kubeConfig: string,
     [<Option('d', "destination", HelpText="Output directory for logs and sql dumps",
              Required = false, Default = "destination")>]
     member self.Destination = destination
-
-    [<Option("storage-class", HelpText="Storage class name to use for dynamically provisioning persistent volume claims",
-             Required = false, Default = "default")>]
-    member self.StorageClass = storageClass
 
     [<Option('i', "image", HelpText="Stellar-core image to use",
              Required = false, Default = "stellar/stellar-core")>]
@@ -372,7 +356,6 @@ let main argv =
           namespaceProperty = setup.NamespaceProperty.Value
           quotas = nq
           logLevels = ll
-          storageClass = setup.StorageClass
           ingressDomain = setup.IngressDomain
           exportToPrometheus = setup.ExportToPrometheus
           probeTimeout = setup.ProbeTimeout
@@ -412,7 +395,6 @@ let main argv =
           namespaceProperty = clean.NamespaceProperty.Value
           quotas = nq
           logLevels = ll
-          storageClass = clean.StorageClass
           ingressDomain = clean.IngressDomain
           exportToPrometheus = clean.ExportToPrometheus
           probeTimeout = clean.ProbeTimeout
@@ -453,7 +435,6 @@ let main argv =
           namespaceProperty = loadgen.NamespaceProperty.Value
           quotas = nq
           logLevels = ll
-          storageClass = loadgen.StorageClass
           ingressDomain = loadgen.IngressDomain
           exportToPrometheus = loadgen.ExportToPrometheus
           probeTimeout = loadgen.ProbeTimeout
@@ -528,7 +509,6 @@ let main argv =
                                                namespaceProperty = ns
                                                quotas = nq
                                                logLevels = ll
-                                               storageClass = mission.StorageClass
                                                ingressDomain = mission.IngressDomain
                                                exportToPrometheus = mission.ExportToPrometheus
                                                probeTimeout = mission.ProbeTimeout

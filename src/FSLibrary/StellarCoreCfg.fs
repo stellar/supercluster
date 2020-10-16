@@ -23,7 +23,6 @@ module CfgVal =
     let stellarCoreContainerName (cmd:string) = "stellar-core-" + cmd
     let dataVolumeName = "data-volume"
     let dataVolumePath = "/data"
-    let peristentVolumeClaimName peerOrJobName = sprintf "pvc-%s" peerOrJobName
     let databasePath = dataVolumePath + "/stellar.db"
     let historyPath = dataVolumePath + "/history"
     let bucketsDir = "buckets"
