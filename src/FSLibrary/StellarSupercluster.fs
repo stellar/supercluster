@@ -87,7 +87,15 @@ let PollCluster (kube:Kubernetes) (ns:string) =
             ns p.Metadata.Name p.Status.Phase p.Status.PodIP
     done
 
-
+let DumpPodInfo (kube:Kubernetes) (ns:string) =
+    let pods = kube.ListNamespacedPod(namespaceParameter = ns)
+    if pods <> null then
+        for p in pods.Items do
+            let age = if p.Status.StartTime.HasValue
+                      then System.DateTime.UtcNow.Subtract(p.Status.StartTime.Value).ToString(@"hh\:mm")
+                      else "00:00"
+            LogInfo "Pod: name=%s phase=%s age=%s (hr:min)" p.Metadata.Name p.Status.Phase age
+        done
 
 // Typically one starts with `ConnectToCluster` above to get a `Kubernetes`
 // object, and then calls one of these `Kubernetes` extension methods to
