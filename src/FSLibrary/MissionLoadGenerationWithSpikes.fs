@@ -7,6 +7,8 @@ module MissionLoadGenerationWithSpikes
 open StellarCoreSet
 open StellarMissionContext
 open StellarFormation
+open StellarSupercluster
+open StellarCoreHTTP
 
 let loadGenerationWithSpikes (context : MissionContext) =
     let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.GetDefault context.image with dumpDatabase = false }

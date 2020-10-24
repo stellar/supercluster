@@ -5,9 +5,10 @@
 module MissionVersionMixOldCatchupToNew
 
 open MissionCatchupHelpers
-open StellarCoreCfg
 open StellarMissionContext
 open StellarFormation
+open StellarSupercluster
+open StellarCoreHTTP
 
 let versionMixOldCatchupToNew (context : MissionContext) =
     let context = context.WithNominalLoad

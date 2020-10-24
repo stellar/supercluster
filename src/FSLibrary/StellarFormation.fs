@@ -26,20 +26,18 @@ open System
 type StellarFormation(networkCfg: NetworkCfg,
                       kube: Kubernetes,
                       statefulSets: V1StatefulSet list,
-                      namespaceContent: NamespaceContent,
-                      probeTimeout: int) =
+                      namespaceContent: NamespaceContent) =
 
     let mutable networkCfg = networkCfg
     let kube = kube
     let mutable statefulSets = statefulSets
     let mutable keepData = false
     let namespaceContent = namespaceContent
-    let probeTimeout = probeTimeout
     let mutable disposed = false
     let mutable jobNumber = 0
 
     member self.sleepUntilNextRateLimitedApiCallTime () =
-        ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(networkCfg.apiRateLimitRequestsPerSecond)
+        ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(networkCfg.missionContext.apiRateLimit)
 
     member self.NamespaceContent =
         namespaceContent
@@ -101,6 +99,7 @@ type StellarFormation(networkCfg: NetworkCfg,
     member self.WaitForAllReplicasReady (ss : V1StatefulSet) =
         let name = ss.Metadata.Name
         let ns = ss.Metadata.NamespaceProperty
+        let mutable forbiddenEvent = None
         use event = new System.Threading.ManualResetEventSlim(false)
 
         // This pattern of a recursive handler-install routine that reinstalls
@@ -112,6 +111,18 @@ type StellarFormation(networkCfg: NetworkCfg,
                 LogInfo "Saw event for statefulset %s: %s" name (ety.ToString())
                 if not event.IsSet
                 then
+                    // First we check to see if we've been woken up because a FailedCreate + forbidden
+                    // event occurred; this happens typically when we exceed quotas on a cluster or
+                    // some other policy reason.
+                    let fs = sprintf "involvedObject.name=%s" name
+                    for ev in self.Kube.ListNamespacedEvent(namespaceParameter=ns, fieldSelector=fs).Items do
+                        if ev.Reason = "FailedCreate" && ev.Message.Contains("forbidden")
+                        then
+                            // If so, we record the causal event and wake up the waiter.
+                            forbiddenEvent <- Some(ev)
+                            event.Set()
+                    // Assuming we weren't failed, we look to see how the sts is doing in terms
+                    // of creating the number of ready replicas we asked for.
                     let n = ss.Status.ReadyReplicas.GetValueOrDefault(0)
                     let k = ss.Spec.Replicas.GetValueOrDefault(0)
                     LogInfo "StatefulSet %s/%s: %d/%d replicas ready" ns name n k;
@@ -127,6 +138,10 @@ type StellarFormation(networkCfg: NetworkCfg,
                                                     onClosed = reinstall) |> ignore
         installHandler()
         event.Wait() |> ignore
+        match forbiddenEvent with
+            | None -> ()
+            | Some(ev) -> failwith (sprintf "Statefulset %s pod creation forbidden: %s"
+                                          name ev.Message)
         LogInfo "All replicas on %s/%s ready" ns name
 
     // Watches the provided StatefulSet until the count of ready replicas equals the
@@ -145,7 +160,7 @@ type StellarFormation(networkCfg: NetworkCfg,
         let stsName = networkCfg.StatefulSetName coreSet
         self.sleepUntilNextRateLimitedApiCallTime()
         let ss = kube.ReplaceNamespacedStatefulSet(
-                   body = networkCfg.ToStatefulSet coreSet probeTimeout,
+                   body = networkCfg.ToStatefulSet coreSet,
                    name = stsName.StringName,
                    namespaceParameter = networkCfg.NamespaceProperty)
         let newSets = statefulSets |> List.filter (fun x -> x.Metadata.Name <> stsName.StringName)
@@ -161,13 +176,6 @@ type StellarFormation(networkCfg: NetworkCfg,
     member self.WaitUntilReady () =
         networkCfg.EachPeer (fun p -> p.WaitUntilReady())
 
-    member self.AddPersistentVolumeClaim (pvc:V1PersistentVolumeClaim) : unit =
-        let ns = networkCfg.NamespaceProperty
-        self.sleepUntilNextRateLimitedApiCallTime()
-        let claim = self.Kube.CreateNamespacedPersistentVolumeClaim(body = pvc,
-                                                                    namespaceParameter = ns)
-        namespaceContent.Add(claim)
-    
     member self.WaitUntilAllLiveSynced () =
         networkCfg.EachPeer (fun p -> p.WaitUntilSynced())
 

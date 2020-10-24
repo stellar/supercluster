@@ -13,7 +13,6 @@ open StellarDestination
 open StellarDataDump
 open StellarFormation
 open StellarKubeSpecs
-open StellarNamespaceContent
 open System
 open System.Threading
 open Microsoft.Rest
@@ -34,7 +33,7 @@ type JobStatusTable() =
                 // of it yet. We _can_ call Dispose on tasks from the previous
                 // call to NoteRunning; we then queue up the current task for
                 // Disposal on the _next_ call.
-                for (name, t:Tasks.Task<Watcher<V1Job>>) in pendingObsoleteTasks do
+                for (_, t:Tasks.Task<Watcher<V1Job>>) in pendingObsoleteTasks do
                         if t <> null && t.IsCompleted
                         then t.Dispose()
                     done
@@ -300,10 +299,12 @@ type StellarFormation with
                     self.WatchJob j jst
 
         let oldConfig = self.NetworkCfg
-        let c = parallelism * self.NetworkCfg.quotas.NumConcurrentMissions
+        let c = parallelism * self.NetworkCfg.missionContext.quotas.NumConcurrentMissions
+        let ctx = { self.NetworkCfg.missionContext with
+                        quotas = { self.NetworkCfg.missionContext.quotas with
+                                       NumConcurrentMissions = c } }
         self.SetNetworkCfg { self.NetworkCfg with
-                                 quotas = { self.NetworkCfg.quotas with
-                                                NumConcurrentMissions = c } }
+                                 missionContext = ctx }
 
         while moreJobs do
             checkPendingPodBuildup()
@@ -327,13 +328,8 @@ type StellarFormation with
         if !anyBad
         then failwith "One of more jobs failed"
 
-    member self.AddDynamicPersistentVolumeClaimForJob (n:int) : unit =
-        let pvc = self.NetworkCfg.ToDynamicPersistentVolumeClaimForJob n
-        self.AddPersistentVolumeClaim pvc
-
     member self.StartJobForCmd (cmd:string array) (image:string) (useConfigFile:bool): V1Job =
         let jobNum = self.NextJobNum
-        self.AddDynamicPersistentVolumeClaimForJob jobNum
         self.StartJob (self.NetworkCfg.GetJobFor jobNum cmd image useConfigFile)
 
     member self.FinishJob (destination:Destination) (j:V1Job) : unit =
@@ -342,29 +338,4 @@ type StellarFormation with
         // quota for number of jobs / pods available and a big parallel
         // catchup will exhaust that set.
         self.DumpJobLogs destination j.Metadata.Name
-
-        // We mop up the PVCs here after each job finishes to avoid keeping
-        // huge amounts of idle EBS storage allocated.
-        let pvc = self.NetworkCfg.ToDynamicPersistentVolumeClaim j.Metadata.Name
-        self.NamespaceContent.Del(pvc)
         self.NamespaceContent.Del(j)
-
-        let mutable pvcLingering = true
-        while pvcLingering do
-            let ns = pvc.Metadata.NamespaceProperty
-            let name = pvc.Metadata.Name
-
-            let pvc2 =
-                try
-                    self.Kube.ReadNamespacedPersistentVolumeClaim(name = name,
-                                                                  namespaceParameter = ns)
-                with
-                    | _ -> null
-
-            if pvc2 = null
-            then pvcLingering <- false
-            else
-                begin
-                    LogInfo "Waiting for PVC %s to stop existing" name
-                    Thread.Sleep(5000)
-                end

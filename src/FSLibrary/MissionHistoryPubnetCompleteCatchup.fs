@@ -9,6 +9,7 @@ open StellarMissionContext
 open StellarNetworkCfg
 open StellarNetworkData
 open StellarFormation
+open StellarSupercluster
 
 let historyPubnetCompleteCatchup (context : MissionContext) =
     let set = { PubnetCoreSetOptions context.image with nodeCount = 1; catchupMode = CatchupComplete }

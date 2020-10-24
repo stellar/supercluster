@@ -1,5 +1,7 @@
 module Tests
 
+open StellarDestination
+open StellarMissionContext
 open Xunit
 open System
 open System.Text.RegularExpressions
@@ -23,16 +25,32 @@ let ``Network nonce looks reasonable`` () =
 
 let coreSetOptions = CoreSetOptions.GetDefault "stellar/stellar-core"
 let coreSet = MakeLiveCoreSet "test" coreSetOptions
-let quotas = MakeNetworkQuotas(1,1,1,1,1,1,1)
-let loglevels = { LogDebugPartitions=[]; LogTracePartitions=[] }
-let nameSpace = "stellar-supercluster"
-let storageclass = "default"
-let ingress = "local"
-let exportToPrometheus = false
 let passOpt : NetworkPassphrase option = None
-let apiRateLimit = 10
-let nCfg = MakeNetworkCfg [coreSet] nameSpace quotas loglevels storageclass ingress
-               exportToPrometheus passOpt apiRateLimit
+let ctx : MissionContext =
+  {
+    kube = null
+    destination = Destination(System.IO.Path.GetTempPath())
+    image = "stellar/stellar-core"
+    oldImage = None
+    txRate = 10
+    maxTxRate = 10
+    numAccounts = 1000
+    numTxs = 1000
+    spikeSize = 1000
+    spikeInterval = 10
+    numNodes = 100
+    namespaceProperty = "stellar-supercluster"
+    quotas = MakeNetworkQuotas(1,1,1,1,1,1,1)
+    logLevels = { LogDebugPartitions=[]; LogTracePartitions=[] }
+    ingressDomain = "local"
+    exportToPrometheus = false
+    probeTimeout = 10
+    coreResources = SmallTestResources
+    keepData = true
+    apiRateLimit = 10
+  }
+
+let nCfg = MakeNetworkCfg ctx [coreSet] passOpt
 
 type Tests(output:ITestOutputHelper) =
 
@@ -44,7 +62,7 @@ type Tests(output:ITestOutputHelper) =
         let peer1DNS = (nCfg.PeerDnsName coreSet 1).StringName
         let peer2DNS = (nCfg.PeerDnsName coreSet 2).StringName
         let nonceStr = nCfg.networkNonce.ToString()
-        let domain = nonceStr + "-stellar-core." + nameSpace + ".svc.cluster.local"
+        let domain = nonceStr + "-stellar-core." + ctx.namespaceProperty + ".svc.cluster.local"
         Assert.Equal(nonceStr + "-sts-test-0." + domain, peer0DNS)
         Assert.Equal(nonceStr + "-sts-test-1." + domain, peer1DNS)
         Assert.Equal(nonceStr + "-sts-test-2." + domain, peer2DNS)
@@ -84,8 +102,7 @@ type Tests(output:ITestOutputHelper) =
     [<Fact>]
     member __.``Public network conversion looks reasonable`` () =
         let coreSets = FullPubnetCoreSets "stellar/stellar-core" false
-        let nCfg = MakeNetworkCfg coreSets nameSpace quotas loglevels storageclass ingress
-                       exportToPrometheus passOpt apiRateLimit
+        let nCfg = MakeNetworkCfg ctx coreSets passOpt
         let sdfCoreSetName = CoreSetName "www-stellar-org"
         Assert.Contains(coreSets, fun cs -> cs.name = sdfCoreSetName)
         let sdfCoreSet = List.find (fun cs -> cs.name = sdfCoreSetName) coreSets

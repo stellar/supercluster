@@ -17,7 +17,6 @@ type NamespaceContent(kube: Kubernetes,
     let services: Set<string> ref = ref Set.empty
     let configMaps: Set<string> ref = ref Set.empty
     let statefulSets: Set<string> ref = ref Set.empty
-    let persistentVolumeClaims: Set<string> ref = ref Set.empty
     let ingresses: Set<string> ref = ref Set.empty
     let jobs: Set<string> ref = ref Set.empty
     let ignoreError f =
@@ -43,12 +42,6 @@ type NamespaceContent(kube: Kubernetes,
         ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(apiRateLimit)
         ignoreError (fun _ -> kube.DeleteNamespacedStatefulSet(namespaceParameter = namespaceProperty,
                                                                name = name, propagationPolicy = "Foreground"))
-
-    let delPersistentVolumeClaim(name: string) =
-        LogInfo "Deleting PersistentVolumeClaim %s" name
-        ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(apiRateLimit)
-        ignoreError (fun _ -> kube.DeleteNamespacedPersistentVolumeClaim(namespaceParameter = namespaceProperty,
-                                                                         name = name, propagationPolicy = "Foreground"))
 
     let delIngress(name: string) =
         LogInfo "Deleting Ingress %s" name
@@ -76,7 +69,6 @@ type NamespaceContent(kube: Kubernetes,
         cleanSet delService services
         cleanSet delStatefulSet statefulSets
         cleanSet delConfigMap configMaps
-        cleanSet delPersistentVolumeClaim persistentVolumeClaims
         cleanSet delIngress ingresses
         cleanSet delJob jobs
 
@@ -88,9 +80,6 @@ type NamespaceContent(kube: Kubernetes,
 
     member self.Add(statefulSet: V1StatefulSet) =
         addOne statefulSets statefulSet.Metadata.Name
-
-    member self.Add(persistentVolumeClaim: V1PersistentVolumeClaim) =
-        addOne persistentVolumeClaims persistentVolumeClaim.Metadata.Name
 
     member self.Add(ingress: Extensionsv1beta1Ingress) =
         addOne ingresses ingress.Metadata.Name
@@ -106,9 +95,6 @@ type NamespaceContent(kube: Kubernetes,
 
     member self.Del(statefulSet: V1StatefulSet) =
         delOne delStatefulSet statefulSets statefulSet.Metadata.Name
-
-    member self.Del(persistentVolumeClaim: V1PersistentVolumeClaim) =
-        delOne delPersistentVolumeClaim persistentVolumeClaims persistentVolumeClaim.Metadata.Name
 
     member self.Del(ingress: Extensionsv1beta1Ingress) =
         delOne delIngress ingresses ingress.Metadata.Name
@@ -127,8 +113,6 @@ type NamespaceContent(kube: Kubernetes,
         for s in kube.ListNamespacedStatefulSet(namespaceParameter = namespaceProperty).Items do
             self.Add(s)
         ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(apiRateLimit)
-        for c in kube.ListNamespacedPersistentVolumeClaim(namespaceParameter = namespaceProperty).Items do
-            self.Add(c)
         ApiRateLimit.sleepUntilNextRateLimitedApiCallTime(apiRateLimit)
         for i in kube.ListNamespacedIngress(namespaceParameter = namespaceProperty).Items do
             self.Add(i)

@@ -6,6 +6,7 @@ module MissionSimplePayment
 
 open StellarCoreSet
 open StellarMissionContext
+open StellarSupercluster
 open StellarTransaction
 open StellarFormation
 

@@ -33,7 +33,6 @@ type CommonOptions(kubeConfig: string,
                    numNodes: int,
                    logDebugPartitions: seq<string>,
                    logTracePartitions: seq<string>,
-                   storageClass: string,
                    containerMaxCpuMili: int,
                    containerMaxMemMebi: int,
                    numConcurrentMissions: int,
@@ -57,10 +56,6 @@ type CommonOptions(kubeConfig: string,
 
     [<Option("trace", HelpText="Log-partitions to set to 'trace' level")>]
     member self.LogTracePartitions = logTracePartitions
-
-    [<Option("storage-class", HelpText="Storage class name to use for dynamically provisioning persistent volume claims",
-             Required = false, Default = "default")>]
-    member self.StorageClass = storageClass
 
     [<Option("container-max-cpu-mili", HelpText="Maximum per-container CPU (in mili-CPUs)",
              Required = false, Default = 0)>]
@@ -104,7 +99,6 @@ type SetupOptions(kubeConfig: string,
                   numNodes: int,
                   logDebugPartitions: seq<string>,
                   logTracePartitions: seq<string>,
-                  storageClass: string,
                   containerMaxCpuMili: int,
                   containerMaxMemMebi: int,
                   numConcurrentMissions: int,
@@ -118,7 +112,6 @@ type SetupOptions(kubeConfig: string,
                           numNodes,
                           logDebugPartitions,
                           logTracePartitions,
-                          storageClass,
                           containerMaxCpuMili,
                           containerMaxMemMebi,
                           numConcurrentMissions,
@@ -135,7 +128,6 @@ type CleanOptions(kubeConfig: string,
                   numNodes: int,
                   logDebugPartitions: seq<string>,
                   logTracePartitions: seq<string>,
-                  storageClass: string,
                   containerMaxCpuMili: int,
                   containerMaxMemMebi: int,
                   numConcurrentMissions: int,
@@ -149,7 +141,6 @@ type CleanOptions(kubeConfig: string,
                           numNodes,
                           logDebugPartitions,
                           logTracePartitions,
-                          storageClass,
                           containerMaxCpuMili,
                           containerMaxMemMebi,
                           numConcurrentMissions,
@@ -166,7 +157,6 @@ type LoadgenOptions(kubeConfig: string,
                     numNodes: int,
                     logDebugPartitions: seq<string>,
                     logTracePartitions: seq<string>,
-                    storageClass: string,
                     containerMaxCpuMili: int,
                     containerMaxMemMebi: int,
                     numConcurrentMissions: int,
@@ -180,7 +170,6 @@ type LoadgenOptions(kubeConfig: string,
                           numNodes,
                           logDebugPartitions,
                           logTracePartitions,
-                          storageClass,
                           containerMaxCpuMili,
                           containerMaxMemMebi,
                           numConcurrentMissions,
@@ -206,7 +195,6 @@ type MissionOptions(kubeConfig: string,
                     probeTimeout: int,
                     missions: string seq,
                     destination: string,
-                    storageClass: string,
                     image: string,
                     oldImage: string option,
                     txRate: int,
@@ -265,10 +253,6 @@ type MissionOptions(kubeConfig: string,
     [<Option('d', "destination", HelpText="Output directory for logs and sql dumps",
              Required = false, Default = "destination")>]
     member self.Destination = destination
-
-    [<Option("storage-class", HelpText="Storage class name to use for dynamically provisioning persistent volume claims",
-             Required = false, Default = "default")>]
-    member self.StorageClass = storageClass
 
     [<Option('i', "image", HelpText="Stellar-core image to use",
              Required = false, Default = "stellar/stellar-core")>]
@@ -357,10 +341,30 @@ let main argv =
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.GetDefault setup.Image with nodeCount = setup.NumNodes }
       let ll = { LogDebugPartitions = List.ofSeq setup.LogDebugPartitions
                  LogTracePartitions = List.ofSeq setup.LogTracePartitions }
-      let sc = setup.StorageClass
-      let nCfg = MakeNetworkCfg [coreSet] ns nq ll sc
-                                setup.IngressDomain setup.ExportToPrometheus None setup.ApiRateLimit
-      use formation = kube.MakeFormation nCfg false setup.ProbeTimeout
+      let ctx = {
+          kube = kube
+          destination = DefaultDestination
+          image = setup.Image
+          oldImage = None
+          txRate = 100
+          maxTxRate = 300
+          numAccounts = 100000
+          numTxs = 100000
+          spikeSize = 100000
+          spikeInterval = 0
+          numNodes = setup.NumNodes
+          namespaceProperty = setup.NamespaceProperty.Value
+          quotas = nq
+          logLevels = ll
+          ingressDomain = setup.IngressDomain
+          exportToPrometheus = setup.ExportToPrometheus
+          probeTimeout = setup.ProbeTimeout
+          coreResources = SmallTestResources
+          keepData = false
+          apiRateLimit = setup.ApiRateLimit
+      }
+      let nCfg = MakeNetworkCfg ctx [coreSet] None
+      use formation = kube.MakeFormation nCfg
       formation.ReportStatus()
       0
 
@@ -376,9 +380,29 @@ let main argv =
           nq <- { nq with ContainerMaxMemMebi = clean.ContainerMaxMemMebi }
       let ll = { LogDebugPartitions = List.ofSeq clean.LogDebugPartitions
                  LogTracePartitions = List.ofSeq clean.LogTracePartitions }
-      let sc = clean.StorageClass
-      let nCfg = MakeNetworkCfg [] ns nq ll sc
-                                clean.IngressDomain clean.ExportToPrometheus None clean.ApiRateLimit
+      let ctx = {
+          kube = kube
+          destination = DefaultDestination
+          image = clean.Image
+          oldImage = None
+          txRate = 100
+          maxTxRate = 300
+          numAccounts = 100000
+          numTxs = 100000
+          spikeSize = 100000
+          spikeInterval = 0
+          numNodes = clean.NumNodes
+          namespaceProperty = clean.NamespaceProperty.Value
+          quotas = nq
+          logLevels = ll
+          ingressDomain = clean.IngressDomain
+          exportToPrometheus = clean.ExportToPrometheus
+          probeTimeout = clean.ProbeTimeout
+          coreResources = SmallTestResources
+          keepData = false
+          apiRateLimit = clean.ApiRateLimit
+      }
+      let nCfg = MakeNetworkCfg ctx [] None
       use formation = kube.MakeEmptyFormation nCfg
       formation.CleanNamespace()
       0
@@ -396,10 +420,30 @@ let main argv =
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.GetDefault loadgen.Image with nodeCount = loadgen.NumNodes }
       let ll = { LogDebugPartitions = List.ofSeq loadgen.LogDebugPartitions
                  LogTracePartitions = List.ofSeq loadgen.LogTracePartitions }
-      let sc = loadgen.StorageClass
-      let nCfg = MakeNetworkCfg [coreSet] ns nq ll sc
-                                loadgen.IngressDomain loadgen.ExportToPrometheus None loadgen.ApiRateLimit
-      use formation = kube.MakeFormation nCfg false loadgen.ProbeTimeout
+      let ctx = {
+          kube = kube
+          destination = DefaultDestination
+          image = loadgen.Image
+          oldImage = None
+          txRate = 100
+          maxTxRate = 300
+          numAccounts = 100000
+          numTxs = 100000
+          spikeSize = 100000
+          spikeInterval = 0
+          numNodes = loadgen.NumNodes
+          namespaceProperty = loadgen.NamespaceProperty.Value
+          quotas = nq
+          logLevels = ll
+          ingressDomain = loadgen.IngressDomain
+          exportToPrometheus = loadgen.ExportToPrometheus
+          probeTimeout = loadgen.ProbeTimeout
+          coreResources = SmallTestResources
+          keepData = false
+          apiRateLimit = loadgen.ApiRateLimit
+      }
+      let nCfg = MakeNetworkCfg ctx [coreSet] None
+      use formation = kube.MakeFormation nCfg
       formation.RunLoadgenAndCheckNoErrors coreSet
       formation.ReportStatus()
       0
@@ -462,14 +506,14 @@ let main argv =
                                                spikeSize = mission.SpikeSize
                                                spikeInterval = mission.SpikeInterval
                                                numNodes = mission.NumNodes
+                                               namespaceProperty = ns
                                                quotas = nq
                                                logLevels = ll
                                                ingressDomain = mission.IngressDomain
                                                exportToPrometheus = mission.ExportToPrometheus
-                                               storageClass = mission.StorageClass
-                                               namespaceProperty = ns
-                                               keepData = mission.KeepData
                                                probeTimeout = mission.ProbeTimeout
+                                               coreResources = SmallTestResources
+                                               keepData = mission.KeepData
                                                apiRateLimit = mission.ApiRateLimit }
                         allMissions.[m] missionContext
                     with

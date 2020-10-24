@@ -7,6 +7,8 @@ module MissionComplexTopology
 open StellarCoreSet
 open StellarMissionContext
 open StellarFormation
+open StellarSupercluster
+open StellarCoreHTTP
 
 let complexTopology (context : MissionContext) =
     let context = context.WithNominalLoad

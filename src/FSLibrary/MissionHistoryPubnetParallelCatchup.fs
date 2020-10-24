@@ -11,8 +11,10 @@ open StellarNetworkCfg
 open StellarNetworkData
 open StellarFormation
 open StellarJobExec
+open StellarSupercluster
 
 let historyPubnetParallelCatchup (context : MissionContext) =
+    let context = { context with coreResources = ParallelCatchupResources }
     let checkpointsPerJob = 250
     let ledgersPerCheckpoint = 64
     let ledgersPerJob = checkpointsPerJob * ledgersPerCheckpoint  // 16,000

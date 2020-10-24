@@ -12,8 +12,11 @@ open StellarMissionContext
 open StellarFormation
 open StellarNetworkData
 open StellarNetworkDelays
+open StellarSupercluster
+open StellarCoreHTTP
 
 let simulatePubnet (context : MissionContext) =
+    let context = { context with coreResources = SimulatePubnetResources }
     let fullCoreSet = FullPubnetCoreSets context.image true
 
     let findCoreSetWithHomeDomain (domain:string) : CoreSet =

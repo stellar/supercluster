@@ -5,11 +5,10 @@
 module MissionHistoryGenerateAndCatchup
 
 open MissionCatchupHelpers
-open StellarCoreCfg
-open StellarCorePeer
 open StellarCoreHTTP
 open StellarMissionContext
 open StellarFormation
+open StellarSupercluster
 
 let historyGenerateAndCatchup (context : MissionContext) =
     let context = context.WithNominalLoad

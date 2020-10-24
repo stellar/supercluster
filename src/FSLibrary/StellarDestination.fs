@@ -33,3 +33,6 @@ type Destination(path: string) =
         let fullPath = Path.Combine [|self.GetExistingNsPath ns; name|]
         LogInfo "Writing data to %s" fullPath
         File.WriteAllText(fullPath, content)
+
+let DefaultDestination =
+    Destination(System.IO.Path.GetTempPath())

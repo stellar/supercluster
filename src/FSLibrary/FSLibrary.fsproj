@@ -12,6 +12,8 @@
     <Compile Include="PollRetry.fs" />
     <Compile Include="StellarShellCmd.fs" />
     <Compile Include="StellarCoreSet.fs" />
+    <Compile Include="StellarDestination.fs" />
+    <Compile Include="StellarMissionContext.fs" />
     <Compile Include="StellarNetworkCfg.fs" />
     <Compile Include="StellarCoreCfg.fs" />
     <Compile Include="StellarNetworkData.fs" />
@@ -19,16 +21,14 @@
     <Compile Include="StellarCoreHTTP.fs" />
     <Compile Include="StellarTransaction.fs" />
     <Compile Include="StellarKubeSpecs.fs" />
-    <Compile Include="StellarDestination.fs" />
     <Compile Include="StellarNamespaceContent.fs" />
     <Compile Include="StellarFormation.fs" />
     <Compile Include="StellarRemoteCommandExec.fs" />
     <Compile Include="StellarNetworkDelays.fs" />
-    <Compile Include="StellarSupercluster.fs" />
     <Compile Include="StellarDataDump.fs" />
     <Compile Include="StellarJobExec.fs" />
     <Compile Include="StellarPerformanceReporter.fs" />
-    <Compile Include="MissionContext.fs" />
+    <Compile Include="StellarSupercluster.fs" />
     <Compile Include="MissionCatchupHelpers.fs" />
     <Compile Include="MissionSimplePayment.fs" />
     <Compile Include="MissionComplexTopology.fs" />

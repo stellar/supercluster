@@ -23,7 +23,6 @@ module CfgVal =
     let stellarCoreContainerName (cmd:string) = "stellar-core-" + cmd
     let dataVolumeName = "data-volume"
     let dataVolumePath = "/data"
-    let peristentVolumeClaimName peerOrJobName = sprintf "pvc-%s" peerOrJobName
     let databasePath = dataVolumePath + "/stellar.db"
     let historyPath = dataVolumePath + "/history"
     let bucketsDir = "buckets"
@@ -133,12 +132,12 @@ type StellarCoreCfg =
         let debugLevelCommands =
             List.map
                 (sprintf "ll?level=debug&partition=%s")
-                self.network.logLevels.LogDebugPartitions
+                self.network.missionContext.logLevels.LogDebugPartitions
 
         let traceLevelCommands =
             List.map
                 (sprintf "ll?level=trace&partition=%s")
-                self.network.logLevels.LogTracePartitions
+                self.network.missionContext.logLevels.LogTracePartitions
 
         let logLevelCommands = List.append debugLevelCommands traceLevelCommands
         let preferredPeers = List.map (fun (x:PeerDnsName) -> x.StringName) self.preferredPeers
