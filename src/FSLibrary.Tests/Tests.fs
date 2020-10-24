@@ -40,7 +40,6 @@ let ctx : MissionContext =
     spikeInterval = 10
     numNodes = 100
     namespaceProperty = "stellar-supercluster"
-    quotas = MakeNetworkQuotas(1,1,1,1,1,1,1)
     logLevels = { LogDebugPartitions=[]; LogTracePartitions=[] }
     ingressDomain = "local"
     exportToPrometheus = false

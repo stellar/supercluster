@@ -61,13 +61,6 @@ let ConnectToCluster (cfgFile:string) (nsOpt:string option) : (Kubernetes * stri
 
 // Prints the stellar-core StatefulSets and Pods on the provided cluster
 let PollCluster (kube:Kubernetes) (ns:string) =
-    let qs = kube.ListNamespacedResourceQuota(namespaceParameter=ns)
-    for q in qs.Items do
-        for entry in q.Status.Hard do
-            LogInfo "Quota: name=%s key=%s val=%s"
-                q.Metadata.Name entry.Key (entry.Value.ToString())
-        done
-    done
 
     let sets = kube.ListNamespacedStatefulSet(namespaceParameter=ns)
     for s in sets.Items do
@@ -99,67 +92,6 @@ let DumpPodInfo (kube:Kubernetes) (ns:string) =
 // object, and then calls one of these `Kubernetes` extension methods to
 // establish a `StellarFormation` object to run tests against.
 type Kubernetes with
-
-    // NetworkQuotas are composed of two different resource types: limitranges
-    // which specify the per-container limits, and quotas which specify the
-    // namespace quotas.
-    member self.GetQuotas(namespaceProperty:string) : NetworkQuotas =
-
-        let resToCpuMili (dict:IDictionary<string,ResourceQuantity>) (k:string) (dflt:int) : int =
-            if dict.ContainsKey(k)
-            then
-                let rq = dict.[k]
-                let s = rq.CanonicalizeString(ResourceQuantity.SuffixFormat.DecimalExponent)
-                try
-                    int((decimal s) * 1000M)
-                with
-                    | _ -> dflt
-            else dflt
-
-        let resToMemMebi (dict:IDictionary<string,ResourceQuantity>) (k:string) (dflt:int) : int =
-            if dict.ContainsKey(k)
-            then
-                let rq = dict.[k]
-                let s = rq.CanonicalizeString(ResourceQuantity.SuffixFormat.DecimalExponent)
-                try
-                    int((decimal s) / 1048576M)
-                with
-                    | _ -> dflt
-            else dflt
-
-        let mutable nq = clusterQuotas
-           
-        // This is the first API call we make, so make sure we get information from the cluster.
-        // We've seen null return values when the connection had an expired certificate.
-        let ranges = self.ListNamespacedLimitRange(namespaceParameter=namespaceProperty)
-        
-        if isNull ranges
-        then failwith "First API call failed - This is most likely due to a connection or certificate issue"
-
-        for r in ranges.Items do
-            for limit in r.Spec.Limits do
-                if limit.Type = "Container"
-                then
-                    nq <- { nq with ContainerMaxCpuMili =
-                                        resToCpuMili limit.Max "cpu" nq.ContainerMaxCpuMili }
-                    nq <- { nq with ContainerMaxMemMebi =
-                                        resToMemMebi limit.Max "memory" nq.ContainerMaxMemMebi }
-            done
-        done
-
-        let quotas = self.ListNamespacedResourceQuota(namespaceParameter=namespaceProperty)
-        for q in quotas.Items do
-            nq <- { nq with NamespaceQuotaLimCpuMili =
-                                resToCpuMili q.Status.Hard "limits.cpu" nq.NamespaceQuotaLimCpuMili }
-            nq <- { nq with NamespaceQuotaLimMemMebi =
-                                resToMemMebi q.Status.Hard "limits.memory" nq.NamespaceQuotaLimMemMebi }
-            nq <- { nq with NamespaceQuotaReqCpuMili =
-                                resToCpuMili q.Status.Hard "requests.cpu" nq.NamespaceQuotaReqCpuMili }
-            nq <- { nq with NamespaceQuotaReqMemMebi =
-                                resToMemMebi q.Status.Hard "requests.memory" nq.NamespaceQuotaReqMemMebi }
-        done
-        LogInfo "Using quotas: %O" nq
-        nq
 
     // Creates a minimal formation on which to run Jobs; no StatefulSets,
     // services, ingresses or anything.

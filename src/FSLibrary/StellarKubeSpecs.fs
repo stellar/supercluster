@@ -100,23 +100,7 @@ let HistoryContainerVolumeMounts : V1VolumeMount array =
        V1VolumeMount(name = CfgVal.dataVolumeName,
                      mountPath = CfgVal.dataVolumePath) |]
 
-
-// Note: for the time being we use the same resource-requirements calculation
-// for each container in our pod, be it core, history or postgres. We just
-// multiply the number of pods by the number of containers-in-each-pod to get a
-// total container count, which is used as a divisor in these calculations. A
-// fancier calculation would deduct different amounts for nginx and postgres
-// (the former needs very little RAM, the latter quite a lot). But this seems to
-// work for now.
-let resourceRequirements (q:NetworkQuotas) (numContainers:int) : V1ResourceRequirements =
-    let q = q.AdjustedToCompensateForKubeletMemoryPressureBug(numContainers)
-    let cpuReq = q.ContainerCpuReqMili numContainers
-    let memReq = q.ContainerMemReqMebi numContainers
-    let cpuLim = q.ContainerCpuLimMili numContainers
-    let memLim = q.ContainerMemLimMebi numContainers
-    makeResourceRequirements cpuReq memReq cpuLim memLim
-
-let HistoryContainer (q:NetworkQuotas) (numContainers:int) =
+let HistoryContainer =
     V1Container
         (name = "history",
          image = "nginx",
@@ -125,7 +109,7 @@ let HistoryContainer (q:NetworkQuotas) (numContainers:int) =
          resources = HistoryResourceRequirements,
          volumeMounts = HistoryContainerVolumeMounts )
 
-let PostgresContainer (q:NetworkQuotas) (numContainers:int) =
+let PostgresContainer =
     let passwordEnvVar = V1EnvVar(name = "POSTGRES_PASSWORD",
                                   value = CfgVal.pgPassword)
     V1Container
@@ -136,7 +120,7 @@ let PostgresContainer (q:NetworkQuotas) (numContainers:int) =
          resources = PgResourceRequirements,
          volumeMounts = PgContainerVolumeMounts)
 
-let PrometheusExporterSidecarContainer (q:NetworkQuotas) (numContainers:int) =
+let PrometheusExporterSidecarContainer =
     V1Container(name = "prom-exp",
                 ports = [| V1ContainerPort(containerPort = CfgVal.prometheusExporterPort,
                                            name = "prom-exp") |],
@@ -150,7 +134,7 @@ let cfgFileArgs (configOpt:ConfigOption) : ShWord array =
         | PeerSpecificConfigFile -> [| ShWord.OfStr "--conf";
                                        CfgVal.peerNameEnvCfgFileWord |]
 
-let CoreContainerForCommand (q:NetworkQuotas) (imageName:string) (numContainers:int) (configOpt:ConfigOption)
+let CoreContainerForCommand (imageName:string) (configOpt:ConfigOption)
                             (cr:CoreResources)
                             (command:string array) (initCommands:ShCmd array) (peerOrJobNames:string array) : V1Container =
 
@@ -333,27 +317,21 @@ type NetworkCfg with
         let cfgOpt = (if useConfigFile
                       then SharedJobConfigFile
                       else NoConfigFile)
-        let maxPeers = 1
 
         let jobCfgVol = V1Volume(name = CfgVal.jobCfgVolumeName,
                                  configMap = V1ConfigMapVolumeSource(name = self.JobCfgMapName))
         let dataVol = V1Volume(name = CfgVal.dataVolumeName,
                                emptyDir = V1EmptyDirVolumeSource())
 
-        let quotas = self.missionContext.quotas
         let res = self.missionContext.coreResources
         let containers  =
             match self.jobCoreSetOptions with
-                | None -> [| CoreContainerForCommand quotas image maxPeers cfgOpt res command [| |] [|jobName|] |]
+                | None -> [| CoreContainerForCommand image cfgOpt res command [| |] [|jobName|] |]
                 | Some(opts) ->
                 let initCmds = self.getInitCommands cfgOpt opts
-                let numContainers =
-                    match opts.dbType with
-                        | Postgres -> maxPeers * 2
-                        | _ -> maxPeers
-                let coreContainer = CoreContainerForCommand quotas image numContainers cfgOpt res command initCmds [|jobName|]
+                let coreContainer = CoreContainerForCommand image cfgOpt res command initCmds [|jobName|]
                 match opts.dbType with
-                    | Postgres -> [| coreContainer; PostgresContainer quotas numContainers |]
+                    | Postgres -> [| coreContainer; PostgresContainer |]
                     | _ -> [| coreContainer |]
 
         V1PodTemplateSpec
@@ -421,33 +399,26 @@ type NetworkCfg with
                        else runCmdWithOpts
 
         let usePostgres = (coreSet.options.dbType = Postgres)
-        let numBaseContainers = 2 // core and history
         let exportToPrometheus = self.missionContext.exportToPrometheus
-        let numPrometheusContainers = if exportToPrometheus then 1 else 0
-        let numPostgresContainers = if usePostgres then 1 else 0
-        let containersPerPod = numBaseContainers + numPrometheusContainers + numPostgresContainers
 
-        let numContainers = maxPeers * containersPerPod
-        let quotas = self.missionContext.quotas
         let res = self.missionContext.coreResources
         let containers = [| WithLivenessProbe
-                                (CoreContainerForCommand quotas imageName numContainers
+                                (CoreContainerForCommand imageName
                                      cfgOpt res runCmdWithOpts initCommands peerNames)
                                 self.missionContext.probeTimeout;
-                            HistoryContainer quotas numContainers; |]
+                            HistoryContainer; |]
         let containers =
             if usePostgres
-            then Array.append containers [| PostgresContainer quotas numContainers |]
+            then Array.append containers [| PostgresContainer |]
             else containers
         let containers =
             if exportToPrometheus
-            then Array.append containers [| PrometheusExporterSidecarContainer quotas numContainers |]
+            then Array.append containers [| PrometheusExporterSidecarContainer |]
             else containers
         let annotations =
             if exportToPrometheus
             then Map.ofList [("prometheus.io/scrape", "true")]
             else Map.empty
-        assert(containersPerPod = containers.Length)
         let podSpec =
             V1PodSpec
                 (containers = containers,
