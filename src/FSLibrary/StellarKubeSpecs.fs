@@ -81,8 +81,8 @@ let ParallelCatchupCoreResourceRequirements: V1ResourceRequirements =
 
 let SmallTestCoreResourceRequirements: V1ResourceRequirements =
     // When running most missions, there are few core nodes, so each
-    // gets 1 vCPU and 256MB RAM guaranteed.
-    makeResourceRequirements 1000 256 1000 256
+    // gets 0.1 vCPUs with bursting to 1vCPU and 256MB RAM guaranteed.
+    makeResourceRequirements 100 256 1000 256
 
 let AcceptanceTestCoreResourceRequirements: V1ResourceRequirements =
     // When running acceptance tests we need to give a single core a very large
