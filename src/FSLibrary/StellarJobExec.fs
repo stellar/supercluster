@@ -298,14 +298,6 @@ type StellarFormation with
                     let j = self.StartJobForCmd cmd image true
                     self.WatchJob j jst
 
-        let oldConfig = self.NetworkCfg
-        let c = parallelism * self.NetworkCfg.missionContext.quotas.NumConcurrentMissions
-        let ctx = { self.NetworkCfg.missionContext with
-                        quotas = { self.NetworkCfg.missionContext.quotas with
-                                       NumConcurrentMissions = c } }
-        self.SetNetworkCfg { self.NetworkCfg with
-                                 missionContext = ctx }
-
         while moreJobs do
             checkPendingPodBuildup()
             if jst.HavePendingFinished()
@@ -316,7 +308,6 @@ type StellarFormation with
         done
         LogInfo "Finished parallel-job loop"
 
-        self.SetNetworkCfg oldConfig
         jst.GetFinishedTable()
 
     member self.CheckAllJobsSucceeded (jobs:Map<string,bool>) =

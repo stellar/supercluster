@@ -251,12 +251,3 @@ let TestnetCoreSetOptions(image: string) = {
                          accelerateTime = false
                          initialization = { CoreSetInitialization.Default with forceScp = false }
                          dumpDatabase = false }
-
-let clusterQuotas : NetworkQuotas =
-    { ContainerMaxCpuMili = 4000
-      ContainerMaxMemMebi = 8000
-      NamespaceQuotaLimCpuMili = 80000
-      NamespaceQuotaLimMemMebi = 62000
-      NamespaceQuotaReqCpuMili = 10000
-      NamespaceQuotaReqMemMebi = 22000
-      NumConcurrentMissions = 1 }

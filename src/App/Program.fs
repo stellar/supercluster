@@ -331,13 +331,6 @@ let main argv =
     | :? SetupOptions as setup ->
       let _ = logToConsoleOnly()
       let (kube, ns) = ConnectToCluster setup.KubeConfig setup.NamespaceProperty
-      let mutable nq = kube.GetQuotas ns
-      if setup.ContainerMaxCpuMili > 0
-      then
-          nq <- { nq with ContainerMaxCpuMili = setup.ContainerMaxCpuMili }
-      if setup.ContainerMaxMemMebi > 0
-      then
-          nq <- { nq with ContainerMaxMemMebi = setup.ContainerMaxMemMebi }
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.GetDefault setup.Image with nodeCount = setup.NumNodes }
       let ll = { LogDebugPartitions = List.ofSeq setup.LogDebugPartitions
                  LogTracePartitions = List.ofSeq setup.LogTracePartitions }
@@ -354,7 +347,6 @@ let main argv =
           spikeInterval = 0
           numNodes = setup.NumNodes
           namespaceProperty = ns
-          quotas = nq
           logLevels = ll
           ingressDomain = setup.IngressDomain
           exportToPrometheus = setup.ExportToPrometheus
@@ -371,13 +363,6 @@ let main argv =
     | :? CleanOptions as clean ->
       let _ = logToConsoleOnly()
       let (kube, ns) = ConnectToCluster clean.KubeConfig clean.NamespaceProperty
-      let mutable nq = { kube.GetQuotas ns with NumConcurrentMissions = clean.NumConcurrentMissions }
-      if clean.ContainerMaxCpuMili > 0
-      then
-          nq <- { nq with ContainerMaxCpuMili = clean.ContainerMaxCpuMili }
-      if clean.ContainerMaxMemMebi > 0
-      then
-          nq <- { nq with ContainerMaxMemMebi = clean.ContainerMaxMemMebi }
       let ll = { LogDebugPartitions = List.ofSeq clean.LogDebugPartitions
                  LogTracePartitions = List.ofSeq clean.LogTracePartitions }
       let ctx = {
@@ -393,7 +378,6 @@ let main argv =
           spikeInterval = 0
           numNodes = clean.NumNodes
           namespaceProperty = ns
-          quotas = nq
           logLevels = ll
           ingressDomain = clean.IngressDomain
           exportToPrometheus = clean.ExportToPrometheus
@@ -410,13 +394,6 @@ let main argv =
     | :? LoadgenOptions as loadgen ->
       let _ = logToConsoleOnly()
       let (kube, ns) = ConnectToCluster loadgen.KubeConfig loadgen.NamespaceProperty
-      let mutable nq = { kube.GetQuotas ns with NumConcurrentMissions = loadgen.NumConcurrentMissions }
-      if loadgen.ContainerMaxCpuMili > 0
-      then
-          nq <- { nq with ContainerMaxCpuMili = loadgen.ContainerMaxCpuMili }
-      if loadgen.ContainerMaxMemMebi > 0
-      then
-          nq <- { nq with ContainerMaxMemMebi = loadgen.ContainerMaxMemMebi }
       let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.GetDefault loadgen.Image with nodeCount = loadgen.NumNodes }
       let ll = { LogDebugPartitions = List.ofSeq loadgen.LogDebugPartitions
                  LogTracePartitions = List.ofSeq loadgen.LogTracePartitions }
@@ -433,7 +410,6 @@ let main argv =
           spikeInterval = 0
           numNodes = loadgen.NumNodes
           namespaceProperty = ns
-          quotas = nq
           logLevels = ll
           ingressDomain = loadgen.IngressDomain
           exportToPrometheus = loadgen.ExportToPrometheus
@@ -467,13 +443,6 @@ let main argv =
                 LogInfo "Connecting to Kubernetes cluster"
                 LogInfo "-----------------------------------"
                 let (kube, ns) = ConnectToCluster mission.KubeConfig mission.NamespaceProperty
-                let mutable nq = { kube.GetQuotas ns with NumConcurrentMissions = mission.NumConcurrentMissions }
-                if mission.ContainerMaxCpuMili > 0
-                then
-                    nq <- { nq with ContainerMaxCpuMili = mission.ContainerMaxCpuMili }
-                if mission.ContainerMaxMemMebi > 0
-                then
-                    nq <- { nq with ContainerMaxMemMebi = mission.ContainerMaxMemMebi }
                 let destination = Destination(mission.Destination)
 
                 let heartbeatHandler _ =
@@ -507,7 +476,6 @@ let main argv =
                                                spikeInterval = mission.SpikeInterval
                                                numNodes = mission.NumNodes
                                                namespaceProperty = ns
-                                               quotas = nq
                                                logLevels = ll
                                                ingressDomain = mission.IngressDomain
                                                exportToPrometheus = mission.ExportToPrometheus
@@ -535,7 +503,6 @@ let main argv =
     | :? PollOptions as poll ->
       let _ = logToConsoleOnly()
       let (kube, ns) = ConnectToCluster poll.KubeConfig poll.NamespaceProperty
-      let nq = kube.GetQuotas ns
       PollCluster kube ns
       0
 
