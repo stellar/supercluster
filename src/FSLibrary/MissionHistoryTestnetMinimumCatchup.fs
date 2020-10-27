@@ -12,6 +12,7 @@ open StellarFormation
 open StellarSupercluster
 
 let historyTestnetMinimumCatchup (context : MissionContext) =
+    let context = { context with coreResources = NonParallelCatchupResources }
     let set = { TestnetCoreSetOptions context.image with nodeCount = 1; catchupMode = CatchupRecent(0) }
     let coreSet = MakeLiveCoreSet "core" set
     context.Execute [coreSet] (Some(SDFTestNet)) (fun (formation: StellarFormation) ->

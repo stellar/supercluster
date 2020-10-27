@@ -21,6 +21,8 @@ type CoreResources =
     | AcceptanceTestResources
     | SimulatePubnetResources
     | ParallelCatchupResources
+    | NonParallelCatchupResources
+    | UpgradeResources
 
 type MissionContext =
     { kube : Kubernetes

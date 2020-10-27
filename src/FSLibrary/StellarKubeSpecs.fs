@@ -79,6 +79,16 @@ let ParallelCatchupCoreResourceRequirements: V1ResourceRequirements =
     // 256MB RAM and 0.1 vCPUs, bursting to 1vCPU and 600MB
     makeResourceRequirements 100 256 1000 600
 
+let NonParallelCatchupCoreResourceRequirements: V1ResourceRequirements =
+    // When doing non-parallel catchup, we give each container
+    // 6000MB RAM and 1 vCPU
+    makeResourceRequirements 1000 6000 1000 6000
+
+let UpgradeCoreResourceRequirements: V1ResourceRequirements =
+    // When doing upgrade tests, we give each container
+    // 256MB RAM and 1 vCPU, bursting to 4vCPU and 8000MB
+    makeResourceRequirements 1000 256 4000 8000
+
 let SmallTestCoreResourceRequirements: V1ResourceRequirements =
     // When running most missions, there are few core nodes, so each
     // gets 0.1 vCPUs with bursting to 1vCPU and 256MB RAM guaranteed.
@@ -168,6 +178,8 @@ let CoreContainerForCommand (imageName:string) (configOpt:ConfigOption)
             | AcceptanceTestResources -> AcceptanceTestCoreResourceRequirements
             | SimulatePubnetResources -> SimulatePubnetCoreResourceRequirements
             | ParallelCatchupResources -> ParallelCatchupCoreResourceRequirements
+            | NonParallelCatchupResources -> NonParallelCatchupCoreResourceRequirements
+            | UpgradeResources -> UpgradeCoreResourceRequirements
 
     V1Container
         (name = containerName, image = imageName,

@@ -14,6 +14,7 @@ open StellarFormation
 open StellarSupercluster
 
 let protocolUpgradeTestnet (context : MissionContext) =
+    let context = { context with coreResources = UpgradeResources }
     let set = { CoreSetOptions.GetDefault context.image with
                   nodeCount = 1
                   quorumSet = CoreSetQuorum(CoreSetName "core")
