@@ -67,12 +67,12 @@ let HistoryResourceRequirements: V1ResourceRequirements =
 
 let PrometheusExporterSidecarResourceRequirements: V1ResourceRequirements =
     // The prometheus exporter sidecar needs 0.01 vCPU and 64MB RAM.
-    makeResourceRequirements 10 64 10 32
+    makeResourceRequirements 10 64 10 64
 
 let SimulatePubnetCoreResourceRequirements: V1ResourceRequirements =
     // When simulating pubnet, we give each container
-    // 256MB RAM and 0.1 vCPUs, bursting to 1vCPU and 600MB
-    makeResourceRequirements 100 256 1000 600
+    // 128MB RAM and 0.1 vCPUs, bursting to 1vCPU and 600MB
+    makeResourceRequirements 100 128 1000 600
 
 let ParallelCatchupCoreResourceRequirements: V1ResourceRequirements =
     // When doing parallel catchup, we give each container
