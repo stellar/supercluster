@@ -357,7 +357,7 @@ type NetworkCfg with
     member self.GetJobFor (jobNum:int) (command: string array) (image:string) (useConfigFile:bool) : V1Job =
         let jobName = self.JobName jobNum
         let template = self.GetJobPodTemplateSpec jobName command image useConfigFile
-        V1Job(spec = V1JobSpec(template = template),
+        V1Job(spec = V1JobSpec(template = template, backoffLimit = System.Nullable<int>(3)),
               metadata = self.NamespacedMeta jobName)
 
     // Returns a PodTemplate that mounts the ConfigMap on /cfg and an empty data

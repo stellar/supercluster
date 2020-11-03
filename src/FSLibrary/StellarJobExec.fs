@@ -127,6 +127,40 @@ type StellarFormation with
             LogError "err: %s" w.Response.ReasonPhrase
             reraise()
 
+    member self.CheckJob (j:V1Job) (jst:JobStatusTable) =
+        let name = j.Metadata.Name
+        let ns = j.Metadata.NamespaceProperty
+        
+        let jobIsCompleted = j.Status.CompletionTime.HasValue
+        let jobActivePodCount = j.Status.Active.GetValueOrDefault(0)
+        let jobFailedPodCount = j.Status.Failed.GetValueOrDefault(0)
+        let jobSucceededPodCount = j.Status.Succeeded.GetValueOrDefault(0)
+
+        // Check if any containers were terminated for a non-OOM reason. We fail on the first non-OOM failure
+        // seen, but we allow two failures if they are due to an OOM kill.
+        let mutable isNonOomFail = false
+        
+        self.sleepUntilNextRateLimitedApiCallTime()
+        for pod in self.Kube.ListNamespacedPod(namespaceParameter = ns, labelSelector="job-name=" + name).Items do
+            if pod.Status.ContainerStatuses <> null
+            then 
+                for status in pod.Status.ContainerStatuses do
+                    if status.State <> null 
+                        && status.State.Terminated <> null 
+                        && status.State.Terminated.ExitCode <> 0 // Success
+                        && status.State.Terminated.ExitCode <> 137 // OOM
+                    then
+                        isNonOomFail <- true   
+                done
+        done
+
+        if (jobIsCompleted && jobActivePodCount = 0) || jobFailedPodCount > 2 || isNonOomFail
+        then
+            LogInfo "Finished job %s: %d fail / %d success"
+                name jobFailedPodCount jobSucceededPodCount
+            let ok = (jobSucceededPodCount = 1)
+            jst.NoteFinished name ok
+
     member self.WatchJob (j:V1Job) (jst:JobStatusTable) =
         let name = j.Metadata.Name
         let ns = j.Metadata.NamespaceProperty
@@ -134,17 +168,7 @@ type StellarFormation with
         let checkStatus _ =
             self.sleepUntilNextRateLimitedApiCallTime()
             let js = self.Kube.ReadNamespacedJob(name=name, namespaceParameter=ns)
-            let jobIsCompleted = js.Status.CompletionTime.HasValue
-            let jobActivePodCount = js.Status.Active.GetValueOrDefault(0)
-            let jobFailedPodCount = js.Status.Failed.GetValueOrDefault(0)
-            let jobSucceededPodCount = js.Status.Succeeded.GetValueOrDefault(0)
-            if (jobIsCompleted && jobActivePodCount = 0) || jobFailedPodCount > 0
-            then
-                LogInfo "Finished job %s: %d fail / %d success"
-                    name jobFailedPodCount jobSucceededPodCount
-                let ok = (jobFailedPodCount = 0) && (jobSucceededPodCount = 1)
-                jst.NoteFinished name ok
-
+            self.CheckJob js jst
         // Unfortunately event "watches" time out and get disconnected,
         // and periodically also drop events, so we can neither rely on
         // a single event handler registration nor catching every change
@@ -268,11 +292,9 @@ type StellarFormation with
 
             // We monitor the jobs in case the watch handlers drop due to a connection issue 
             let checkJobs = fun () -> 
-                for job in self.Kube.ListNamespacedJob(namespaceParameter=self.NetworkCfg.NamespaceProperty ).Items do
-                    if (job.Status.CompletionTime.HasValue && job.Status.Succeeded.GetValueOrDefault(0) > 0)
-                    then jst.NoteFinished job.Metadata.Name true
-                    else if(job.Status.Failed.GetValueOrDefault(0) > 0)
-                    then jst.NoteFinished job.Metadata.Name false
+                self.sleepUntilNextRateLimitedApiCallTime()
+                for job in self.Kube.ListNamespacedJob(namespaceParameter=self.NetworkCfg.NamespaceProperty).Items do
+                    self.CheckJob job jst
 
             let (j, ok) = jst.WaitForNextFinish (checkJobs) (TimeSpan(0,10,0))
             let name = j.Metadata.Name
