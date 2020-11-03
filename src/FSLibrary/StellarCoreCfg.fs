@@ -114,7 +114,6 @@ type StellarCoreCfg =
       historyGetCommands : Map<PeerShortName, string>
       localHistory: bool
       maxSlotsToRemember: int
-      maxBatchReadCount: int
       maxBatchWriteCount: int}
 
     member self.ToTOML() : TomlTable =
@@ -158,7 +157,6 @@ type StellarCoreCfg =
                 | CatchupComplete -> 0
                 | CatchupRecent n -> n) |> ignore
         t.Add("MAX_SLOTS_TO_REMEMBER", self.maxSlotsToRemember) |> ignore
-        t.Add("MAX_BATCH_READ_COUNT", self.maxBatchReadCount) |> ignore
         t.Add("MAX_BATCH_WRITE_COUNT", self.maxBatchWriteCount) |> ignore
         t.Add("AUTOMATIC_MAINTENANCE_PERIOD", self.automaticMaintenancePeriod) |> ignore
         t.Add("AUTOMATIC_MAINTENANCE_COUNT", self.automaticMaintenanceCount) |> ignore
@@ -308,7 +306,6 @@ type NetworkCfg with
           historyGetCommands = opts.historyGetCommands
           localHistory = opts.localHistory
           maxSlotsToRemember = opts.maxSlotsToRemember
-          maxBatchReadCount = opts.maxBatchReadCount
           maxBatchWriteCount = opts.maxBatchWriteCount }
 
     member self.StellarCoreCfg(c:CoreSet, i:int) : StellarCoreCfg =
@@ -336,5 +333,4 @@ type NetworkCfg with
           historyGetCommands = c.options.historyGetCommands
           localHistory = c.options.localHistory
           maxSlotsToRemember = c.options.maxSlotsToRemember
-          maxBatchReadCount = c.options.maxBatchReadCount
           maxBatchWriteCount = c.options.maxBatchWriteCount }

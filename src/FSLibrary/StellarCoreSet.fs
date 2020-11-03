@@ -144,7 +144,6 @@ type CoreSetOptions =
       dumpDatabase: bool
       simulateApplyUsec : int
       maxSlotsToRemember : int
-      maxBatchReadCount : int
       maxBatchWriteCount : int }
 
     member self.WithForceSCP (f:bool) =
@@ -171,7 +170,6 @@ type CoreSetOptions =
         dumpDatabase = true
         simulateApplyUsec = 0
         maxSlotsToRemember = 12
-        maxBatchReadCount = 1
         maxBatchWriteCount = 1024 }
 
     member self.InConsensusOnlyMode (simulateApply:int) =
