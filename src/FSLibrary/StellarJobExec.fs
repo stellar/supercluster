@@ -15,6 +15,7 @@ open StellarFormation
 open StellarKubeSpecs
 open System
 open System.Threading
+open System.Text
 open Microsoft.Rest
 
 
@@ -136,25 +137,28 @@ type StellarFormation with
         let jobFailedPodCount = j.Status.Failed.GetValueOrDefault(0)
         let jobSucceededPodCount = j.Status.Succeeded.GetValueOrDefault(0)
 
-        // Check if any containers were terminated for a non-OOM reason. We fail on the first non-OOM failure
-        // seen, but we allow two failures if they are due to an OOM kill.
-        let mutable isNonOomFail = false
-        
-        self.sleepUntilNextRateLimitedApiCallTime()
-        for pod in self.Kube.ListNamespacedPod(namespaceParameter = ns, labelSelector="job-name=" + name).Items do
-            if pod.Status.ContainerStatuses <> null
-            then 
-                for status in pod.Status.ContainerStatuses do
-                    if status.State <> null 
-                        && status.State.Terminated <> null 
-                        && status.State.Terminated.ExitCode <> 0 // Success
-                        && status.State.Terminated.ExitCode <> 137 // OOM
-                    then
-                        isNonOomFail <- true   
-                done
-        done
+        let checkNonOomFail () : bool =
+            // Check if any containers were terminated for a non-OOM reason. We fail on the first non-OOM failure
+            // seen, but we allow two failures if they are due to an OOM kill.
+            
+            let mutable isNonOomFail = false
+            
+            self.sleepUntilNextRateLimitedApiCallTime()
+            for pod in self.Kube.ListNamespacedPod(namespaceParameter = ns, labelSelector="job-name=" + name).Items do
+                if pod.Status.ContainerStatuses <> null
+                then 
+                    for status in pod.Status.ContainerStatuses do
+                        if status.State <> null 
+                            && status.State.Terminated <> null 
+                            && status.State.Terminated.ExitCode <> 0 // Success
+                            && status.State.Terminated.ExitCode <> 137 // OOM
+                        then
+                            isNonOomFail <- true   
+                    done
+            done
+            isNonOomFail
 
-        if (jobIsCompleted && jobActivePodCount = 0) || jobFailedPodCount > 2 || isNonOomFail
+        if (jobIsCompleted && jobActivePodCount = 0) || jobFailedPodCount > 2 || checkNonOomFail()
         then
             LogInfo "Finished job %s: %d fail / %d success"
                 name jobFailedPodCount jobSucceededPodCount
@@ -300,7 +304,9 @@ type StellarFormation with
             let name = j.Metadata.Name
             if ok
             then LogInfo "Job %s passed" name
-            else failwith ("Job " + name + " failed")
+            else 
+                self.LogState j
+                failwith ("Job " + name + " failed")
             try
                 self.FinishJob destination j
             with
@@ -331,6 +337,50 @@ type StellarFormation with
         LogInfo "Finished parallel-job loop"
 
         jst.GetFinishedTable()
+
+    member self.LogState (j:V1Job) = 
+        let jobName = j.Metadata.Name
+        let ns = j.Metadata.NamespaceProperty
+
+        let mutable message = new System.Text.StringBuilder()
+        
+        self.sleepUntilNextRateLimitedApiCallTime()
+        for pod in self.Kube.ListNamespacedPod(namespaceParameter = ns, labelSelector="job-name=" + jobName).Items do
+            message.Append (sprintf "\nPod %s failed, HostIp=%s" pod.Metadata.Name pod.Status.HostIP) |> ignore
+
+            let podName = pod.Metadata.Name
+
+            //Container errors
+            if pod.Status.ContainerStatuses <> null
+            then 
+                for status in pod.Status.ContainerStatuses do
+                    if status.State <> null 
+                        && status.State.Terminated <> null 
+                        && status.State.Terminated.ExitCode <> 0 // Success
+                    then
+                        message.Append (sprintf "\nContainer %s terminated. ExitCode = %d, Reason = %s" status.Name status.State.Terminated.ExitCode status.State.Terminated.Reason) |> ignore            
+                done
+
+            // Pod events
+            let fs = sprintf "involvedObject.name=%s" podName
+            self.sleepUntilNextRateLimitedApiCallTime()
+            for ev in self.Kube.ListNamespacedEvent(namespaceParameter=ns, fieldSelector=fs).Items do
+                if ev.Reason <> "DNSConfigForming" && ev.Type <> "Normal"
+                then
+                    message.Append (sprintf "\n\nPod Event %s - Type=%s, Reason=%s, Message=%s" podName ev.Type ev.Reason ev.Message) |> ignore
+            done
+        done
+
+        let fs = sprintf "involvedObject.name=%s" jobName
+        // Job events
+        self.sleepUntilNextRateLimitedApiCallTime()
+        for ev in self.Kube.ListNamespacedEvent(namespaceParameter=ns, fieldSelector=fs).Items do
+            if ev.Reason <> "DNSConfigForming" && ev.Type <> "Normal"
+            then
+                message.Append (sprintf "\n\nJob Event %s - Type=%s, Reason=%s, Message=%s" jobName ev.Type ev.Reason ev.Message) |> ignore
+        done
+
+        LogWarn "%s" (message.ToString())
 
     member self.CheckAllJobsSucceeded (jobs:Map<string,bool>) =
         let anyBad = ref false
