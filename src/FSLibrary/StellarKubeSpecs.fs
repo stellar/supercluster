@@ -267,6 +267,13 @@ type NetworkCfg with
         let nonSimulation = opts.simulateApplyUsec = 0
         let runCoreIf flag args = if flag && nonSimulation then Some (runCore args) else None 
 
+        let ignoreError cmd : ShCmd Option = 
+            match cmd with
+            | None -> None
+            | Some(cmd) -> 
+                let t = ShCmd.OfStr "true"
+                Some (ShCmd.ShOr [|cmd; t|])
+
         let setPgHost: ShCmd Option = 
             match opts.dbType with
               | Postgres -> Some (ShCmd.ExDefVar "PGHOST" CfgVal.pgHost)
@@ -306,10 +313,18 @@ type NetworkCfg with
         let init = opts.initialization
         let newDb = runCoreIf init.newDb [| "new-db" |]
         let newHist = runCoreIf (opts.localHistory && init.newHist) [| "new-hist"; CfgVal.localHistName |]
+
+        // If the container is restarted, we want to ignore the error that says the history archive already exists.
+        // This will allow us to bring the node up again, and notice that its ledgerNum isn't where we expect it to be.
+        // We should get one of the InconsistentPeersException, and the previous container logs will contain the information
+        // we want.  
+        let newHistIgnoreError = ignoreError newHist   
+        
+
         let initialCatchup = runCoreIf init.initialCatchup [| "catchup"; "current/0" |]
         let forceScp = runCoreIf init.forceScp [| "force-scp" |]
-
-        let cmds = Array.choose id (Array.append ([| waitForDB; setPgUser; setPgHost; waitForTime; newDb; newHist; initialCatchup; forceScp |]) createDbs)
+        
+        let cmds = Array.choose id (Array.append ([| waitForDB; setPgUser; setPgHost; waitForTime; newDb; newHistIgnoreError; initialCatchup; forceScp |]) createDbs)
 
         let restoreDBStep coreSet i : ShCmd array =
           let dnsName = self.PeerDnsName coreSet i

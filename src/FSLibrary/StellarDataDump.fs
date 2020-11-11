@@ -31,6 +31,15 @@ type StellarFormation with
                                                         container = containerName)
             destination.WriteStream ns (sprintf "%s-%s.log" podName.StringName containerName) stream
             stream.Close()
+            
+            //dump previous container log if it exists
+            self.sleepUntilNextRateLimitedApiCallTime()
+            let streamPrevious = self.Kube.ReadNamespacedPodLog(name = podName.StringName,
+                                                        namespaceParameter = ns,
+                                                        container = containerName,
+                                                        previous = System.Nullable<bool>(true))
+            destination.WriteStream ns (sprintf "%s-%s-previous.log" podName.StringName containerName) streamPrevious
+            streamPrevious.Close()
         with
         | x -> ()
 
