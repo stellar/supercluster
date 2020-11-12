@@ -77,7 +77,7 @@ type Tests(output:ITestOutputHelper) =
         let cmds = nCfg.getInitCommands PeerSpecificConfigFile coreSet.options
         let cmdStr = ShAnd(cmds).ToString()
         let exp = "{ stellar-core new-db --conf \"/cfg-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core.cfg\" && " +
-                    "stellar-core new-hist local --conf \"/cfg-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core.cfg\" && " +
+                    "{ stellar-core new-hist local --conf \"/cfg-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core.cfg\" || true; } && " +
                     "stellar-core force-scp --conf \"/cfg-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core.cfg\"; }"
         Assert.Equal(exp, cmdStr)
 
