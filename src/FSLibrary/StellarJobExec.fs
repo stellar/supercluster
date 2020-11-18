@@ -142,20 +142,21 @@ type StellarFormation with
             // seen, but we allow two failures if they are due to an OOM kill.
             
             let mutable isNonOomFail = false
-            
-            self.sleepUntilNextRateLimitedApiCallTime()
-            for pod in self.Kube.ListNamespacedPod(namespaceParameter = ns, labelSelector="job-name=" + name).Items do
-                if pod.Status.ContainerStatuses <> null
-                then 
-                    for status in pod.Status.ContainerStatuses do
-                        if status.State <> null 
-                            && status.State.Terminated <> null 
-                            && status.State.Terminated.ExitCode <> 0 // Success
-                            && status.State.Terminated.ExitCode <> 137 // OOM
-                        then
-                            isNonOomFail <- true   
-                    done
-            done
+
+            if jobFailedPodCount > 0 then
+                self.sleepUntilNextRateLimitedApiCallTime()
+                for pod in self.Kube.ListNamespacedPod(namespaceParameter = ns, labelSelector="job-name=" + name).Items do
+                    if pod.Status.ContainerStatuses <> null
+                    then 
+                        for status in pod.Status.ContainerStatuses do
+                            if status.State <> null 
+                                && status.State.Terminated <> null 
+                                && status.State.Terminated.ExitCode <> 0 // Success
+                                && status.State.Terminated.ExitCode <> 137 // OOM
+                            then
+                                isNonOomFail <- true   
+                        done
+                done
             isNonOomFail
 
         if (jobIsCompleted && jobActivePodCount = 0) || jobFailedPodCount > 2 || checkNonOomFail()
