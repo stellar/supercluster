@@ -20,95 +20,24 @@ open Microsoft.Rest
 
 
 type JobStatusTable() =
-    let mutable running = Map.empty
+    let mutable running = Set.empty
     let mutable finished = Map.empty
-    let mutable pendingFinished = []
-    let mutable pendingObsoleteTasks = []
 
-    member self.NoteRunning (name:string) (j:V1Job) (task:Tasks.Task<Watcher<V1Job>>) =
-        lock self
-            begin fun _ ->
-                // We bounce tasks off the pendingObsoleteTasks list because
-                // NoteRunning is called from the onClosed callback when the
-                // task hasn't actually finished running and we can't Dispose
-                // of it yet. We _can_ call Dispose on tasks from the previous
-                // call to NoteRunning; we then queue up the current task for
-                // Disposal on the _next_ call.
-                for (_, t:Tasks.Task<Watcher<V1Job>>) in pendingObsoleteTasks do
-                        if t <> null && t.IsCompleted
-                        then t.Dispose()
-                    done
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
-                pendingObsoleteTasks <- []
-                match Map.tryFind name running with
-                    | None -> ()
-                    | Some((_, t)) ->
-                        pendingObsoleteTasks <- (name, t) :: pendingObsoleteTasks
-                        running <- Map.remove name running
-
-                assert (not (running.ContainsKey(name)))
-                assert (not (finished.ContainsKey(name)))
-                running <- running.Add(name, (j, task))
-                Interlocked.MemoryBarrier()
-            end
+    member self.NoteRunning (name:string) =
+        running <- running.Add(name)
 
     member self.NoteFinished (name:string) (ok:bool) =
-        lock self
-            begin fun _ ->
-                if (not (running.ContainsKey(name))) then ()
-                else
-                assert (not (finished.ContainsKey(name)))
-                let (job, task) = Map.find name running
-                pendingObsoleteTasks <- (name, task) :: pendingObsoleteTasks
-                pendingFinished <- (job, ok) :: pendingFinished
-                running <- running.Remove(name)
-                finished <- finished.Add(name, ok)
-                LogInfo "Awakening any waiters"
-                Interlocked.MemoryBarrier();
-                Monitor.PulseAll self
-            end
+        running <- running.Remove(name)
+        finished <- finished.Add(name, ok)
 
     member self.IsFinished (name:string) : bool =
-        lock self (fun _ -> finished.ContainsKey name)
-
-    member self.WaitForNextFinishWithTimeout(timeout:TimeSpan) : bool =
-        lock self
-            begin fun _ ->
-                let mutable signalled = true
-                while pendingFinished.IsEmpty && signalled do
-                  signalled <- Monitor.Wait(self, timeout)
-                if not pendingFinished.IsEmpty
-                then pendingFinished <- pendingFinished.Tail
-                Interlocked.MemoryBarrier()
-                signalled
-            end
-
-    member self.WaitForNextFinish (checkJobs) (timeout:TimeSpan) : (V1Job * bool) =
-        lock self
-            begin fun _ ->
-                while pendingFinished.IsEmpty do
-                    LogInfo "Waiting for next finish"
-                    Monitor.Wait(self, timeout) |> ignore
-                    LogInfo "Woke from waiting for next finish" 
-                    checkJobs()
-                let res = pendingFinished.Head
-                pendingFinished <- pendingFinished.Tail
-                Interlocked.MemoryBarrier()
-                res
-            end
-
-    member self.HavePendingFinished() : bool =
-        lock self (fun _ -> not pendingFinished.IsEmpty)
+        finished.ContainsKey name
 
     member self.NumRunning() : int =
-        lock self (fun _ -> running.Count)
-
-    member self.NumFinished() : int =
-        lock self (fun _ -> finished.Count)
+        running.Count
 
     member self.GetFinishedTable() : Map<string,bool> =
-        lock self (fun _ -> finished)
+        finished
 
 
 type StellarFormation with
@@ -128,8 +57,10 @@ type StellarFormation with
             LogError "err: %s" w.Response.ReasonPhrase
             reraise()
 
-    member self.CheckJob (j:V1Job) (jst:JobStatusTable) =
+    member self.CheckJob (j:V1Job) (jst:JobStatusTable) (destination:Destination) =
         let name = j.Metadata.Name
+        assert (not (jst.IsFinished(name)))
+
         let ns = j.Metadata.NamespaceProperty
         
         let jobIsCompleted = j.Status.CompletionTime.HasValue
@@ -164,45 +95,21 @@ type StellarFormation with
             LogInfo "Finished job %s: %d fail / %d success"
                 name jobFailedPodCount jobSucceededPodCount
             let ok = (jobSucceededPodCount = 1)
+
             jst.NoteFinished name ok
 
-    member self.WatchJob (j:V1Job) (jst:JobStatusTable) =
-        let name = j.Metadata.Name
-        let ns = j.Metadata.NamespaceProperty
-
-        let checkStatus _ =
-            self.sleepUntilNextRateLimitedApiCallTime()
-            let js = self.Kube.ReadNamespacedJob(name=name, namespaceParameter=ns)
-            self.CheckJob js jst
-        // Unfortunately event "watches" time out and get disconnected,
-        // and periodically also drop events, so we can neither rely on
-        // a single event handler registration nor catching every change
-        // event as they occur. Instead, we rely on fully re-reading the
-        // state of the job every time the handler is (re)installed _or_
-        // triggered by any event.
-        let rec installHandler (firstWait:bool) =
-            checkStatus()
-            if jst.IsFinished name
-            then LogInfo "Dropping handler for completed job %s" name
-            else
-                if firstWait
-                then
-                    LogInfo "Starting to wait for job %s" name
-                else
-                    LogInfo "Continuing to wait for job %s" name
-                let handler (ety:WatchEventType) (job:V1Job) =
-                    if (not (jst.IsFinished name))
-                    then checkStatus()
-                let action = System.Action<WatchEventType, V1Job>(handler)
-                let reinstall = System.Action((fun _ -> installHandler false))
-                self.sleepUntilNextRateLimitedApiCallTime()
-                let task = self.Kube.WatchNamespacedJobAsync(name = name,
-                                                             ``namespace`` = ns,
-                                                             onEvent = action,
-                                                             onClosed = reinstall)
-                jst.NoteRunning name j task
-
-        installHandler true
+            if ok
+            then LogInfo "Job %s passed" name
+            else 
+                self.LogState j
+                failwith ("Job " + name + " failed")
+            try
+                self.FinishJob destination j
+            with
+                | e ->
+                    LogError "Error occurred during cleanup of job %s" name
+                    raise e
+            LogInfo "Finished cleaning up after job %s" name
 
     member self.RunSingleJob (destination:Destination)
                              (job:(string array))
@@ -216,23 +123,35 @@ type StellarFormation with
                                         (image:string)
                                         (useConfigFile:bool) : Map<string,bool> =
         let startTime = DateTime.UtcNow
-        let j = self.StartJobForCmd cmd image useConfigFile
-        let name = j.Metadata.Name
         let jst = new JobStatusTable()
-        self.WatchJob j jst
-        let timeoutArg = match timeout with | None -> TimeSpan(0,0,0,0,-1) | Some x -> x
-        let signalled = jst.WaitForNextFinishWithTimeout timeoutArg
+
+        let j = self.StartJobForCmd cmd image useConfigFile
+
+        let name = j.Metadata.Name
+        let ns = j.Metadata.NamespaceProperty
+        jst.NoteRunning j.Metadata.Name
+
+        while not (jst.IsFinished(name)) do
+
+            if timeout.IsSome && (DateTime.UtcNow - startTime) > timeout.Value then
+                let err = (sprintf "Timeout while waiting %O for job '%s'"
+                               (timeout.Value) (String.Join(" ", cmd)))
+                LogError "%s" err
+                failwith err
+            
+            self.sleepUntilNextRateLimitedApiCallTime()
+            let js = self.Kube.ReadNamespacedJob(name=name, namespaceParameter=ns)
+            self.CheckJob js jst destination
+
+            //sleep for 30 seconds
+            Thread.Sleep(30000)
+        done
+
         let endTime = DateTime.UtcNow
-        if signalled
-        then
-            LogInfo "Job finished after %O (timeout %O): '%s'"
-                (endTime - startTime) timeoutArg (String.Join(" ", cmd))
-            jst.GetFinishedTable()
-        else
-            let err = (sprintf "Timeout while waiting %O for job '%s'"
-                           timeoutArg (String.Join(" ", cmd)))
-            LogError "%s" err
-            failwith err
+
+        LogInfo "Job finished after %O: '%s'"
+            (endTime - startTime) (String.Join(" ", cmd))
+        jst.GetFinishedTable()
 
     member self.RunParallelJobsInRandomOrder (parallelism:int)
                                              (destination:Destination)
@@ -292,50 +211,35 @@ type StellarFormation with
                     LogInfo "Did not find pod buildup"
                 end
 
-        let waitJob () : unit =
-            LogInfo "Waiting for next job to finish"
-
-            // We monitor the jobs in case the watch handlers drop due to a connection issue 
-            let checkJobs = fun () -> 
-                self.sleepUntilNextRateLimitedApiCallTime()
-                for job in self.Kube.ListNamespacedJob(namespaceParameter=self.NetworkCfg.NamespaceProperty).Items do
-                    self.CheckJob job jst
-
-            let (j, ok) = jst.WaitForNextFinish (checkJobs) (TimeSpan(0,10,0))
-            let name = j.Metadata.Name
-            if ok
-            then LogInfo "Job %s passed" name
-            else 
-                self.LogState j
-                failwith ("Job " + name + " failed")
-            try
-                self.FinishJob destination j
-            with
-                | e ->
-                    LogError "Error occurred during cleanup of job %s" name
-                    raise e
-            LogInfo "Finished cleaning up after job %s" name
-
         let addJob () : unit =
-            LogInfo "Adding a job (numRunning = %d)" (jst.NumRunning())
             match nextJob() with
                  | None ->
-                     if jst.NumRunning() = 0
-                     then moreJobs <- false
-                     else waitJob()
+                    moreJobs <- false
                  | Some(cmd) ->
                     let j = self.StartJobForCmd cmd image true
-                    self.WatchJob j jst
+                    jst.NoteRunning j.Metadata.Name
+                    LogInfo "Adding job %s (numRunning = %d)" j.Metadata.Name (jst.NumRunning())
 
-        while moreJobs do
+        while moreJobs || jst.NumRunning() > 0 do
             checkPendingPodBuildup()
-            if jst.HavePendingFinished()
-            then waitJob()
-            if jst.NumRunning() < parallelism
-            then addJob()
-            else waitJob()
+
+            //check for completed and move to finished from running
+            self.sleepUntilNextRateLimitedApiCallTime()
+            for job in self.Kube.ListNamespacedJob(namespaceParameter=self.NetworkCfg.NamespaceProperty).Items do
+                self.CheckJob job jst destination
+
+            while jst.NumRunning() < parallelism && moreJobs do
+                addJob()
+            done
+
+            //sleep for one minute
+            Thread.Sleep(60000)
         done
         LogInfo "Finished parallel-job loop"
+        
+        //make sure we're actually done
+        assert(nextJob() = None)
+        assert(jst.NumRunning() = 0)
 
         jst.GetFinishedTable()
 
