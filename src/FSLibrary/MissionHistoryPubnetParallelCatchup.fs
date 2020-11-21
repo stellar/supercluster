@@ -20,7 +20,7 @@ let historyPubnetParallelCatchup (context : MissionContext) =
     let ledgersPerJob = checkpointsPerJob * ledgersPerCheckpoint  // 16,000
     let totalLedgers = GetLatestPubnetLedgerNumber()              // ~30 million ish
     let numJobs = (totalLedgers / ledgersPerJob)                  // 1800 ish
-    let parallelism = 64
+    let parallelism = 40
     let overlapCheckpoints = 5
     let overlapLedgers = overlapCheckpoints * ledgersPerCheckpoint
 
