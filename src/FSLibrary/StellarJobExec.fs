@@ -33,6 +33,9 @@ type JobStatusTable() =
     member self.IsFinished (name:string) : bool =
         finished.ContainsKey name
 
+    member self.IsRunning (name:string) : bool =
+        running.Contains name
+
     member self.NumRunning() : int =
         running.Count
 
@@ -226,7 +229,9 @@ type StellarFormation with
             //check for completed and move to finished from running
             self.sleepUntilNextRateLimitedApiCallTime()
             for job in self.Kube.ListNamespacedJob(namespaceParameter=self.NetworkCfg.NamespaceProperty).Items do
-                self.CheckJob job jst destination
+                if jst.IsRunning(job.Metadata.Name) then
+                    self.CheckJob job jst destination
+                done             
 
             while jst.NumRunning() < parallelism && moreJobs do
                 addJob()
