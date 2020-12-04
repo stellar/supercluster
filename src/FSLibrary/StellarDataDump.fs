@@ -32,7 +32,7 @@ type StellarFormation with
             destination.WriteStream ns (sprintf "%s-%s.log" podName.StringName containerName) stream
             stream.Close()
             
-            //dump previous container log if it exists
+            // dump previous container log if it exists
             self.sleepUntilNextRateLimitedApiCallTime()
             let streamPrevious = self.Kube.ReadNamespacedPodLog(name = podName.StringName,
                                                         namespaceParameter = ns,
