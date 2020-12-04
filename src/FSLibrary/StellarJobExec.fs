@@ -226,12 +226,20 @@ type StellarFormation with
         while moreJobs || jst.NumRunning() > 0 do
             checkPendingPodBuildup()
 
+            let mutable jobCount = 0
             //check for completed and move to finished from running
             self.sleepUntilNextRateLimitedApiCallTime()
             for job in self.Kube.ListNamespacedJob(namespaceParameter=self.NetworkCfg.NamespaceProperty).Items do
                 if jst.IsRunning(job.Metadata.Name) then
                     self.CheckJob job jst destination
+                    jobCount <- jobCount + 1
                 done             
+
+            // We remove from the running set before deleting the job, so the 
+            // only way this condition can be true is if something other than 
+            // supercluster deletes jobs started by this run
+            if jst.NumRunning() > jobCount 
+            then failwith (sprintf "NumRunning (%d) is greater than number of jobs seen (%d)" (jst.NumRunning()) jobCount)
 
             while jst.NumRunning() < parallelism && moreJobs do
                 addJob()
