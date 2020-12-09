@@ -76,10 +76,8 @@ let SimulatePubnetCoreResourceRequirements: V1ResourceRequirements =
 
 let ParallelCatchupCoreResourceRequirements: V1ResourceRequirements =
     // When doing parallel catchup, we give each container
-    // 256MB RAM and 0.1 vCPUs, bursting to 1.55vCPU and 600MB
-    // This should cause an 8-core machine to get 5 jobs, which
-    // corresponds to load-levels we see in practice.
-    makeResourceRequirements 100 256 1550 600
+    // 256MB RAM and 0.1 vCPUs, bursting to 1vCPU and 600MB
+    makeResourceRequirements 100 256 1000 600
 
 let NonParallelCatchupCoreResourceRequirements: V1ResourceRequirements =
     // When doing non-parallel catchup, we give each container
