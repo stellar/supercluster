@@ -98,12 +98,12 @@ let doCatchupForVersion (context: MissionContext) (formation: StellarFormation) 
 
     formation.RunLoadgen catchupSets.generatorSet context.GenerateAccountCreationLoad
     formation.RunLoadgen catchupSets.generatorSet context.GeneratePaymentLoad
-    generatorPeer.WaitForLedgerNum 32
+    generatorPeer.WaitForFewLedgers(5)
 
     for set in catchupSets.deferredSetList do
         formation.Start set.name
         let peer = formation.NetworkCfg.GetPeer set 0
-        peer.WaitForLedgerNum 40
+        peer.WaitForFewLedgers(5)
 
 let doCatchup (context: MissionContext) (formation: StellarFormation) (catchupSets: CatchupSets) =
     let versionPeer = formation.NetworkCfg.GetPeer catchupSets.versionSet 0

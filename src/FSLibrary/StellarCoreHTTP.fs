@@ -12,6 +12,7 @@ open Logging
 open StellarMissionContext
 open StellarNetworkCfg
 open StellarCorePeer
+open System.Threading
 
 
 // Note to curious reader: these are "type providers" whereby the compiler's
@@ -272,6 +273,12 @@ type Peer with
                         ours
                 then ()
                 else
+
+                    // Sleep for 1 second to allow ledgers to close. No need to sleep on the first iteration
+                    if n < ConsistencyCheckIterationCount 
+                    then 
+                        Thread.Sleep(1000)
+
                     let ourLedger = self.GetInfo().Ledger
                     let theirLedger = other.GetInfo().Ledger
 
