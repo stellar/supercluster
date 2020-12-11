@@ -146,7 +146,7 @@ type StellarFormation with
             let js = self.Kube.ReadNamespacedJob(name=name, namespaceParameter=ns)
             self.CheckJob js jst destination
 
-            //sleep for 30 seconds
+            // sleep for 30 seconds
             Thread.Sleep(30000)
         done
 
@@ -226,23 +226,31 @@ type StellarFormation with
         while moreJobs || jst.NumRunning() > 0 do
             checkPendingPodBuildup()
 
-            //check for completed and move to finished from running
+            let mutable jobCount = 0
+            // check for completed and move to finished from running
             self.sleepUntilNextRateLimitedApiCallTime()
             for job in self.Kube.ListNamespacedJob(namespaceParameter=self.NetworkCfg.NamespaceProperty).Items do
                 if jst.IsRunning(job.Metadata.Name) then
                     self.CheckJob job jst destination
+                    jobCount <- jobCount + 1
                 done             
+
+            // We remove from the running set before deleting the job, so the 
+            // only way this condition can be true is if something other than 
+            // supercluster deletes jobs started by this run
+            if jst.NumRunning() > jobCount 
+            then failwith (sprintf "NumRunning (%d) is greater than number of jobs seen (%d)" (jst.NumRunning()) jobCount)
 
             while jst.NumRunning() < parallelism && moreJobs do
                 addJob()
             done
 
-            //sleep for one minute
+            // sleep for one minute
             Thread.Sleep(60000)
         done
         LogInfo "Finished parallel-job loop"
         
-        //make sure we're actually done
+        // make sure we're actually done
         assert(nextJob() = None)
         assert(jst.NumRunning() = 0)
 
@@ -260,7 +268,7 @@ type StellarFormation with
 
             let podName = pod.Metadata.Name
 
-            //Container errors
+            // Container errors
             if pod.Status.ContainerStatuses <> null
             then 
                 for status in pod.Status.ContainerStatuses do
