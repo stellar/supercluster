@@ -113,7 +113,7 @@ let HistoryContainerVolumeMounts : V1VolumeMount array =
 let HistoryContainer =
     V1Container
         (name = "history",
-         image = "nginx",
+         image = "index.docker.io/library/nginx:latest",
          command = [| "nginx" |],
          args = [| "-c"; CfgVal.historyCfgFilePath; |],
          resources = HistoryResourceRequirements,
@@ -126,7 +126,7 @@ let PostgresContainer =
         (name = "postgres",
          env = [| passwordEnvVar; |],
          ports = [| V1ContainerPort(containerPort = 5432, name = "postgres") |],
-         image = "postgres:9.5.22",
+         image = "index.docker.io/library/postgres:9.5.22",
          resources = PgResourceRequirements,
          volumeMounts = PgContainerVolumeMounts)
 
@@ -134,7 +134,7 @@ let PrometheusExporterSidecarContainer =
     V1Container(name = "prom-exp",
                 ports = [| V1ContainerPort(containerPort = CfgVal.prometheusExporterPort,
                                            name = "prom-exp") |],
-                image = "stellar/stellar-core-prometheus-exporter:latest",
+                image = "index.docker.io/library/stellar-core-prometheus-exporter:latest",
                 resources = PrometheusExporterSidecarResourceRequirements)
 
 let cfgFileArgs (configOpt:ConfigOption) : ShWord array =
