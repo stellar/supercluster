@@ -81,8 +81,8 @@ let ParallelCatchupCoreResourceRequirements: V1ResourceRequirements =
 
 let NonParallelCatchupCoreResourceRequirements: V1ResourceRequirements =
     // When doing non-parallel catchup, we give each container
-    // 6000MB RAM and 1 vCPU
-    makeResourceRequirements 1000 6000 1000 6000
+    // 6000MB RAM and 1 vCPU, bursting to 8000MB and 2 vCPUs 
+    makeResourceRequirements 1000 6000 2000 8000
 
 let UpgradeCoreResourceRequirements: V1ResourceRequirements =
     // When doing upgrade tests, we give each container
