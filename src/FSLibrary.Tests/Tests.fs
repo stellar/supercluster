@@ -23,7 +23,7 @@ let ``Network nonce looks reasonable`` () =
     let nstr = nonce.ToString()
     Assert.Matches(Regex("^ssc-[a-f0-9]+$"), nstr)
 
-let coreSetOptions = CoreSetOptions.GetDefault "stellar/stellar-core"
+let coreSetOptions = { CoreSetOptions.GetDefault "stellar/stellar-core" with syncStartupDelay = None }
 let coreSet = MakeLiveCoreSet "test" coreSetOptions
 let passOpt : NetworkPassphrase option = None
 let ctx : MissionContext =
