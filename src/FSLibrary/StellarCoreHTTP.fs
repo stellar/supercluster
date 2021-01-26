@@ -392,14 +392,25 @@ type Peer with
                 self.LogCoreSetListStatusWithTiers self.networkCfg.CoreSetList
                 )
 
-    member self.WaitUntilConnected(connections:int) =
+    // WaitUntilConnected waits until every node is connected to all the nodes in
+    // its preferredPeersMap. This ensures that the simulation is deterministic.
+    member self.WaitUntilConnected =
+        let desiredNumberOfConnection =
+            match self.coreSet.options.preferredPeersMap with
+                | None -> failwith "preferredPeersMap is needed to determine # of desired connections"
+                | Some map ->
+                    let preferredPeers = Map.find (self.coreSet.keys.[self.peerNum].PublicKey) map
+                    List.length preferredPeers
         RetryUntilTrue
             (fun _ ->
-                self.GetInfo().Peers.AuthenticatedCount >= connections
+                self.GetInfo().Peers.AuthenticatedCount >= desiredNumberOfConnection
                 )
             (fun _ ->
-                LogInfo "Waiting until %s is connected: currently %d connections"
-                    self.ShortName.StringName (self.GetInfo().Peers.AuthenticatedCount))
+                LogInfo "Waiting until %s is connected: currently %d connections, want at least %d connections"
+                    self.ShortName.StringName
+                    (self.GetInfo().Peers.AuthenticatedCount)
+                    desiredNumberOfConnection)
+
 
     member self.WaitUntilReady() =
         RetryUntilTrue

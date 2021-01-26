@@ -186,8 +186,8 @@ type StellarFormation(networkCfg: NetworkCfg,
             
         networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.WaitUntilSynced())
 
-    member self.WaitUntilConnected (coreSetList: CoreSet list) (connections: int) =
-        networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.WaitUntilConnected connections)
+    member self.WaitUntilConnected (coreSetList: CoreSet list) =
+        networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.WaitUntilConnected)
 
     member self.ManualClose (coreSetList: CoreSet list) =
         networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.ManualClose())

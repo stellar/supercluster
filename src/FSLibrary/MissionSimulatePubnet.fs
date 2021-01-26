@@ -24,7 +24,7 @@ let simulatePubnet (context : MissionContext) =
     context.Execute fullCoreSet None (fun (formation: StellarFormation) ->
         // Setup overlay connections first before manually closing
         // ledger, which kick off consensus
-        formation.WaitUntilConnected fullCoreSet 16
+        formation.WaitUntilConnected fullCoreSet
         formation.ManualClose tier1
 
         // Wait until the whole network is synced before proceeding,
