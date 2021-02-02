@@ -16,6 +16,7 @@ let PubnetLatestHistoryArchiveState = "http://history.stellar.org/prd/core-live/
 let TestnetLatestHistoryArchiveState = "http://history.stellar.org/prd/core-testnet/core_testnet_001/.well-known/stellar-history.json"
 
 type PubnetNode = JsonProvider<"json-pubnet-data/nodes.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
+type Tier1PublicKey = JsonProvider<"json-pubnet-data/tier1keys.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
 
 let FullPubnetCoreSets (image:string) (manualclose:bool) : CoreSet list =
 
@@ -25,6 +26,8 @@ let FullPubnetCoreSets (image:string) (manualclose:bool) : CoreSet list =
         |> Array.filter (fun n -> n.Active &&
                                   ((n.QuorumSet.Validators.Length <> 0) ||
                                    (n.QuorumSet.InnerQuorumSets.Length <> 0)))
+    let tier1Keys : string array = Tier1PublicKey.GetSamples() |> Array.map (fun n -> n.PublicKey)
+
 
     // For each pubkey in the pubnet, we map it to an actual KeyPair (with a private
     // key) to use in the simulation. It's important to keep these straight! The keys
