@@ -18,19 +18,8 @@ open StellarCoreHTTP
 let simulatePubnet (context : MissionContext) =
     let context = { context with coreResources = SimulatePubnetResources }
     let fullCoreSet = FullPubnetCoreSets context.image true
-
-    let findCoreSetWithHomeDomain (domain:string) : CoreSet =
-        List.find (fun (cs:CoreSet) -> cs.name.StringName = domain) fullCoreSet
-
-    let sdf = findCoreSetWithHomeDomain "www-stellar-org"
-    let lobstr = findCoreSetWithHomeDomain "lobstr-co"
-    let keybase = findCoreSetWithHomeDomain "keybase-io"
-    let satoshipay = findCoreSetWithHomeDomain "satoshipay-io"
-    let wirex = findCoreSetWithHomeDomain "wirexapp-com"
-    let blockdaemon = findCoreSetWithHomeDomain "stellar-blockdaemon-com"
-    let coinqvest = findCoreSetWithHomeDomain "coinqvest-com"
-
-    let tier1 = [sdf; lobstr; keybase; satoshipay; wirex; blockdaemon; coinqvest]
+    let sdf = List.find (fun (cs:CoreSet) -> cs.name.StringName = "www-stellar-org") fullCoreSet
+    let tier1 = List.filter (fun (cs:CoreSet) -> cs.options.tier1 = Some true) fullCoreSet
 
     context.Execute fullCoreSet None (fun (formation: StellarFormation) ->
         // Setup overlay connections first before manually closing

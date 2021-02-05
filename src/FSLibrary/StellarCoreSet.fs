@@ -138,6 +138,7 @@ type CoreSetOptions =
       unsafeQuorum : bool
       awaitSync : bool
       validate : bool
+      tier1 : bool option
       catchupMode : CatchupMode
       image : string
       initialization : CoreSetInitialization
@@ -164,6 +165,7 @@ type CoreSetOptions =
         unsafeQuorum = true
         awaitSync = true
         validate = true
+        tier1 = None
         catchupMode = CatchupComplete
         image = image
         initialization = CoreSetInitialization.Default
