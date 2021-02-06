@@ -81,6 +81,7 @@ let PollCluster (kube:Kubernetes) (ns:string) =
 let DumpPodInfo (kube:Kubernetes) (ns:string) =
     let pods = kube.ListNamespacedPod(namespaceParameter = ns)
     if pods <> null then
+        LogInfo "There are %d pods in total" (Seq.length pods.Items)
         for p in pods.Items do
             let age = if p.Status.StartTime.HasValue
                       then System.DateTime.UtcNow.Subtract(p.Status.StartTime.Value).ToString(@"hh\:mm")
