@@ -7,6 +7,7 @@ module StellarCoreHTTP
 open FSharp.Data
 open stellar_dotnet_sdk
 
+open StellarCoreSet
 open PollRetry
 open Logging
 open StellarMissionContext
@@ -354,6 +355,21 @@ type Peer with
             raise (TransactionRejectedException tx)
         else res
 
+    member self.LogCoreSetListStatusWithTiers (coreSetList: CoreSet list) : unit =
+        let tier1CoreSetList = List.filter (fun cs -> cs.options.tier1 = Some true) coreSetList
+        let nonTier1CoreSetList = List.filter (fun cs -> cs.options.tier1 = Some false) coreSetList
+        let getStateList (cs:CoreSet) = Seq.map (fun i -> (self.networkCfg.GetPeer cs i).GetState())
+                                                (seq { 0 .. (cs.options.nodeCount - 1)})
+                                                |> Seq.toList
+        let tier1StatusList = List.map getStateList tier1CoreSetList |> List.concat
+        let nonTier1StatusList = List.map getStateList nonTier1CoreSetList |> List.concat
+        let countAndLogStates ls nodeType = List.sort ls
+                                            |> Seq.countBy id
+                                            |> Seq.iter (fun x ->
+                                                LogInfo "%d %s nodes have state %s" (snd x) nodeType (fst x))
+        countAndLogStates tier1StatusList "tier1"
+        countAndLogStates nonTier1StatusList "non-tier1"
+
     member self.WaitForLoadGenComplete (loadGen: LoadGen) =
         RetryUntilTrue
             (fun _ ->
@@ -371,7 +387,10 @@ type Peer with
                 LogInfo "Waiting for loadgen run %d to finish, %d/%d accts, %d/%d txns"
                             (MeterCountOr 0 m.LoadgenRunStart)
                             (MeterCountOr 0 m.LoadgenAccountCreated) loadGen.accounts
-                            (MeterCountOr 0 m.LoadgenTxnAttempted) loadGen.txs)
+                            (MeterCountOr 0 m.LoadgenTxnAttempted) loadGen.txs
+
+                self.LogCoreSetListStatusWithTiers self.networkCfg.CoreSetList
+                )
 
     member self.WaitUntilConnected(connections:int) =
         RetryUntilTrue

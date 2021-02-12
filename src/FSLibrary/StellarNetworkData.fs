@@ -26,8 +26,10 @@ let FullPubnetCoreSets (image:string) (manualclose:bool) : CoreSet list =
         |> Array.filter (fun n -> n.Active &&
                                   ((n.QuorumSet.Validators.Length <> 0) ||
                                    (n.QuorumSet.InnerQuorumSets.Length <> 0)))
-    let tier1Keys : string array = Tier1PublicKey.GetSamples() |> Array.map (fun n -> n.PublicKey)
 
+    let tier1KeySet : Set<string> = Tier1PublicKey.GetSamples()
+                                     |> Array.map (fun n -> n.PublicKey)
+                                     |> Set.ofArray
 
     // For each pubkey in the pubnet, we map it to an actual KeyPair (with a private
     // key) to use in the simulation. It's important to keep these straight! The keys
@@ -158,6 +160,7 @@ let FullPubnetCoreSets (image:string) (manualclose:bool) : CoreSet list =
                     { pubnetOpts with
                         nodeCount = 1
                         quorumSet = ExplicitQuorum qset
+                        tier1 = Some (Set.contains n.PublicKey tier1KeySet)
                         nodeLocs = Some [nodeToGeoLoc n] }
                 let shouldForceScp = n.IsValidator && not manualclose
                 let coreSetOpts = coreSetOpts.WithForceSCP shouldForceScp
@@ -174,6 +177,7 @@ let FullPubnetCoreSets (image:string) (manualclose:bool) : CoreSet list =
                     { pubnetOpts with
                         nodeCount = Array.length nodes
                         quorumSet = ExplicitQuorum qset
+                        tier1 = Some (Set.contains nodes.[0].PublicKey tier1KeySet)
                         nodeLocs = Some (List.map nodeToGeoLoc (List.ofArray nodes)) }
                 let shouldForceScp = nodes.[0].IsValidator && not manualclose
                 let coreSetOpts = coreSetOpts.WithForceSCP shouldForceScp
