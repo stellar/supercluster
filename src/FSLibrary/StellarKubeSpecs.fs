@@ -380,16 +380,29 @@ type NetworkCfg with
     // /data/stellar.db with buckets in /data/buckets and history archive in
     // /data/history, forces SCP on next startup, and runs.
     member self.ToPodTemplateSpec (coreSet: CoreSet) : V1PodTemplateSpec =
-        let peerCfgVolumes = self.MapAllPeers (fun cs i ->
-           let peerName = self.PodName cs i
-           if self.IsJobMode
+
+        // We cannot limit _individual_ peers within a CoreSet to only mount
+        // their peer-specific ConfigMap, as we're producing a PodTemplateSpec
+        // here that will be used for _all_ peers in the same CoreSet. However,
+        // we can limit them to only mount ConfigMaps for the set of peers in
+        // the single CoreSet we're building a PodTemplateSpec for, rather than
+        // all the peers in the Formation.
+        //
+        // This is fairly important to try to limit, as it appears to create
+        // heavy 'watch' load on the Kubernetes controller to have a large
+        // number of ConfigMap volume mounts.
+        let peerCfgVolume i =
+            let peerName = self.PodName coreSet i
+            if self.IsJobMode
                 then V1Volume(name = CfgVal.jobCfgVolumeName,
-                        configMap = V1ConfigMapVolumeSource(name = self.JobCfgMapName))
+                         configMap = V1ConfigMapVolumeSource(name = self.JobCfgMapName))
                 else
                     V1Volume(name = CfgVal.cfgVolumeName peerName.StringName,
-                         configMap = V1ConfigMapVolumeSource(name = self.PeerCfgMapName cs i)))
+                         configMap = V1ConfigMapVolumeSource(name = self.PeerCfgMapName coreSet i))
 
-        let peerNames = self.MapAllPeers self.PodName |> Array.map (fun x -> x.StringName)
+        let peerName i = (self.PodName coreSet i).StringName
+        let peerCfgVolumes = Array.mapi (fun i _ -> peerCfgVolume i) coreSet.keys
+        let peerNames = Array.mapi (fun i _ -> peerName i) coreSet.keys
         let historyCfgVolume = V1Volume(name = CfgVal.historyCfgVolumeName,
                                         configMap = V1ConfigMapVolumeSource(name = self.HistoryCfgMapName))
         let dataVol = V1Volume(name = CfgVal.dataVolumeName,
