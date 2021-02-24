@@ -193,7 +193,11 @@ let FullPubnetCoreSets (image:string) (manualclose:bool) (networkSizeLimit:int) 
         allPubnetNodes |>
             Array.map (fun (n:PubnetNode.Root) ->
                         let key = getSimPubKey n.PublicKey
-                        let peers = n.Peers |> List.ofArray |> List.map getSimPubKey
+                        let peers = n.Peers |>
+                                     // This filtering is necessary since we intentionally remove some nodes
+                                     // using networkSizeLimit.
+                                     Array.filter (fun (k:string) -> Set.contains k allPubnetNodeKeys) |>
+                                     List.ofArray |> List.map getSimPubKey
                         (key, peers)) |>
             Map.ofArray
 
