@@ -125,7 +125,8 @@ type Tests(output:ITestOutputHelper) =
 
     [<Fact>]
     member __.``Public network conversion looks reasonable`` () =
-        let coreSets = FullPubnetCoreSets "stellar/stellar-core" false
+        let maxNetworkSize = 100
+        let coreSets = FullPubnetCoreSets "stellar/stellar-core" false maxNetworkSize
         let nCfg = MakeNetworkCfg ctx coreSets passOpt
         let sdfCoreSetName = CoreSetName "www-stellar-org"
         Assert.Contains(coreSets, fun cs -> cs.name = sdfCoreSetName)

@@ -18,7 +18,7 @@ let TestnetLatestHistoryArchiveState = "http://history.stellar.org/prd/core-test
 type PubnetNode = JsonProvider<"json-pubnet-data/public-network-data-2021-01-05.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
 type Tier1PublicKey = JsonProvider<"json-pubnet-data/tier1keys.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
 
-let FullPubnetCoreSets (image:string) (manualclose:bool) : CoreSet list =
+let FullPubnetCoreSets (image:string) (manualclose:bool) (networkSizeLimit:int) : CoreSet list =
     // Our dataset is the samples used to build the datatype: json-pubnet-data/nodes.json
     let allPubnetNodes : PubnetNode.Root array = PubnetNode.GetSamples()
 
@@ -49,6 +49,22 @@ let FullPubnetCoreSets (image:string) (manualclose:bool) : CoreSet list =
     // those that do not. We call the former "org" nodes and the latter "misc" nodes.
     let orgNodes, miscNodes =
         Array.partition (fun (n:PubnetNode.Root) -> n.SbHomeDomain.IsSome) allPubnetNodes
+
+    // We then trim down the set of misc nodes so that they fit within simulation
+    // size limit passed. If we can't even fit the org nodes, we fail here.
+    let miscNodes =
+        begin
+            let numOrgNodes = Array.length orgNodes
+            let numMiscNodes = Array.length miscNodes
+            let _ = if numOrgNodes > networkSizeLimit
+                    then failwith "simulated network size limit too small to fit org nodes"
+            let takeMiscNodes = min (networkSizeLimit - numOrgNodes) numMiscNodes
+            Array.take takeMiscNodes miscNodes
+        end
+    let allPubnetNodes = Array.append orgNodes miscNodes
+    let _ = assert ((Array.length allPubnetNodes) <= networkSizeLimit)
+    let allPubnetNodeKeys = Array.map (fun (n:PubnetNode.Root) -> n.PublicKey) allPubnetNodes
+                            |> Set.ofArray
 
     // We then group the org nodes by their home domains. The domain names are drawn
     // from the HomeDomains of the public network but with periods replaced with dashes,

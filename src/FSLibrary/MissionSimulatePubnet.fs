@@ -17,7 +17,8 @@ open StellarCoreHTTP
 
 let simulatePubnet (context : MissionContext) =
     let context = { context with coreResources = SimulatePubnetResources }
-    let fullCoreSet = FullPubnetCoreSets context.image true
+    let networkSizeLimit = 100
+    let fullCoreSet = FullPubnetCoreSets context.image true networkSizeLimit
     let sdf = List.find (fun (cs:CoreSet) -> cs.name.StringName = "www-stellar-org") fullCoreSet
     let tier1 = List.filter (fun (cs:CoreSet) -> cs.options.tier1 = Some true) fullCoreSet
 
