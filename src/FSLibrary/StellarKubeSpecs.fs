@@ -70,9 +70,19 @@ let PrometheusExporterSidecarResourceRequirements: V1ResourceRequirements =
     makeResourceRequirements 10 64 10 64
 
 let SimulatePubnetCoreResourceRequirements: V1ResourceRequirements =
-    // When simulating pubnet, we give each container
-    // 128MB RAM and 0.1 vCPUs, bursting to 1vCPU and 600MB
-    makeResourceRequirements 100 128 1000 600
+    // Running simulate-pubnet _needs_ a ways over 200MB RSS per node, and
+    // depending on queue backups it can spike over 300MB; we have 64GB limit
+    // for quota so to be generous we give each node 400MB limit and run only
+    // 100 nodes (despite survey showing many more).
+    //
+    // We also have a 100vCPU quota but only really 72 cores to play with, so
+    // to keep some spare room for other jobs without stressing the workers we
+    // want to stay under 50vCPU, again divided 100 ways across our simulated
+    // nodes.
+    //
+    // So we allocate a 64MB RAM request and 400MB RAM limit to each, and a
+    // 0.025vCPU request and 0.5vCPU limit to each.
+    makeResourceRequirements 25 64 500 400
 
 let ParallelCatchupCoreResourceRequirements: V1ResourceRequirements =
     // When doing parallel catchup, we give each container
