@@ -101,6 +101,7 @@ type StellarCoreCfg =
       runStandalone : bool
       preferredPeers : PeerDnsName list
       targetPeerConnections : int
+      preferredPeersOnly : bool
       catchupMode: CatchupMode
       automaticMaintenancePeriod: int
       automaticMaintenanceCount: int
@@ -153,6 +154,7 @@ type StellarCoreCfg =
         t.Add("NODE_IS_VALIDATOR", self.nodeIsValidator) |> ignore
         t.Add("RUN_STANDALONE", self.runStandalone) |> ignore
         t.Add("PREFERRED_PEERS", preferredPeers) |> ignore
+        t.Add("PREFERRED_PEERS_ONLY", self.preferredPeersOnly) |> ignore
         t.Add("COMMANDS", logLevelCommands) |> ignore
         t.Add("CATCHUP_COMPLETE", self.catchupMode = CatchupComplete) |> ignore
         t.Add("CATCHUP_RECENT",
@@ -310,6 +312,7 @@ type NetworkCfg with
           nodeIsValidator = false
           runStandalone = false
           preferredPeers = self.PreferredPeers opts
+          preferredPeersOnly = false
           targetPeerConnections = 16
           catchupMode = opts.catchupMode
           automaticMaintenancePeriod = 10
@@ -340,6 +343,7 @@ type NetworkCfg with
           preferredPeers = match c.options.preferredPeersMap with
                             | None -> self.PreferredPeers c.options
                             | _ -> self.PreferredPeersForNode c.options (c.keys.[i])
+          preferredPeersOnly = c.options.preferredPeersMap.IsSome
           targetPeerConnections = match c.options.preferredPeersMap with
                                     | None -> 16
                                     | _ -> self.PreferredPeersForNode c.options (c.keys.[i]) |> List.length
