@@ -130,6 +130,7 @@ type CoreSetOptions =
       syncStartupDelay : int option
       quorumSet : QuorumSetSpec
       historyNodes : CoreSetName list option
+      preferredPeersMap : Map<byte[], byte [] list> option
       historyGetCommands : Map<PeerShortName, string>
       localHistory : bool
       peers : CoreSetName list option
@@ -157,6 +158,7 @@ type CoreSetOptions =
         syncStartupDelay = Some(5)
         quorumSet = AllPeersQuorum
         historyNodes = None
+        preferredPeersMap = None
         historyGetCommands = Map.empty
         localHistory = true
         peers = None

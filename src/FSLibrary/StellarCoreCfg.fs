@@ -100,6 +100,8 @@ type StellarCoreCfg =
       nodeIsValidator : bool
       runStandalone : bool
       preferredPeers : PeerDnsName list
+      targetPeerConnections : int
+      preferredPeersOnly : bool
       catchupMode: CatchupMode
       automaticMaintenancePeriod: int
       automaticMaintenanceCount: int
@@ -119,10 +121,12 @@ type StellarCoreCfg =
     member self.ToTOML() : TomlTable =
         let t = Toml.Create()
 
-        let hist =
+        let defaultHist =
             Map.ofSeq [| ("get", sprintf "cp %s/{0} {1}" CfgVal.historyPath)
                          ("put", sprintf "cp {0} %s/{1}" CfgVal.historyPath)
                          ("mkdir", sprintf "mkdir -p %s/{0}" CfgVal.historyPath) |]
+        let histGetOnly = defaultHist |> Map.filter (fun key _ -> key = "get")
+
         let remoteHist (dnsName:PeerDnsName) =
             Map.ofSeq [| ("get", curlGetCmdFromPeer dnsName) |]
         let getHist getCommand =
@@ -150,6 +154,7 @@ type StellarCoreCfg =
         t.Add("NODE_IS_VALIDATOR", self.nodeIsValidator) |> ignore
         t.Add("RUN_STANDALONE", self.runStandalone) |> ignore
         t.Add("PREFERRED_PEERS", preferredPeers) |> ignore
+        t.Add("PREFERRED_PEERS_ONLY", self.preferredPeersOnly) |> ignore
         t.Add("COMMANDS", logLevelCommands) |> ignore
         t.Add("CATCHUP_COMPLETE", self.catchupMode = CatchupComplete) |> ignore
         t.Add("CATCHUP_RECENT",
@@ -164,7 +169,7 @@ type StellarCoreCfg =
         t.Add("ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING", self.generateLoad) |> ignore
 
         let n = self.preferredPeers.Length
-        t.Add("TARGET_PEER_CONNECTIONS", 16) |> ignore
+        t.Add("TARGET_PEER_CONNECTIONS", self.targetPeerConnections) |> ignore
         t.Add("MAX_ADDITIONAL_PEER_CONNECTIONS", min n 128) |> ignore
 
         t.Add("QUORUM_INTERSECTION_CHECKER", false) |> ignore
@@ -190,8 +195,13 @@ type StellarCoreCfg =
         addQsetAt "QUORUM_SET" self.quorumSet
 
         let localTab = t.Add("HISTORY", Toml.Create(), TomlObjectFactory.RequireTomlObject()).Added
+        // When simulateApplyUsec > 0, stellar-core sets MODE_STORES_HISTORY
+        // which is used for simulations that only test consensus.
+        // In such cases, we should not pass put and mkdir commands.
         if self.localHistory
-        then localTab.Add(CfgVal.localHistName, hist) |> ignore
+            then localTab.Add(CfgVal.localHistName,
+                              if self.network.CoreSetList.[0].options.simulateApplyUsec > 0
+                                  then histGetOnly else defaultHist) |> ignore
         for historyNode in self.historyNodes do
             localTab.Add(historyNode.Key.StringName, remoteHist historyNode.Value) |> ignore
         for historyGetCommand in self.historyGetCommands do
@@ -253,6 +263,14 @@ type NetworkCfg with
     member self.DnsNames() : PeerDnsName array =
         List.map self.DnsNames self.CoreSetList |> Array.concat
 
+    member self.pubKeyToPeerDnsNameMap : Map<byte [], PeerDnsName> =
+        let processCoreSet(coreSet: CoreSet) : (byte[] * PeerDnsName) list =
+            coreSet.keys |> Array.mapi (fun i (k:KeyPair) -> (k.PublicKey, self.PeerDnsName coreSet i))
+                         |> List.ofArray
+        self.CoreSetList |> List.map processCoreSet
+                         |> List.concat
+                         |> Map.ofList
+
     member self.QuorumSet(o: CoreSetOptions) : QuorumSet =
         let ofNameKeyList (nks:(PeerShortName * KeyPair) array) : QuorumSet =
             { thresholdPercent = None
@@ -274,6 +292,11 @@ type NetworkCfg with
         | None -> List.concat [self.DnsNames() |> List.ofArray; o.peersDns ]
         | Some(x) -> List.concat [self.DnsNames(x) |> List.ofArray; o.peersDns ]
 
+    member self.PreferredPeersForNode(o: CoreSetOptions) (keyPair: KeyPair) =
+        match o.preferredPeersMap with
+        | Some(map) -> let preferredPeers : byte[] list = Map.find keyPair.PublicKey map
+                       List.map (fun key -> self.pubKeyToPeerDnsNameMap.[key]) preferredPeers
+        | None -> failwith "Unable to create preferredPeers without preferredPeersMap"
 
     member self.getDbUrl(o: CoreSetOptions): DatabaseURL =
         match o.dbType with
@@ -289,6 +312,8 @@ type NetworkCfg with
           nodeIsValidator = false
           runStandalone = false
           preferredPeers = self.PreferredPeers opts
+          preferredPeersOnly = false
+          targetPeerConnections = 16
           catchupMode = opts.catchupMode
           automaticMaintenancePeriod = 10
           automaticMaintenanceCount = 50000
@@ -315,7 +340,13 @@ type NetworkCfg with
           nodeSeed = c.keys.[i]
           nodeIsValidator = c.options.validate
           runStandalone = false
-          preferredPeers = self.PreferredPeers c.options
+          preferredPeers = match c.options.preferredPeersMap with
+                            | None -> self.PreferredPeers c.options
+                            | _ -> self.PreferredPeersForNode c.options (c.keys.[i])
+          preferredPeersOnly = c.options.preferredPeersMap.IsSome
+          targetPeerConnections = match c.options.preferredPeersMap with
+                                    | None -> 16
+                                    | _ -> self.PreferredPeersForNode c.options (c.keys.[i]) |> List.length
           catchupMode = c.options.catchupMode
           automaticMaintenancePeriod = 0
           automaticMaintenanceCount = 0

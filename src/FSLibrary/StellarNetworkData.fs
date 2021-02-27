@@ -15,17 +15,12 @@ type HistoryArchiveState = JsonProvider<"json-type-samples/sample-stellar-histor
 let PubnetLatestHistoryArchiveState = "http://history.stellar.org/prd/core-live/core_live_001/.well-known/stellar-history.json"
 let TestnetLatestHistoryArchiveState = "http://history.stellar.org/prd/core-testnet/core_testnet_001/.well-known/stellar-history.json"
 
-type PubnetNode = JsonProvider<"json-pubnet-data/nodes.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
+type PubnetNode = JsonProvider<"json-pubnet-data/public-network-data-2021-01-05.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
 type Tier1PublicKey = JsonProvider<"json-pubnet-data/tier1keys.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
 
-let FullPubnetCoreSets (image:string) (manualclose:bool) : CoreSet list =
-
+let FullPubnetCoreSets (image:string) (manualclose:bool) (networkSizeLimit:int) : CoreSet list =
     // Our dataset is the samples used to build the datatype: json-pubnet-data/nodes.json
-    let allPubnetNodes : PubnetNode.Root array =
-        PubnetNode.GetSamples()
-        |> Array.filter (fun n -> n.Active &&
-                                  ((n.QuorumSet.Validators.Length <> 0) ||
-                                   (n.QuorumSet.InnerQuorumSets.Length <> 0)))
+    let allPubnetNodes : PubnetNode.Root array = PubnetNode.GetSamples()
 
     let tier1KeySet : Set<string> = Tier1PublicKey.GetSamples()
                                      |> Array.map (fun n -> n.PublicKey)
@@ -53,7 +48,23 @@ let FullPubnetCoreSets (image:string) (manualclose:bool) : CoreSet list =
     // First we partition nodes in the network into those that have home domains and
     // those that do not. We call the former "org" nodes and the latter "misc" nodes.
     let orgNodes, miscNodes =
-        Array.partition (fun (n:PubnetNode.Root) -> n.HomeDomain.IsSome) allPubnetNodes
+        Array.partition (fun (n:PubnetNode.Root) -> n.SbHomeDomain.IsSome) allPubnetNodes
+
+    // We then trim down the set of misc nodes so that they fit within simulation
+    // size limit passed. If we can't even fit the org nodes, we fail here.
+    let miscNodes =
+        begin
+            let numOrgNodes = Array.length orgNodes
+            let numMiscNodes = Array.length miscNodes
+            let _ = if numOrgNodes > networkSizeLimit
+                    then failwith "simulated network size limit too small to fit org nodes"
+            let takeMiscNodes = min (networkSizeLimit - numOrgNodes) numMiscNodes
+            Array.take takeMiscNodes miscNodes
+        end
+    let allPubnetNodes = Array.append orgNodes miscNodes
+    let _ = assert ((Array.length allPubnetNodes) <= networkSizeLimit)
+    let allPubnetNodeKeys = Array.map (fun (n:PubnetNode.Root) -> n.PublicKey) allPubnetNodes
+                            |> Set.ofArray
 
     // We then group the org nodes by their home domains. The domain names are drawn
     // from the HomeDomains of the public network but with periods replaced with dashes,
@@ -62,7 +73,7 @@ let FullPubnetCoreSets (image:string) (manualclose:bool) : CoreSet list =
         Array.groupBy
             begin
                 fun (n:PubnetNode.Root) ->
-                    let cleanOrgName = n.HomeDomain.Value.Replace('.', '-')
+                    let cleanOrgName = n.SbHomeDomain.Value.Replace('.', '-')
                     let lowercase = cleanOrgName.ToLower()
                     HomeDomainName lowercase
             end
@@ -106,44 +117,70 @@ let FullPubnetCoreSets (image:string) (manualclose:bool) : CoreSet list =
         | Some(s, i) -> PeerShortName (sprintf "%s-%d" s.StringName i)
         | None -> PeerShortName ((anonymousNodeName pubkey) + "-0")
 
+    let pubKeysToValidators pubKeys =
+            pubKeys |> Array.map (fun k -> (peerShortNameForKey k, getSimKey k))
+                    |> Map.ofArray
+
+    // Recursively check if the given quorum set only contains tier 1.
+    let rec checkOnlyContainsTier1 (q:PubnetNode.SbQuorumSet) : bool =
+        Array.forall (fun k -> Set.contains k tier1KeySet) q.Validators
+          && Array.forall checkOnlyContainsTier1Inner q.InnerQuorumSets
+    and checkOnlyContainsTier1Inner (iq:PubnetNode.InnerQuorumSet) : bool =
+        let q = new PubnetNode.SbQuorumSet(iq.JsonValue)
+        checkOnlyContainsTier1 q
+
     // Recursively convert json qsets to typed QuorumSet type
-    let rec qsetOfNodeQset (q:PubnetNode.QuorumSet) : QuorumSet =
+    let rec qsetOfNodeQset (q:PubnetNode.SbQuorumSet) : QuorumSet =
         let sz = q.Validators.Length + q.InnerQuorumSets.Length
         let pct = percentOfThreshold sz (int(q.Threshold))
         { thresholdPercent = Some pct
-          validators = Array.map (fun k -> (peerShortNameForKey k, getSimKey k)) q.Validators
-                       |> Map.ofArray
+          validators = pubKeysToValidators q.Validators
           innerQuorumSets = Array.map qsetOfNodeInnerQset q.InnerQuorumSets }
     and qsetOfNodeInnerQset (iq:PubnetNode.InnerQuorumSet) : QuorumSet =
-        let q = new PubnetNode.QuorumSet(iq.JsonValue)
+        let q = new PubnetNode.SbQuorumSet(iq.JsonValue)
         qsetOfNodeQset q
 
-    // Convert the json geolocation data to a typed GeoLoc type
-    let nodeToGeoLoc (n:PubnetNode.Root) : GeoLoc =
-        {lat = float n.GeoData.Latitude
-         lon = float n.GeoData.Longitude}
+    let defaultQuorum : QuorumSet =
+        {
+            thresholdPercent = None
+            validators = allPubnetNodes |>
+                            Array.filter (fun (n:PubnetNode.Root) ->
+                                n.SbHomeDomain = Some "www.stellar.org") |>
+                            Array.map (fun (n:PubnetNode.Root) -> n.PublicKey) |>
+                            pubKeysToValidators
+            innerQuorumSets = Array.empty
+        }
+    assert(not(Map.isEmpty defaultQuorum.validators))
 
-    let historyGetCmds : Map<PeerShortName, string> =
-        Array.filter (fun (n:PubnetNode.Root) -> n.HistoryUrl.IsSome) orgNodes
-        |> Array.map
-               (fun (n:PubnetNode.Root) ->
-                   let shortName = peerShortNameForKey n.PublicKey
-                   let uri = System.Uri(n.HistoryUrl.Value)
-                   let cmd = curlGetCmd uri
-                   (shortName, cmd))
-        |> Map.ofArray
+    let qsetOfNodeQsetOrDefault (qOption:PubnetNode.SbQuorumSet option) : QuorumSet =
+        match qOption with
+            | Some q -> if (q.Validators.Length <> 0 || q.InnerQuorumSets.Length <> 0)
+                            && checkOnlyContainsTier1 q
+                        then qsetOfNodeQset q else defaultQuorum
+            | None -> defaultQuorum
 
     let pubnetOpts = { CoreSetOptions.GetDefault image with
                          accelerateTime = false
                          historyNodes = Some([])
-                         historyGetCommands = historyGetCmds
                          // We need to use a synchronized startup delay
                          // for networks as large as this, otherwise it loses
                          // sync before all the nodes are online.
                          syncStartupDelay = Some(30)
                          simulateApplyUsec = 1200
-                         localHistory = false
                          dumpDatabase = false }
+
+    // Ashburn Virginia USA suburb of Washington a.k.a. AWS us-east-1
+    // and GCP us-east-4; home to all SDF nodes, 2 LOBSTR nodes,
+    // PaySend, Stellarbeat, 2 Satoshipay nodes, BAC, LockerX,
+    // and all Blockdaemon nodes.
+    // This location is used when a node doesn't have any geo data.
+    let ashburn : GeoLoc = {lat = 38.89511; lon = -77.03637}
+
+    let getGeoLocOrDefault (n:PubnetNode.Root) : GeoLoc =
+        match n.SbGeoData with
+        | Some geoData -> {lat = float geoData.Latitude
+                           lon = float geoData.Longitude}
+        | None -> ashburn
 
     let makeCoreSetWithExplicitKeys (hdn:HomeDomainName) (options:CoreSetOptions) (keys:KeyPair array) =
         { name = CoreSetName (hdn.StringName)
@@ -151,20 +188,38 @@ let FullPubnetCoreSets (image:string) (manualclose:bool) : CoreSet list =
           keys = keys
           live = true }
 
+    let preferredPeersMapForAllNodes : Map<byte[], byte[] list> =
+        let getSimPubKey (k:string) = (getSimKey k).PublicKey
+        allPubnetNodes |>
+            Array.map (fun (n:PubnetNode.Root) ->
+                        let key = getSimPubKey n.PublicKey
+                        let peers = n.Peers |>
+                                     // This filtering is necessary since we intentionally remove some nodes
+                                     // using networkSizeLimit.
+                                     Array.filter (fun (k:string) -> Set.contains k allPubnetNodeKeys) |>
+                                     List.ofArray |> List.map getSimPubKey
+                        (key, peers)) |>
+            Map.ofArray
+
+    let keysToPreferredPeersMap (keys:KeyPair array) =
+        keys |> Array.map (fun (k:KeyPair) -> (k.PublicKey, Map.find k.PublicKey preferredPeersMapForAllNodes))
+             |> Map.ofArray
+
     let miscCoreSets : CoreSet array =
         Array.mapi
-            (fun (i:int) (n:PubnetNode.Root) ->
+            (fun (_:int) (n:PubnetNode.Root) ->
                 let hdn = homeDomainNameForKey n.PublicKey
-                let qset = qsetOfNodeQset n.QuorumSet
+                let qset = qsetOfNodeQsetOrDefault n.SbQuorumSet
+                let keys = [|getSimKey n.PublicKey|]
                 let coreSetOpts =
                     { pubnetOpts with
                         nodeCount = 1
                         quorumSet = ExplicitQuorum qset
                         tier1 = Some (Set.contains n.PublicKey tier1KeySet)
-                        nodeLocs = Some [nodeToGeoLoc n] }
-                let shouldForceScp = n.IsValidator && not manualclose
+                        nodeLocs = Some [getGeoLocOrDefault n]
+                        preferredPeersMap = Some (keysToPreferredPeersMap keys) }
+                let shouldForceScp = not manualclose
                 let coreSetOpts = coreSetOpts.WithForceSCP shouldForceScp
-                let keys = [|getSimKey n.PublicKey|]
                 makeCoreSetWithExplicitKeys hdn coreSetOpts keys)
             miscNodes
 
@@ -172,16 +227,18 @@ let FullPubnetCoreSets (image:string) (manualclose:bool) : CoreSet list =
         Array.map
             (fun ((hdn:HomeDomainName), (nodes:PubnetNode.Root array)) ->
                 assert(nodes.Length <> 0)
-                let qset = qsetOfNodeQset nodes.[0].QuorumSet
+                let qset = qsetOfNodeQsetOrDefault nodes.[0].SbQuorumSet
+                let nodeList = List.ofArray nodes
+                let keys = Array.map (fun (n:PubnetNode.Root) -> getSimKey n.PublicKey) nodes
                 let coreSetOpts =
                     { pubnetOpts with
                         nodeCount = Array.length nodes
                         quorumSet = ExplicitQuorum qset
                         tier1 = Some (Set.contains nodes.[0].PublicKey tier1KeySet)
-                        nodeLocs = Some (List.map nodeToGeoLoc (List.ofArray nodes)) }
-                let shouldForceScp = nodes.[0].IsValidator && not manualclose
+                        nodeLocs = Some (List.map getGeoLocOrDefault nodeList)
+                        preferredPeersMap = Some (keysToPreferredPeersMap keys) }
+                let shouldForceScp = not manualclose
                 let coreSetOpts = coreSetOpts.WithForceSCP shouldForceScp
-                let keys = Array.map (fun (n:PubnetNode.Root) -> getSimKey n.PublicKey) nodes
                 makeCoreSetWithExplicitKeys hdn coreSetOpts keys)
             groupedOrgNodes
 

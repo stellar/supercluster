@@ -115,6 +115,7 @@ type StellarFormation(networkCfg: NetworkCfg,
                     // event occurred; this happens typically when we exceed quotas on a cluster or
                     // some other policy reason.
                     let fs = sprintf "involvedObject.name=%s" name
+                    self.sleepUntilNextRateLimitedApiCallTime()
                     for ev in self.Kube.ListNamespacedEvent(namespaceParameter=ns, fieldSelector=fs).Items do
                         if ev.Reason = "FailedCreate" && ev.Message.Contains("forbidden")
                         then
@@ -186,8 +187,8 @@ type StellarFormation(networkCfg: NetworkCfg,
             
         networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.WaitUntilSynced())
 
-    member self.WaitUntilConnected (coreSetList: CoreSet list) (connections: int) =
-        networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.WaitUntilConnected connections)
+    member self.WaitUntilConnected (coreSetList: CoreSet list) =
+        networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.WaitUntilConnected)
 
     member self.ManualClose (coreSetList: CoreSet list) =
         networkCfg.EachPeerInSets (coreSetList |> Array.ofList) (fun p -> p.ManualClose())

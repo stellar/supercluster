@@ -92,6 +92,31 @@ type Tests(output:ITestOutputHelper) =
         Assert.Equal(s, exp)
 
     [<Fact>]
+    member __.``PercentOfThreshold function is correct`` () =
+        let pct = percentOfThreshold 3 2
+        Assert.Equal(34, pct)
+        let pct = percentOfThreshold 4 2
+        Assert.Equal(26, pct)
+        let pct = percentOfThreshold 4 3
+        Assert.Equal(51, pct)
+        let thr = thresholdOfPercent 3 34
+        Assert.Equal(2, thr)
+        let thr = thresholdOfPercent 3 66
+        Assert.Equal(2, thr)
+        let thr = thresholdOfPercent 3 67
+        Assert.Equal(3, thr)
+        let thr = thresholdOfPercent 4 24
+        Assert.Equal(1, thr)
+        let thr = thresholdOfPercent 4 25
+        Assert.Equal(1, thr)
+        let thr = thresholdOfPercent 4 26
+        Assert.Equal(2, thr)
+        let thr = thresholdOfPercent 4 50
+        Assert.Equal(2, thr)
+        let thr = thresholdOfPercent 4 51
+        Assert.Equal(3, thr)
+
+    [<Fact>]
     member __.``Inverse threshold function is actually inverse`` () =
         for sz = 1 to 20 do
             for thr = 1 to sz do
@@ -100,7 +125,8 @@ type Tests(output:ITestOutputHelper) =
 
     [<Fact>]
     member __.``Public network conversion looks reasonable`` () =
-        let coreSets = FullPubnetCoreSets "stellar/stellar-core" false
+        let maxNetworkSize = 100
+        let coreSets = FullPubnetCoreSets "stellar/stellar-core" false maxNetworkSize
         let nCfg = MakeNetworkCfg ctx coreSets passOpt
         let sdfCoreSetName = CoreSetName "www-stellar-org"
         Assert.Contains(coreSets, fun cs -> cs.name = sdfCoreSetName)
@@ -108,8 +134,7 @@ type Tests(output:ITestOutputHelper) =
         let cfg = nCfg.StellarCoreCfg(sdfCoreSet, 0)
         let toml = cfg.ToString()
         Assert.Contains("[QUORUM_SET.sub1]", toml)
-        Assert.Contains("[HISTORY.www-stellar-org-0]", toml)
-        Assert.Contains("http://history.stellar.org/prd/core-live/core_live_001", toml)
+        Assert.Contains("[HISTORY.local]", toml)
         Assert.Matches(Regex("VALIDATORS.*stellar-blockdaemon-com-0"), toml)
         Assert.Matches(Regex("VALIDATORS.*www-stellar-org-0"), toml)
         Assert.Matches(Regex("VALIDATORS.*keybase-io-0"), toml)
