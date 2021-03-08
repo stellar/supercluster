@@ -11,6 +11,7 @@ open StellarMissionContext
 open StellarNetworkCfg
 open StellarCoreSet
 open StellarShellCmd
+open StellarNetworkDelays
 open System.Text.RegularExpressions
 
 // Containers that run stellar-core may or may-not have a final '--conf'
@@ -62,12 +63,16 @@ let PgResourceRequirements : V1ResourceRequirements =
     makeResourceRequirements 1000 1024 1000 1024
 
 let HistoryResourceRequirements: V1ResourceRequirements =
-    // Nginx needs 0.01 vCPU and 32MB RAM. It's small.
-    makeResourceRequirements 10 32 10 32
+    // Nginx needs 0.05 vCPU and 32MB RAM. It's small.
+    makeResourceRequirements 10 32 50 32
 
 let PrometheusExporterSidecarResourceRequirements: V1ResourceRequirements =
-    // The prometheus exporter sidecar needs 0.01 vCPU and 64MB RAM.
-    makeResourceRequirements 10 64 10 64
+    // The prometheus exporter sidecar needs 0.05 vCPU and 64MB RAM.
+    makeResourceRequirements 10 64 50 64
+
+let NetworkDelayScriptResourceRequirements: V1ResourceRequirements =
+    // The network delay script needs 0.05 vCPU and 32MB RAM
+    makeResourceRequirements 10 32 50 32
 
 let SimulatePubnetCoreResourceRequirements: V1ResourceRequirements =
     // Running simulate-pubnet _needs_ a ways over 200MB RSS per node, and
@@ -146,6 +151,25 @@ let PrometheusExporterSidecarContainer =
                                            name = "prom-exp") |],
                 image = "index.docker.io/library/stellar-core-prometheus-exporter:latest",
                 resources = PrometheusExporterSidecarResourceRequirements)
+
+let NetworkDelayScriptContainer (configOpt:ConfigOption) (peerOrJobNames:string array) =
+    let peerNameFieldSel = V1ObjectFieldSelector(fieldPath = "metadata.name")
+    let peerNameEnvVarSource = V1EnvVarSource(fieldRef = peerNameFieldSel)
+    let peerNameEnvVar = V1EnvVar(name = CfgVal.peerNameEnvVarName,
+                                  valueFrom = peerNameEnvVarSource)
+    let runCmd =
+        let test = ShCmd [| ShWord.OfStr "test"; ShWord.OfStr "-e"; CfgVal.peerNameEnvDelayCfgFileWord |]
+        let run = ShCmd [| ShWord.OfStr "sh"; ShWord.OfStr "-e"; ShWord.OfStr "-x"; CfgVal.peerNameEnvDelayCfgFileWord |]
+        ShCmd.ShIf(test, run, [||], None)
+
+    V1Container(name = "network-delay",
+                image = "index.docker.io/library/sdf-netdelay:latest",
+                command = [| "/bin/sh" |],
+                args = [| "-x"; "-c"; runCmd.ToString() |],
+                env = [| peerNameEnvVar |],
+                resources = NetworkDelayScriptResourceRequirements,
+                securityContext = V1SecurityContext(capabilities = V1Capabilities(add = [|"NET_ADMIN"|])),
+                volumeMounts = CoreContainerVolumeMounts peerOrJobNames configOpt)
 
 let cfgFileArgs (configOpt:ConfigOption) : ShWord array =
     match configOpt with
@@ -247,22 +271,32 @@ type NetworkCfg with
         V1ConfigMap(metadata = self.NamespacedMeta cfgmapname,
                     data = Map.empty.Add(filename, filedata))
 
-    // Returns an array of ConfigMaps, each of which is a volume named
-    // peer-0-cfg .. peer-N-cfg, to be mounted on /peer-0-cfg .. /peer-N-cfg,
-    // and each containing a stellar-core.cfg TOML file for each peer.
-    // Mounting these ConfigMaps on a PodTemplate will provide Pods instantiated
-    // from the template with access to all the configs in the network, but each
-    // only needs to figure out its own name to pick the volume that contains its
-    // config. This arrangement is a bit crude but makes it relatively easy to
-    // get a node's config to it, and to browse the configuration of the entire
-    // network eg. in the k8s dashboard.
+    // Returns an array of ConfigMaps, which is either a single Job ConfigMap if
+    // running a job, or a set of per-peer ConfigMaps, each of which is a volume
+    // named peer-0-cfg .. peer-N-cfg, to be mounted on /peer-0-cfg ..
+    // /peer-N-cfg, and each containing a stellar-core.cfg TOML file for each
+    // peer. The per-peer configmap may also include a per-per install-delays.sh
+    // script that configures the peer's networking delays.
+    //
+    // The ConfigMap array may also include a history-service ConfigMap, if the
+    // network will be running CoreSets.
+    //
+    // Mounting these ConfigMaps in a PodTemplate will provide Pods instantiated
+    // from the template with access to all the configs they need (though
+    // possibly more -- see comments in ToPodTemplateSpec), and each must then
+    // figure out its own name to pick the volume(s) that contain its config(s).
     member self.ToConfigMaps() : V1ConfigMap array =
         let peerCfgMap (coreSet:CoreSet) (i:int) =
-            let cfgmapname = (self.PeerCfgMapName coreSet i)
-            let filename = CfgVal.peerCfgFileName
-            let filedata = (self.StellarCoreCfg (coreSet, i)).ToString()
-            V1ConfigMap(metadata = self.NamespacedMeta cfgmapname,
-                        data = Map.empty.Add(filename, filedata))
+            let cfgMapName = (self.PeerCfgMapName coreSet i)
+            let cfgFileData = (self.StellarCoreCfg (coreSet, i)).ToString()
+            let cfgMap = Map.empty.Add(CfgVal.peerCfgFileName, cfgFileData)
+            let cfgMap = if self.NeedNetworkDelayScript
+                         then
+                             let delayFileData = (self.NetworkDelayScript coreSet i).ToString()
+                             cfgMap.Add(CfgVal.peerDelayCfgFileName, delayFileData)
+                         else cfgMap
+            V1ConfigMap(metadata = self.NamespacedMeta cfgMapName,
+                        data = cfgMap)
         let cfgs = Array.append (self.MapAllPeers peerCfgMap) [| self.HistoryConfigMap() |]
         match self.jobCoreSetOptions with
             | None -> cfgs
@@ -309,6 +343,7 @@ type NetworkCfg with
               let sleep2 = [| "sleep"; "2" |]
               Some (ShCmd.Until pgIsReady sleep2)
           | _ -> None
+
         let waitForTime : ShCmd Option =
             match opts.syncStartupDelay with
             | None -> None
@@ -334,7 +369,8 @@ type NetworkCfg with
         let initialCatchup = runCoreIf init.initialCatchup [| "catchup"; "current/0" |]
         let forceScp = runCoreIf init.forceScp [| "force-scp" |]
         
-        let cmds = Array.choose id (Array.append ([| waitForDB; setPgUser; setPgHost; waitForTime; newDb; newHistIgnoreError; initialCatchup; forceScp |]) createDbs)
+        let cmds = Array.choose id (Array.append ([| waitForDB; setPgUser; setPgHost; waitForTime;
+                                                     newDb; newHistIgnoreError; initialCatchup; forceScp |]) createDbs)
 
         let restoreDBStep coreSet i : ShCmd array =
           let dnsName = self.PeerDnsName coreSet i
@@ -463,6 +499,10 @@ type NetworkCfg with
         let containers =
             if exportToPrometheus
             then Array.append containers [| PrometheusExporterSidecarContainer |]
+            else containers
+        let containers =
+            if self.NeedNetworkDelayScript
+            then Array.append containers [| NetworkDelayScriptContainer cfgOpt peerNames |]
             else containers
         let annotations =
             if exportToPrometheus

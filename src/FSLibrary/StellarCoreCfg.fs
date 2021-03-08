@@ -32,10 +32,15 @@ module CfgVal =
     let asanOptionsEnvVarName = "ASAN_OPTIONS"
     let asanOptionsEnvVarValue = "quarantine_size_mb=1:malloc_context_size=5"
     let peerCfgFileName = "stellar-core.cfg"
+    let peerDelayCfgFileName = "install-delays.sh"
     let peerNameEnvCfgFileWord: ShWord =
         ShWord.ShPieces [| ShBare ("/cfg-");
                            ShVar (ShName peerNameEnvVarName);
                            ShBare ("/" + peerCfgFileName) |]
+    let peerNameEnvDelayCfgFileWord: ShWord =
+        ShWord.ShPieces [| ShBare ("/cfg-");
+                           ShVar (ShName peerNameEnvVarName);
+                           ShBare ("/" + peerDelayCfgFileName) |]
     let cfgVolumeName peerOrJobName = sprintf "cfg-%s" peerOrJobName
     let cfgVolumePath peerOrJobName = "/" + (cfgVolumeName peerOrJobName)
     let jobCfgVolumeName = "cfg-job"

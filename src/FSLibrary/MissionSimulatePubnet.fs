@@ -11,7 +11,6 @@ open StellarCoreSet
 open StellarMissionContext
 open StellarFormation
 open StellarNetworkData
-open StellarNetworkDelays
 open StellarSupercluster
 open StellarCoreHTTP
 
@@ -31,7 +30,6 @@ let simulatePubnet (context : MissionContext) =
         // Wait until the whole network is synced before proceeding,
         // to fail asap in case of a misconfiguration
         formation.WaitUntilSynced fullCoreSet
-        formation.InstallNetworkDelays fullCoreSet
         formation.UpgradeProtocolToLatest tier1
         formation.UpgradeMaxTxSize tier1 1000000
 

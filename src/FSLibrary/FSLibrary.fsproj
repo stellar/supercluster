@@ -20,11 +20,11 @@
     <Compile Include="StellarCorePeer.fs" />
     <Compile Include="StellarCoreHTTP.fs" />
     <Compile Include="StellarTransaction.fs" />
+    <Compile Include="StellarNetworkDelays.fs" />
     <Compile Include="StellarKubeSpecs.fs" />
     <Compile Include="StellarNamespaceContent.fs" />
     <Compile Include="StellarFormation.fs" />
     <Compile Include="StellarRemoteCommandExec.fs" />
-    <Compile Include="StellarNetworkDelays.fs" />
     <Compile Include="StellarDataDump.fs" />
     <Compile Include="StellarJobExec.fs" />
     <Compile Include="StellarPerformanceReporter.fs" />
