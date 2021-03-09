@@ -39,11 +39,11 @@ let databaseInplaceUpgrade (context : MissionContext) =
                                                         fetchDBFromPeer = fetchFromPeer } }
 
     context.Execute [beforeUpgradeCoreSet; coreSet; afterUpgradeCoreSet] None (fun (formation: StellarFormation) ->
-      formation.WaitUntilSynced [beforeUpgradeCoreSet; coreSet]
-
       let peer = formation.NetworkCfg.GetPeer beforeUpgradeCoreSet 0
       let version = peer.GetSupportedProtocolVersion()
       formation.UpgradeProtocol [coreSet] version
+
+      formation.WaitUntilSynced [beforeUpgradeCoreSet; coreSet]
 
       formation.RunLoadgen beforeUpgradeCoreSet context.GenerateAccountCreationLoad
       formation.RunLoadgen beforeUpgradeCoreSet context.GeneratePaymentLoad
