@@ -421,7 +421,6 @@ type NetworkCfg with
 
         let cfgOpt = PeerSpecificConfigFile
         let volumes = Array.append peerCfgVolumes [| dataVol; historyCfgVolume |]
-        let maxPeers = max 1 self.MaxPeerCount
         let initCommands = self.getInitCommands cfgOpt coreSet.options
 
         let runCmd = [| "run" |]
