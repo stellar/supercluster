@@ -240,13 +240,16 @@ type StellarFormation(networkCfg: NetworkCfg,
             self
 
     member self.CheckNoErrorsAndPairwiseConsistency () =
-        let peer = networkCfg.GetPeer networkCfg.CoreSetList.[0] 0
-        networkCfg.EachPeer
-            begin
-                fun p ->
-                    p.CheckNoErrorMetrics(includeTxInternalErrors=false)
-                    p.CheckConsistencyWith peer
-            end
+        let cs = List.filter (fun cs -> cs.live = true) networkCfg.CoreSetList
+        if not (List.isEmpty cs)
+        then
+            let peer = networkCfg.GetPeer cs.[0] 0
+            networkCfg.EachPeer
+                begin
+                    fun p ->
+                        p.CheckNoErrorMetrics(includeTxInternalErrors=false)
+                        p.CheckConsistencyWith peer
+                end
 
     member self.CheckUsesLatestProtocolVersion () =
         networkCfg.EachPeer

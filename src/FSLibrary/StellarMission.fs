@@ -57,8 +57,7 @@ let allMissions : Map<string, Mission> =
         ("HistoryTestnetCompleteCatchup", historyTestnetCompleteCatchup)
         ("HistoryTestnetParallelCatchup", historyTestnetParallelCatchup)
         ("HistoryTestnetPerformance", historyTestnetPerformance)
-// temporarily disabled: v15.4.0 and v15.3.0 are not compatible on boot
-//      ("VersionMixConsensus", versionMixConsensus)
+        ("VersionMixConsensus", versionMixConsensus)
         ("VersionMixNewCatchupToOld", versionMixNewCatchupToOld)
         ("VersionMixOldCatchupToNew", versionMixOldCatchupToNew)
         ("ProtocolUpgradeTestnet", protocolUpgradeTestnet)

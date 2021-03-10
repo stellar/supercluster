@@ -120,6 +120,7 @@ type QuorumSet = {
 
 type QuorumSetSpec =
     | CoreSetQuorum of CoreSetName
+    | CoreSetQuorumList of CoreSetName list
     | ExplicitQuorum of QuorumSet
     | AllPeersQuorum
 

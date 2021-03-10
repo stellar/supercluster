@@ -279,6 +279,7 @@ type NetworkCfg with
         match o.quorumSet with
             | AllPeersQuorum -> ofNameKeyList (self.GetNameKeyListAll())
             | CoreSetQuorum(ns) -> ofNameKeyList (self.GetNameKeyList [ns])
+            | CoreSetQuorumList(q) -> ofNameKeyList (self.GetNameKeyList q)
             | ExplicitQuorum(e) -> e
 
     member self.HistoryNodes(o: CoreSetOptions) : Map<PeerShortName, PeerDnsName> =
