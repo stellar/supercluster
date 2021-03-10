@@ -169,18 +169,35 @@ let FullPubnetCoreSets (image:string) (manualclose:bool) (networkSizeLimit:int) 
                          simulateApplyUsec = 1200
                          dumpDatabase = false }
 
-    // Ashburn Virginia USA suburb of Washington a.k.a. AWS us-east-1
-    // and GCP us-east-4; home to all SDF nodes, 2 LOBSTR nodes,
-    // PaySend, Stellarbeat, 2 Satoshipay nodes, BAC, LockerX,
-    // and all Blockdaemon nodes.
-    // This location is used when a node doesn't have any geo data.
-    let ashburn : GeoLoc = {lat = 38.89511; lon = -77.03637}
+    // Sorted list of known geolocations.
+    // We can choose an arbitrary geolocation such that the distribution follows that of the given data
+    // by uniformly randomly selecting an element from this array.
+    // Since this is sorted, we will have the same assignments across different runs
+    // as long as the random function is persistent.
+    let geoLocations : GeoLoc array = allPubnetNodes |>
+                                        Array.filter (fun (n:PubnetNode.Root) -> n.SbGeoData.IsSome) |>
+                                        Array.map (fun (n:PubnetNode.Root) ->
+                                           { lat = float n.SbGeoData.Value.Latitude
+                                             lon = float n.SbGeoData.Value.Longitude }) |>
+                                        Seq.ofArray |>
+                                        Seq.sortBy (fun x -> x.lat, x.lon) |>
+                                        Array.ofSeq
 
+    // If the given node has geolocation info, use it.
+    // Otherwise, pseudo-randomly select one from the list of geolocations that we are aware of.
+    // Since the assignment depends on the pubnet public key,
+    // this assignment is persistent across different runs.
     let getGeoLocOrDefault (n:PubnetNode.Root) : GeoLoc =
         match n.SbGeoData with
         | Some geoData -> {lat = float geoData.Latitude
                            lon = float geoData.Longitude}
-        | None -> ashburn
+        | None ->
+            let len = Array.length geoLocations
+            // A deterministic, fairly elementary hashing function that adds the ASCII code
+            // of each character.
+            // All we need is a deterministic, mostly randomized mapping.
+            let h = n.PublicKey |> Seq.sumBy int
+            geoLocations.[h % len]
 
     let makeCoreSetWithExplicitKeys (hdn:HomeDomainName) (options:CoreSetOptions) (keys:KeyPair array) =
         { name = CoreSetName (hdn.StringName)
