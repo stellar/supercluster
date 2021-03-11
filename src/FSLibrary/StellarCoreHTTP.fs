@@ -275,10 +275,13 @@ type Peer with
                 then ()
                 else
 
-                    // Sleep for 1 second to allow ledgers to close. No need to sleep on the first iteration
+                    // Sleep to allow ledgers to close. No need to sleep on the first iteration
                     if n < ConsistencyCheckIterationCount 
                     then 
-                        Thread.Sleep(1000)
+                        // Sleep for 1 second when using accelerateTime, and 5 seconds otherwise
+                        // because it does not make much sense to check every 1 second
+                        // if the network closes ledgers every 5 seconds.
+                        Thread.Sleep(if self.coreSet.options.accelerateTime then 1000 else 5000)
 
                     let ourLedger = self.GetInfo().Ledger
                     let theirLedger = other.GetInfo().Ledger
