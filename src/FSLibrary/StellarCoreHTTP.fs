@@ -280,6 +280,14 @@ type Peer with
                     then 
                         Thread.Sleep(1000)
 
+                    let ensureSyncedIfTier1 p =
+                        if p.coreSet.options.tier1 = Some true && p.GetState() <> "Synced!"
+                        then
+                            (NodeLostSyncException p.ShortName.StringName) |> raise
+
+                    ensureSyncedIfTier1 self
+                    ensureSyncedIfTier1 other
+
                     let ourLedger = self.GetInfo().Ledger
                     let theirLedger = other.GetInfo().Ledger
 
