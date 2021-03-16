@@ -3,12 +3,9 @@
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
 module StellarNetworkDelays
-open k8s
-open k8s.Models
 open StellarCoreSet
-open StellarFormation
+open StellarNetworkCfg
 open StellarShellCmd
-open StellarRemoteCommandExec
 
 // This module calculates simulated network delays based on geographic distance
 // between simulated peers, as well as the linux traffic-control commands
@@ -51,7 +48,7 @@ let networkPingInMs (loc1:GeoLoc) (loc2:GeoLoc) : double =
     // A ping is a round trip, so double one-way delay.
     2.0 * (networkDelayInMs loc1 loc2)
 
-let getNetworkDelayCommands (loc1:GeoLoc) (locsAndIps:(PodName * GeoLoc * string) list) : ShCmd array =
+let getNetworkDelayCommands (loc1:GeoLoc) (locsAndNames:(GeoLoc * PeerDnsName) array) : ShCmd =
     // Traffic shaping happens using the 'tc' command on linux. This is a
     // complicated command. We build up the commands in pieces.
 
@@ -104,11 +101,43 @@ let getNetworkDelayCommands (loc1:GeoLoc) (locsAndIps:(PodName * GeoLoc * string
                         "classid"; sprintf "1:%d" n;
                         "htb"; "rate"; "100mbit" |]
 
-    let addFilter (n:int) (ipaddr:string) : ShCmd =
+    let peerVar (n:int) : string =
+        sprintf "PEER%d" n
+
+    let resolveName (n:int) (dns:PeerDnsName) : ShCmd =
+        let tmpFile = "tmp.txt";
+        let varName = peerVar n
+        let pv:ShPiece = ShVar(ShName varName)
+        let z:ShPiece = ShBare "z"
+        let test:ShCmd = ShCmd [| ShWord.OfStr "test";
+                                  ShPieces [| z; pv |];
+                                  ShWord.OfStr "=";
+                                  ShPieces [| z |] |]
+        let probe:ShCmd = ShCmd.OfStrs [|"host"; "-t"; "A"; dns.StringName|]
+        let probe:ShCmd = probe.StdOutTo tmpFile
+        let probe:ShCmd = probe.OrElse [| "echo"; "temporary failure" |]
+        let grep:ShCmd = ShCmd.OfStrs [|"grep"; "address"; tmpFile|]
+        let sed:ShCmd = ShCmd.OfStrs [|"sed"; "-i"; "-e"; "s/.*address//"; tmpFile|]
+        let defSub:ShCmd = ShCmd.DefVarSub varName [|"cat"; tmpFile|]
+        let then_ = ShSeq [|sed; defSub|]
+        let elif_ = [||]
+        let else_ = Some (ShCmd.OfStrs [|"sleep"; "1"|])
+        let defIf:ShCmd = ShIf(grep, then_, elif_, else_)
+        let body:ShCmd = ShSeq [|probe; defIf|]
+        let loop:ShCmd = ShWhile(test, body)
+        ShSeq [|
+            ShCmd.OfStrs [|"rm"; "-f"; tmpFile|];
+            loop
+            |]
+
+    let peerVarRef (n:int) : string =
+        "${" + (peerVar n) + "}"
+
+    let addFilter (n:int) : ShCmd =
         ShCmd.OfStrs [| "tc"; "filter"; "add"; "dev"; "eth0"
                         "parent"; "1:0"
                         "protocol"; "ip"; "prio"; "1"
-                        "u32"; "match"; "ip"; "dst"; ipaddr
+                        "u32"; "match"; "ip"; "dst"; peerVarRef n;
                         "classid"; sprintf "1:%d" n |]
 
     let addNetemQdisc (n:int) (msDelay:int) : ShCmd =
@@ -116,76 +145,75 @@ let getNetworkDelayCommands (loc1:GeoLoc) (locsAndIps:(PodName * GeoLoc * string
                         "parent"; sprintf "1:%d" n;
                         "netem"; "delay"; sprintf "%dms" msDelay |]
 
-    let perIpCmds : ShCmd array =
-        List.mapi
-            begin fun (i:int) (_, (loc2:GeoLoc), (ip:string)) ->
+    let perPeerResolveCmds : ShCmd array =
+        Array.mapi
+            begin fun (i:int) ((loc2:GeoLoc), (peer:PeerDnsName)) ->
+                let classNo = 1 + i
+                [|
+                    resolveName classNo peer;
+                |]
+            end
+            locsAndNames
+        |> Array.concat
+
+    let perPeerCmds : ShCmd array =
+        Array.mapi
+            begin fun (i:int) ((loc2:GeoLoc), (peer:PeerDnsName)) ->
                 let (msDelay:int) = int(networkDelayInMs loc1 loc2)
                 let classNo = 1 + i
-                [
+                [|
                     addClass classNo;
-                    addFilter classNo ip;
+                    addFilter classNo;
                     addNetemQdisc classNo msDelay
-                ]
+                |]
             end
-            locsAndIps
-        |> List.concat |> Array.ofList
+            locsAndNames
+        |> Array.concat
 
-    (Array.append
-                 [| setDeviceTxQlen; clearRootQdisc; addRootQdisc |]
-                 perIpCmds)
+    let seq = Array.concat [|
+                               [| setDeviceTxQlen; |]
+                               perPeerResolveCmds;
+                               [| clearRootQdisc;
+                                  addRootQdisc |];
+                               perPeerCmds
+                               [| ShCmd.OfStrs [|"tc"; "qdisc"|];
+                                  // End in an infinite sleep-loop, so k8s don't
+                                  // exit-restart the container endlessly.
+                                  ShCmd.While [| "true" |] [|"sleep"; "1000"|] |]
+                           |]
+    ShSeq seq
 
 
-type StellarFormation with
-    // Returns a (geoloc, ipaddr) pair for each peer we have a GeoLoc for in any
-    // of the provided CoreSets. Return value is for InstallNetworkDelays below.
-    member self.GetPeerLocsAndIps(coreSetList: CoreSet list) : (PodName * GeoLoc * string) list =
-        let ns = self.NetworkCfg.NamespaceProperty
-        List.collect
-            begin fun (cs:CoreSet) ->
-                match cs.options.nodeLocs with
-                | None -> []
-                | Some(locs) ->
-                    List.mapi
-                        begin fun (i:int) (loc:GeoLoc) ->
-                            let podName = self.NetworkCfg.PodName cs i
-                            self.sleepUntilNextRateLimitedApiCallTime()
-                            let (pod:V1Pod) = self.Kube.ReadNamespacedPod(name = podName.StringName,
-                                                                          namespaceParameter = ns)
-                            (podName, loc, pod.Status.PodIP)
-                        end
-                        locs
-            end
-            coreSetList
+type NetworkCfg with
 
-    // For each peer in the coresets, calculate and install (by running a set of
-    // linux traffic-control commands on the peer) a set of network delays
-    // between that peer and every other peer in the coresets.
-    member self.InstallNetworkDelays(coreSetList: CoreSet list) : unit =
-        let locsAndIps = self.GetPeerLocsAndIps coreSetList
-        for (peerName, loc1, _ip1) in locsAndIps do
-            let mutable cmds = getNetworkDelayCommands loc1 locsAndIps
-            while cmds.Length > 0 do
-                // Apparently -- goodness knows why! -- we can only send
-                // "moderately large" commands over stdin, 4kb or less;
-                // any more and dotnet's IO-tasking system deadlocks, or
-                // something fails in the transport layer, or such (???).
-                //
-                // We approximate this limit here with "50 commands at a time"
-                // which should be well within the limit given the size of
-                // commands we're sending (average 75 bytes).
-                //
-                // Note also: fsharp array slicing syntax is range-inclusive
-                // and _mostly_ throws if you index past the last element,
-                // except it allows you to ask for the slice beginning at
-                // the array's length, which is the empty slice.
-                //
-                //  That is: x.[x.Length..] is an empty slice, whereas
-                //           x.[..x.Length] is an error. Awesome!
-                let lastCmdIdx = cmds.Length - 1
-                let chunkLimInc = min lastCmdIdx 50
-                let chunk = cmds.[..chunkLimInc]
-                let blockCmd = ShCmd.ShSeq chunk
-                let nextChunkStart = min (chunkLimInc+1) cmds.Length
-                cmds <- cmds.[nextChunkStart..]
-                self.RunRemoteCommand(peerName, blockCmd)
-            done
+    member self.LocAndDnsName (cs:CoreSet) (i:int) : (GeoLoc * PeerDnsName) Option =
+        match cs.options.nodeLocs with
+            | None -> None
+            | Some locs -> Some (locs.[i], self.PeerDnsName cs i)
+
+    member self.LocAndDnsNameForKey (k:byte[]) : (GeoLoc * PeerDnsName) Option =
+        Array.tryPick id
+            (self.MapAllPeers
+                (fun cs i ->
+                    if cs.keys.[i].PublicKey = k
+                    then self.LocAndDnsName cs i
+                    else None))
+
+    member self.NeedNetworkDelayScript : bool =
+        let firstLoc = Map.tryPick (fun _ cs -> cs.options.nodeLocs) self.coreSets
+        firstLoc.IsSome
+
+    member self.NetworkDelayScript (cs:CoreSet) (i:int) : ShCmd =
+        match cs.options.nodeLocs with
+            | None -> ShCmd.True()
+            | Some(locs) ->
+                let selfLoc = locs.[i]
+                let otherLocsAndNames : (GeoLoc * PeerDnsName) array =
+                    match cs.options.preferredPeersMap with
+                        | Some(otherMap) ->
+                              let otherKeys = Array.ofList otherMap.[cs.keys.[i].PublicKey]
+                              Array.choose self.LocAndDnsNameForKey otherKeys
+                        | None ->
+                              Array.choose id (self.MapAllPeers self.LocAndDnsName)
+                getNetworkDelayCommands selfLoc otherLocsAndNames
+

@@ -290,21 +290,24 @@ type Tests(output:ITestOutputHelper) =
         let Ashburn = {lat = 38.89511; lon = -77.03637}
         let Beauharnois = {lat = 45.2986777; lon= -73.9288762}
         let Chennai = {lat = 13.08784; lon = 80.27847}
-        let n1 = PodName "n1"
-        let ip1 = "192.168.1.236"
-        let n2 = PodName "n2"
-        let ip2 = "192.168.1.237"
-        let cmds = getNetworkDelayCommands Ashburn [(n1,Beauharnois,ip1);
-                                                    (n2,Chennai,ip2)]
+        let dns1 = PeerDnsName "www.foo.com"
+        let dns2 = PeerDnsName "www.bar.com"
+        let cmd = getNetworkDelayCommands Ashburn [|(Beauharnois,dns1);
+                                                     (Chennai,dns2)|]
+        let cmdStr = cmd.ToString()
 
-        let mutable cmdStr = ""
-        for item in cmds do
-            cmdStr <- cmdStr + (item.ToString())
-
-        Assert.Contains(ip1, cmdStr)
-        Assert.Contains(ip2, cmdStr)
+        Assert.Contains(dns1.StringName, cmdStr)
+        Assert.Contains(dns2.StringName, cmdStr)
         let delay1 = int(networkDelayInMs Ashburn Beauharnois)
         let delay2 = int(networkDelayInMs Ashburn Chennai)
         Assert.Contains(sprintf "netem delay %dms" delay1, cmdStr)
         Assert.Contains(sprintf "netem delay %dms" delay2, cmdStr)
 
+    [<Fact>]
+    member __.``Public network delay commands are reasonable`` () =
+        let allCoreSets = FullPubnetCoreSets ctx.image true 100
+        let fullNetCfg = MakeNetworkCfg ctx allCoreSets passOpt
+        let sdf = List.find (fun (cs:CoreSet) -> cs.name.StringName = "www-stellar-org") allCoreSets
+        let delayCmd = fullNetCfg.NetworkDelayScript sdf 0
+        let str = delayCmd.ToString()
+        Assert.Matches(Regex("host -t A ssc-.*cluster.local"), str)

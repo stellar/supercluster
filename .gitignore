@@ -11,3 +11,7 @@
 # run artifacts
 /destination
 
+
+.fake
+.ionide
+.idea
