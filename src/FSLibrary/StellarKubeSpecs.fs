@@ -236,6 +236,13 @@ let WithLivenessProbe (container:V1Container) (probeTimeout:int) : V1Container =
     container.LivenessProbe <- liveProbe
     container
 
+let evenTopologyConstraints : V1TopologySpreadConstraint array =
+    [| V1TopologySpreadConstraint(
+                            maxSkew=1,
+                            topologyKey="kubernetes.io/hostname",
+                            whenUnsatisfiable = "ScheduleAnyway",
+                            labelSelector = V1LabelSelector(matchLabels = CfgVal.labels)) |]
+
 // Extend NetworkCfg type with methods for producing various Kubernetes objects.
 type NetworkCfg with
 
@@ -412,6 +419,7 @@ type NetworkCfg with
         V1PodTemplateSpec
                 (spec = V1PodSpec (containers = containers,
                                    volumes = [| jobCfgVol; dataVol |],
+                                   topologySpreadConstraints = evenTopologyConstraints,
                                    restartPolicy = "Never",
                                    shareProcessNamespace = System.Nullable<bool>(true)),
                  metadata = V1ObjectMeta(labels = CfgVal.labels,
@@ -515,6 +523,7 @@ type NetworkCfg with
         let podSpec =
             V1PodSpec
                 (containers = containers,
+                 topologySpreadConstraints = evenTopologyConstraints,
                  volumes = volumes)
         V1PodTemplateSpec
                 (spec = podSpec,
