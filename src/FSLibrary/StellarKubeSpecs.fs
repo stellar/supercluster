@@ -13,6 +13,7 @@ open StellarCoreSet
 open StellarShellCmd
 open StellarNetworkDelays
 open System.Text.RegularExpressions
+open Logging
 
 // Containers that run stellar-core may or may-not have a final '--conf'
 // argument appended to their command-line. The argument is specified one of 3
@@ -293,6 +294,7 @@ type NetworkCfg with
             let cfgMap = if self.NeedNetworkDelayScript
                          then
                              let delayFileData = (self.NetworkDelayScript coreSet i).ToString()
+                             LogInfo "Adding NetworkDelayScript to cfgMap of %s-%d" (coreSet.name.StringName) i |> ignore
                              cfgMap.Add(CfgVal.peerDelayCfgFileName, delayFileData)
                          else cfgMap
             V1ConfigMap(metadata = self.NamespacedMeta cfgMapName,
@@ -463,7 +465,9 @@ type NetworkCfg with
         let runCmdWithOpts =
             match coreSet.options.simulateApplyUsec with
             | 0 -> runCmd
-            | _ -> Array.append runCmd [| "--simulate-apply-per-op"; coreSet.options.simulateApplyUsec.ToString() |]
+            | _ ->
+                LogInfo "Setting --simulate-apply-per-op to %d (%s)" coreSet.options.simulateApplyUsec coreSet.name.StringName
+                Array.append runCmd [| "--simulate-apply-per-op"; coreSet.options.simulateApplyUsec.ToString() |]
 
         let firstProtocolWithDefaultForceSCP = 14
         let getCoreVersion (coreVersion: string) =
