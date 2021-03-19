@@ -422,6 +422,10 @@ type Peer with
                     (self.GetInfo().Peers.AuthenticatedCount)
                     desiredNumberOfConnection)
 
+    member self.EnsureInSync = if self.GetState() <> "Synced!"
+                               then failwith (sprintf "%s is in state %s"
+                                                      (self.ShortName.StringName)
+                                                      (self.GetState()))
 
     member self.WaitUntilReady() =
         RetryUntilTrue
