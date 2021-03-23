@@ -240,8 +240,16 @@ let evenTopologyConstraints : V1TopologySpreadConstraint array =
     [| V1TopologySpreadConstraint(
                             maxSkew=1,
                             topologyKey="kubernetes.io/hostname",
-                            whenUnsatisfiable = "ScheduleAnyway",
+                            whenUnsatisfiable = "DoNotSchedule",
                             labelSelector = V1LabelSelector(matchLabels = CfgVal.labels)) |]
+
+let workerAffinity : V1Affinity =
+    let req = V1NodeSelectorRequirement(key="node-role.kubernetes.io/master",
+                                        operatorProperty="DoesNotExist")
+    let terms = [| V1NodeSelectorTerm(matchExpressions=[|req|]) |]
+    let sel = V1NodeSelector(nodeSelectorTerms = terms)
+    let na = V1NodeAffinity(requiredDuringSchedulingIgnoredDuringExecution = sel)
+    V1Affinity(nodeAffinity = na)
 
 // Extend NetworkCfg type with methods for producing various Kubernetes objects.
 type NetworkCfg with
@@ -420,6 +428,7 @@ type NetworkCfg with
                 (spec = V1PodSpec (containers = containers,
                                    volumes = [| jobCfgVol; dataVol |],
                                    topologySpreadConstraints = evenTopologyConstraints,
+                                   affinity = workerAffinity,
                                    restartPolicy = "Never",
                                    shareProcessNamespace = System.Nullable<bool>(true)),
                  metadata = V1ObjectMeta(labels = CfgVal.labels,
@@ -524,6 +533,7 @@ type NetworkCfg with
             V1PodSpec
                 (containers = containers,
                  topologySpreadConstraints = evenTopologyConstraints,
+                 affinity = workerAffinity,
                  volumes = volumes)
         V1PodTemplateSpec
                 (spec = podSpec,
