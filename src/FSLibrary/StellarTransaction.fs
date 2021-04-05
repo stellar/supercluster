@@ -1,4 +1,4 @@
-﻿module StellarTransaction
+module StellarTransaction
 
 open stellar_dotnet_sdk
 
