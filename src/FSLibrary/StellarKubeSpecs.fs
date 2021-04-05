@@ -621,13 +621,13 @@ type NetworkCfg with
         let corePaths = self.MapAllPeers corePath
         let historyPaths = self.MapAllPeers historyPath
         let rule = Extensionsv1beta1HTTPIngressRuleValue(paths = Array.concat [corePaths; historyPaths])
-        let host = self.IngressHostName
+        let host = self.IngressInternalHostName
         let rules = [|Extensionsv1beta1IngressRule(
                         host = host,
                         http = rule)|]
         let spec = Extensionsv1beta1IngressSpec(rules = rules)
         let annotation = Map.ofArray [|("traefik.ingress.kubernetes.io/rule-type", "PathPrefixStrip");
-                                       ("kubernetes.io/ingress.class", "private")|]
+                                       ("kubernetes.io/ingress.class", self.missionContext.ingressClass)|]
         let meta = V1ObjectMeta(name = self.IngressName,
                                 namespaceProperty = self.NamespaceProperty,
                                 annotations = annotation)

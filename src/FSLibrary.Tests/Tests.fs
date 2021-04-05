@@ -41,7 +41,10 @@ let ctx : MissionContext =
     numNodes = 100
     namespaceProperty = "stellar-supercluster"
     logLevels = { LogDebugPartitions=[]; LogTracePartitions=[] }
-    ingressDomain = "local"
+    ingressClass = "private"
+    ingressInternalDomain = "local"
+    ingressExternalHost = None
+    ingressExternalPort = 80
     exportToPrometheus = false
     probeTimeout = 10
     coreResources = SmallTestResources
