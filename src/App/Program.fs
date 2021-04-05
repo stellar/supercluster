@@ -28,123 +28,13 @@ type KubeOption(kubeConfig: string,
              Required = false)>]
     member self.NamespaceProperty = namespaceProperty
 
-
-type CommonOptions(kubeConfig: string,
-                   numNodes: int,
-                   logDebugPartitions: seq<string>,
-                   logTracePartitions: seq<string>,
-                   namespaceProperty: string option,
-                   ingressDomain: string,
-                   exportToPrometheus: bool,
-                   probeTimeout: int,
-                   image: string,
-                   apiRateLimit: int) =
-
-    [<Option('k', "kubeconfig", HelpText = "Kubernetes config file",
-             Required = false, Default = "~/.kube/config")>]
-    member self.KubeConfig = kubeConfig
-
-    [<Option('n', "num-nodes", HelpText="Number of nodes in config",
-             Required = false, Default = 5)>]
-    member self.NumNodes = numNodes
-
-    [<Option("debug", HelpText="Log-partitions to set to 'debug' level")>]
-    member self.LogDebugPartitions = logDebugPartitions
-
-    [<Option("trace", HelpText="Log-partitions to set to 'trace' level")>]
-    member self.LogTracePartitions = logTracePartitions
-
-    [<Option("namespace", HelpText="Namespace to use, overriding kubeconfig.",
-             Required = false)>]
-    member self.NamespaceProperty = namespaceProperty
-
-    [<Option("ingress-domain", HelpText="Domain in which to configure ingress host",
-             Required = false, Default = "local")>]
-    member self.IngressDomain = ingressDomain
-
-    [<Option("export-to-prometheus", HelpText="Whether to export core metrics to prometheus")>]
-    member self.ExportToPrometheus : bool = exportToPrometheus
-
-    [<Option("probe-timeout", HelpText="Timeout for liveness probe",
-             Required = false, Default = 5)>]
-    member self.ProbeTimeout = probeTimeout
-
-    [<Option('i', "image", HelpText="Stellar-core image to use",
-             Required = false, Default = "stellar/stellar-core")>]
-    member self.Image = image
-
-    [<Option("api-rate-limit", HelpText="Limit of kubernetes API requests per second to make",
-             Required = false, Default = 10)>]
-    member self.ApiRateLimit = apiRateLimit
-
-[<Verb("setup", HelpText="Set up a new stellar-core cluster")>]
-type SetupOptions(kubeConfig: string,
-                  numNodes: int,
-                  logDebugPartitions: seq<string>,
-                  logTracePartitions: seq<string>,
-                  namespaceProperty: string option,
-                  ingressDomain: string,
-                  exportToPrometheus: bool,
-                  probeTimeout: int,
-                  image: string,
-                  apiRateLimit: int) =
-    inherit CommonOptions(kubeConfig,
-                          numNodes,
-                          logDebugPartitions,
-                          logTracePartitions,
-                          namespaceProperty,
-                          ingressDomain,
-                          exportToPrometheus,
-                          probeTimeout,
-                          image,
-                          apiRateLimit)
-
+[<Verb("poll", HelpText="Poll a running stellar-core cluster for status")>]
+type PollOptions(kubeConfig: string, namespaceProperty: string option) =
+    inherit KubeOption(kubeConfig, namespaceProperty)
 
 [<Verb("clean", HelpText="Clean all resources in a namespace")>]
-type CleanOptions(kubeConfig: string,
-                  numNodes: int,
-                  logDebugPartitions: seq<string>,
-                  logTracePartitions: seq<string>,
-                  namespaceProperty: string option,
-                  ingressDomain: string,
-                  exportToPrometheus: bool,
-                  probeTimeout: int,
-                  image: string,
-                  apiRateLimit: int) =
-    inherit CommonOptions(kubeConfig,
-                          numNodes,
-                          logDebugPartitions,
-                          logTracePartitions,
-                          namespaceProperty,
-                          ingressDomain,
-                          exportToPrometheus,
-                          probeTimeout,
-                          image,
-                          apiRateLimit)
-
-
-[<Verb("loadgen", HelpText="Run a load generation test")>]
-type LoadgenOptions(kubeConfig: string,
-                    numNodes: int,
-                    logDebugPartitions: seq<string>,
-                    logTracePartitions: seq<string>,
-                    namespaceProperty: string option,
-                    ingressDomain: string,
-                    exportToPrometheus: bool,
-                    probeTimeout: int,
-                    image: string,
-                    apiRateLimit: int) =
-    inherit CommonOptions(kubeConfig,
-                          numNodes,
-                          logDebugPartitions,
-                          logTracePartitions,
-                          namespaceProperty,
-                          ingressDomain,
-                          exportToPrometheus,
-                          probeTimeout,
-                          image,
-                          apiRateLimit)
-
+type CleanOptions(kubeConfig: string, namespaceProperty: string option) =
+    inherit KubeOption(kubeConfig, namespaceProperty)
 
 [<Verb("mission", HelpText="Run one or more named missions")>]
 type MissionOptions(kubeConfig: string,
@@ -261,11 +151,6 @@ type MissionOptions(kubeConfig: string,
 
 
 
-[<Verb("poll", HelpText="Poll a running stellar-core cluster for status")>]
-type PollOptions(kubeConfig: string, namespaceProperty: string option) =
-    inherit KubeOption(kubeConfig, namespaceProperty)
-
-
 [<EntryPoint>]
 let main argv =
 
@@ -283,60 +168,29 @@ let main argv =
                     .CreateLogger()
 
   AuxClass.CheckCSharpWorksToo()
-  let result = CommandLine.Parser.Default.ParseArguments<SetupOptions,
+  let result = CommandLine.Parser.Default.ParseArguments<PollOptions,
                                                          CleanOptions,
-                                                         LoadgenOptions,
-                                                         MissionOptions,
-                                                         PollOptions>(argv)
+                                                         MissionOptions>(argv)
   match result with
 
   | :? Parsed<obj> as command ->
     match command.Value with
 
-    | :? SetupOptions as setup ->
+    | :? PollOptions as poll ->
       let _ = logToConsoleOnly()
-      let (kube, ns) = ConnectToCluster setup.KubeConfig setup.NamespaceProperty
-      let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.GetDefault setup.Image with nodeCount = setup.NumNodes }
-      let ll = { LogDebugPartitions = List.ofSeq setup.LogDebugPartitions
-                 LogTracePartitions = List.ofSeq setup.LogTracePartitions }
-      let ctx = {
-          kube = kube
-          destination = DefaultDestination
-          image = setup.Image
-          oldImage = None
-          txRate = 100
-          maxTxRate = 300
-          numAccounts = 100000
-          numTxs = 100000
-          spikeSize = 100000
-          spikeInterval = 0
-          numNodes = setup.NumNodes
-          namespaceProperty = ns
-          logLevels = ll
-          ingressDomain = setup.IngressDomain
-          exportToPrometheus = setup.ExportToPrometheus
-          probeTimeout = setup.ProbeTimeout
-          coreResources = SmallTestResources
-          keepData = false
-          apiRateLimit = setup.ApiRateLimit
-          installNetworkDelay = None
-          simulateApplyUsec = None
-          networkSizeLimit = 100
-      }
-      let nCfg = MakeNetworkCfg ctx [coreSet] None
-      use formation = kube.MakeFormation nCfg
-      formation.ReportStatus()
+      let (kube, ns) = ConnectToCluster poll.KubeConfig poll.NamespaceProperty
+      PollCluster kube ns
       0
 
     | :? CleanOptions as clean ->
       let _ = logToConsoleOnly()
       let (kube, ns) = ConnectToCluster clean.KubeConfig clean.NamespaceProperty
-      let ll = { LogDebugPartitions = List.ofSeq clean.LogDebugPartitions
-                 LogTracePartitions = List.ofSeq clean.LogTracePartitions }
+      let ll = { LogDebugPartitions = []
+                 LogTracePartitions = [] }
       let ctx = {
           kube = kube
           destination = DefaultDestination
-          image = clean.Image
+          image = "stellar/stellar-core"
           oldImage = None
           txRate = 100
           maxTxRate = 300
@@ -344,15 +198,15 @@ let main argv =
           numTxs = 100000
           spikeSize = 100000
           spikeInterval = 0
-          numNodes = clean.NumNodes
+          numNodes = 3
           namespaceProperty = ns
           logLevels = ll
-          ingressDomain = clean.IngressDomain
-          exportToPrometheus = clean.ExportToPrometheus
-          probeTimeout = clean.ProbeTimeout
+          ingressDomain = "local"
+          exportToPrometheus = false
+          probeTimeout = 5
           coreResources = SmallTestResources
           keepData = false
-          apiRateLimit = clean.ApiRateLimit
+          apiRateLimit = 30
           installNetworkDelay = None
           simulateApplyUsec = None
           networkSizeLimit = 0
@@ -360,42 +214,6 @@ let main argv =
       let nCfg = MakeNetworkCfg ctx [] None
       use formation = kube.MakeEmptyFormation nCfg
       formation.CleanNamespace()
-      0
-
-    | :? LoadgenOptions as loadgen ->
-      let _ = logToConsoleOnly()
-      let (kube, ns) = ConnectToCluster loadgen.KubeConfig loadgen.NamespaceProperty
-      let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.GetDefault loadgen.Image with nodeCount = loadgen.NumNodes }
-      let ll = { LogDebugPartitions = List.ofSeq loadgen.LogDebugPartitions
-                 LogTracePartitions = List.ofSeq loadgen.LogTracePartitions }
-      let ctx = {
-          kube = kube
-          destination = DefaultDestination
-          image = loadgen.Image
-          oldImage = None
-          txRate = 100
-          maxTxRate = 300
-          numAccounts = 100000
-          numTxs = 100000
-          spikeSize = 100000
-          spikeInterval = 0
-          numNodes = loadgen.NumNodes
-          namespaceProperty = ns
-          logLevels = ll
-          ingressDomain = loadgen.IngressDomain
-          exportToPrometheus = loadgen.ExportToPrometheus
-          probeTimeout = loadgen.ProbeTimeout
-          coreResources = SmallTestResources
-          keepData = false
-          apiRateLimit = loadgen.ApiRateLimit
-          installNetworkDelay = None
-          simulateApplyUsec = None
-          networkSizeLimit = 0
-      }
-      let nCfg = MakeNetworkCfg ctx [coreSet] None
-      use formation = kube.MakeFormation nCfg
-      formation.RunLoadgenAndCheckNoErrors coreSet
-      formation.ReportStatus()
       0
 
     | :? MissionOptions as mission ->
@@ -423,13 +241,13 @@ let main argv =
                         try
                             let ranges = kube.ListNamespacedLimitRange(namespaceParameter=ns)
                             if isNull ranges
-                            then failwith "Connection issue!" 
+                            then failwith "Connection issue!"
                             else DumpPodInfo kube ns
                         with
                         | x ->
                             LogError "Connection issue!"
                             reraise()
-                        
+
                 // Poll cluster every minute to make sure we don't have any issues
                 let timer = new System.Threading.Timer(TimerCallback(heartbeatHandler), null, 1000, 60000);
 
@@ -466,22 +284,16 @@ let main argv =
                     // This looks ridiculous but it's how you coax the .NET runtime
                     // to actually run the IDisposable Dispose methods on uncaught
                     // exceptions. Sigh.
-                    | x -> 
+                    | x ->
                         LogError "Exception thrown. Message = %s - StackTrace =%s" x.Message x.StackTrace
                         reraise()
                     LogInfo "-----------------------------------"
                     LogInfo "Finished mission: %s" m
                     LogInfo "-----------------------------------"
 
-                timer.Dispose()            
+                timer.Dispose()
                 0
             end
-
-    | :? PollOptions as poll ->
-      let _ = logToConsoleOnly()
-      let (kube, ns) = ConnectToCluster poll.KubeConfig poll.NamespaceProperty
-      PollCluster kube ns
-      0
 
     | _ -> 1
 
