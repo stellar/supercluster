@@ -33,8 +33,6 @@ type CommonOptions(kubeConfig: string,
                    numNodes: int,
                    logDebugPartitions: seq<string>,
                    logTracePartitions: seq<string>,
-                   containerMaxCpuMili: int,
-                   containerMaxMemMebi: int,
                    namespaceProperty: string option,
                    ingressDomain: string,
                    exportToPrometheus: bool,
@@ -55,14 +53,6 @@ type CommonOptions(kubeConfig: string,
 
     [<Option("trace", HelpText="Log-partitions to set to 'trace' level")>]
     member self.LogTracePartitions = logTracePartitions
-
-    [<Option("container-max-cpu-mili", HelpText="Maximum per-container CPU (in mili-CPUs)",
-             Required = false, Default = 0)>]
-    member self.ContainerMaxCpuMili = containerMaxCpuMili
-
-    [<Option("container-max-mem-mebi", HelpText="Maximum per-container memory (in MB)",
-             Required = false, Default = 0)>]
-    member self.ContainerMaxMemMebi = containerMaxMemMebi
 
     [<Option("namespace", HelpText="Namespace to use, overriding kubeconfig.",
              Required = false)>]
@@ -92,8 +82,6 @@ type SetupOptions(kubeConfig: string,
                   numNodes: int,
                   logDebugPartitions: seq<string>,
                   logTracePartitions: seq<string>,
-                  containerMaxCpuMili: int,
-                  containerMaxMemMebi: int,
                   namespaceProperty: string option,
                   ingressDomain: string,
                   exportToPrometheus: bool,
@@ -104,8 +92,6 @@ type SetupOptions(kubeConfig: string,
                           numNodes,
                           logDebugPartitions,
                           logTracePartitions,
-                          containerMaxCpuMili,
-                          containerMaxMemMebi,
                           namespaceProperty,
                           ingressDomain,
                           exportToPrometheus,
@@ -119,8 +105,6 @@ type CleanOptions(kubeConfig: string,
                   numNodes: int,
                   logDebugPartitions: seq<string>,
                   logTracePartitions: seq<string>,
-                  containerMaxCpuMili: int,
-                  containerMaxMemMebi: int,
                   namespaceProperty: string option,
                   ingressDomain: string,
                   exportToPrometheus: bool,
@@ -131,8 +115,6 @@ type CleanOptions(kubeConfig: string,
                           numNodes,
                           logDebugPartitions,
                           logTracePartitions,
-                          containerMaxCpuMili,
-                          containerMaxMemMebi,
                           namespaceProperty,
                           ingressDomain,
                           exportToPrometheus,
@@ -146,8 +128,6 @@ type LoadgenOptions(kubeConfig: string,
                     numNodes: int,
                     logDebugPartitions: seq<string>,
                     logTracePartitions: seq<string>,
-                    containerMaxCpuMili: int,
-                    containerMaxMemMebi: int,
                     namespaceProperty: string option,
                     ingressDomain: string,
                     exportToPrometheus: bool,
@@ -158,8 +138,6 @@ type LoadgenOptions(kubeConfig: string,
                           numNodes,
                           logDebugPartitions,
                           logTracePartitions,
-                          containerMaxCpuMili,
-                          containerMaxMemMebi,
                           namespaceProperty,
                           ingressDomain,
                           exportToPrometheus,
@@ -173,8 +151,6 @@ type MissionOptions(kubeConfig: string,
                     numNodes: int,
                     logDebugPartitions: seq<string>,
                     logTracePartitions: seq<string>,
-                    containerMaxCpuMili: int,
-                    containerMaxMemMebi: int,
                     namespaceProperty: string option,
                     ingressDomain: string,
                     exportToPrometheus: bool,
@@ -208,14 +184,6 @@ type MissionOptions(kubeConfig: string,
 
     [<Option("trace", HelpText="Log-partitions to set to 'trace' level")>]
     member self.LogTracePartitions = logTracePartitions
-
-    [<Option("container-max-cpu-mili", HelpText="Maximum per-container CPU (in mili-CPUs)",
-             Required = false, Default = 0)>]
-    member self.ContainerMaxCpuMili = containerMaxCpuMili
-
-    [<Option("container-max-mem-mebi", HelpText="Maximum per-container memory (in MB)",
-             Required = false, Default = 0)>]
-    member self.ContainerMaxMemMebi = containerMaxMemMebi
 
     [<Option("namespace", HelpText="Namespace to use, overriding kubeconfig.",
              Required = false)>]
