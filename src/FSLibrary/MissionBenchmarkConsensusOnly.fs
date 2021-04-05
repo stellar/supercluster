@@ -17,7 +17,9 @@ let benchmarkConsensusOnly (context : MissionContext) =
                                                nodeCount = context.numNodes
                                                accelerateTime = false
                                                localHistory = false
-                                               simulateApplyUsec = 2000
+                                               simulateApplyUsec = if context.simulateApplyUsec.IsSome
+                                                                    then context.simulateApplyUsec.Value
+                                                                    else 2000
                                                maxSlotsToRemember = 24
                                                syncStartupDelay = Some(30)
                                                dumpDatabase = false }

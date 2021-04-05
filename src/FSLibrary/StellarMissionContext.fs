@@ -43,4 +43,7 @@ type MissionContext =
       probeTimeout : int
       coreResources : CoreResources
       keepData : bool
-      apiRateLimit: int }
+      apiRateLimit: int
+      installNetworkDelay: bool option
+      simulateApplyUsec: int option
+      networkSizeLimit: int }

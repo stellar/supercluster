@@ -201,7 +201,10 @@ type NetworkCfg with
 
     member self.NeedNetworkDelayScript : bool =
         let firstLoc = Map.tryPick (fun _ cs -> cs.options.nodeLocs) self.coreSets
-        firstLoc.IsSome
+        // firstLoc.IsSome is about whether it's possible to install network delays.
+        // installNetworkDelay is about whether we want install network delays.
+        // We should install network delays iff we can and we want to do so.
+        (self.missionContext.installNetworkDelay = Some true) && firstLoc.IsSome
 
     member self.NetworkDelayScript (cs:CoreSet) (i:int) : ShCmd =
         match cs.options.nodeLocs with

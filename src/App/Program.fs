@@ -190,7 +190,10 @@ type MissionOptions(kubeConfig: string,
                     spikeSize: int,
                     spikeInterval: int,
                     keepData: bool,
-                    apiRateLimit: int) =
+                    apiRateLimit: int,
+                    installNetworkDelay: bool option,
+                    simulateApplyUsec: int option,
+                    networkSizeLimit: int) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file",
              Required = false, Default = "~/.kube/config")>]
@@ -276,6 +279,18 @@ type MissionOptions(kubeConfig: string,
              Required = false, Default = 10)>]
     member self.ApiRateLimit = apiRateLimit
 
+    [<Option("install-network-delay", HelpText="Installs network delay estimated from node locations",
+             Required = false)>]
+    member self.InstallNetworkDelay = installNetworkDelay
+
+    [<Option("simulate-apply-usec", HelpText="how much to sleep for in simulation (See --simulate-apply-per-op.)",
+             Required = false)>]
+    member self.SimulateApplyUsec = simulateApplyUsec
+
+    [<Option("network-size-limit", HelpText="The number of nodes to run in SimulatePubnet",
+             Required = false, Default = 100)>]
+    member self.NetworkSizeLimit = networkSizeLimit
+
 
 
 [<Verb("poll", HelpText="Poll a running stellar-core cluster for status")>]
@@ -336,6 +351,9 @@ let main argv =
           coreResources = SmallTestResources
           keepData = false
           apiRateLimit = setup.ApiRateLimit
+          installNetworkDelay = None
+          simulateApplyUsec = None
+          networkSizeLimit = 100
       }
       let nCfg = MakeNetworkCfg ctx [coreSet] None
       use formation = kube.MakeFormation nCfg
@@ -367,6 +385,9 @@ let main argv =
           coreResources = SmallTestResources
           keepData = false
           apiRateLimit = clean.ApiRateLimit
+          installNetworkDelay = None
+          simulateApplyUsec = None
+          networkSizeLimit = 0
       }
       let nCfg = MakeNetworkCfg ctx [] None
       use formation = kube.MakeEmptyFormation nCfg
@@ -399,6 +420,9 @@ let main argv =
           coreResources = SmallTestResources
           keepData = false
           apiRateLimit = loadgen.ApiRateLimit
+          installNetworkDelay = None
+          simulateApplyUsec = None
+          networkSizeLimit = 0
       }
       let nCfg = MakeNetworkCfg ctx [coreSet] None
       use formation = kube.MakeFormation nCfg
@@ -464,7 +488,10 @@ let main argv =
                                                probeTimeout = mission.ProbeTimeout
                                                coreResources = SmallTestResources
                                                keepData = mission.KeepData
-                                               apiRateLimit = mission.ApiRateLimit }
+                                               apiRateLimit = mission.ApiRateLimit
+                                               installNetworkDelay = mission.InstallNetworkDelay
+                                               simulateApplyUsec = mission.SimulateApplyUsec
+                                               networkSizeLimit = mission.NetworkSizeLimit }
                         allMissions.[m] missionContext
                     with
                     // The exception handling below is required even if we weren't logging.

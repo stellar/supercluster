@@ -10,6 +10,7 @@ open stellar_dotnet_sdk
 open StellarCoreSet
 open StellarCoreCfg
 open StellarMissionContext
+open Logging
 
 type HistoryArchiveState = JsonProvider<"json-type-samples/sample-stellar-history.json", ResolutionFolder=__SOURCE_DIRECTORY__>
 let PubnetLatestHistoryArchiveState = "http://history.stellar.org/prd/core-live/core_live_001/.well-known/stellar-history.json"
@@ -18,7 +19,7 @@ let TestnetLatestHistoryArchiveState = "http://history.stellar.org/prd/core-test
 type PubnetNode = JsonProvider<"json-pubnet-data/public-network-data-2021-01-05.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
 type Tier1PublicKey = JsonProvider<"json-pubnet-data/tier1keys.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
 
-let FullPubnetCoreSets (image:string) (manualclose:bool) (networkSizeLimit:int) : CoreSet list =
+let FullPubnetCoreSets (context:MissionContext) (manualclose:bool) : CoreSet list =
     // Our dataset is the samples used to build the datatype: json-pubnet-data/nodes.json
     let allPubnetNodes : PubnetNode.Root array = PubnetNode.GetSamples()
 
@@ -56,15 +57,17 @@ let FullPubnetCoreSets (image:string) (manualclose:bool) (networkSizeLimit:int) 
         begin
             let numOrgNodes = Array.length orgNodes
             let numMiscNodes = Array.length miscNodes
-            let _ = if numOrgNodes > networkSizeLimit
+            let _ = if numOrgNodes > context.networkSizeLimit
                     then failwith "simulated network size limit too small to fit org nodes"
-            let takeMiscNodes = min (networkSizeLimit - numOrgNodes) numMiscNodes
+            let takeMiscNodes = min (context.networkSizeLimit - numOrgNodes) numMiscNodes
             Array.take takeMiscNodes miscNodes
         end
     let allPubnetNodes = Array.append orgNodes miscNodes
-    let _ = assert ((Array.length allPubnetNodes) <= networkSizeLimit)
+    let _ = assert ((Array.length allPubnetNodes) <= context.networkSizeLimit)
     let allPubnetNodeKeys = Array.map (fun (n:PubnetNode.Root) -> n.PublicKey) allPubnetNodes
                             |> Set.ofArray
+
+    LogInfo "SimulatePubnet will run with %d nodes" (Array.length allPubnetNodes)
 
     // We then group the org nodes by their home domains. The domain names are drawn
     // from the HomeDomains of the public network but with periods replaced with dashes,
@@ -159,14 +162,16 @@ let FullPubnetCoreSets (image:string) (manualclose:bool) (networkSizeLimit:int) 
                         then qsetOfNodeQset q else defaultQuorum
             | None -> defaultQuorum
 
-    let pubnetOpts = { CoreSetOptions.GetDefault image with
+    let pubnetOpts = { CoreSetOptions.GetDefault context.image with
                          accelerateTime = false
                          historyNodes = Some([])
                          // We need to use a synchronized startup delay
                          // for networks as large as this, otherwise it loses
                          // sync before all the nodes are online.
                          syncStartupDelay = Some(30)
-                         simulateApplyUsec = 1200
+                         // When no value is given, use 1200 usec as the default value.
+                         simulateApplyUsec = if context.simulateApplyUsec.IsSome
+                                              then context.simulateApplyUsec.Value else 1200
                          dumpDatabase = false }
 
     // Sorted list of known geolocations.
