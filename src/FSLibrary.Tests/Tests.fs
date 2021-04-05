@@ -47,6 +47,9 @@ let ctx : MissionContext =
     coreResources = SmallTestResources
     keepData = true
     apiRateLimit = 10
+    installNetworkDelay = Some true
+    simulateApplyUsec = Some 1200
+    networkSizeLimit = 100
   }
 
 let nCfg = MakeNetworkCfg ctx [coreSet] passOpt
@@ -125,8 +128,7 @@ type Tests(output:ITestOutputHelper) =
 
     [<Fact>]
     member __.``Public network conversion looks reasonable`` () =
-        let maxNetworkSize = 100
-        let coreSets = FullPubnetCoreSets "stellar/stellar-core" false maxNetworkSize
+        let coreSets = FullPubnetCoreSets ctx false
         let nCfg = MakeNetworkCfg ctx coreSets passOpt
         let sdfCoreSetName = CoreSetName "www-stellar-org"
         Assert.Contains(coreSets, fun cs -> cs.name = sdfCoreSetName)
@@ -305,7 +307,7 @@ type Tests(output:ITestOutputHelper) =
 
     [<Fact>]
     member __.``Public network delay commands are reasonable`` () =
-        let allCoreSets = FullPubnetCoreSets ctx.image true 100
+        let allCoreSets = FullPubnetCoreSets ctx true
         let fullNetCfg = MakeNetworkCfg ctx allCoreSets passOpt
         let sdf = List.find (fun (cs:CoreSet) -> cs.name.StringName = "www-stellar-org") allCoreSets
         let delayCmd = fullNetCfg.NetworkDelayScript sdf 0
