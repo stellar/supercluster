@@ -46,6 +46,7 @@ type MissionContext =
       probeTimeout : int
       coreResources : CoreResources
       keepData : bool
+      unevenSched: bool
       apiRateLimit: int
       installNetworkDelay: bool option
       simulateApplyUsec: int option

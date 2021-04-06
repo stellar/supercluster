@@ -424,11 +424,16 @@ type NetworkCfg with
                     | Postgres -> [| coreContainer; PostgresContainer |]
                     | _ -> [| coreContainer |]
 
+        let (affinity, topologyConstraints) =
+            if self.missionContext.unevenSched
+            then (V1Affinity(), [||])
+            else (workerAffinity, evenTopologyConstraints)
+
         V1PodTemplateSpec
                 (spec = V1PodSpec (containers = containers,
                                    volumes = [| jobCfgVol; dataVol |],
-                                   topologySpreadConstraints = evenTopologyConstraints,
-                                   affinity = workerAffinity,
+                                   topologySpreadConstraints = topologyConstraints,
+                                   affinity = affinity,
                                    restartPolicy = "Never",
                                    shareProcessNamespace = System.Nullable<bool>(true)),
                  metadata = V1ObjectMeta(labels = CfgVal.labels,
@@ -529,12 +534,17 @@ type NetworkCfg with
             if exportToPrometheus
             then Map.ofList [("prometheus.io/scrape", "true")]
             else Map.empty
+        let (affinity, topologyConstraints) =
+            if self.missionContext.unevenSched
+            then (V1Affinity(), [||])
+            else (workerAffinity, evenTopologyConstraints)
         let podSpec =
             V1PodSpec
                 (containers = containers,
-                 topologySpreadConstraints = evenTopologyConstraints,
-                 affinity = workerAffinity,
+                 topologySpreadConstraints = topologyConstraints,
+                 affinity = affinity,
                  volumes = volumes)
+
         V1PodTemplateSpec
                 (spec = podSpec,
                  metadata = V1ObjectMeta(labels = CfgVal.labels,

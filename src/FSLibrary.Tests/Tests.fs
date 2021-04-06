@@ -49,6 +49,7 @@ let ctx : MissionContext =
     probeTimeout = 10
     coreResources = SmallTestResources
     keepData = true
+    unevenSched = false
     apiRateLimit = 10
     installNetworkDelay = Some true
     simulateApplyUsec = Some 1200

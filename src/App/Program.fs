@@ -59,6 +59,7 @@ type MissionOptions(kubeConfig: string,
                     spikeSize: int,
                     spikeInterval: int,
                     keepData: bool,
+                    unevenSched: bool,
                     apiRateLimit: int,
                     installNetworkDelay: bool option,
                     simulateApplyUsec: int option,
@@ -148,6 +149,10 @@ type MissionOptions(kubeConfig: string,
              Required = false, Default = false)>]
     member self.KeepData = keepData
 
+    [<Option("uneven-sched", HelpText="Do not attempt to constrain scheduling evenly across worker nodes",
+             Required = false, Default = false)>]
+    member self.UnevenSched = unevenSched
+
     [<Option("api-rate-limit", HelpText="Limit of kubernetes API requests per second to make",
              Required = false, Default = 10)>]
     member self.ApiRateLimit = apiRateLimit
@@ -224,6 +229,7 @@ let main argv =
           probeTimeout = 5
           coreResources = SmallTestResources
           keepData = false
+          unevenSched = true
           apiRateLimit = 30
           installNetworkDelay = None
           simulateApplyUsec = None
@@ -295,6 +301,7 @@ let main argv =
                                                probeTimeout = mission.ProbeTimeout
                                                coreResources = SmallTestResources
                                                keepData = mission.KeepData
+                                               unevenSched = mission.UnevenSched
                                                apiRateLimit = mission.ApiRateLimit
                                                installNetworkDelay = mission.InstallNetworkDelay
                                                simulateApplyUsec = mission.SimulateApplyUsec
