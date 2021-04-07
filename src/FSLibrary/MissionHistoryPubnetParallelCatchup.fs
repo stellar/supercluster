@@ -15,19 +15,22 @@ open StellarSupercluster
 
 let historyPubnetParallelCatchup (context : MissionContext) =
     let context = { context with coreResources = ParallelCatchupResources }
+
     let checkpointsPerJob = 250
     let ledgersPerCheckpoint = 64
-    let ledgersPerJob = checkpointsPerJob * ledgersPerCheckpoint  // 16,000
-    let totalLedgers = GetLatestPubnetLedgerNumber()              // ~30 million ish
-    let numJobs = (totalLedgers / ledgersPerJob)                  // 1800 ish
+    let latestLedgerNum = GetLatestPubnetLedgerNumber()
+    let ledgersPerJob = checkpointsPerJob * ledgersPerCheckpoint
+    let startingLedger  = max context.pubnetParallelCatchupStartingLedger ledgersPerJob
+    let totalLedgers = latestLedgerNum - startingLedger
+    let numJobs = max (totalLedgers / ledgersPerJob) 1
     let parallelism = 84
     let overlapCheckpoints = 5
     let overlapLedgers = overlapCheckpoints * ledgersPerCheckpoint
 
-    LogInfo "Running %d jobs (%d-way parallel) of %d checkpoints each, to catch up to ledger %d"
-            numJobs parallelism checkpointsPerJob totalLedgers
+    LogInfo "Running %d jobs (%d-way parallel) of %d checkpoints each, to catch up to ledger %d starting from %d"
+            numJobs parallelism checkpointsPerJob latestLedgerNum startingLedger
 
-    let catchupRangeStr i = sprintf "%d/%d" ((i+1) * ledgersPerJob) (ledgersPerJob + overlapLedgers)
+    let catchupRangeStr i = sprintf "%d/%d" ((i) * ledgersPerJob + startingLedger) (ledgersPerJob + overlapLedgers)
     let jobArr = Array.init numJobs (fun i -> [| "catchup"; catchupRangeStr i|])
     let opts = { PubnetCoreSetOptions context.image with
                      localHistory = false

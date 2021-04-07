@@ -46,4 +46,5 @@ type MissionContext =
       apiRateLimit: int
       installNetworkDelay: bool option
       simulateApplyUsec: int option
-      networkSizeLimit: int }
+      networkSizeLimit: int
+      pubnetParallelCatchupStartingLedger: int}

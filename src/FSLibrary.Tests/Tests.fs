@@ -50,6 +50,7 @@ let ctx : MissionContext =
     installNetworkDelay = Some true
     simulateApplyUsec = Some 1200
     networkSizeLimit = 100
+    pubnetParallelCatchupStartingLedger = 0
   }
 
 let nCfg = MakeNetworkCfg ctx [coreSet] passOpt
