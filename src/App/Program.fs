@@ -59,7 +59,8 @@ type MissionOptions(kubeConfig: string,
                     apiRateLimit: int,
                     installNetworkDelay: bool option,
                     simulateApplyUsec: int option,
-                    networkSizeLimit: int) =
+                    networkSizeLimit: int,
+                    pubnetParallelCatchupStartingLedger: int) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file",
              Required = false, Default = "~/.kube/config")>]
@@ -149,6 +150,10 @@ type MissionOptions(kubeConfig: string,
              Required = false, Default = 100)>]
     member self.NetworkSizeLimit = networkSizeLimit
 
+    [<Option("pubnet-parallel-catchup-starting-ledger", HelpText="starting ledger to run parallel catchup on",
+             Required = false, Default = 0)>]
+    member self.PubnetParallelCatchupStartingLedger = pubnetParallelCatchupStartingLedger
+
 
 
 [<EntryPoint>]
@@ -210,6 +215,7 @@ let main argv =
           installNetworkDelay = None
           simulateApplyUsec = None
           networkSizeLimit = 0
+          pubnetParallelCatchupStartingLedger = 0
       }
       let nCfg = MakeNetworkCfg ctx [] None
       use formation = kube.MakeEmptyFormation nCfg
@@ -277,7 +283,8 @@ let main argv =
                                                apiRateLimit = mission.ApiRateLimit
                                                installNetworkDelay = mission.InstallNetworkDelay
                                                simulateApplyUsec = mission.SimulateApplyUsec
-                                               networkSizeLimit = mission.NetworkSizeLimit }
+                                               networkSizeLimit = mission.NetworkSizeLimit
+                                               pubnetParallelCatchupStartingLedger = mission.PubnetParallelCatchupStartingLedger }
                         allMissions.[m] missionContext
                     with
                     // The exception handling below is required even if we weren't logging.
