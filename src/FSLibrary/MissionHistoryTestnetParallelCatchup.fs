@@ -27,7 +27,15 @@ let historyTestnetParallelCatchup (context : MissionContext) =
             numJobs parallelism checkpointsPerJob totalLedgers
 
     let catchupRangeStr i = sprintf "%d/%d" ((i+1) * ledgersPerJob) (ledgersPerJob + overlapLedgers)
-    let jobArr = Array.init numJobs (fun i -> [| "catchup"; catchupRangeStr i|])
+    let mutable jobArr = Array.init numJobs (fun i -> [| "catchup"; catchupRangeStr i|])
+
+    //figure out if there is a gap between the latest ledger, and the latest range we have calculated
+    let gap = totalLedgers - (numJobs  * ledgersPerJob)
+    if gap > 0
+    then 
+        let finalRange = sprintf "%d/%d" (totalLedgers) (gap + overlapLedgers)
+        jobArr <- Array.append [|[| "catchup"; finalRange|]|] jobArr
+
     let opts = { TestnetCoreSetOptions context.image with
                      localHistory = false
                      initialization = CoreSetInitialization.OnlyNewDb }
