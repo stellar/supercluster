@@ -31,7 +31,15 @@ let historyPubnetParallelCatchup (context : MissionContext) =
             numJobs parallelism checkpointsPerJob latestLedgerNum startingLedger
 
     let catchupRangeStr i = sprintf "%d/%d" ((i) * ledgersPerJob + startingLedger) (ledgersPerJob + overlapLedgers)
-    let jobArr = Array.init numJobs (fun i -> [| "catchup"; catchupRangeStr i|])
+    let mutable jobArr = Array.init numJobs (fun i -> [| "catchup"; catchupRangeStr i|])
+    
+    //figure out if there is a gap between the latest ledger, and the latest range we have calculated
+    let gap = latestLedgerNum - ((numJobs - 1) * ledgersPerJob + startingLedger)
+    if gap > 0
+    then 
+        let finalRange = sprintf "%d/%d" (latestLedgerNum) (gap + overlapLedgers)
+        jobArr <- Array.append [|[| "catchup"; finalRange|]|] jobArr
+    
     let opts = { PubnetCoreSetOptions context.image with
                      localHistory = false
                      initialization = CoreSetInitialization.OnlyNewDb }
