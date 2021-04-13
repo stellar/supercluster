@@ -34,4 +34,5 @@ let simulatePubnet (context : MissionContext) =
 
         formation.RunLoadgen sdf context.GenerateAccountCreationLoad
         formation.RunLoadgen sdf context.GeneratePaymentLoad
+        formation.EnsureAllNodesInSync fullCoreSet
     )
