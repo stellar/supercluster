@@ -42,7 +42,10 @@ type MissionOptions(kubeConfig: string,
                     logDebugPartitions: seq<string>,
                     logTracePartitions: seq<string>,
                     namespaceProperty: string option,
-                    ingressDomain: string,
+                    ingressClass: string,
+                    ingressInternalDomain: string,
+                    ingressExternalHost: string option,
+                    ingressExternalPort: int,
                     exportToPrometheus: bool,
                     probeTimeout: int,
                     missions: string seq,
@@ -56,6 +59,7 @@ type MissionOptions(kubeConfig: string,
                     spikeSize: int,
                     spikeInterval: int,
                     keepData: bool,
+                    unevenSched: bool,
                     apiRateLimit: int,
                     installNetworkDelay: bool option,
                     simulateApplyUsec: int option,
@@ -80,9 +84,21 @@ type MissionOptions(kubeConfig: string,
              Required = false)>]
     member self.NamespaceProperty = namespaceProperty
 
-    [<Option("ingress-domain", HelpText="Domain in which to configure ingress host",
+    [<Option("ingress-class", HelpText="Value for kubernetes.io/ingress.class, on ingress",
+             Required = false, Default = "private")>]
+    member self.IngressClass = ingressClass
+
+    [<Option("ingress-internal-domain", HelpText="Cluster-internal DNS domain in which to configure ingress",
              Required = false, Default = "local")>]
-    member self.IngressDomain = ingressDomain
+    member self.IngressInternalDomain = ingressInternalDomain
+
+    [<Option("ingress-external-host", HelpText="Cluster-external hostname to connect to for access to ingress",
+             Required = false)>]
+    member self.IngressExternalHost = ingressExternalHost
+
+    [<Option("ingress-external-port", HelpText="Cluster-external port to connect to for access to ingress",
+             Required = false, Default = 80)>]
+    member self.IngressExternalPort = ingressExternalPort
 
     [<Option("export-to-prometheus", HelpText="Whether to export core metrics to prometheus")>]
     member self.ExportToPrometheus : bool = exportToPrometheus
@@ -133,6 +149,10 @@ type MissionOptions(kubeConfig: string,
     [<Option("keep-data", HelpText="Keeps namespaces and persistent volumes after mission fails",
              Required = false, Default = false)>]
     member self.KeepData = keepData
+
+    [<Option("uneven-sched", HelpText="Do not attempt to constrain scheduling evenly across worker nodes",
+             Required = false, Default = false)>]
+    member self.UnevenSched = unevenSched
 
     [<Option("api-rate-limit", HelpText="Limit of kubernetes API requests per second to make",
              Required = false, Default = 10)>]
@@ -206,11 +226,15 @@ let main argv =
           numNodes = 3
           namespaceProperty = ns
           logLevels = ll
-          ingressDomain = "local"
+          ingressClass = "private"
+          ingressInternalDomain = "local"
+          ingressExternalHost = None
+          ingressExternalPort = 80
           exportToPrometheus = false
           probeTimeout = 5
           coreResources = SmallTestResources
           keepData = false
+          unevenSched = true
           apiRateLimit = 30
           installNetworkDelay = None
           simulateApplyUsec = None
@@ -275,11 +299,15 @@ let main argv =
                                                numNodes = mission.NumNodes
                                                namespaceProperty = ns
                                                logLevels = ll
-                                               ingressDomain = mission.IngressDomain
+                                               ingressClass = mission.IngressClass
+                                               ingressInternalDomain = mission.IngressInternalDomain
+                                               ingressExternalHost = mission.IngressExternalHost
+                                               ingressExternalPort = mission.IngressExternalPort
                                                exportToPrometheus = mission.ExportToPrometheus
                                                probeTimeout = mission.ProbeTimeout
                                                coreResources = SmallTestResources
                                                keepData = mission.KeepData
+                                               unevenSched = mission.UnevenSched
                                                apiRateLimit = mission.ApiRateLimit
                                                installNetworkDelay = mission.InstallNetworkDelay
                                                simulateApplyUsec = mission.SimulateApplyUsec

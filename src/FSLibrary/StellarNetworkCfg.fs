@@ -111,8 +111,13 @@ type NetworkCfg =
                     self.NamespaceProperty
         PeerDnsName s
 
-    member self.IngressHostName : string =
-        sprintf "%s.%s" self.Nonce self.missionContext.ingressDomain
+    member self.IngressInternalHostName : string =
+        sprintf "%s.%s" self.Nonce self.missionContext.ingressInternalDomain
+
+    member self.IngressExternalHostName : string =
+        match self.missionContext.ingressExternalHost with
+        | None -> self.IngressInternalHostName
+        | Some h -> h
 
     member self.WithLive name (live: bool) =
         let coreSet = self.FindCoreSet(name).WithLive live

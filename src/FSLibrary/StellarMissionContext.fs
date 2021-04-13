@@ -38,11 +38,15 @@ type MissionContext =
       numNodes : int
       namespaceProperty : string
       logLevels: LogLevels
-      ingressDomain : string
+      ingressClass : string
+      ingressInternalDomain : string
+      ingressExternalHost: string option
+      ingressExternalPort: int
       exportToPrometheus : bool
       probeTimeout : int
       coreResources : CoreResources
       keepData : bool
+      unevenSched: bool
       apiRateLimit: int
       installNetworkDelay: bool option
       simulateApplyUsec: int option

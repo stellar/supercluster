@@ -236,6 +236,21 @@ let WithLivenessProbe (container:V1Container) (probeTimeout:int) : V1Container =
     container.LivenessProbe <- liveProbe
     container
 
+let evenTopologyConstraints : V1TopologySpreadConstraint array =
+    [| V1TopologySpreadConstraint(
+                            maxSkew=1,
+                            topologyKey="kubernetes.io/hostname",
+                            whenUnsatisfiable = "DoNotSchedule",
+                            labelSelector = V1LabelSelector(matchLabels = CfgVal.labels)) |]
+
+let workerAffinity : V1Affinity =
+    let req = V1NodeSelectorRequirement(key="node-role.kubernetes.io/master",
+                                        operatorProperty="DoesNotExist")
+    let terms = [| V1NodeSelectorTerm(matchExpressions=[|req|]) |]
+    let sel = V1NodeSelector(nodeSelectorTerms = terms)
+    let na = V1NodeAffinity(requiredDuringSchedulingIgnoredDuringExecution = sel)
+    V1Affinity(nodeAffinity = na)
+
 // Extend NetworkCfg type with methods for producing various Kubernetes objects.
 type NetworkCfg with
 
@@ -409,9 +424,16 @@ type NetworkCfg with
                     | Postgres -> [| coreContainer; PostgresContainer |]
                     | _ -> [| coreContainer |]
 
+        let (affinity, topologyConstraints) =
+            if self.missionContext.unevenSched
+            then (V1Affinity(), [||])
+            else (workerAffinity, evenTopologyConstraints)
+
         V1PodTemplateSpec
                 (spec = V1PodSpec (containers = containers,
                                    volumes = [| jobCfgVol; dataVol |],
+                                   topologySpreadConstraints = topologyConstraints,
+                                   affinity = affinity,
                                    restartPolicy = "Never",
                                    shareProcessNamespace = System.Nullable<bool>(true)),
                  metadata = V1ObjectMeta(labels = CfgVal.labels,
@@ -512,10 +534,17 @@ type NetworkCfg with
             if exportToPrometheus
             then Map.ofList [("prometheus.io/scrape", "true")]
             else Map.empty
+        let (affinity, topologyConstraints) =
+            if self.missionContext.unevenSched
+            then (V1Affinity(), [||])
+            else (workerAffinity, evenTopologyConstraints)
         let podSpec =
             V1PodSpec
                 (containers = containers,
+                 topologySpreadConstraints = topologyConstraints,
+                 affinity = affinity,
                  volumes = volumes)
+
         V1PodTemplateSpec
                 (spec = podSpec,
                  metadata = V1ObjectMeta(labels = CfgVal.labels,
@@ -602,13 +631,13 @@ type NetworkCfg with
         let corePaths = self.MapAllPeers corePath
         let historyPaths = self.MapAllPeers historyPath
         let rule = Extensionsv1beta1HTTPIngressRuleValue(paths = Array.concat [corePaths; historyPaths])
-        let host = self.IngressHostName
+        let host = self.IngressInternalHostName
         let rules = [|Extensionsv1beta1IngressRule(
                         host = host,
                         http = rule)|]
         let spec = Extensionsv1beta1IngressSpec(rules = rules)
         let annotation = Map.ofArray [|("traefik.ingress.kubernetes.io/rule-type", "PathPrefixStrip");
-                                       ("kubernetes.io/ingress.class", "private")|]
+                                       ("kubernetes.io/ingress.class", self.missionContext.ingressClass)|]
         let meta = V1ObjectMeta(name = self.IngressName,
                                 namespaceProperty = self.NamespaceProperty,
                                 annotations = annotation)

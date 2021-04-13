@@ -143,29 +143,38 @@ exception NodeLostSyncException of string
 
 type Peer with
 
+    member self.Headers =
+        let host = self.networkCfg.IngressInternalHostName
+        [HttpRequestHeaders.Host host]
+
     member self.URL (path:string) : string =
-        sprintf "http://%s/%s/core/%s"
-            self.networkCfg.IngressHostName
+        sprintf "http://%s:%d/%s/core/%s"
+            self.networkCfg.IngressExternalHostName
+            self.networkCfg.missionContext.ingressExternalPort
             self.PodName.StringName
             path
 
+    member self.fetch (path:string) : string =
+        let url = self.URL path
+        Http.RequestString(url, headers=self.Headers)
+
     member self.GetState() =
         WebExceptionRetry DefaultRetry
-            (fun _ -> Info.Load(self.URL "info").Info.State)
+            (fun _ -> Info.Parse(self.fetch "info").Info.State)
 
     member self.GetStatusOrState() : string =
         WebExceptionRetry DefaultRetry
             (fun _ ->
-             let i = Info.Load(self.URL "info").Info
+             let i = Info.Parse(self.fetch "info").Info
              if i.Status.Length = 0 then i.State else i.Status.[0] )
 
     member self.GetMetrics() : Metrics.Metrics =
         WebExceptionRetry DefaultRetry
-            (fun _ -> Metrics.Load(self.URL "metrics").Metrics)
+            (fun _ -> Metrics.Parse(self.fetch "metrics").Metrics)
 
     member self.GetInfo() : Info.Info =
         WebExceptionRetry DefaultRetry
-            (fun _ -> Info.Load(self.URL "info").Info)
+            (fun _ -> Info.Parse(self.fetch "info").Info)
 
     member self.GetLedgerNum() : int =
         self.GetInfo().Ledger.Num
@@ -184,6 +193,7 @@ type Peer with
             WebExceptionRetry DefaultRetry
                 (fun _ -> Http.RequestString(httpMethod="GET",
                                              url=self.URL "upgrades",
+                                             headers=self.Headers,
                                              query=upgrades.ToQuery))
         if res.ToLower().Contains("exception")
         then raise (PeerRejectedUpgradesException res)
@@ -309,6 +319,7 @@ type Peer with
     member self.ClearMetrics() =
         WebExceptionRetry DefaultRetry
             (fun _ -> Http.RequestString(httpMethod="GET",
+                                         headers=self.Headers,
                                          url=self.URL "clearmetrics")) |> ignore
 
     member self.GetTestAcc (accName:string) : TestAcc.Root =
@@ -317,6 +328,7 @@ type Peer with
         let s = WebExceptionRetry DefaultRetry
                     (fun _ -> Http.RequestString(httpMethod = "GET",
                                                  url = self.URL("testacc"),
+                                                 headers=self.Headers,
                                                  query = [("name", accName)]))
         TestAcc.Parse(if s.Trim().StartsWith("null") then "{}" else s)
 
@@ -333,11 +345,13 @@ type Peer with
     member self.GenerateLoad (loadGen: LoadGen) : string =
         WebExceptionRetry DefaultRetry
             (fun _ -> Http.RequestString(httpMethod="GET",
+                                         headers=self.Headers,
                                          url=self.URL "generateload",
                                          query=loadGen.ToQuery))
     member self.ManualClose() =
         WebExceptionRetry DefaultRetry
             (fun _ -> Http.RequestString(httpMethod="GET",
+                                         headers=self.Headers,
                                          url = self.URL "manualclose")) |> ignore
 
     member self.SubmitSignedTransaction (tx:Transaction) : Tx.Root =
@@ -350,6 +364,9 @@ type Peer with
                      LogDebug "Submitting transaction: %s" uri
                      let req = System.Net.WebRequest.CreateHttp uri
                      req.Method <- "GET"
+                     let hdrs = System.Net.WebHeaderCollection()
+                     hdrs.Add(System.Net.HttpRequestHeader.Host, self.networkCfg.IngressInternalHostName)
+                     req.Headers <- hdrs
                      use stream = req.GetResponse().GetResponseStream()
                      use reader = new System.IO.StreamReader(stream)
                      reader.ReadToEnd())
