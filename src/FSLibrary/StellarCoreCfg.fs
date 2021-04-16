@@ -121,7 +121,7 @@ type StellarCoreCfg =
       historyGetCommands : Map<PeerShortName, string>
       localHistory: bool
       maxSlotsToRemember: int
-      maxBatchWriteCount: int}
+      maxBatchWriteCount: int }
 
     member self.ToTOML() : TomlTable =
         let t = Toml.Create()
@@ -172,6 +172,12 @@ type StellarCoreCfg =
         t.Add("AUTOMATIC_MAINTENANCE_COUNT", self.automaticMaintenanceCount) |> ignore
         t.Add("ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING", self.accelerateTime) |> ignore
         t.Add("ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING", self.generateLoad) |> ignore
+        match self.network.missionContext.simulateApplyWeight, self.network.missionContext.simulateApplyDuration with
+            | None, None -> ()
+            | Some weight, Some duration ->
+                t.Add("OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING", duration) |> ignore
+                t.Add("OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING", weight) |> ignore
+            | _, _ -> raise (System.ArgumentException "simulate-apply-weight and simulate-apply-duration must be defined together")
 
         let n = self.preferredPeers.Length
         t.Add("TARGET_PEER_CONNECTIONS", self.targetPeerConnections) |> ignore
@@ -200,12 +206,12 @@ type StellarCoreCfg =
         addQsetAt "QUORUM_SET" self.quorumSet
 
         let localTab = t.Add("HISTORY", Toml.Create(), TomlObjectFactory.RequireTomlObject()).Added
-        // When simulateApplyUsec > 0, stellar-core sets MODE_STORES_HISTORY
+        // When simulateApplyWeight = Some _, stellar-core sets MODE_STORES_HISTORY
         // which is used for simulations that only test consensus.
         // In such cases, we should not pass put and mkdir commands.
         if self.localHistory
             then localTab.Add(CfgVal.localHistName,
-                              if self.network.CoreSetList.[0].options.simulateApplyUsec > 0
+                              if self.network.missionContext.simulateApplyWeight.IsSome
                                   then histGetOnly else defaultHist) |> ignore
         for historyNode in self.historyNodes do
             localTab.Add(historyNode.Key.StringName, remoteHist historyNode.Value) |> ignore

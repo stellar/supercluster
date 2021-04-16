@@ -53,7 +53,8 @@ let ctx : MissionContext =
     unevenSched = false
     apiRateLimit = 10
     installNetworkDelay = Some true
-    simulateApplyUsec = Some 1200
+    simulateApplyDuration = Some (seq {10; 100})
+    simulateApplyWeight = Some (seq {30; 70})
     networkSizeLimit = 100
     pubnetParallelCatchupStartingLedger = 0
   }
@@ -79,15 +80,24 @@ type Tests(output:ITestOutputHelper) =
         Assert.Contains("PREFERRED_PEERS = [\"" + peer0DNS + "\", \"" + peer1DNS + "\", \"" + peer2DNS + "\"]", toml)
         Assert.Contains("[HISTORY.test-0]", toml)
         Assert.Contains("\"curl -sf http://" + peer0DNS + "/{0} -o {1}\"", toml)
+        Assert.Contains("OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING = [10, 100]", toml)
+        Assert.Contains("OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING = [30, 70]", toml)
 
 
     [<Fact>]
     member __.``Core init commands look reasonable`` () =
-        let cmds = nCfg.getInitCommands PeerSpecificConfigFile coreSet.options
+        let nCfgWithoutSimulateApply = MakeNetworkCfg { ctx with simulateApplyWeight = None
+                                                                 simulateApplyDuration = None } [coreSet] passOpt
+        let cmds = nCfgWithoutSimulateApply.getInitCommands PeerSpecificConfigFile coreSet.options
         let cmdStr = ShAnd(cmds).ToString()
         let exp = "{ stellar-core new-db --conf \"/cfg-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core.cfg\" && " +
                     "{ stellar-core new-hist local --conf \"/cfg-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core.cfg\" || true; } && " +
                     "stellar-core force-scp --conf \"/cfg-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core.cfg\"; }"
+        Assert.Equal(exp, cmdStr)
+
+        let cmds = nCfg.getInitCommands PeerSpecificConfigFile coreSet.options
+        let cmdStr = ShAnd(cmds).ToString()
+        let exp = "{ ; }"
         Assert.Equal(exp, cmdStr)
 
     [<Fact>]

@@ -145,7 +145,6 @@ type CoreSetOptions =
       image : string
       initialization : CoreSetInitialization
       dumpDatabase: bool
-      simulateApplyUsec : int
       maxSlotsToRemember : int
       maxBatchWriteCount : int }
 
@@ -173,12 +172,8 @@ type CoreSetOptions =
         image = image
         initialization = CoreSetInitialization.Default
         dumpDatabase = true
-        simulateApplyUsec = 0
         maxSlotsToRemember = 12
         maxBatchWriteCount = 1024 }
-
-    member self.InConsensusOnlyMode (simulateApply:int) =
-        { self with simulateApplyUsec = simulateApply; initialization = CoreSetInitialization.NoInitCmds }
 
 type CoreSet =
     { name : CoreSetName

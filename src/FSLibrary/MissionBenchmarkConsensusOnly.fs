@@ -13,13 +13,14 @@ open StellarSupercluster
 
 
 let benchmarkConsensusOnly (context : MissionContext) =
+    let context = { context with
+                       // = 2000 usec 100% of the time
+                      simulateApplyDuration = Some (context.simulateApplyDuration |> Option.defaultValue (seq { 2000 }))
+                      simulateApplyWeight = Some (context.simulateApplyWeight |> Option.defaultValue (seq { 100 })) }
     let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.GetDefault context.image with
                                                nodeCount = context.numNodes
                                                accelerateTime = false
                                                localHistory = false
-                                               simulateApplyUsec = if context.simulateApplyUsec.IsSome
-                                                                    then context.simulateApplyUsec.Value
-                                                                    else 2000
                                                maxSlotsToRemember = 24
                                                syncStartupDelay = Some(30)
                                                dumpDatabase = false }

@@ -169,9 +169,6 @@ let FullPubnetCoreSets (context:MissionContext) (manualclose:bool) : CoreSet lis
                          // for networks as large as this, otherwise it loses
                          // sync before all the nodes are online.
                          syncStartupDelay = Some(30)
-                         // When no value is given, use 1200 usec as the default value.
-                         simulateApplyUsec = if context.simulateApplyUsec.IsSome
-                                              then context.simulateApplyUsec.Value else 1200
                          dumpDatabase = false }
 
     // Sorted list of known geolocations.
