@@ -41,8 +41,8 @@
     <Compile Include="MissionHistoryPubnetMinimumCatchup.fs" />
     <Compile Include="MissionSimulatePubnet.fs" />
     <Compile Include="MissionHistoryPubnetRecentCatchup.fs" />
-    <Compile Include="MissionHistoryPubnetCompleteCatchup.fs" />
     <Compile Include="MissionHistoryPubnetParallelCatchup.fs" />
+    <Compile Include="MissionHistoryPubnetCompleteCatchup.fs" />
     <Compile Include="MissionHistoryPubnetParallelCatchupExtrawide.fs" />
     <Compile Include="MissionHistoryPubnetPerformance.fs" />
     <Compile Include="MissionHistoryTestnetCompleteCatchup.fs" />

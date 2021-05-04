@@ -13,6 +13,7 @@ open StellarNetworkCfg
 open StellarKubeSpecs
 open StellarNetworkData
 open StellarNetworkDelays
+open MissionCatchupHelpers
 open Xunit.Abstractions
 open k8s
 
@@ -318,3 +319,29 @@ type Tests(output:ITestOutputHelper) =
         let delayCmd = fullNetCfg.NetworkDelayScript sdf 0
         let str = delayCmd.ToString()
         Assert.Matches(Regex("host -t A ssc-.*cluster.local"), str)
+
+
+    [<Fact>]
+    member __.``Parallel catchup ranges are reasonable`` () =
+
+        // startingLedger = 0
+        let jobArr1 = getCatchupRanges 5 0 19 1
+        Assert.Equal(4, jobArr1.Length)
+        Assert.Equal("4/6", jobArr1.[0].[1])
+        Assert.Equal("9/6", jobArr1.[1].[1])
+        Assert.Equal("14/6", jobArr1.[2].[1])
+        Assert.Equal("19/6", jobArr1.[3].[1])
+         
+        // next range would end at startingLedger(50), but it's 
+        // already contained in the previously calculated range (56/8)
+        let jobArr2 = getCatchupRanges 6 50 62 2
+        Assert.Equal(2, jobArr2.Length)
+        Assert.Equal("56/8", jobArr2.[0].[1])
+        Assert.Equal("62/8", jobArr2.[1].[1])
+
+
+        let jobArr3 = getCatchupRanges 5 50 61 1
+        Assert.Equal(3, jobArr3.Length)
+        Assert.Equal("51/6", jobArr3.[0].[1])
+        Assert.Equal("56/6", jobArr3.[1].[1])
+        Assert.Equal("61/6", jobArr3.[2].[1])
