@@ -109,3 +109,18 @@ let doCatchup (context: MissionContext) (formation: StellarFormation) (catchupSe
     let versionPeer = formation.NetworkCfg.GetPeer catchupSets.versionSet 0
     let version = versionPeer.GetSupportedProtocolVersion()
     doCatchupForVersion context formation catchupSets version
+
+
+let getCatchupRanges (ledgersPerJob : int) (startingLedger : int) (latestLedgerNum : int) (overlapLedgers : int) =
+    // we require some overlap
+    assert(overlapLedgers > 0)
+    
+    let mutable endRange = latestLedgerNum
+    let mutable ranges = [||]
+
+    while endRange > startingLedger do
+        let range = sprintf "%d/%d" (endRange) (ledgersPerJob + overlapLedgers)
+        ranges <- Array.append [|[| "catchup"; range|]|] ranges
+        endRange <- endRange - ledgersPerJob
+    
+    ranges
