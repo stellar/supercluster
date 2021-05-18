@@ -325,7 +325,7 @@ type NetworkCfg with
             let cmdAndArgs = (Array.map ShWord.OfStr
                                (Array.append [| CfgVal.stellarCoreBinPath |] args))
             ShCmd (Array.append cmdAndArgs cfgWords)
-        let nonSimulation = opts.simulateApplyUsec = 0
+        let nonSimulation = self.missionContext.simulateApplyWeight.IsNone
         let runCoreIf flag args = if flag && nonSimulation then Some (runCore args) else None 
 
         let ignoreError cmd : ShCmd Option = 
@@ -483,13 +483,8 @@ type NetworkCfg with
         let volumes = Array.append peerCfgVolumes [| dataVol; historyCfgVolume |]
         let initCommands = self.getInitCommands cfgOpt coreSet.options
 
+
         let runCmd = [| "run" |]
-        let runCmdWithOpts =
-            match coreSet.options.simulateApplyUsec with
-            | 0 -> runCmd
-            | _ ->
-                LogInfo "Setting --simulate-apply-per-op to %d (%s)" coreSet.options.simulateApplyUsec coreSet.name.StringName
-                Array.append runCmd [| "--simulate-apply-per-op"; coreSet.options.simulateApplyUsec.ToString() |]
 
         let firstProtocolWithDefaultForceSCP = 14
         let getCoreVersion (coreVersion: string) =
@@ -504,10 +499,10 @@ type NetworkCfg with
 
         let runCmdWithOpts =
             match coreSet.options.initialization.forceScp with
-            | true -> runCmdWithOpts
+            | true -> runCmd
             | false -> if (imageProtoVersion >= firstProtocolWithDefaultForceSCP)
-                       then Array.append runCmdWithOpts [| "--wait-for-consensus" |]
-                       else runCmdWithOpts
+                       then Array.append runCmd [| "--wait-for-consensus" |]
+                       else runCmd
 
         let usePostgres = (coreSet.options.dbType = Postgres)
         let exportToPrometheus = self.missionContext.exportToPrometheus

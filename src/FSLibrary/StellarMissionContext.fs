@@ -49,6 +49,7 @@ type MissionContext =
       unevenSched: bool
       apiRateLimit: int
       installNetworkDelay: bool option
-      simulateApplyUsec: int option
+      simulateApplyDuration: seq<int> option
+      simulateApplyWeight: seq<int> option
       networkSizeLimit: int
       pubnetParallelCatchupStartingLedger: int}

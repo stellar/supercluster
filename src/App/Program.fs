@@ -62,7 +62,8 @@ type MissionOptions(kubeConfig: string,
                     unevenSched: bool,
                     apiRateLimit: int,
                     installNetworkDelay: bool option,
-                    simulateApplyUsec: int option,
+                    simulateApplyDuration: seq<string>,
+                    simulateApplyWeight: seq<string>,
                     networkSizeLimit: int,
                     pubnetParallelCatchupStartingLedger: int) =
 
@@ -162,9 +163,13 @@ type MissionOptions(kubeConfig: string,
              Required = false)>]
     member self.InstallNetworkDelay = installNetworkDelay
 
-    [<Option("simulate-apply-usec", HelpText="how much to sleep for in simulation (See --simulate-apply-per-op.)",
+    [<Option("simulate-apply-duration", HelpText="A space-separated list of how much to sleep for in simulation (See OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING)",
              Required = false)>]
-    member self.SimulateApplyUsec = simulateApplyUsec
+    member self.SimulateApplyDuration = simulateApplyDuration
+
+    [<Option("simulate-apply-weight", HelpText="A space-separated indicating how often to sleep for a specified amount (See OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING)",
+             Required = false)>]
+    member self.SimulateApplyWeight = simulateApplyWeight
 
     [<Option("network-size-limit", HelpText="The number of nodes to run in SimulatePubnet",
              Required = false, Default = 100)>]
@@ -237,7 +242,8 @@ let main argv =
           unevenSched = true
           apiRateLimit = 30
           installNetworkDelay = None
-          simulateApplyUsec = None
+          simulateApplyDuration = None
+          simulateApplyWeight = None
           networkSizeLimit = 0
           pubnetParallelCatchupStartingLedger = 0
       }
@@ -310,7 +316,12 @@ let main argv =
                                                unevenSched = mission.UnevenSched
                                                apiRateLimit = mission.ApiRateLimit
                                                installNetworkDelay = mission.InstallNetworkDelay
-                                               simulateApplyUsec = mission.SimulateApplyUsec
+                                               simulateApplyDuration = if Seq.isEmpty mission.SimulateApplyDuration
+                                                                        then None
+                                                                        else Some ((Seq.map int) mission.SimulateApplyDuration)
+                                               simulateApplyWeight = if Seq.isEmpty mission.SimulateApplyWeight
+                                                                        then None
+                                                                        else Some ((Seq.map int) mission.SimulateApplyWeight)
                                                networkSizeLimit = mission.NetworkSizeLimit
                                                pubnetParallelCatchupStartingLedger = mission.PubnetParallelCatchupStartingLedger }
                         allMissions.[m] missionContext
