@@ -17,7 +17,7 @@ open MissionCatchupHelpers
 let historyPubnetParallelCatchup (context : MissionContext) =
     let context = { context with coreResources = ParallelCatchupResources }
 
-    let checkpointsPerJob = 90
+    let checkpointsPerJob = 200
     let ledgersPerCheckpoint = 64
     let latestLedgerNum = GetLatestPubnetLedgerNumber()
     let ledgersPerJob = checkpointsPerJob * ledgersPerCheckpoint
