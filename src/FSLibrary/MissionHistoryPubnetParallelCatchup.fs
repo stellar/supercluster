@@ -34,13 +34,20 @@ let historyPubnetParallelCatchup (context : MissionContext) =
     LogInfo "Printing catchup ranges"
     for row in jobArr do
         LogInfo "%A" row
+
     
     let opts = { PubnetCoreSetOptions context.image with
                      localHistory = false
                      initialization = CoreSetInitialization.OnlyNewDb }
+
+    let mutable jobQueue = Array.toList (Array.rev jobArr)
     context.ExecuteJobs (Some(opts)) (Some(SDFMainNet))
         begin
         fun (formation: StellarFormation) ->
-            (formation.RunParallelJobsInRandomOrder parallelism context.destination jobArr context.image)
+            (formation.RunParallelJobs parallelism context.destination
+            (fun _ -> (match jobQueue with
+                       | [] -> None
+                       | head::tail -> jobQueue <- tail
+                                       Some head)) context.image)
             |> formation.CheckAllJobsSucceeded
         end
