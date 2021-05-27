@@ -22,12 +22,22 @@ open System.Threading
 // FSharp.Data.JsonProvider<> takes a sample of some JSON you want to load and
 // infers a static type for it.
 
-type Metrics = JsonProvider<"json-type-samples/sample-metrics.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
-type Info = JsonProvider<"json-type-samples/sample-info.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
-type TestAcc = JsonProvider<"json-type-samples/sample-testacc.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
-type Tx = JsonProvider<"json-type-samples/sample-tx.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
-type PerformanceCsv = CsvProvider<"csv-type-samples/sample-performance.csv", HasHeaders=true, ResolutionFolder=__SOURCE_DIRECTORY__>
+[<Literal>]
+let SampleMetricsJson = __SOURCE_DIRECTORY__ + "/json-type-samples/sample-metrics.json"
+[<Literal>]
+let SampleInfoJson = __SOURCE_DIRECTORY__ + "/json-type-samples/sample-info.json"
+[<Literal>]
+let SampleTestAccJson = __SOURCE_DIRECTORY__ + "/json-type-samples/sample-testacc.json"
+[<Literal>]
+let SampleTxJson = __SOURCE_DIRECTORY__ + "/json-type-samples/sample-tx.json"
+[<Literal>]
+let SamplePerformanceCsv = __SOURCE_DIRECTORY__ + "/csv-type-samples/sample-performance.csv"
 
+type Metrics = JsonProvider<SampleMetricsJson, SampleIsList=true>
+type Info = JsonProvider<SampleInfoJson, SampleIsList=true>
+type TestAcc = JsonProvider<SampleTestAccJson, SampleIsList=true>
+type Tx = JsonProvider<SampleTxJson, SampleIsList=true>
+type PerformanceCsv = CsvProvider<SamplePerformanceCsv, HasHeaders=true>
 
 type LoadGenMode =
     | GenerateAccountCreationLoad
