@@ -12,12 +12,20 @@ open StellarCoreCfg
 open StellarMissionContext
 open Logging
 
-type HistoryArchiveState = JsonProvider<"json-type-samples/sample-stellar-history.json", ResolutionFolder=__SOURCE_DIRECTORY__>
+[<Literal>]
+let StellarHistoryJson = __SOURCE_DIRECTORY__ + "/json-type-samples/sample-stellar-history.json"
+[<Literal>]
+let PublicNetworkDataJson = __SOURCE_DIRECTORY__ + "/json-pubnet-data/public-network-data-2021-01-05.json"
+[<Literal>]
+let Tier1KeysJson = __SOURCE_DIRECTORY__ + "/json-pubnet-data/tier1keys.json"
+
+type HistoryArchiveState = JsonProvider<StellarHistoryJson>
+
 let PubnetLatestHistoryArchiveState = "http://history.stellar.org/prd/core-live/core_live_001/.well-known/stellar-history.json"
 let TestnetLatestHistoryArchiveState = "http://history.stellar.org/prd/core-testnet/core_testnet_001/.well-known/stellar-history.json"
 
-type PubnetNode = JsonProvider<"json-pubnet-data/public-network-data-2021-01-05.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
-type Tier1PublicKey = JsonProvider<"json-pubnet-data/tier1keys.json", SampleIsList=true, ResolutionFolder=__SOURCE_DIRECTORY__>
+type PubnetNode = JsonProvider<PublicNetworkDataJson, SampleIsList=true>
+type Tier1PublicKey = JsonProvider<Tier1KeysJson, SampleIsList=true>
 
 let FullPubnetCoreSets (context:MissionContext) (manualclose:bool) : CoreSet list =
     // Our dataset is the samples used to build the datatype: json-pubnet-data/nodes.json
