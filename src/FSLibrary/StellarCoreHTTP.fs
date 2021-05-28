@@ -22,22 +22,17 @@ open System.Threading
 // FSharp.Data.JsonProvider<> takes a sample of some JSON you want to load and
 // infers a static type for it.
 
+// This exists to work around a buggy interaction between FSharp.Data and
+// dotnet 5.0.300: __SOURCE_DIRECTORY__ is not [<Literal>] anymore, but
+// JsonProvider's ResolutionFolder argument needs to be.
 [<Literal>]
-let SampleMetricsJson = __SOURCE_DIRECTORY__ + "/json-type-samples/sample-metrics.json"
-[<Literal>]
-let SampleInfoJson = __SOURCE_DIRECTORY__ + "/json-type-samples/sample-info.json"
-[<Literal>]
-let SampleTestAccJson = __SOURCE_DIRECTORY__ + "/json-type-samples/sample-testacc.json"
-[<Literal>]
-let SampleTxJson = __SOURCE_DIRECTORY__ + "/json-type-samples/sample-tx.json"
-[<Literal>]
-let SamplePerformanceCsv = __SOURCE_DIRECTORY__ + "/csv-type-samples/sample-performance.csv"
+let cwd = __SOURCE_DIRECTORY__
 
-type Metrics = JsonProvider<SampleMetricsJson, SampleIsList=true>
-type Info = JsonProvider<SampleInfoJson, SampleIsList=true>
-type TestAcc = JsonProvider<SampleTestAccJson, SampleIsList=true>
-type Tx = JsonProvider<SampleTxJson, SampleIsList=true>
-type PerformanceCsv = CsvProvider<SamplePerformanceCsv, HasHeaders=true>
+type Metrics = JsonProvider<"json-type-samples/sample-metrics.json", SampleIsList=true, ResolutionFolder=cwd>
+type Info = JsonProvider<"json-type-samples/sample-info.json", SampleIsList=true, ResolutionFolder=cwd>
+type TestAcc = JsonProvider<"json-type-samples/sample-testacc.json", SampleIsList=true, ResolutionFolder=cwd>
+type Tx = JsonProvider<"json-type-samples/sample-tx.json", SampleIsList=true, ResolutionFolder=cwd>
+type PerformanceCsv = CsvProvider<"csv-type-samples/sample-performance.csv", HasHeaders=true, ResolutionFolder=cwd>
 
 type LoadGenMode =
     | GenerateAccountCreationLoad
