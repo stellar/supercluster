@@ -67,6 +67,8 @@ module CfgVal =
     let bucketsBackupURL (host:PeerDnsName) = "http://" + host.StringName + "/buckets.tar.gz"
     let bucketsDownloadPath = dataVolumePath + "/buckets.tar.gz"
 
+    let metaStreamPath = "metadata.xdr"
+
 // This is the formula stellar-core uses to calculate a threshold from
 // a percent.
 let thresholdOfPercent (sz:int) (pct:int) : int =
@@ -121,7 +123,8 @@ type StellarCoreCfg =
       historyGetCommands : Map<PeerShortName, string>
       localHistory: bool
       maxSlotsToRemember: int
-      maxBatchWriteCount: int }
+      maxBatchWriteCount: int
+      inMemoryMode: bool }
 
     member self.ToTOML() : TomlTable =
         let t = Toml.Create()
@@ -172,6 +175,9 @@ type StellarCoreCfg =
         t.Add("AUTOMATIC_MAINTENANCE_COUNT", self.automaticMaintenanceCount) |> ignore
         t.Add("ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING", self.accelerateTime) |> ignore
         t.Add("ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING", self.generateLoad) |> ignore
+        match self.inMemoryMode with
+            | false -> ()
+            | true -> t.Add("METADATA_OUTPUT_STREAM", CfgVal.metaStreamPath) |> ignore
         match self.network.missionContext.simulateApplyWeight, self.network.missionContext.simulateApplyDuration with
             | None, None -> ()
             | Some weight, Some duration ->
@@ -343,7 +349,8 @@ type NetworkCfg with
           historyGetCommands = opts.historyGetCommands
           localHistory = opts.localHistory
           maxSlotsToRemember = opts.maxSlotsToRemember
-          maxBatchWriteCount = opts.maxBatchWriteCount }
+          maxBatchWriteCount = opts.maxBatchWriteCount
+          inMemoryMode = opts.inMemoryMode }
 
     member self.StellarCoreCfg(c:CoreSet, i:int) : StellarCoreCfg =
         { network = self
@@ -376,4 +383,5 @@ type NetworkCfg with
           historyGetCommands = c.options.historyGetCommands
           localHistory = c.options.localHistory
           maxSlotsToRemember = c.options.maxSlotsToRemember
-          maxBatchWriteCount = c.options.maxBatchWriteCount }
+          maxBatchWriteCount = c.options.maxBatchWriteCount
+          inMemoryMode = c.options.inMemoryMode }

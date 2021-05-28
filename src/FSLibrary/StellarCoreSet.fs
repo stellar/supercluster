@@ -146,7 +146,8 @@ type CoreSetOptions =
       initialization : CoreSetInitialization
       dumpDatabase: bool
       maxSlotsToRemember : int
-      maxBatchWriteCount : int }
+      maxBatchWriteCount : int
+      inMemoryMode : bool }
 
     member self.WithForceSCP (f:bool) =
         { self with initialization = { self.initialization with forceScp = f } }
@@ -173,7 +174,8 @@ type CoreSetOptions =
         initialization = CoreSetInitialization.Default
         dumpDatabase = true
         maxSlotsToRemember = 12
-        maxBatchWriteCount = 1024 }
+        maxBatchWriteCount = 1024
+        inMemoryMode = false}
 
 type CoreSet =
     { name : CoreSetName

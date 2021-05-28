@@ -504,13 +504,18 @@ type NetworkCfg with
                        then Array.append runCmd [| "--wait-for-consensus" |]
                        else runCmd
 
+        let runCmdMaybeInMemory =
+            match coreSet.options.inMemoryMode with
+            | true -> Array.append runCmdWithOpts [| "--in-memory" |]
+            | false -> runCmdWithOpts
+
         let usePostgres = (coreSet.options.dbType = Postgres)
         let exportToPrometheus = self.missionContext.exportToPrometheus
 
         let res = self.missionContext.coreResources
         let containers = [| WithLivenessProbe
                                 (CoreContainerForCommand imageName
-                                     cfgOpt res runCmdWithOpts initCommands peerNames)
+                                     cfgOpt res runCmdMaybeInMemory initCommands peerNames)
                                 self.missionContext.probeTimeout;
                             HistoryContainer; |]
         let containers =
