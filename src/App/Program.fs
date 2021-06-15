@@ -52,6 +52,10 @@ type MissionOptions(kubeConfig: string,
                     destination: string,
                     image: string,
                     oldImage: string option,
+                    netdelayImage: string,
+                    postgresImage: string,
+                    nginxImage: string,
+                    prometheusExporterImage: string,
                     txRate: int,
                     maxTxRate: int,
                     numAccounts: int,
@@ -122,6 +126,22 @@ type MissionOptions(kubeConfig: string,
     [<Option('o', "old-image", HelpText="Stellar-core image to use as old-image",
              Required = false)>]
     member self.OldImage = oldImage
+
+    [<Option("netdelay-image", HelpText="'Netdelay' utility image to use",
+             Required = false, Default = "stellar/netdelay:latest")>]
+    member self.netdelayImage = netdelayImage
+
+    [<Option("postgres-image", HelpText="Postgres server image to use",
+             Required = false, Default = "index.docker.io/library/postgres:9.5.22")>]
+    member self.postgresImage = postgresImage
+
+    [<Option("nginx-image", HelpText="Nginx server image to use",
+             Required = false, Default = "index.docker.io/library/nginx:1.21.0")>]
+    member self.nginxImage = nginxImage
+
+    [<Option("prometheus-exporter-image", HelpText="Stellar-core prometheus-exporter image to use",
+             Required = false, Default = "stellar/stellar-core-prometheus-exporter:latest")>]
+    member self.prometheusExporterImage = prometheusExporterImage
 
     [<Option("tx-rate", HelpText="Transaction rate for benchamarks and load generation tests",
              Required = false, Default = 100)>]
@@ -222,6 +242,10 @@ let main argv =
           destination = DefaultDestination
           image = "stellar/stellar-core"
           oldImage = None
+          netdelayImage = ""
+          postgresImage = ""
+          nginxImage = ""
+          prometheusExporterImage = ""
           txRate = 100
           maxTxRate = 300
           numAccounts = 100000
@@ -296,6 +320,10 @@ let main argv =
                                                destination = destination
                                                image = mission.Image
                                                oldImage = mission.OldImage
+                                               netdelayImage = mission.netdelayImage
+                                               postgresImage = mission.postgresImage
+                                               nginxImage = mission.nginxImage
+                                               prometheusExporterImage = mission.prometheusExporterImage
                                                txRate = mission.TxRate
                                                maxTxRate = mission.MaxTxRate
                                                numAccounts = mission.NumAccounts

@@ -126,34 +126,34 @@ let HistoryContainerVolumeMounts : V1VolumeMount array =
        V1VolumeMount(name = CfgVal.dataVolumeName,
                      mountPath = CfgVal.dataVolumePath) |]
 
-let HistoryContainer =
+let HistoryContainer (nginxImage:string) =
     V1Container
         (name = "history",
-         image = "index.docker.io/library/nginx:latest",
+         image = nginxImage,
          command = [| "nginx" |],
          args = [| "-c"; CfgVal.historyCfgFilePath; |],
          resources = HistoryResourceRequirements,
          volumeMounts = HistoryContainerVolumeMounts )
 
-let PostgresContainer =
+let PostgresContainer (postgresImage:string) =
     let passwordEnvVar = V1EnvVar(name = "POSTGRES_PASSWORD",
                                   value = CfgVal.pgPassword)
     V1Container
         (name = "postgres",
          env = [| passwordEnvVar; |],
          ports = [| V1ContainerPort(containerPort = 5432, name = "postgres") |],
-         image = "index.docker.io/library/postgres:9.5.22",
+         image = postgresImage,
          resources = PgResourceRequirements,
          volumeMounts = PgContainerVolumeMounts)
 
-let PrometheusExporterSidecarContainer =
+let PrometheusExporterSidecarContainer (prometheusExporterImage:string) =
     V1Container(name = "prom-exp",
                 ports = [| V1ContainerPort(containerPort = CfgVal.prometheusExporterPort,
                                            name = "prom-exp") |],
-                image = "index.docker.io/library/stellar-core-prometheus-exporter:latest",
+                image = prometheusExporterImage,
                 resources = PrometheusExporterSidecarResourceRequirements)
 
-let NetworkDelayScriptContainer (configOpt:ConfigOption) (peerOrJobNames:string array) =
+let NetworkDelayScriptContainer (netdelayImage:string) (configOpt:ConfigOption) (peerOrJobNames:string array) =
     let peerNameFieldSel = V1ObjectFieldSelector(fieldPath = "metadata.name")
     let peerNameEnvVarSource = V1EnvVarSource(fieldRef = peerNameFieldSel)
     let peerNameEnvVar = V1EnvVar(name = CfgVal.peerNameEnvVarName,
@@ -164,7 +164,7 @@ let NetworkDelayScriptContainer (configOpt:ConfigOption) (peerOrJobNames:string 
         ShCmd.ShIf(test, run, [||], None)
 
     V1Container(name = "network-delay",
-                image = "index.docker.io/library/sdf-netdelay:latest",
+                image = netdelayImage,
                 command = [| "/bin/sh" |],
                 args = [| "-x"; "-c"; runCmd.ToString() |],
                 env = [| peerNameEnvVar |],
@@ -421,7 +421,7 @@ type NetworkCfg with
                 let initCmds = self.getInitCommands cfgOpt opts
                 let coreContainer = CoreContainerForCommand image cfgOpt res command initCmds [|jobName|]
                 match opts.dbType with
-                    | Postgres -> [| coreContainer; PostgresContainer |]
+                    | Postgres -> [| coreContainer; PostgresContainer self.missionContext.postgresImage |]
                     | _ -> [| coreContainer |]
 
         let (affinity, topologyConstraints) =
@@ -517,18 +517,18 @@ type NetworkCfg with
                                 (CoreContainerForCommand imageName
                                      cfgOpt res runCmdMaybeInMemory initCommands peerNames)
                                 self.missionContext.probeTimeout;
-                            HistoryContainer; |]
+                            HistoryContainer self.missionContext.nginxImage; |]
         let containers =
             if usePostgres
-            then Array.append containers [| PostgresContainer |]
+            then Array.append containers [| PostgresContainer self.missionContext.postgresImage |]
             else containers
         let containers =
             if exportToPrometheus
-            then Array.append containers [| PrometheusExporterSidecarContainer |]
+            then Array.append containers [| PrometheusExporterSidecarContainer self.missionContext.prometheusExporterImage |]
             else containers
         let containers =
             if self.NeedNetworkDelayScript
-            then Array.append containers [| NetworkDelayScriptContainer cfgOpt peerNames |]
+            then Array.append containers [| NetworkDelayScriptContainer self.missionContext.netdelayImage cfgOpt peerNames |]
             else containers
         let annotations =
             if exportToPrometheus

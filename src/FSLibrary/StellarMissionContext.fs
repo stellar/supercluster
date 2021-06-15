@@ -29,6 +29,10 @@ type MissionContext =
       destination : Destination
       image : string
       oldImage : string option
+      netdelayImage : string
+      postgresImage : string
+      nginxImage : string
+      prometheusExporterImage : string
       txRate : int
       maxTxRate : int
       numAccounts : int
