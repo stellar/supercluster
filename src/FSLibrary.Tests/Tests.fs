@@ -56,12 +56,20 @@ let ctx : MissionContext =
     keepData = true
     unevenSched = false
     apiRateLimit = 10
+    pubnetData = None
+    tier1Keys = None
     installNetworkDelay = Some true
     simulateApplyDuration = Some (seq {10; 100})
     simulateApplyWeight = Some (seq {30; 70})
     networkSizeLimit = 100
     pubnetParallelCatchupStartingLedger = 0
   }
+
+let netdata = __SOURCE_DIRECTORY__ + "/../../data/public-network-data-2021-01-05.json"
+let pubkeys = __SOURCE_DIRECTORY__ + "/../../data/tier1keys.json"
+let pubnetctx = {ctx with
+                     pubnetData = Some netdata
+                     tier1Keys = Some pubkeys }
 
 let nCfg = MakeNetworkCfg ctx [coreSet] passOpt
 
@@ -148,22 +156,26 @@ type Tests(output:ITestOutputHelper) =
 
     [<Fact>]
     member __.``Public network conversion looks reasonable`` () =
-        let coreSets = FullPubnetCoreSets ctx false
-        let nCfg = MakeNetworkCfg ctx coreSets passOpt
-        let sdfCoreSetName = CoreSetName "www-stellar-org"
-        Assert.Contains(coreSets, fun cs -> cs.name = sdfCoreSetName)
-        let sdfCoreSet = List.find (fun cs -> cs.name = sdfCoreSetName) coreSets
-        let cfg = nCfg.StellarCoreCfg(sdfCoreSet, 0)
-        let toml = cfg.ToString()
-        Assert.Contains("[QUORUM_SET.sub1]", toml)
-        Assert.Contains("[HISTORY.local]", toml)
-        Assert.Matches(Regex("VALIDATORS.*stellar-blockdaemon-com-0"), toml)
-        Assert.Matches(Regex("VALIDATORS.*www-stellar-org-0"), toml)
-        Assert.Matches(Regex("VALIDATORS.*keybase-io-0"), toml)
-        Assert.Matches(Regex("VALIDATORS.*wirexapp-com-0"), toml)
-        Assert.Matches(Regex("VALIDATORS.*coinqvest-com-0"), toml)
-        Assert.Matches(Regex("VALIDATORS.*satoshipay-io-0"), toml)
-        Assert.Matches(Regex("VALIDATORS.*lobstr-co-0"), toml)
+        if System.IO.File.Exists(netdata) && System.IO.File.Exists(pubkeys)
+        then
+            begin
+                let coreSets = FullPubnetCoreSets pubnetctx false
+                let nCfg = MakeNetworkCfg pubnetctx coreSets passOpt
+                let sdfCoreSetName = CoreSetName "www-stellar-org"
+                Assert.Contains(coreSets, fun cs -> cs.name = sdfCoreSetName)
+                let sdfCoreSet = List.find (fun cs -> cs.name = sdfCoreSetName) coreSets
+                let cfg = nCfg.StellarCoreCfg(sdfCoreSet, 0)
+                let toml = cfg.ToString()
+                Assert.Contains("[QUORUM_SET.sub1]", toml)
+                Assert.Contains("[HISTORY.local]", toml)
+                Assert.Matches(Regex("VALIDATORS.*stellar-blockdaemon-com-0"), toml)
+                Assert.Matches(Regex("VALIDATORS.*www-stellar-org-0"), toml)
+                Assert.Matches(Regex("VALIDATORS.*keybase-io-0"), toml)
+                Assert.Matches(Regex("VALIDATORS.*wirexapp-com-0"), toml)
+                Assert.Matches(Regex("VALIDATORS.*coinqvest-com-0"), toml)
+                Assert.Matches(Regex("VALIDATORS.*satoshipay-io-0"), toml)
+                Assert.Matches(Regex("VALIDATORS.*lobstr-co-0"), toml)
+            end
 
     [<Fact>]
     member __.``Geographic calculations are reasonable`` () =
@@ -327,13 +339,16 @@ type Tests(output:ITestOutputHelper) =
 
     [<Fact>]
     member __.``Public network delay commands are reasonable`` () =
-        let allCoreSets = FullPubnetCoreSets ctx true
-        let fullNetCfg = MakeNetworkCfg ctx allCoreSets passOpt
-        let sdf = List.find (fun (cs:CoreSet) -> cs.name.StringName = "www-stellar-org") allCoreSets
-        let delayCmd = fullNetCfg.NetworkDelayScript sdf 0
-        let str = delayCmd.ToString()
-        Assert.Matches(Regex("host -t A ssc-.*cluster.local"), str)
-
+        if System.IO.File.Exists(netdata) && System.IO.File.Exists(pubkeys)
+        then
+            begin
+                let allCoreSets = FullPubnetCoreSets pubnetctx true
+                let fullNetCfg = MakeNetworkCfg pubnetctx allCoreSets passOpt
+                let sdf = List.find (fun (cs:CoreSet) -> cs.name.StringName = "www-stellar-org") allCoreSets
+                let delayCmd = fullNetCfg.NetworkDelayScript sdf 0
+                let str = delayCmd.ToString()
+                Assert.Matches(Regex("host -t A ssc-.*cluster.local"), str)
+            end
 
     [<Fact>]
     member __.``Parallel catchup ranges are reasonable`` () =
