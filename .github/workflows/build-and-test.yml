@@ -13,6 +13,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+    - name: Setup k3s
+      uses: graydon/actions-k3s@d58ce61bef5a763614dc281dbe80457fc0b66c53
     - name: Setup .NET SDK 5
       uses: actions/setup-dotnet@v1
       with:
@@ -23,7 +25,10 @@ jobs:
       run: dotnet build --configuration Release --no-restore
     - name: Test
       run: dotnet test --no-restore --verbosity normal
-    - name: Set up K3s
-      uses: graydon/actions-k3s@d58ce61bef5a763614dc281dbe80457fc0b66c53
     - name: Run SimplePayment mission
       run: dotnet run --project src/App/App.fsproj --configuration Release -- mission SimplePayment --kubeconfig $KUBECONFIG --namespace default --ingress-class traefik --ingress-internal-domain local --ingress-external-host localhost --uneven-sched
+    - uses: actions/upload-artifact@v2
+      with:
+        name: destination
+        path: destination/
+        retention-days: 30
