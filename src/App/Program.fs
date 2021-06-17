@@ -65,6 +65,8 @@ type MissionOptions(kubeConfig: string,
                     keepData: bool,
                     unevenSched: bool,
                     apiRateLimit: int,
+                    pubnetData: string option,
+                    tier1Keys: string option,
                     installNetworkDelay: bool option,
                     simulateApplyDuration: seq<string>,
                     simulateApplyWeight: seq<string>,
@@ -179,6 +181,14 @@ type MissionOptions(kubeConfig: string,
              Required = false, Default = 10)>]
     member self.ApiRateLimit = apiRateLimit
 
+    [<Option("pubnet-data", HelpText="JSON file containing pubnet connectivity graph data",
+             Required = false)>]
+    member self.PubnetData = pubnetData
+
+    [<Option("tier1-keys", HelpText="JSON file containing list of 'tier-1' pubkeys from pubnet",
+             Required = false)>]
+    member self.Tier1Keys = tier1Keys
+
     [<Option("install-network-delay", HelpText="Installs network delay estimated from node locations",
              Required = false)>]
     member self.InstallNetworkDelay = installNetworkDelay
@@ -265,6 +275,8 @@ let main argv =
           keepData = false
           unevenSched = true
           apiRateLimit = 30
+          pubnetData =  None
+          tier1Keys = None
           installNetworkDelay = None
           simulateApplyDuration = None
           simulateApplyWeight = None
@@ -343,6 +355,8 @@ let main argv =
                                                keepData = mission.KeepData
                                                unevenSched = mission.UnevenSched
                                                apiRateLimit = mission.ApiRateLimit
+                                               pubnetData = mission.PubnetData
+                                               tier1Keys = mission.Tier1Keys
                                                installNetworkDelay = mission.InstallNetworkDelay
                                                simulateApplyDuration = if Seq.isEmpty mission.SimulateApplyDuration
                                                                         then None

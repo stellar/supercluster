@@ -1,0 +1,87 @@
+[
+    {
+        "numTotalInboundPeers": 2,
+        "numTotalOutboundPeers": 2,
+        "peers": [
+            "GBOOLF6VITJWPTYYTWGJST35XHFUCTPTOJGZBPA7FLNINX6YD3AQHUBL",
+            "GDUBKMXWLSQNK33XQNRPSDEYODROPPRM4XLJGXFEZPWCLKIOFOTTCX3B"
+        ],
+        "publicKey": "GCP7LQUW5UXXDNQI4ENXTUULZOIEIR6UDRC5S3VN6ZGKMOZ6TL3YB6IS",
+        "sb_geoData": {
+            "countryCode": "US",
+            "countryName": "United States",
+            "dateUpdated": "2020-01-01T01:01:01.000Z",
+            "latitude": 40.01212121212,
+            "longitude": -60.01212121212
+        },
+        "sb_homeDomain": "www.someone.org",
+        "sb_index": 1,
+        "sb_ip": "192.168.1.1",
+        "sb_isValidating": true,
+        "sb_isp": "Some Datacenter Inc.",
+        "sb_name": "SomeoneNet-1",
+        "sb_organizationId": "764efa883dda1e11db47671c4a3bbd9e",
+        "sb_quorumSet": {
+            "hashKey": "MzI3MzUyODNjODk2NzQ2YmQyMzNjOThkNDZkMDM4OThkOGJmNDdjZiAgLQo=",
+            "innerQuorumSets": [
+                {
+                    "hashKey": "OTI1NzIxZjllYzZiYjE1MGVjODQ0YWJjN2MwNjVkZDI5ODY0NjhiZiAgLQo=",
+                    "innerQuorumSets": [],
+                    "threshold": 2,
+                    "validators": [
+                        "GDMSQ7KDJKDVQCVDMZ7VW2FXDUZLHILTEA7JEE7TBFADYG6PNJSABZTM",
+                        "GA4LI76TTHQDK3QL6DAUCOUMBB3UHDU3IWT3HAVNZ36HRWQQS2CMPVB5",
+                        "GBBAF6QXXYXG2RC2ZWSIX6UR3LQRDLFNCRFJ226L5DMFK3O3AEVFOCP6"
+                    ]
+                },
+                {
+                    "hashKey": "NTVjYTYyODZlM2U0ZjRmYmE1ZDA0NDgzMzNmYTk5ZmM1YTQwNGE3MyAgLQo=",
+                    "innerQuorumSets": [],
+                    "threshold": 2,
+                    "validators": [
+                        "GDVIDS5TYLQJ5THYGB6ULNJJMTUIZYROPZOGZGLVFO336KBGYSJCYA4N",
+                        "GA7SDMIG3CNKEE6CP45IJSK3VOATMIZIXGHVNC2HRQACWC3KHD7EA5S3",
+                        "GB37UNY2X5X4DSOUVUAXPXTOVKWF4NHTXTTPW2FCVHGNSGYLPQKBUBXW"
+                    ]
+                }
+            ],
+            "threshold": 1,
+            "validators": []
+        },
+        "version": "v13.1.0"
+    },
+    {
+        "numTotalInboundPeers": 1,
+        "numTotalOutboundPeers": 1,
+        "peers": [
+            "GDQHFKIEF3NPKZVDC2WO5E5P54H3UG3QU2AZZCDINVF4THK5BZV6E4AK"
+        ],
+        "publicKey": "GBDRGD7ZSIBXYLRHNO2LRI2BLOLOLD4THAMDCMCVK3JX2GFE4KQWABUE",
+        "sb_geoData": {
+            "countryCode": "PL",
+            "countryName": "Poland",
+            "dateUpdated": "2020-01-01T01:01:01.100Z",
+            "latitude": 51.012121212,
+            "longitude": 17.012121212
+        },
+        "sb_index": 0.5,
+        "sb_ip": "192.168.1.1",
+        "sb_isValidating": false,
+        "sb_isp": "Some ISP",
+        "sb_quorumSet": {
+            "innerQuorumSets": [],
+            "threshold": 9999999,
+          "validators": ["GBN5UP5XG2NKBGSBXGV632XFUQYYU62XYWR47GH7KQZUQDTVT7ROGK5C",
+                         "GDQHFKIEF3NPKZVDC2WO5E5P54H3UG3QU2AZZCDINVF4THK5BZV6E4AK"
+          ]
+        },
+        "version": "stellar-core 15.0.0 (8d6e6d74cfae65943211bdcc5ba083976d525a04)"
+    },
+    {
+        "peers": [
+            "GBN5UP5XG2NKBGSBXGV632XFUQYYU62XYWR47GH7KQZUQDTVT7ROGK5C"
+        ],
+        "publicKey": "GATTOMMXJ4TITUGIP4MQ635Z6FJYK57WOWGDQ7AM6DUWYBM5TUJ2BLFV",
+        "version": "v15.0.0"
+    }
+]

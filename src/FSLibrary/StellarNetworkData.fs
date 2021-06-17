@@ -23,14 +23,20 @@ type HistoryArchiveState = JsonProvider<"json-type-samples/sample-stellar-histor
 let PubnetLatestHistoryArchiveState = "http://history.stellar.org/prd/core-live/core_live_001/.well-known/stellar-history.json"
 let TestnetLatestHistoryArchiveState = "http://history.stellar.org/prd/core-testnet/core_testnet_001/.well-known/stellar-history.json"
 
-type PubnetNode = JsonProvider<"json-pubnet-data/public-network-data-2021-01-05.json", SampleIsList=true, ResolutionFolder=cwd>
-type Tier1PublicKey = JsonProvider<"json-pubnet-data/tier1keys.json", SampleIsList=true, ResolutionFolder=cwd>
+type PubnetNode = JsonProvider<"json-type-samples/sample-network-data.json", SampleIsList=false, ResolutionFolder=cwd>
+type Tier1PublicKey = JsonProvider<"json-type-samples/sample-keys.json", SampleIsList=false, ResolutionFolder=cwd>
 
 let FullPubnetCoreSets (context:MissionContext) (manualclose:bool) : CoreSet list =
-    // Our dataset is the samples used to build the datatype: json-pubnet-data/nodes.json
-    let allPubnetNodes : PubnetNode.Root array = PubnetNode.GetSamples()
 
-    let tier1KeySet : Set<string> = Tier1PublicKey.GetSamples()
+    if context.pubnetData.IsNone
+    then failwith "pubnet simulation requires --pubnet-data=<filename.json>"
+
+    if context.tier1Keys.IsNone
+    then failwith "pubnet simulation requires --tier1-keys=<filename.json>"
+
+    let allPubnetNodes : PubnetNode.Root array = PubnetNode.Load(context.pubnetData.Value)
+
+    let tier1KeySet : Set<string> = Tier1PublicKey.Load(context.tier1Keys.Value)
                                      |> Array.map (fun n -> n.PublicKey)
                                      |> Set.ofArray
 
