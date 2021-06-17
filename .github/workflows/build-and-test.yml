@@ -1,4 +1,4 @@
-name: .NET Core
+name: Build and test
 
 on:
   push:
@@ -23,3 +23,6 @@ jobs:
       run: dotnet build --configuration Release --no-restore
     - name: Test
       run: dotnet test --no-restore --verbosity normal
+    - name: actions-k3s
+      uses: debianmaster/actions-k3s@v1.0.1
+      run: dotnet run --project src/App/App.fsproj --configuration Release -- mission SimplePayment --kubeconfig $KUBECONFIG --namespace default --ingress-class traefik --ingress-internal-domain local --ingress-external-host localhost --uneven-sched
