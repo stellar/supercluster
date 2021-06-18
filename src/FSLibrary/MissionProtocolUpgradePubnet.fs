@@ -13,24 +13,29 @@ open StellarNetworkData
 open StellarFormation
 open StellarSupercluster
 
-let protocolUpgradePubnet (context : MissionContext) =
+let protocolUpgradePubnet (context: MissionContext) =
     let context = { context with coreResources = UpgradeResources }
-    let set = { CoreSetOptions.GetDefault context.image with
-                  nodeCount = 1
-                  quorumSet = CoreSetQuorum(CoreSetName "core")
-                  historyNodes = Some([])
-                  historyGetCommands = PubnetGetCommands
-                  catchupMode = CatchupRecent(0)
-                  initialization = { CoreSetInitialization.Default with initialCatchup = true } }
+
+    let set =
+        { CoreSetOptions.GetDefault context.image with
+              nodeCount = 1
+              quorumSet = CoreSetQuorum(CoreSetName "core")
+              historyNodes = Some([])
+              historyGetCommands = PubnetGetCommands
+              catchupMode = CatchupRecent(0)
+              initialization = { CoreSetInitialization.Default with initialCatchup = true } }
 
     let coreSet = MakeLiveCoreSet "core" set
-    context.Execute [coreSet] (Some(SDFMainNet)) (fun (formation: StellarFormation) ->
-        formation.WaitUntilSynced [coreSet]
 
-        let peer = formation.NetworkCfg.GetPeer coreSet 0
-        peer.WaitForFewLedgers(3)
-        peer.UpgradeProtocolToLatest System.DateTime.UtcNow
-        peer.WaitForFewLedgers(3)
+    context.Execute
+        [ coreSet ]
+        (Some(SDFMainNet))
+        (fun (formation: StellarFormation) ->
+            formation.WaitUntilSynced [ coreSet ]
 
-        formation.CheckUsesLatestProtocolVersion()
-    )
+            let peer = formation.NetworkCfg.GetPeer coreSet 0
+            peer.WaitForFewLedgers(3)
+            peer.UpgradeProtocolToLatest System.DateTime.UtcNow
+            peer.WaitForFewLedgers(3)
+
+            formation.CheckUsesLatestProtocolVersion())

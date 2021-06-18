@@ -10,14 +10,25 @@ open StellarFormation
 open StellarSupercluster
 open StellarCoreHTTP
 
-let loadGenerationWithSpikes (context : MissionContext) =
-    let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.GetDefault context.image with dumpDatabase = false }
-    let context = { context with numAccounts = 2000; numTxs = 20000; txRate = 20; spikeSize = 2000; spikeInterval = 30 }
-    context.Execute [coreSet] None (fun (formation: StellarFormation) ->
-        formation.WaitUntilSynced [coreSet]
-        formation.UpgradeProtocolToLatest [coreSet]
-        formation.UpgradeMaxTxSize [coreSet] 100000
+let loadGenerationWithSpikes (context: MissionContext) =
+    let coreSet =
+        MakeLiveCoreSet "core" { CoreSetOptions.GetDefault context.image with dumpDatabase = false }
 
-        formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
-        formation.RunLoadgen coreSet context.GeneratePaymentLoad
-    )
+    let context =
+        { context with
+              numAccounts = 2000
+              numTxs = 20000
+              txRate = 20
+              spikeSize = 2000
+              spikeInterval = 30 }
+
+    context.Execute
+        [ coreSet ]
+        None
+        (fun (formation: StellarFormation) ->
+            formation.WaitUntilSynced [ coreSet ]
+            formation.UpgradeProtocolToLatest [ coreSet ]
+            formation.UpgradeMaxTxSize [ coreSet ] 100000
+
+            formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
+            formation.RunLoadgen coreSet context.GeneratePaymentLoad)

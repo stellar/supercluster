@@ -13,7 +13,7 @@ type PeerDnsName =
     | PeerDnsName of string
     member self.StringName =
         match self with
-        | PeerDnsName(n) -> n
+        | PeerDnsName (n) -> n
 
 // A StatefulSetName followed by a number, such as ssc-483463dbb624-sts-core-0
 // or ssc-483463dbb624-sts-www-stellar-org-2. These are the names that
@@ -23,7 +23,7 @@ type PodName =
     | PodName of string
     member self.StringName =
         match self with
-        | PodName(n) -> n
+        | PodName (n) -> n
 
 // A nonce-qualified CoreSetName like ssc-483463dbb624-sts-www-stellar-org that
 // can be used to identify a statefulset in kubernetes without colliding with
@@ -32,7 +32,7 @@ type StatefulSetName =
     | StatefulSetName of string
     member self.StringName =
         match self with
-        | StatefulSetName(n) -> n
+        | StatefulSetName (n) -> n
 
 // A CoreSetName followed by a number, such as core-0 or
 // www-stellar-org-1. Identifies a peer within a statefulset in places that are
@@ -41,7 +41,7 @@ type PeerShortName =
     | PeerShortName of string
     member self.StringName =
         match self with
-        | PeerShortName(n) -> n
+        | PeerShortName (n) -> n
 
 // A short symbolic name like "core" or one derived from a HomeDomainName like
 // "www-stellar-org", used in deriving statefulset names.
@@ -49,7 +49,7 @@ type CoreSetName =
     | CoreSetName of string
     member self.StringName =
         match self with
-        | CoreSetName(n) -> n
+        | CoreSetName (n) -> n
 
 // A name like "www.stellar.org" used in grouping nodes in a qset. Also used to
 // derive CoreSetNames by changing dots to hyphens.
@@ -57,7 +57,7 @@ type HomeDomainName =
     | HomeDomainName of string
     member self.StringName =
         match self with
-        | HomeDomainName(n) -> n
+        | HomeDomainName (n) -> n
 
 type CatchupMode =
     | CatchupComplete
@@ -69,54 +69,53 @@ type DBType =
     | Postgres
 
 type CoreSetInitialization =
-    { newDb : bool
-      newHist : bool
-      initialCatchup : bool
-      forceScp : bool
+    { newDb: bool
+      newHist: bool
+      initialCatchup: bool
+      forceScp: bool
       fetchDBFromPeer: (CoreSetName * int) option }
 
     static member Default =
-      { newDb = true
-        newHist = true
-        initialCatchup = false
-        forceScp = true
-        fetchDBFromPeer = None }
+        { newDb = true
+          newHist = true
+          initialCatchup = false
+          forceScp = true
+          fetchDBFromPeer = None }
 
     static member DefaultNoForceSCP =
-      { newDb = true
-        newHist = true
-        initialCatchup = false
-        forceScp = false
-        fetchDBFromPeer = None }
+        { newDb = true
+          newHist = true
+          initialCatchup = false
+          forceScp = false
+          fetchDBFromPeer = None }
 
     static member CatchupNoForceSCP =
-      { newDb = true
-        newHist = true
-        initialCatchup = true
-        forceScp = false
-        fetchDBFromPeer = None }
+        { newDb = true
+          newHist = true
+          initialCatchup = true
+          forceScp = false
+          fetchDBFromPeer = None }
 
     static member OnlyNewDb =
-      { newDb = true
-        newHist = false
-        initialCatchup = false
-        forceScp = false
-        fetchDBFromPeer = None }
+        { newDb = true
+          newHist = false
+          initialCatchup = false
+          forceScp = false
+          fetchDBFromPeer = None }
 
     static member NoInitCmds =
-      { newDb = false
-        newHist = false
-        initialCatchup = false
-        forceScp = false
-        fetchDBFromPeer = None }
+        { newDb = false
+          newHist = false
+          initialCatchup = false
+          forceScp = false
+          fetchDBFromPeer = None }
 
-type GeoLoc = {lat:float; lon:float}
+type GeoLoc = { lat: float; lon: float }
 
-type QuorumSet = {
-    thresholdPercent: int option
-    validators: Map<PeerShortName, KeyPair>
-    innerQuorumSets: QuorumSet array
-}
+type QuorumSet =
+    { thresholdPercent: int option
+      validators: Map<PeerShortName, KeyPair>
+      innerQuorumSets: QuorumSet array }
 
 type QuorumSetSpec =
     | CoreSetQuorum of CoreSetName
@@ -125,75 +124,69 @@ type QuorumSetSpec =
     | AllPeersQuorum
 
 type CoreSetOptions =
-    { nodeCount : int
-      nodeLocs : GeoLoc list option
-      dbType : DBType
-      syncStartupDelay : int option
-      quorumSet : QuorumSetSpec
-      historyNodes : CoreSetName list option
-      preferredPeersMap : Map<byte[], byte [] list> option
-      historyGetCommands : Map<PeerShortName, string>
-      localHistory : bool
-      peers : CoreSetName list option
-      peersDns : PeerDnsName list
-      accelerateTime : bool
-      unsafeQuorum : bool
-      awaitSync : bool
-      validate : bool
-      tier1 : bool option
-      catchupMode : CatchupMode
-      image : string
-      initialization : CoreSetInitialization
+    { nodeCount: int
+      nodeLocs: GeoLoc list option
+      dbType: DBType
+      syncStartupDelay: int option
+      quorumSet: QuorumSetSpec
+      historyNodes: CoreSetName list option
+      preferredPeersMap: Map<byte [], byte [] list> option
+      historyGetCommands: Map<PeerShortName, string>
+      localHistory: bool
+      peers: CoreSetName list option
+      peersDns: PeerDnsName list
+      accelerateTime: bool
+      unsafeQuorum: bool
+      awaitSync: bool
+      validate: bool
+      tier1: bool option
+      catchupMode: CatchupMode
+      image: string
+      initialization: CoreSetInitialization
       dumpDatabase: bool
-      maxSlotsToRemember : int
-      maxBatchWriteCount : int
-      inMemoryMode : bool }
+      maxSlotsToRemember: int
+      maxBatchWriteCount: int
+      inMemoryMode: bool }
 
-    member self.WithForceSCP (f:bool) =
-        { self with initialization = { self.initialization with forceScp = f } }
+    member self.WithForceSCP(f: bool) = { self with initialization = { self.initialization with forceScp = f } }
 
     static member GetDefault(image: string) =
-      { nodeCount = 3
-        nodeLocs = None
-        dbType = Sqlite
-        syncStartupDelay = Some(5)
-        quorumSet = AllPeersQuorum
-        historyNodes = None
-        preferredPeersMap = None
-        historyGetCommands = Map.empty
-        localHistory = true
-        peers = None
-        peersDns = List.empty
-        accelerateTime = true
-        unsafeQuorum = true
-        awaitSync = true
-        validate = true
-        tier1 = None
-        catchupMode = CatchupComplete
-        image = image
-        initialization = CoreSetInitialization.Default
-        dumpDatabase = true
-        maxSlotsToRemember = 12
-        maxBatchWriteCount = 1024
-        inMemoryMode = false}
+        { nodeCount = 3
+          nodeLocs = None
+          dbType = Sqlite
+          syncStartupDelay = Some(5)
+          quorumSet = AllPeersQuorum
+          historyNodes = None
+          preferredPeersMap = None
+          historyGetCommands = Map.empty
+          localHistory = true
+          peers = None
+          peersDns = List.empty
+          accelerateTime = true
+          unsafeQuorum = true
+          awaitSync = true
+          validate = true
+          tier1 = None
+          catchupMode = CatchupComplete
+          image = image
+          initialization = CoreSetInitialization.Default
+          dumpDatabase = true
+          maxSlotsToRemember = 12
+          maxBatchWriteCount = 1024
+          inMemoryMode = false }
 
 type CoreSet =
-    { name : CoreSetName
-      options : CoreSetOptions
-      keys : KeyPair array
-      live : bool }
+    { name: CoreSetName
+      options: CoreSetOptions
+      keys: KeyPair array
+      live: bool }
 
-    member self.NumKeys : int =
-        self.keys.Length
+    member self.NumKeys : int = self.keys.Length
 
-    member self.CurrentCount : int =
-        if self.live then self.keys.Length else 0
+    member self.CurrentCount : int = if self.live then self.keys.Length else 0
 
-    member self.WithLive (live : bool) : CoreSet =
-        { name = self.name
-          options = self.options
-          keys = self.keys
-          live = live }
+    member self.WithLive(live: bool) : CoreSet =
+        { name = self.name; options = self.options; keys = self.keys; live = live }
 
 
 let MakeLiveCoreSet (name: string) (options: CoreSetOptions) : CoreSet =

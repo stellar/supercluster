@@ -5,7 +5,6 @@
 module StellarNetworkCfg
 
 open stellar_dotnet_sdk
-
 open StellarMissionContext
 open StellarCoreSet
 
@@ -19,7 +18,7 @@ type NetworkNonce =
         // "ssc" == "stellar supercluster", just to help group namespaces.
         "ssc-" + (Util.BytesToHex n).ToLower()
 
-let MakeNetworkNonce() : NetworkNonce =
+let MakeNetworkNonce () : NetworkNonce =
     let bytes : byte array = Array.zeroCreate 6
     let rng = System.Security.Cryptography.RNGCryptoServiceProvider.Create()
     rng.GetBytes(bytes) |> ignore
@@ -49,70 +48,56 @@ type NetworkPassphrase =
 
 type NetworkCfg =
     { missionContext: MissionContext
-      networkNonce : NetworkNonce
-      networkPassphrase : NetworkPassphrase
-      coreSets : Map<CoreSetName,CoreSet>
-      jobCoreSetOptions : CoreSetOptions option }
+      networkNonce: NetworkNonce
+      networkPassphrase: NetworkPassphrase
+      coreSets: Map<CoreSetName, CoreSet>
+      jobCoreSetOptions: CoreSetOptions option }
 
-    member self.FindCoreSet (n:CoreSetName) : CoreSet =
-        Map.find n self.coreSets
+    member self.FindCoreSet(n: CoreSetName) : CoreSet = Map.find n self.coreSets
 
-    member self.Nonce : string =
-        self.networkNonce.ToString()
+    member self.Nonce : string = self.networkNonce.ToString()
 
-    member self.MapAllPeers<'a> (f:CoreSet->int->'a) : 'a array =
-        let mapCoreSetPeers (cs:CoreSet) = Array.mapi (fun i k -> f cs i) cs.keys
-        Map.toArray self.coreSets
-        |> Array.collect (fun (_, cs) -> mapCoreSetPeers cs)
+    member self.MapAllPeers<'a>(f: CoreSet -> int -> 'a) : 'a array =
+        let mapCoreSetPeers (cs: CoreSet) = Array.mapi (fun i k -> f cs i) cs.keys
+        Map.toArray self.coreSets |> Array.collect (fun (_, cs) -> mapCoreSetPeers cs)
 
-    member self.MaxPeerCount : int =
-        Map.fold (fun n k v -> n + v.options.nodeCount) 0 self.coreSets
+    member self.MaxPeerCount : int = Map.fold (fun n k v -> n + v.options.nodeCount) 0 self.coreSets
 
-    member self.CoreSetList : CoreSet list =
-        Map.toList self.coreSets |> List.map (fun (_, v) -> v)
+    member self.CoreSetList : CoreSet list = Map.toList self.coreSets |> List.map (fun (_, v) -> v)
 
-    member self.StatefulSetName (cs:CoreSet) : StatefulSetName =
-        StatefulSetName (sprintf "%s-sts-%s" self.Nonce cs.name.StringName)
+    member self.StatefulSetName(cs: CoreSet) : StatefulSetName =
+        StatefulSetName(sprintf "%s-sts-%s" self.Nonce cs.name.StringName)
 
-    member self.PodName (cs:CoreSet) (n:int) : PodName =
-        PodName (sprintf "%s-%d" (self.StatefulSetName cs).StringName n)
+    member self.PodName (cs: CoreSet) (n: int) : PodName =
+        PodName(sprintf "%s-%d" (self.StatefulSetName cs).StringName n)
 
-    member self.PeerShortName (cs:CoreSet) (n:int) : PeerShortName =
-        PeerShortName (sprintf "%s-%d" cs.name.StringName n)
+    member self.PeerShortName (cs: CoreSet) (n: int) : PeerShortName =
+        PeerShortName(sprintf "%s-%d" cs.name.StringName n)
 
-    member self.ServiceName : string =
-        sprintf "%s-stellar-core" self.Nonce
+    member self.ServiceName : string = sprintf "%s-stellar-core" self.Nonce
 
-    member self.IngressName : string =
-        sprintf "%s-stellar-core-ingress" self.Nonce
+    member self.IngressName : string = sprintf "%s-stellar-core-ingress" self.Nonce
 
-    member self.JobName(i:int) : string =
-        sprintf "%s-stellar-core-job-%d" self.Nonce i
+    member self.JobName(i: int) : string = sprintf "%s-stellar-core-job-%d" self.Nonce i
 
-    member self.PeerCfgMapName (cs:CoreSet) (i:int) : string =
-        sprintf "%s-cfg-map" (self.PodName cs i).StringName
+    member self.PeerCfgMapName (cs: CoreSet) (i: int) : string = sprintf "%s-cfg-map" (self.PodName cs i).StringName
 
-    member self.PeerDelayCfgMapName (cs:CoreSet) (i:int) : string =
+    member self.PeerDelayCfgMapName (cs: CoreSet) (i: int) : string =
         sprintf "%s-delay-cfg-map" (self.PodName cs i).StringName
 
-    member self.JobCfgMapName : string =
-        sprintf "%s-job-cfg-map" self.Nonce
+    member self.JobCfgMapName : string = sprintf "%s-job-cfg-map" self.Nonce
 
-    member self.HistoryCfgMapName : string =
-        sprintf "%s-history-cfg-map" self.Nonce
+    member self.HistoryCfgMapName : string = sprintf "%s-history-cfg-map" self.Nonce
 
-    member self.NamespaceProperty : string =
-        self.missionContext.namespaceProperty
+    member self.NamespaceProperty : string = self.missionContext.namespaceProperty
 
-    member self.PeerDnsName (cs:CoreSet) (n:int) : PeerDnsName =
-        let s = sprintf "%s.%s.%s.svc.cluster.local"
-                    (self.PodName cs n).StringName
-                    self.ServiceName
-                    self.NamespaceProperty
+    member self.PeerDnsName (cs: CoreSet) (n: int) : PeerDnsName =
+        let s =
+            sprintf "%s.%s.%s.svc.cluster.local" (self.PodName cs n).StringName self.ServiceName self.NamespaceProperty
+
         PeerDnsName s
 
-    member self.IngressInternalHostName : string =
-        sprintf "%s.%s" self.Nonce self.missionContext.ingressInternalDomain
+    member self.IngressInternalHostName : string = sprintf "%s.%s" self.Nonce self.missionContext.ingressInternalDomain
 
     member self.IngressExternalHostName : string =
         match self.missionContext.ingressExternalHost with
@@ -123,24 +108,22 @@ type NetworkCfg =
         let coreSet = self.FindCoreSet(name).WithLive live
         { self with coreSets = self.coreSets.Add(name, coreSet) }
 
-    member self.IsJobMode : bool =
-        if self.jobCoreSetOptions = None
-        then
-            false
-        else
-            true
+    member self.IsJobMode : bool = if self.jobCoreSetOptions = None then false else true
 
 // Generates a fresh network of size n, with fresh keypairs for each node, and a
 // random nonce to isolate the network.
 let MakeNetworkCfg
-        (missionContext:MissionContext)
-        (coreSetList: CoreSet list)
-        (passphrase: NetworkPassphrase option) : NetworkCfg =
+    (missionContext: MissionContext)
+    (coreSetList: CoreSet list)
+    (passphrase: NetworkPassphrase option)
+    : NetworkCfg =
     let nonce = MakeNetworkNonce()
+
     { missionContext = missionContext
       networkNonce = nonce
-      networkPassphrase = match passphrase with
-                          | None -> PrivateNet nonce
-                          | Some(x) -> x
+      networkPassphrase =
+          match passphrase with
+          | None -> PrivateNet nonce
+          | Some (x) -> x
       coreSets = List.map (fun cs -> (cs.name, cs)) coreSetList |> Map.ofList
       jobCoreSetOptions = None }

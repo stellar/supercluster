@@ -9,15 +9,13 @@ open StellarDestination
 
 let GetOrDefault optional def =
     match optional with
-    | Some(x) -> x
+    | Some (x) -> x
     | _ -> def
 
-type LogLevels =
-    { LogDebugPartitions: string list
-      LogTracePartitions: string list }
+type LogLevels = { LogDebugPartitions: string list; LogTracePartitions: string list }
 
 type CoreResources =
-    SmallTestResources
+    | SmallTestResources
     | AcceptanceTestResources
     | SimulatePubnetResources
     | ParallelCatchupResources
@@ -25,31 +23,31 @@ type CoreResources =
     | UpgradeResources
 
 type MissionContext =
-    { kube : Kubernetes
-      destination : Destination
-      image : string
-      oldImage : string option
-      netdelayImage : string
-      postgresImage : string
-      nginxImage : string
-      prometheusExporterImage : string
-      txRate : int
-      maxTxRate : int
-      numAccounts : int
-      numTxs : int
-      spikeSize : int
-      spikeInterval : int
-      numNodes : int
-      namespaceProperty : string
+    { kube: Kubernetes
+      destination: Destination
+      image: string
+      oldImage: string option
+      netdelayImage: string
+      postgresImage: string
+      nginxImage: string
+      prometheusExporterImage: string
+      txRate: int
+      maxTxRate: int
+      numAccounts: int
+      numTxs: int
+      spikeSize: int
+      spikeInterval: int
+      numNodes: int
+      namespaceProperty: string
       logLevels: LogLevels
-      ingressClass : string
-      ingressInternalDomain : string
+      ingressClass: string
+      ingressInternalDomain: string
       ingressExternalHost: string option
       ingressExternalPort: int
-      exportToPrometheus : bool
-      probeTimeout : int
-      coreResources : CoreResources
-      keepData : bool
+      exportToPrometheus: bool
+      probeTimeout: int
+      coreResources: CoreResources
+      keepData: bool
       unevenSched: bool
       apiRateLimit: int
       pubnetData: string option
@@ -58,4 +56,4 @@ type MissionContext =
       simulateApplyDuration: seq<int> option
       simulateApplyWeight: seq<int> option
       networkSizeLimit: int
-      pubnetParallelCatchupStartingLedger: int}
+      pubnetParallelCatchupStartingLedger: int }

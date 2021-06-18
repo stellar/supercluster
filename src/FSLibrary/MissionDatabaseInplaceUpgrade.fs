@@ -12,53 +12,59 @@ open StellarFormation
 open StellarDataDump
 open StellarSupercluster
 
-let databaseInplaceUpgrade (context : MissionContext) =
+let databaseInplaceUpgrade (context: MissionContext) =
     let context = context.WithNominalLoad
     let newImage = context.image
     let oldImage = GetOrDefault context.oldImage context.image
 
     let quorumSet = CoreSetQuorum(CoreSetName("core"))
-    let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.GetDefault newImage with quorumSet = quorumSet; }
 
-    let beforeUpgradeCoreSet = MakeLiveCoreSet
-                                 "before-upgrade"
-                                 { CoreSetOptions.GetDefault oldImage with
-                                     nodeCount = 1
-                                     quorumSet = quorumSet }
+    let coreSet =
+        MakeLiveCoreSet "core" { CoreSetOptions.GetDefault newImage with quorumSet = quorumSet }
+
+    let beforeUpgradeCoreSet =
+        MakeLiveCoreSet
+            "before-upgrade"
+            { CoreSetOptions.GetDefault oldImage with nodeCount = 1; quorumSet = quorumSet }
 
     let fetchFromPeer = Some(CoreSetName("before-upgrade"), 0)
-    let afterUpgradeCoreSet = MakeDeferredCoreSet
-                                 "after-upgrade"
-                                 { CoreSetOptions.GetDefault newImage with
-                                     nodeCount = 1
-                                     quorumSet = quorumSet
-                                     initialization = { newDb = false
-                                                        newHist = false
-                                                        initialCatchup = false
-                                                        forceScp = false
-                                                        fetchDBFromPeer = fetchFromPeer } }
 
-    context.Execute [beforeUpgradeCoreSet; coreSet; afterUpgradeCoreSet] None (fun (formation: StellarFormation) ->
-      formation.WaitUntilSynced [coreSet]
-      let peer = formation.NetworkCfg.GetPeer beforeUpgradeCoreSet 0
-      let version = peer.GetSupportedProtocolVersion()
-      formation.UpgradeProtocol [coreSet] version
+    let afterUpgradeCoreSet =
+        MakeDeferredCoreSet
+            "after-upgrade"
+            { CoreSetOptions.GetDefault newImage with
+                  nodeCount = 1
+                  quorumSet = quorumSet
+                  initialization =
+                      { newDb = false
+                        newHist = false
+                        initialCatchup = false
+                        forceScp = false
+                        fetchDBFromPeer = fetchFromPeer } }
 
-      formation.WaitUntilSynced [beforeUpgradeCoreSet]
+    context.Execute
+        [ beforeUpgradeCoreSet; coreSet; afterUpgradeCoreSet ]
+        None
+        (fun (formation: StellarFormation) ->
+            formation.WaitUntilSynced [ coreSet ]
+            let peer = formation.NetworkCfg.GetPeer beforeUpgradeCoreSet 0
+            let version = peer.GetSupportedProtocolVersion()
+            formation.UpgradeProtocol [ coreSet ] version
 
-      formation.RunLoadgen beforeUpgradeCoreSet context.GenerateAccountCreationLoad
-      formation.RunLoadgen beforeUpgradeCoreSet context.GeneratePaymentLoad
-      formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
-      formation.RunLoadgen coreSet context.GeneratePaymentLoad
+            formation.WaitUntilSynced [ beforeUpgradeCoreSet ]
 
-      formation.BackupDatabaseToHistory peer
-      formation.Start afterUpgradeCoreSet.name
+            formation.RunLoadgen beforeUpgradeCoreSet context.GenerateAccountCreationLoad
+            formation.RunLoadgen beforeUpgradeCoreSet context.GeneratePaymentLoad
+            formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
+            formation.RunLoadgen coreSet context.GeneratePaymentLoad
 
-      let afterUpgradeCoreSetLive = formation.NetworkCfg.FindCoreSet afterUpgradeCoreSet.name
-      formation.WaitUntilSynced [afterUpgradeCoreSetLive]
+            formation.BackupDatabaseToHistory peer
+            formation.Start afterUpgradeCoreSet.name
 
-      formation.RunLoadgen afterUpgradeCoreSet context.GenerateAccountCreationLoad
-      formation.RunLoadgen afterUpgradeCoreSet context.GeneratePaymentLoad
-      formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
-      formation.RunLoadgen coreSet context.GeneratePaymentLoad
-    )
+            let afterUpgradeCoreSetLive = formation.NetworkCfg.FindCoreSet afterUpgradeCoreSet.name
+            formation.WaitUntilSynced [ afterUpgradeCoreSetLive ]
+
+            formation.RunLoadgen afterUpgradeCoreSet context.GenerateAccountCreationLoad
+            formation.RunLoadgen afterUpgradeCoreSet context.GeneratePaymentLoad
+            formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
+            formation.RunLoadgen coreSet context.GeneratePaymentLoad)

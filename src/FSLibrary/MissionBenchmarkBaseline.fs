@@ -11,15 +11,24 @@ open StellarPerformanceReporter
 open StellarFormation
 open StellarSupercluster
 
-let benchmarkBaseline (context : MissionContext) =
-    let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.GetDefault context.image with nodeCount = context.numNodes; accelerateTime = false; }
-    context.ExecuteWithPerformanceReporter [coreSet] None (fun (formation: StellarFormation) (performanceReporter: PerformanceReporter) ->
-        formation.WaitUntilSynced [coreSet]
-        formation.UpgradeProtocolToLatest [coreSet]
-        formation.UpgradeMaxTxSize [coreSet] 1000000
+let benchmarkBaseline (context: MissionContext) =
+    let coreSet =
+        MakeLiveCoreSet
+            "core"
+            { CoreSetOptions.GetDefault context.image with
+                  nodeCount = context.numNodes
+                  accelerateTime = false }
 
-        formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
-        performanceReporter.RecordPerformanceMetrics context.GeneratePaymentLoad (fun _ ->
-            formation.RunLoadgen coreSet context.GeneratePaymentLoad
-        )
-    )
+    context.ExecuteWithPerformanceReporter
+        [ coreSet ]
+        None
+        (fun (formation: StellarFormation) (performanceReporter: PerformanceReporter) ->
+            formation.WaitUntilSynced [ coreSet ]
+            formation.UpgradeProtocolToLatest [ coreSet ]
+            formation.UpgradeMaxTxSize [ coreSet ] 1000000
+
+            formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
+
+            performanceReporter.RecordPerformanceMetrics
+                context.GeneratePaymentLoad
+                (fun _ -> formation.RunLoadgen coreSet context.GeneratePaymentLoad))

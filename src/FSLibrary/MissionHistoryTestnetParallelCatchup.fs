@@ -14,7 +14,7 @@ open StellarJobExec
 open StellarSupercluster
 open MissionCatchupHelpers
 
-let historyTestnetParallelCatchup (context : MissionContext) =
+let historyTestnetParallelCatchup (context: MissionContext) =
     let checkpointsPerJob = 256
     let ledgersPerCheckpoint = 64
     let ledgersPerJob = checkpointsPerJob * ledgersPerCheckpoint
@@ -25,15 +25,21 @@ let historyTestnetParallelCatchup (context : MissionContext) =
 
     let jobArr = getCatchupRanges ledgersPerJob 0 totalLedgers overlapLedgers
 
-    LogInfo "Running %d jobs (%d-way parallel) of %d checkpoints each, to catch up to ledger %d"
-            jobArr.Length parallelism checkpointsPerJob totalLedgers
+    LogInfo
+        "Running %d jobs (%d-way parallel) of %d checkpoints each, to catch up to ledger %d"
+        jobArr.Length
+        parallelism
+        checkpointsPerJob
+        totalLedgers
 
-    let opts = { TestnetCoreSetOptions context.image with
-                     localHistory = false
-                     initialization = CoreSetInitialization.OnlyNewDb }
-    context.ExecuteJobs (Some(opts)) (Some(SDFTestNet))
-        begin
-        fun (formation: StellarFormation) ->
+    let opts =
+        { TestnetCoreSetOptions context.image with
+              localHistory = false
+              initialization = CoreSetInitialization.OnlyNewDb }
+
+    context.ExecuteJobs
+        (Some(opts))
+        (Some(SDFTestNet))
+        (fun (formation: StellarFormation) ->
             (formation.RunParallelJobsInRandomOrder parallelism context.destination jobArr context.image)
-            |> formation.CheckAllJobsSucceeded
-        end
+            |> formation.CheckAllJobsSucceeded)

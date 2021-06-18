@@ -3,7 +3,6 @@ module Tests
 open StellarDestination
 open StellarMissionContext
 open Xunit
-open System
 open System.Text.RegularExpressions
 
 open StellarCoreSet
@@ -15,7 +14,6 @@ open StellarNetworkData
 open StellarNetworkDelays
 open MissionCatchupHelpers
 open Xunit.Abstractions
-open k8s
 
 
 [<Fact>]
@@ -24,59 +22,71 @@ let ``Network nonce looks reasonable`` () =
     let nstr = nonce.ToString()
     Assert.Matches(Regex("^ssc-[a-f0-9]+$"), nstr)
 
-let coreSetOptions = { CoreSetOptions.GetDefault "stellar/stellar-core" with syncStartupDelay = None }
+let coreSetOptions =
+    { CoreSetOptions.GetDefault "stellar/stellar-core" with
+          syncStartupDelay = None }
+
 let coreSet = MakeLiveCoreSet "test" coreSetOptions
 let passOpt : NetworkPassphrase option = None
+
 let ctx : MissionContext =
-  {
-    kube = null
-    destination = Destination(System.IO.Path.GetTempPath())
-    image = "stellar/stellar-core"
-    oldImage = None
-    netdelayImage = ""
-    nginxImage = ""
-    postgresImage = ""
-    prometheusExporterImage = ""
-    txRate = 10
-    maxTxRate = 10
-    numAccounts = 1000
-    numTxs = 1000
-    spikeSize = 1000
-    spikeInterval = 10
-    numNodes = 100
-    namespaceProperty = "stellar-supercluster"
-    logLevels = { LogDebugPartitions=[]; LogTracePartitions=[] }
-    ingressClass = "private"
-    ingressInternalDomain = "local"
-    ingressExternalHost = None
-    ingressExternalPort = 80
-    exportToPrometheus = false
-    probeTimeout = 10
-    coreResources = SmallTestResources
-    keepData = true
-    unevenSched = false
-    apiRateLimit = 10
-    pubnetData = None
-    tier1Keys = None
-    installNetworkDelay = Some true
-    simulateApplyDuration = Some (seq {10; 100})
-    simulateApplyWeight = Some (seq {30; 70})
-    networkSizeLimit = 100
-    pubnetParallelCatchupStartingLedger = 0
-  }
+    { kube = null
+      destination = Destination(System.IO.Path.GetTempPath())
+      image = "stellar/stellar-core"
+      oldImage = None
+      netdelayImage = ""
+      nginxImage = ""
+      postgresImage = ""
+      prometheusExporterImage = ""
+      txRate = 10
+      maxTxRate = 10
+      numAccounts = 1000
+      numTxs = 1000
+      spikeSize = 1000
+      spikeInterval = 10
+      numNodes = 100
+      namespaceProperty = "stellar-supercluster"
+      logLevels = { LogDebugPartitions = []; LogTracePartitions = [] }
+      ingressClass = "private"
+      ingressInternalDomain = "local"
+      ingressExternalHost = None
+      ingressExternalPort = 80
+      exportToPrometheus = false
+      probeTimeout = 10
+      coreResources = SmallTestResources
+      keepData = true
+      unevenSched = false
+      apiRateLimit = 10
+      pubnetData = None
+      tier1Keys = None
+      installNetworkDelay = Some true
+      simulateApplyDuration =
+          Some(
+              seq {
+                  10
+                  100
+              }
+          )
+      simulateApplyWeight =
+          Some(
+              seq {
+                  30
+                  70
+              }
+          )
+      networkSizeLimit = 100
+      pubnetParallelCatchupStartingLedger = 0 }
 
 let netdata = __SOURCE_DIRECTORY__ + "/../../data/public-network-data-2021-01-05.json"
 let pubkeys = __SOURCE_DIRECTORY__ + "/../../data/tier1keys.json"
-let pubnetctx = {ctx with
-                     pubnetData = Some netdata
-                     tier1Keys = Some pubkeys }
+let pubnetctx = { ctx with pubnetData = Some netdata; tier1Keys = Some pubkeys }
 
-let nCfg = MakeNetworkCfg ctx [coreSet] passOpt
+let nCfg = MakeNetworkCfg ctx [ coreSet ] passOpt
 
-type Tests(output:ITestOutputHelper) =
+type Tests(output: ITestOutputHelper) =
 
     [<Fact>]
-    member __.``TOML Config looks reasonable`` () =
+    member __.``TOML Config looks reasonable``() =
         let cfg = nCfg.StellarCoreCfg(coreSet, 1)
         let toml = cfg.ToString()
         let peer0DNS = (nCfg.PeerDnsName coreSet 0).StringName
@@ -89,7 +99,18 @@ type Tests(output:ITestOutputHelper) =
         Assert.Equal(nonceStr + "-sts-test-2." + domain, peer2DNS)
         Assert.Contains("DATABASE = \"sqlite3:///data/stellar.db\"", toml)
         Assert.Contains("BUCKET_DIR_PATH = \"/data/buckets\"", toml)
-        Assert.Contains("PREFERRED_PEERS = [\"" + peer0DNS + "\", \"" + peer1DNS + "\", \"" + peer2DNS + "\"]", toml)
+
+        Assert.Contains(
+            "PREFERRED_PEERS = [\""
+            + peer0DNS
+            + "\", \""
+            + peer1DNS
+            + "\", \""
+            + peer2DNS
+            + "\"]",
+            toml
+        )
+
         Assert.Contains("[HISTORY.test-0]", toml)
         Assert.Contains("\"curl -sf http://" + peer0DNS + "/{0} -o {1}\"", toml)
         Assert.Contains("OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING = [10, 100]", toml)
@@ -97,14 +118,18 @@ type Tests(output:ITestOutputHelper) =
 
 
     [<Fact>]
-    member __.``Core init commands look reasonable`` () =
-        let nCfgWithoutSimulateApply = MakeNetworkCfg { ctx with simulateApplyWeight = None
-                                                                 simulateApplyDuration = None } [coreSet] passOpt
+    member __.``Core init commands look reasonable``() =
+        let nCfgWithoutSimulateApply =
+            MakeNetworkCfg { ctx with simulateApplyWeight = None; simulateApplyDuration = None } [ coreSet ] passOpt
+
         let cmds = nCfgWithoutSimulateApply.getInitCommands PeerSpecificConfigFile coreSet.options
         let cmdStr = ShAnd(cmds).ToString()
-        let exp = "{ stellar-core new-db --conf \"/cfg-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core.cfg\" && " +
-                    "{ stellar-core new-hist local --conf \"/cfg-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core.cfg\" || true; } && " +
-                    "stellar-core force-scp --conf \"/cfg-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core.cfg\"; }"
+
+        let exp =
+            "{ stellar-core new-db --conf \"/cfg-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core.cfg\" && "
+            + "{ stellar-core new-hist local --conf \"/cfg-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core.cfg\" || true; } && "
+            + "stellar-core force-scp --conf \"/cfg-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core.cfg\"; }"
+
         Assert.Equal(exp, cmdStr)
 
         let cmds = nCfg.getInitCommands PeerSpecificConfigFile coreSet.options
@@ -113,17 +138,19 @@ type Tests(output:ITestOutputHelper) =
         Assert.Equal(exp, cmdStr)
 
     [<Fact>]
-    member __.``Shell convenience methods work`` () =
-        let cmds = [|
-                    ShCmd.DefVarSub "pid" [|"pidof"; "postgresql"|];
-                    ShCmd.OfStrs [| "kill"; "-HUP"; "${pid}"; |]
-                    |]
+    member __.``Shell convenience methods work``() =
+        let cmds =
+            [| ShCmd.DefVarSub "pid" [| "pidof"; "postgresql" |]
+               ShCmd.OfStrs [| "kill"
+                               "-HUP"
+                               "${pid}" |] |]
+
         let s = (ShCmd.ShSeq cmds).ToString()
         let exp = "{ pid=`pidof postgresql`; kill -HUP \"${pid}\"; }"
         Assert.Equal(s, exp)
 
     [<Fact>]
-    member __.``PercentOfThreshold function is correct`` () =
+    member __.``PercentOfThreshold function is correct``() =
         let pct = percentOfThreshold 3 2
         Assert.Equal(34, pct)
         let pct = percentOfThreshold 4 2
@@ -148,37 +175,34 @@ type Tests(output:ITestOutputHelper) =
         Assert.Equal(3, thr)
 
     [<Fact>]
-    member __.``Inverse threshold function is actually inverse`` () =
+    member __.``Inverse threshold function is actually inverse``() =
         for sz = 1 to 20 do
             for thr = 1 to sz do
                 let pct = percentOfThreshold sz thr
                 Assert.Equal(thr, thresholdOfPercent sz pct)
 
     [<Fact>]
-    member __.``Public network conversion looks reasonable`` () =
-        if System.IO.File.Exists(netdata) && System.IO.File.Exists(pubkeys)
-        then
-            begin
-                let coreSets = FullPubnetCoreSets pubnetctx false
-                let nCfg = MakeNetworkCfg pubnetctx coreSets passOpt
-                let sdfCoreSetName = CoreSetName "www-stellar-org"
-                Assert.Contains(coreSets, fun cs -> cs.name = sdfCoreSetName)
-                let sdfCoreSet = List.find (fun cs -> cs.name = sdfCoreSetName) coreSets
-                let cfg = nCfg.StellarCoreCfg(sdfCoreSet, 0)
-                let toml = cfg.ToString()
-                Assert.Contains("[QUORUM_SET.sub1]", toml)
-                Assert.Contains("[HISTORY.local]", toml)
-                Assert.Matches(Regex("VALIDATORS.*stellar-blockdaemon-com-0"), toml)
-                Assert.Matches(Regex("VALIDATORS.*www-stellar-org-0"), toml)
-                Assert.Matches(Regex("VALIDATORS.*keybase-io-0"), toml)
-                Assert.Matches(Regex("VALIDATORS.*wirexapp-com-0"), toml)
-                Assert.Matches(Regex("VALIDATORS.*coinqvest-com-0"), toml)
-                Assert.Matches(Regex("VALIDATORS.*satoshipay-io-0"), toml)
-                Assert.Matches(Regex("VALIDATORS.*lobstr-co-0"), toml)
-            end
+    member __.``Public network conversion looks reasonable``() =
+        if System.IO.File.Exists(netdata) && System.IO.File.Exists(pubkeys) then
+            (let coreSets = FullPubnetCoreSets pubnetctx false
+             let nCfg = MakeNetworkCfg pubnetctx coreSets passOpt
+             let sdfCoreSetName = CoreSetName "www-stellar-org"
+             Assert.Contains(coreSets, (fun cs -> cs.name = sdfCoreSetName))
+             let sdfCoreSet = List.find (fun cs -> cs.name = sdfCoreSetName) coreSets
+             let cfg = nCfg.StellarCoreCfg(sdfCoreSet, 0)
+             let toml = cfg.ToString()
+             Assert.Contains("[QUORUM_SET.sub1]", toml)
+             Assert.Contains("[HISTORY.local]", toml)
+             Assert.Matches(Regex("VALIDATORS.*stellar-blockdaemon-com-0"), toml)
+             Assert.Matches(Regex("VALIDATORS.*www-stellar-org-0"), toml)
+             Assert.Matches(Regex("VALIDATORS.*keybase-io-0"), toml)
+             Assert.Matches(Regex("VALIDATORS.*wirexapp-com-0"), toml)
+             Assert.Matches(Regex("VALIDATORS.*coinqvest-com-0"), toml)
+             Assert.Matches(Regex("VALIDATORS.*satoshipay-io-0"), toml)
+             Assert.Matches(Regex("VALIDATORS.*lobstr-co-0"), toml))
 
     [<Fact>]
-    member __.``Geographic calculations are reasonable`` () =
+    member __.``Geographic calculations are reasonable``() =
         // We want to test ping time and distance calculations for
         // a variety of node locations both far apart and close together.
 
@@ -186,53 +210,53 @@ type Tests(output:ITestOutputHelper) =
         // and GCP us-east-4; home to all SDF nodes, 2 LOBSTR nodes,
         // PaySend, Stellarbeat, 2 Satoshipay nodes, BAC, LockerX,
         // and all Blockdaemon nodes.
-        let Ashburn = {lat = 38.89511; lon = -77.03637}
+        let Ashburn = { lat = 38.89511; lon = -77.03637 }
 
         // Beauharnois, suburb of Montreal a.k.a. OVH DC, home of LAPO 4,
         // PublicNode Bootes, etc.
-        let Beauharnois = {lat = 45.2986777; lon= -73.9288762}
+        let Beauharnois = { lat = 45.2986777; lon = -73.9288762 }
 
         // Chennai India a.k.a. IBM/Softlayer DC, home of IBM India node
-        let Chennai = {lat = 13.08784; lon = 80.27847}
+        let Chennai = { lat = 13.08784; lon = 80.27847 }
 
         // Columbus Ohio USA a.k.a. AWS DC (us-east-2) home of Stellarport Ohio
-        let Columbus = {lat = 39.9828671; lon = -83.1309106}
+        let Columbus = { lat = 39.9828671; lon = -83.1309106 }
 
         // Falkenstein/Vogtland Germany a.k.a. Hetzner DC
         // home of StellarExpertV2, LOBSTR 1, HelpCoin 1, COINQVEST
         // "germany", PublicNode Hercules, etc.
-        let Falkenstein = {lat = 50.4788652; lon = 12.3348363}
+        let Falkenstein = { lat = 50.4788652; lon = 12.3348363 }
 
         // Frankfurt Germany a.k.a. AWS DC (eu-central-1) and Hetzner DC
         // home of keybase 2 and SCHUNK 1
-        let Frankfurt = {lat = 50.11552; lon = 8.68417}
+        let Frankfurt = { lat = 50.11552; lon = 8.68417 }
 
         // IBM/Softlayer DC home of IBM HK node
-        let HongKong = {lat = 22.3526738; lon = 113.9876171}
+        let HongKong = { lat = 22.3526738; lon = 113.9876171 }
 
         // Portland Oregon USA a.k.a. AWS DC (us-west-1) home of keybase1
-        let Portland = {lat = 45.5426916; lon = -122.7243663}
+        let Portland = { lat = 45.5426916; lon = -122.7243663 }
 
         // Pudong, suburb of Shanghai a.k.a. Azure DC (china-east-2),
         // home of fchain core3
-        let Pudong = {lat = 31.0856396; lon = 121.4547635}
+        let Pudong = { lat = 31.0856396; lon = 121.4547635 }
 
         // Purfleet UK, suburb of London, a.k.a. OVH and Azure DCs (uksouth)
         // home of StellarExpertV3, PublicNode Lyra, Wirex UK, Sakkex UK, etc.
-        let Purfleet = {lat = 51.4819587; lon = 0.2220319}
+        let Purfleet = { lat = 51.4819587; lon = 0.2220319 }
 
         // Sao Paulo Brazil a.k.a. AWS DC (sa-east-1) and IBM/Softlayer
         // DC, home of at least IBM Brazil node
-        let SaoPaulo = {lat = -23.6821604; lon = -46.8754795}
+        let SaoPaulo = { lat = -23.6821604; lon = -46.8754795 }
 
         // Singapore a.k.a. DCs for OVH, AWS (ap-southeast-1),
         // Azure (southeastasia), DigitalOcean. Home of LAPO 6,
         // Wirex Singapore, fchain core 2, Hawking, etc.
-        let Singapore = {lat = 1.3437449; lon = 103.7540051}
+        let Singapore = { lat = 1.3437449; lon = 103.7540051 }
 
         // Tokyo Japan a.k.a. AWS DC (ap-northeast-1) home of lots
         // of nodes.
-        let Tokyo = {lat = 35.6895; lon = 139.69171}
+        let Tokyo = { lat = 35.6895; lon = 139.69171 }
 
         // Ashburn to Beauharnois: empirically 792km, pingtime 29ms
         // Calculated approximation: 756km, 15ms
@@ -320,38 +344,37 @@ type Tests(output:ITestOutputHelper) =
         Assert.InRange(networkPingInMs Falkenstein Purfleet, 15.0, 20.0)
 
     [<Fact>]
-    member __.``Traffic control commands are reasonable`` () =
-        let Ashburn = {lat = 38.89511; lon = -77.03637}
-        let Beauharnois = {lat = 45.2986777; lon= -73.9288762}
-        let Chennai = {lat = 13.08784; lon = 80.27847}
+    member __.``Traffic control commands are reasonable``() =
+        let Ashburn = { lat = 38.89511; lon = -77.03637 }
+        let Beauharnois = { lat = 45.2986777; lon = -73.9288762 }
+        let Chennai = { lat = 13.08784; lon = 80.27847 }
         let dns1 = PeerDnsName "www.foo.com"
         let dns2 = PeerDnsName "www.bar.com"
-        let cmd = getNetworkDelayCommands Ashburn [|(Beauharnois,dns1);
-                                                     (Chennai,dns2)|]
+        let cmd = getNetworkDelayCommands Ashburn [| (Beauharnois, dns1); (Chennai, dns2) |]
         let cmdStr = cmd.ToString()
 
         Assert.Contains(dns1.StringName, cmdStr)
         Assert.Contains(dns2.StringName, cmdStr)
-        let delay1 = int(networkDelayInMs Ashburn Beauharnois)
-        let delay2 = int(networkDelayInMs Ashburn Chennai)
+        let delay1 = int (networkDelayInMs Ashburn Beauharnois)
+        let delay2 = int (networkDelayInMs Ashburn Chennai)
         Assert.Contains(sprintf "netem delay %dms" delay1, cmdStr)
         Assert.Contains(sprintf "netem delay %dms" delay2, cmdStr)
 
     [<Fact>]
-    member __.``Public network delay commands are reasonable`` () =
-        if System.IO.File.Exists(netdata) && System.IO.File.Exists(pubkeys)
-        then
-            begin
-                let allCoreSets = FullPubnetCoreSets pubnetctx true
-                let fullNetCfg = MakeNetworkCfg pubnetctx allCoreSets passOpt
-                let sdf = List.find (fun (cs:CoreSet) -> cs.name.StringName = "www-stellar-org") allCoreSets
-                let delayCmd = fullNetCfg.NetworkDelayScript sdf 0
-                let str = delayCmd.ToString()
-                Assert.Matches(Regex("host -t A ssc-.*cluster.local"), str)
-            end
+    member __.``Public network delay commands are reasonable``() =
+        if System.IO.File.Exists(netdata) && System.IO.File.Exists(pubkeys) then
+            (let allCoreSets = FullPubnetCoreSets pubnetctx true
+             let fullNetCfg = MakeNetworkCfg pubnetctx allCoreSets passOpt
+
+             let sdf =
+                 List.find (fun (cs: CoreSet) -> cs.name.StringName = "www-stellar-org") allCoreSets
+
+             let delayCmd = fullNetCfg.NetworkDelayScript sdf 0
+             let str = delayCmd.ToString()
+             Assert.Matches(Regex("host -t A ssc-.*cluster.local"), str))
 
     [<Fact>]
-    member __.``Parallel catchup ranges are reasonable`` () =
+    member __.``Parallel catchup ranges are reasonable``() =
 
         // startingLedger = 0
         let jobArr1 = getCatchupRanges 5 0 19 1
@@ -360,8 +383,8 @@ type Tests(output:ITestOutputHelper) =
         Assert.Equal("9/6", jobArr1.[1].[1])
         Assert.Equal("14/6", jobArr1.[2].[1])
         Assert.Equal("19/6", jobArr1.[3].[1])
-         
-        // next range would end at startingLedger(50), but it's 
+
+        // next range would end at startingLedger(50), but it's
         // already contained in the previously calculated range (56/8)
         let jobArr2 = getCatchupRanges 6 50 62 2
         Assert.Equal(2, jobArr2.Length)

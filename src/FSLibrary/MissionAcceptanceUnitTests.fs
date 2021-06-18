@@ -9,15 +9,19 @@ open StellarMissionContext
 open StellarSupercluster
 open StellarJobExec
 
-let acceptanceUnitTests (context : MissionContext) =
+let acceptanceUnitTests (context: MissionContext) =
     let context = { context with coreResources = AcceptanceTestResources }
-    let opts = { CoreSetOptions.GetDefault context.image with
-                    dbType = Postgres
-                    localHistory = false
-                    nodeCount = 1
-                    initialization = CoreSetInitialization.NoInitCmds
-                     }
-    context.ExecuteJobs (Some(opts)) None
+
+    let opts =
+        { CoreSetOptions.GetDefault context.image with
+              dbType = Postgres
+              localHistory = false
+              nodeCount = 1
+              initialization = CoreSetInitialization.NoInitCmds }
+
+    context.ExecuteJobs
+        (Some(opts))
+        None
         (fun formation ->
-         formation.RunSingleJob context.destination [| "test"; "[acceptance]~[.]" |] context.image false
-         |> formation.CheckAllJobsSucceeded)
+            formation.RunSingleJob context.destination [| "test"; "[acceptance]~[.]" |] context.image false
+            |> formation.CheckAllJobsSucceeded)

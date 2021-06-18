@@ -12,25 +12,33 @@ open StellarFormation
 open StellarSupercluster
 
 
-let benchmarkIncreaseTxRate (context : MissionContext) =
-    let coreSet = MakeLiveCoreSet "core" { CoreSetOptions.GetDefault context.image with nodeCount = context.numNodes; accelerateTime = false; }
-    context.ExecuteWithPerformanceReporter [coreSet] None (fun (formation: StellarFormation) (performanceReporter: PerformanceReporter) ->
-        formation.WaitUntilSynced [coreSet]
-        formation.UpgradeProtocolToLatest [coreSet]
-        formation.UpgradeMaxTxSize [coreSet] 1000000
+let benchmarkIncreaseTxRate (context: MissionContext) =
+    let coreSet =
+        MakeLiveCoreSet
+            "core"
+            { CoreSetOptions.GetDefault context.image with
+                  nodeCount = context.numNodes
+                  accelerateTime = false }
 
-        formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
+    context.ExecuteWithPerformanceReporter
+        [ coreSet ]
+        None
+        (fun (formation: StellarFormation) (performanceReporter: PerformanceReporter) ->
+            formation.WaitUntilSynced [ coreSet ]
+            formation.UpgradeProtocolToLatest [ coreSet ]
+            formation.UpgradeMaxTxSize [ coreSet ] 1000000
 
-        for txRate in context.txRate..(10)..context.maxTxRate do
-            let loadGen = { mode = GeneratePaymentLoad
-                            accounts = context.numAccounts
-                            txs = context.numTxs
-                            spikesize = context.spikeSize
-                            spikeinterval = context.spikeInterval
-                            txrate = txRate
-                            offset = 0
-                            batchsize = 100 }
-            performanceReporter.RecordPerformanceMetrics loadGen (fun _ ->
-                formation.RunLoadgen coreSet loadGen
-            )
-    )
+            formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
+
+            for txRate in context.txRate .. (10) .. context.maxTxRate do
+                let loadGen =
+                    { mode = GeneratePaymentLoad
+                      accounts = context.numAccounts
+                      txs = context.numTxs
+                      spikesize = context.spikeSize
+                      spikeinterval = context.spikeInterval
+                      txrate = txRate
+                      offset = 0
+                      batchsize = 100 }
+
+                performanceReporter.RecordPerformanceMetrics loadGen (fun _ -> formation.RunLoadgen coreSet loadGen))

@@ -5,13 +5,9 @@
 module StellarRemoteCommandExec
 
 open Logging
-open k8s
-open k8s.Models
 open StellarCoreSet
 open StellarFormation
 open StellarShellCmd
-open System.Threading
-open Microsoft.Rest.Serialization
 open CSLibrary
 
 type StellarFormation with
@@ -29,27 +25,29 @@ type StellarFormation with
 
     member self.RunRemoteCommand(peer: PodName, cmd: ShCmd) : unit =
         let cmdStr = cmd.ToString()
-        let truncated = if cmdStr.Length > 20
-                        then cmdStr.Substring(0, 20) + "..."
-                        else cmdStr
+        let truncated = if cmdStr.Length > 20 then cmdStr.Substring(0, 20) + "..." else cmdStr
         LogInfo "Running %d-byte shell command on peer %s: %s" cmdStr.Length peer.StringName truncated
 
         // We're feeding /bin/sh a command on stdin, which means we also need to run an exit
         // command at the end to ensure it actually terminates instead of sitting there.
-        let fullCmdWithExit = ShCmd.ShSeq [|cmd; ShCmd.OfStrs [|"exit"; "0"|] |]
+        let fullCmdWithExit =
+            ShCmd.ShSeq [| cmd
+                           ShCmd.OfStrs [| "exit"; "0" |] |]
 
         // Further, we also have to add a trailing "\n" to get it to run at all.
         let fullCmdStr = fullCmdWithExit.ToString() + "\n"
 
-        self.sleepUntilNextRateLimitedApiCallTime()
-        let res = RemoteCommandRunner.RunRemoteCommand(kube = self.Kube,
-                                                       ns = self.NetworkCfg.NamespaceProperty,
-                                                       podName = peer.StringName,
-                                                       containerName = "stellar-core-run",
-                                                       shellCmdStrIncludingNewLine = fullCmdStr)
-        if res <> 0
-        then
-            begin
-                LogError "Command failed on peer %s: %s => exited %d " peer.StringName truncated res
-                failwith "remote command execution failed"
-            end
+        self.sleepUntilNextRateLimitedApiCallTime ()
+
+        let res =
+            RemoteCommandRunner.RunRemoteCommand(
+                kube = self.Kube,
+                ns = self.NetworkCfg.NamespaceProperty,
+                podName = peer.StringName,
+                containerName = "stellar-core-run",
+                shellCmdStrIncludingNewLine = fullCmdStr
+            )
+
+        if res <> 0 then
+            (LogError "Command failed on peer %s: %s => exited %d " peer.StringName truncated res
+             failwith "remote command execution failed")

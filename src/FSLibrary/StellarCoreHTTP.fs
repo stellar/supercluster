@@ -6,7 +6,6 @@ module StellarCoreHTTP
 
 open FSharp.Data
 open stellar_dotnet_sdk
-
 open StellarCoreSet
 open PollRetry
 open Logging
@@ -39,7 +38,7 @@ type LoadGenMode =
     | GeneratePaymentLoad
 
     override self.ToString() =
-       match self with
+        match self with
         | GenerateAccountCreationLoad -> "create"
         | GeneratePaymentLoad -> "pay"
 
@@ -54,42 +53,39 @@ type LoadGen =
       offset: int
       batchsize: int }
 
-    member self.ToQuery : (string*string) list =
-        [
-           ("mode", self.mode.ToString())
-           ("accounts", self.accounts.ToString());
-           ("txs", self.txs.ToString());
-           ("txrate", self.txrate.ToString());
-           ("spikesize", self.spikesize.ToString());
-           ("spikeinterval", self.spikeinterval.ToString());
-           ("batchsize", self.batchsize.ToString());
-        ]
+    member self.ToQuery : (string * string) list =
+        [ ("mode", self.mode.ToString())
+          ("accounts", self.accounts.ToString())
+          ("txs", self.txs.ToString())
+          ("txrate", self.txrate.ToString())
+          ("spikesize", self.spikesize.ToString())
+          ("spikeinterval", self.spikeinterval.ToString())
+          ("batchsize", self.batchsize.ToString()) ]
 
 type MissionContext with
 
-    member self.WithNominalLoad : MissionContext =
-      { self with numTxs = 100; numAccounts = 100 }
+    member self.WithNominalLoad : MissionContext = { self with numTxs = 100; numAccounts = 100 }
 
     member self.GenerateAccountCreationLoad : LoadGen =
-      { mode = GenerateAccountCreationLoad
-        accounts = self.numAccounts
-        txs = 0
-        spikesize = 0
-        spikeinterval = 0
-        // Use conservative rate for account creation, as the network may quickly get overloaded
-        txrate = 5
-        offset = 0
-        batchsize = 100 }
+        { mode = GenerateAccountCreationLoad
+          accounts = self.numAccounts
+          txs = 0
+          spikesize = 0
+          spikeinterval = 0
+          // Use conservative rate for account creation, as the network may quickly get overloaded
+          txrate = 5
+          offset = 0
+          batchsize = 100 }
 
     member self.GeneratePaymentLoad : LoadGen =
-      { mode = GeneratePaymentLoad
-        accounts = self.numAccounts
-        txs = self.numTxs
-        txrate = self.txRate
-        spikesize = self.spikeSize
-        spikeinterval = self.spikeInterval
-        offset = 0
-        batchsize = 100 }
+        { mode = GeneratePaymentLoad
+          accounts = self.numAccounts
+          txs = self.numTxs
+          txrate = self.txRate
+          spikesize = self.spikeSize
+          spikeinterval = self.spikeInterval
+          offset = 0
+          batchsize = 100 }
 
 
 let DefaultAccountCreationLoadGen =
@@ -110,17 +106,15 @@ type UpgradeParameters =
       maxTxSize: Option<int>
       baseReserve: Option<int> }
 
-    member self.ToQuery : (string*string) list =
+    member self.ToQuery : (string * string) list =
         let maybe name opt = Option.toList (Option.map (fun v -> (name, v.ToString())) opt)
-        List.concat
-            [|
-                [("mode", "set")];
-                [("upgradetime", self.upgradeTime.ToUniversalTime().ToString("o"))];
-                maybe "protocolversion" self.protocolVersion;
-                maybe "basefee" self.baseFee;
-                maybe "basereserve" self.baseReserve;
-                maybe "maxtxsize" self.maxTxSize;
-            |]
+
+        List.concat [| [ ("mode", "set") ]
+                       [ ("upgradetime", self.upgradeTime.ToUniversalTime().ToString("o")) ]
+                       maybe "protocolversion" self.protocolVersion
+                       maybe "basefee" self.baseFee
+                       maybe "basereserve" self.baseReserve
+                       maybe "maxtxsize" self.maxTxSize |]
 
 let DefaultUpgradeParameters =
     { upgradeTime = System.DateTime.Parse("1970-01-01T00:00:00Z")
@@ -130,10 +124,10 @@ let DefaultUpgradeParameters =
       baseReserve = None }
 
 
-let MeterCountOr (def:int) (m:Option<Metrics.GenericMeter>) : int =
+let MeterCountOr (def: int) (m: Option<Metrics.GenericMeter>) : int =
     match m with
-        | Some(n) -> n.Count
-        | None -> def
+    | Some (n) -> n.Count
+    | None -> def
 
 
 let ConsistencyCheckIterationCount : int = 5
@@ -150,90 +144,88 @@ type Peer with
 
     member self.Headers =
         let host = self.networkCfg.IngressInternalHostName
-        [HttpRequestHeaders.Host host]
+        [ HttpRequestHeaders.Host host ]
 
-    member self.URL (path:string) : string =
-        sprintf "http://%s:%d/%s/core/%s"
+    member self.URL(path: string) : string =
+        sprintf
+            "http://%s:%d/%s/core/%s"
             self.networkCfg.IngressExternalHostName
             self.networkCfg.missionContext.ingressExternalPort
             self.PodName.StringName
             path
 
-    member self.fetch (path:string) : string =
+    member self.fetch(path: string) : string =
         let url = self.URL path
-        Http.RequestString(url, headers=self.Headers)
+        Http.RequestString(url, headers = self.Headers)
 
     member self.GetState() =
-        WebExceptionRetry DefaultRetry
-            (fun _ -> Info.Parse(self.fetch "info").Info.State)
+        WebExceptionRetry DefaultRetry (fun _ -> Info.Parse(self.fetch "info").Info.State)
 
     member self.GetStatusOrState() : string =
-        WebExceptionRetry DefaultRetry
+        WebExceptionRetry
+            DefaultRetry
             (fun _ ->
-             let i = Info.Parse(self.fetch "info").Info
-             if i.Status.Length = 0 then i.State else i.Status.[0] )
+                let i = Info.Parse(self.fetch "info").Info
+                if i.Status.Length = 0 then i.State else i.Status.[0])
 
     member self.GetMetrics() : Metrics.Metrics =
-        WebExceptionRetry DefaultRetry
-            (fun _ -> Metrics.Parse(self.fetch "metrics").Metrics)
+        WebExceptionRetry DefaultRetry (fun _ -> Metrics.Parse(self.fetch "metrics").Metrics)
 
-    member self.GetInfo() : Info.Info =
-        WebExceptionRetry DefaultRetry
-            (fun _ -> Info.Parse(self.fetch "info").Info)
+    member self.GetInfo() : Info.Info = WebExceptionRetry DefaultRetry (fun _ -> Info.Parse(self.fetch "info").Info)
 
-    member self.GetLedgerNum() : int =
-        self.GetInfo().Ledger.Num
+    member self.GetLedgerNum() : int = self.GetInfo().Ledger.Num
 
-    member self.GetMaxTxSetSize() : int =
-        self.GetInfo().Ledger.MaxTxSetSize
+    member self.GetMaxTxSetSize() : int = self.GetInfo().Ledger.MaxTxSetSize
 
-    member self.GetLedgerProtocolVersion() : int =
-        self.GetInfo().Ledger.Version
+    member self.GetLedgerProtocolVersion() : int = self.GetInfo().Ledger.Version
 
-    member self.GetSupportedProtocolVersion() : int =
-        self.GetInfo().ProtocolVersion
+    member self.GetSupportedProtocolVersion() : int = self.GetInfo().ProtocolVersion
 
-    member self.SetUpgrades (upgrades:UpgradeParameters) =
+    member self.SetUpgrades(upgrades: UpgradeParameters) =
         let res =
-            WebExceptionRetry DefaultRetry
-                (fun _ -> Http.RequestString(httpMethod="GET",
-                                             url=self.URL "upgrades",
-                                             headers=self.Headers,
-                                             query=upgrades.ToQuery))
-        if res.ToLower().Contains("exception")
-        then raise (PeerRejectedUpgradesException res)
+            WebExceptionRetry
+                DefaultRetry
+                (fun _ ->
+                    Http.RequestString(
+                        httpMethod = "GET",
+                        url = self.URL "upgrades",
+                        headers = self.Headers,
+                        query = upgrades.ToQuery
+                    ))
 
-    member self.UpgradeProtocol (version: int) (time:System.DateTime) =
-        let upgrades = { DefaultUpgradeParameters with
-                           protocolVersion = Some(version);
-                           upgradeTime = time }
+        if res.ToLower().Contains("exception") then
+            raise (PeerRejectedUpgradesException res)
+
+    member self.UpgradeProtocol (version: int) (time: System.DateTime) =
+        let upgrades =
+            { DefaultUpgradeParameters with
+                  protocolVersion = Some(version)
+                  upgradeTime = time }
+
         self.SetUpgrades(upgrades)
 
-    member self.UpgradeProtocolToLatest (time:System.DateTime) =
-        let upgrades = { DefaultUpgradeParameters with
-                           protocolVersion = Some(self.GetSupportedProtocolVersion());
-                           upgradeTime = time }
+    member self.UpgradeProtocolToLatest(time: System.DateTime) =
+        let upgrades =
+            { DefaultUpgradeParameters with
+                  protocolVersion = Some(self.GetSupportedProtocolVersion())
+                  upgradeTime = time }
+
         self.SetUpgrades(upgrades)
 
-    member self.UpgradeMaxTxSize (txSize: int) (time:System.DateTime) =
-        let upgrades = { DefaultUpgradeParameters with
-                           maxTxSize = Some(txSize);
-                           upgradeTime = time }
+    member self.UpgradeMaxTxSize (txSize: int) (time: System.DateTime) =
+        let upgrades = { DefaultUpgradeParameters with maxTxSize = Some(txSize); upgradeTime = time }
         self.SetUpgrades(upgrades)
 
-    member self.WaitForLedgerNum (n:int) =
+    member self.WaitForLedgerNum(n: int) =
         RetryUntilTrue
             (fun _ -> self.GetLedgerNum() >= n)
-            (fun _ -> LogInfo "Waiting for ledger %d on %s: %s"
-                              n self.ShortName.StringName (self.GetStatusOrState()))
+            (fun _ -> LogInfo "Waiting for ledger %d on %s: %s" n self.ShortName.StringName (self.GetStatusOrState()))
 
-    member self.WaitForFewLedgers (count:int) =
-        self.WaitForLedgerNum (self.GetLedgerNum() + count)
+    member self.WaitForFewLedgers(count: int) = self.WaitForLedgerNum(self.GetLedgerNum() + count)
 
-    member self.WaitForNextLedger() =
-        self.WaitForFewLedgers(1)
+    member self.WaitForNextLedger() = self.WaitForFewLedgers(1)
 
-    member self.WaitForProtocol (n:int) =
+    member self.WaitForProtocol(n: int) =
         RetryUntilTrue
             (fun _ -> self.GetLedgerProtocolVersion() = n)
             (fun _ -> LogInfo "Waiting for protocol %d on %s" n self.ShortName.StringName)
@@ -242,244 +234,273 @@ type Peer with
         let latest = self.GetSupportedProtocolVersion()
         self.WaitForProtocol latest
 
-    member self.WaitForMaxTxSetSize(n:int) =
-       RetryUntilTrue
+    member self.WaitForMaxTxSetSize(n: int) =
+        RetryUntilTrue
             (fun _ -> self.GetMaxTxSetSize() = n)
             (fun _ -> LogInfo "Waiting for MaxTxSize=%d on %s" n self.ShortName.StringName)
 
-    member self.WaitForNextSeq (src: string) (n:int64) =
-        let desiredSeq = n + int64(1)
+    member self.WaitForNextSeq (src: string) (n: int64) =
+        let desiredSeq = n + int64 (1)
+
         RetryUntilTrue
             (fun _ -> self.GetTestAccSeq(src) >= desiredSeq)
             (fun _ -> LogInfo "Waiting for seqnum=%d for account %s" desiredSeq src)
 
-    member self.CheckNoErrorMetrics(includeTxInternalErrors:bool) =
-        let raiseIfNonzero (c:int) (n:string) =
-            if c <> 0
-            then raise (PeerHasNonzeroErrorMetricsException (self, n, c))
-        let m:Metrics.Metrics = self.GetMetrics()
+    member self.CheckNoErrorMetrics(includeTxInternalErrors: bool) =
+        let raiseIfNonzero (c: int) (n: string) = if c <> 0 then raise (PeerHasNonzeroErrorMetricsException(self, n, c))
+        let m : Metrics.Metrics = self.GetMetrics()
         raiseIfNonzero m.ScpEnvelopeInvalidsig.Count "scp.envelope.invalidsig"
         raiseIfNonzero m.HistoryPublishFailure.Count "history.publish.failure"
         raiseIfNonzero m.LedgerInvariantFailure.Count "ledger.invariant.failure"
-        if includeTxInternalErrors
-        then raiseIfNonzero m.LedgerTransactionInternalError.Count
-                 "ledger.transaction.internal-error"
+
+        if includeTxInternalErrors then
+            raiseIfNonzero m.LedgerTransactionInternalError.Count "ledger.transaction.internal-error"
+
         LogInfo "No errors found on %s" self.ShortName.StringName
 
-    member self.CheckConsistencyWith (other:Peer) =
-        let shortHash (v:string) : string = v.Remove 6
-        let rec loop (ours:Map<int,string>) (theirs:Map<int,string>) (n:int) =
-            if n < 0
-            then raise (MaybeInconsistentPeersException (self, other))
+    member self.CheckConsistencyWith(other: Peer) =
+        let shortHash (v: string) : string = v.Remove 6
+
+        let rec loop (ours: Map<int, string>) (theirs: Map<int, string>) (n: int) =
+            if n < 0 then
+                raise (MaybeInconsistentPeersException(self, other))
             else
-                if Map.exists
-                    begin
-                        fun k v ->
-                            match theirs.TryFind k with
-                                | None -> false
-                                | Some w when v = w ->
-                                    LogInfo "found agreeing ledger %d = %s on %s and %s"
-                                        k (shortHash v) self.ShortName.StringName other.ShortName.StringName
-                                    true
-                                | Some w ->
-                                    LogError "Inconsistent peers: ledger %d = %s on %s and %s on %s"
-                                       k (shortHash v) self.ShortName.StringName (shortHash w) other.ShortName.StringName
-                                    raise (InconsistentPeersException (self, other))
-                    end
-                        ours
-                then ()
-                else
 
-                    // Sleep to allow ledgers to close. No need to sleep on the first iteration
-                    if n < ConsistencyCheckIterationCount 
-                    then 
-                        // Sleep for 1 second when using accelerateTime, and 5 seconds otherwise
-                        // because it does not make much sense to check every 1 second
-                        // if the network closes ledgers every 5 seconds.
-                        Thread.Sleep(if self.coreSet.options.accelerateTime then 1000 else 5000)
+            // Sleep to allow ledgers to close. No need to sleep on the first iteration
+            if Map.exists
+                (fun k v ->
+                    match theirs.TryFind k with
+                    | None -> false
+                    | Some w when v = w ->
+                        LogInfo
+                            "found agreeing ledger %d = %s on %s and %s"
+                            k
+                            (shortHash v)
+                            self.ShortName.StringName
+                            other.ShortName.StringName
 
-                    let ensureSyncedIfTier1 p =
-                        if p.coreSet.options.tier1 = Some true && p.GetState() <> "Synced!"
-                        then
-                            (NodeLostSyncException p.ShortName.StringName) |> raise
+                        true
+                    | Some w ->
+                        LogError
+                            "Inconsistent peers: ledger %d = %s on %s and %s on %s"
+                            k
+                            (shortHash v)
+                            self.ShortName.StringName
+                            (shortHash w)
+                            other.ShortName.StringName
 
-                    ensureSyncedIfTier1 self
-                    ensureSyncedIfTier1 other
+                        raise (InconsistentPeersException(self, other)))
+                ours then
+                ()
+            else
 
-                    let ourLedger = self.GetInfo().Ledger
-                    let theirLedger = other.GetInfo().Ledger
+                // Sleep to allow ledgers to close. No need to sleep on the first iteration
+                if n < ConsistencyCheckIterationCount then
+                    // Sleep for 1 second when using accelerateTime, and 5 seconds otherwise
+                    // because it does not make much sense to check every 1 second
+                    // if the network closes ledgers every 5 seconds.
+                    Thread.Sleep(if self.coreSet.options.accelerateTime then 1000 else 5000)
 
-                    loop
-                        (Map.add ourLedger.Num ourLedger.Hash ours)
-                        (Map.add theirLedger.Num theirLedger.Hash theirs)
-                        (n-1)
+                let ensureSyncedIfTier1 p =
+                    if p.coreSet.options.tier1 = Some true && p.GetState() <> "Synced!" then
+                        (NodeLostSyncException p.ShortName.StringName) |> raise
+
+                ensureSyncedIfTier1 self
+                ensureSyncedIfTier1 other
+
+                let ourLedger = self.GetInfo().Ledger
+                let theirLedger = other.GetInfo().Ledger
+
+                loop
+                    (Map.add ourLedger.Num ourLedger.Hash ours)
+                    (Map.add theirLedger.Num theirLedger.Hash theirs)
+                    (n - 1)
+
         loop Map.empty Map.empty ConsistencyCheckIterationCount
 
     member self.CheckUsesLatestProtocolVersion() =
         let lastestProtocolVersion = self.GetSupportedProtocolVersion()
         let currentProtocolVersion = self.GetLedgerProtocolVersion()
+
         if lastestProtocolVersion <> currentProtocolVersion then
-            raise (ProtocolVersionNotUpgradedException (currentProtocolVersion, lastestProtocolVersion))
+            raise (ProtocolVersionNotUpgradedException(currentProtocolVersion, lastestProtocolVersion))
 
     member self.ClearMetrics() =
-        WebExceptionRetry DefaultRetry
-            (fun _ -> Http.RequestString(httpMethod="GET",
-                                         headers=self.Headers,
-                                         url=self.URL "clearmetrics")) |> ignore
+        WebExceptionRetry
+            DefaultRetry
+            (fun _ -> Http.RequestString(httpMethod = "GET", headers = self.Headers, url = self.URL "clearmetrics"))
+        |> ignore
 
-    member self.GetTestAcc (accName:string) : TestAcc.Root =
+    member self.GetTestAcc(accName: string) : TestAcc.Root =
         // NB: work around buggy JSON parser upstream, see
         // https://github.com/fsharp/FSharp.Data/pull/1262
-        let s = WebExceptionRetry DefaultRetry
-                    (fun _ -> Http.RequestString(httpMethod = "GET",
-                                                 url = self.URL("testacc"),
-                                                 headers=self.Headers,
-                                                 query = [("name", accName)]))
+        let s =
+            WebExceptionRetry
+                DefaultRetry
+                (fun _ ->
+                    Http.RequestString(
+                        httpMethod = "GET",
+                        url = self.URL("testacc"),
+                        headers = self.Headers,
+                        query = [ ("name", accName) ]
+                    ))
+
         TestAcc.Parse(if s.Trim().StartsWith("null") then "{}" else s)
 
-    member self.GetTestAccBalance (accName:string) : int64 =
+    member self.GetTestAccBalance(accName: string) : int64 =
         RetryUntilSome
             (fun _ -> self.GetTestAcc(accName).Balance)
             (fun _ -> LogWarn "Waiting for account %s to exist, to read balance" accName)
 
-    member self.GetTestAccSeq (accName:string) : int64 =
+    member self.GetTestAccSeq(accName: string) : int64 =
         RetryUntilSome
             (fun _ -> self.GetTestAcc(accName).Seqnum)
             (fun _ -> LogWarn "Waiting for account %s to exist, to read seqnum" accName)
 
-    member self.GenerateLoad (loadGen: LoadGen) : string =
-        WebExceptionRetry DefaultRetry
-            (fun _ -> Http.RequestString(httpMethod="GET",
-                                         headers=self.Headers,
-                                         url=self.URL "generateload",
-                                         query=loadGen.ToQuery))
-    member self.ManualClose() =
-        WebExceptionRetry DefaultRetry
-            (fun _ -> Http.RequestString(httpMethod="GET",
-                                         headers=self.Headers,
-                                         url = self.URL "manualclose")) |> ignore
+    member self.GenerateLoad(loadGen: LoadGen) : string =
+        WebExceptionRetry
+            DefaultRetry
+            (fun _ ->
+                Http.RequestString(
+                    httpMethod = "GET",
+                    headers = self.Headers,
+                    url = self.URL "generateload",
+                    query = loadGen.ToQuery
+                ))
 
-    member self.SubmitSignedTransaction (tx:Transaction) : Tx.Root =
+    member self.ManualClose() =
+        WebExceptionRetry
+            DefaultRetry
+            (fun _ -> Http.RequestString(httpMethod = "GET", headers = self.Headers, url = self.URL "manualclose"))
+        |> ignore
+
+    member self.SubmitSignedTransaction(tx: Transaction) : Tx.Root =
         let b64 = tx.ToEnvelopeXdrBase64()
         let uri = (self.URL "tx") + "?blob=" + (System.Uri.EscapeDataString b64)
-        let s = WebExceptionRetry DefaultRetry
-                    (fun  _ ->
-                     // Work around buggy URI-escaping upstream,
-                     // see https://github.com/fsharp/FSharp.Data/issues/1263
-                     LogDebug "Submitting transaction: %s" uri
-                     let req = System.Net.WebRequest.CreateHttp uri
-                     req.Method <- "GET"
-                     let hdrs = System.Net.WebHeaderCollection()
-                     hdrs.Add(System.Net.HttpRequestHeader.Host, self.networkCfg.IngressInternalHostName)
-                     req.Headers <- hdrs
-                     use stream = req.GetResponse().GetResponseStream()
-                     use reader = new System.IO.StreamReader(stream)
-                     reader.ReadToEnd())
+
+        let s =
+            WebExceptionRetry
+                DefaultRetry
+                (fun _ ->
+                    // Work around buggy URI-escaping upstream,
+                    // see https://github.com/fsharp/FSharp.Data/issues/1263
+                    LogDebug "Submitting transaction: %s" uri
+                    let req = System.Net.WebRequest.CreateHttp uri
+                    req.Method <- "GET"
+                    let hdrs = System.Net.WebHeaderCollection()
+                    hdrs.Add(System.Net.HttpRequestHeader.Host, self.networkCfg.IngressInternalHostName)
+                    req.Headers <- hdrs
+                    use stream = req.GetResponse().GetResponseStream()
+                    use reader = new System.IO.StreamReader(stream)
+                    reader.ReadToEnd())
+
         LogDebug "Transaction response: %s" s
         let res = Tx.Parse(s)
-        if res.Status <> "PENDING"
-        then
-            LogError "Transaction result %s" res.Status
-            match res.Error with
-                | None -> ()
-                | Some(r) ->
-                    let txr = responses.TransactionResult.FromXdr(r)
-                    LogError "Result details: %O" txr
-            raise (TransactionRejectedException tx)
-        else res
 
-    member self.LogCoreSetListStatusWithTiers (coreSetList: CoreSet list) : unit =
+        if res.Status <> "PENDING" then
+            LogError "Transaction result %s" res.Status
+
+            match res.Error with
+            | None -> ()
+            | Some (r) ->
+                let txr = responses.TransactionResult.FromXdr(r)
+                LogError "Result details: %O" txr
+
+            raise (TransactionRejectedException tx)
+        else
+            res
+
+    member self.LogCoreSetListStatusWithTiers(coreSetList: CoreSet list) : unit =
         let tier1CoreSetList = List.filter (fun cs -> cs.options.tier1 = Some true) coreSetList
         let nonTier1CoreSetList = List.filter (fun cs -> cs.options.tier1 = Some false) coreSetList
-        let getStateList (cs:CoreSet) = Seq.map (fun i -> (self.networkCfg.GetPeer cs i).GetState())
-                                                (seq { 0 .. (cs.options.nodeCount - 1)})
-                                                |> Seq.toList
+
+        let getStateList (cs: CoreSet) =
+            Seq.map (fun i -> (self.networkCfg.GetPeer cs i).GetState()) (seq { 0 .. (cs.options.nodeCount - 1) })
+            |> Seq.toList
+
         let tier1StatusList = List.map getStateList tier1CoreSetList |> List.concat
         let nonTier1StatusList = List.map getStateList nonTier1CoreSetList |> List.concat
-        let countAndLogStates ls nodeType = List.sort ls
-                                            |> Seq.countBy id
-                                            |> Seq.iter (fun x ->
-                                                LogInfo "%d %s nodes have state %s" (snd x) nodeType (fst x))
+
+        let countAndLogStates ls nodeType =
+            List.sort ls
+            |> Seq.countBy id
+            |> Seq.iter (fun x -> LogInfo "%d %s nodes have state %s" (snd x) nodeType (fst x))
+
         countAndLogStates tier1StatusList "tier1"
         countAndLogStates nonTier1StatusList "non-tier1"
 
-    member self.WaitForLoadGenComplete (loadGen: LoadGen) =
+    member self.WaitForLoadGenComplete(loadGen: LoadGen) =
         RetryUntilTrue
             (fun _ ->
-                if self.GetState() <> "Synced!"
-                then
+                if self.GetState() <> "Synced!" then
                     (NodeLostSyncException self.ShortName.StringName) |> raise
 
                 let m = self.GetMetrics()
-                if (MeterCountOr 0 m.LoadgenRunFailed) <> 0
-                then failwith "Loadgen failed"
-                else (MeterCountOr 0 m.LoadgenRunStart) =
-                       (MeterCountOr 0 m.LoadgenRunComplete))
+
+                if (MeterCountOr 0 m.LoadgenRunFailed) <> 0 then
+                    failwith "Loadgen failed"
+                else
+                    (MeterCountOr 0 m.LoadgenRunStart) = (MeterCountOr 0 m.LoadgenRunComplete))
             (fun _ ->
                 let m = self.GetMetrics()
-                LogInfo "Waiting for loadgen run %d to finish, %d/%d accts, %d/%d txns"
-                            (MeterCountOr 0 m.LoadgenRunStart)
-                            (MeterCountOr 0 m.LoadgenAccountCreated) loadGen.accounts
-                            (MeterCountOr 0 m.LoadgenTxnAttempted) loadGen.txs
 
-                self.LogCoreSetListStatusWithTiers self.networkCfg.CoreSetList
-                )
+                LogInfo
+                    "Waiting for loadgen run %d to finish, %d/%d accts, %d/%d txns"
+                    (MeterCountOr 0 m.LoadgenRunStart)
+                    (MeterCountOr 0 m.LoadgenAccountCreated)
+                    loadGen.accounts
+                    (MeterCountOr 0 m.LoadgenTxnAttempted)
+                    loadGen.txs
+
+                self.LogCoreSetListStatusWithTiers self.networkCfg.CoreSetList)
 
     // WaitUntilConnected waits until every node is connected to all the nodes in
     // its preferredPeersMap. This ensures that the simulation is deterministic.
     member self.WaitUntilConnected =
         let desiredNumberOfConnection =
             match self.coreSet.options.preferredPeersMap with
-                | None -> failwith "preferredPeersMap is needed to determine # of desired connections"
-                | Some map ->
-                    let preferredPeers = Map.find (self.coreSet.keys.[self.peerNum].PublicKey) map
-                    List.length preferredPeers
+            | None -> failwith "preferredPeersMap is needed to determine # of desired connections"
+            | Some map ->
+                let preferredPeers = Map.find (self.coreSet.keys.[self.peerNum].PublicKey) map
+                List.length preferredPeers
+
         RetryUntilTrue
+            (fun _ -> self.GetInfo().Peers.AuthenticatedCount >= desiredNumberOfConnection)
             (fun _ ->
-                self.GetInfo().Peers.AuthenticatedCount >= desiredNumberOfConnection
-                )
-            (fun _ ->
-                LogInfo "Waiting until %s is connected: currently %d connections, want at least %d connections"
+                LogInfo
+                    "Waiting until %s is connected: currently %d connections, want at least %d connections"
                     self.ShortName.StringName
                     (self.GetInfo().Peers.AuthenticatedCount)
                     desiredNumberOfConnection)
 
-    member self.EnsureInSync = if self.GetState() <> "Synced!"
-                               then failwith (sprintf "%s is in state %s"
-                                                      (self.ShortName.StringName)
-                                                      (self.GetState()))
+    member self.EnsureInSync =
+        if self.GetState() <> "Synced!" then
+            failwith (sprintf "%s is in state %s" (self.ShortName.StringName) (self.GetState()))
 
     member self.WaitUntilReady() =
         RetryUntilTrue
-            (fun _ ->
-                self.GetState() <> "Booting"
-                )
-            (fun _ ->
-                LogInfo "Waiting until %s is ready: %s"
-                    self.ShortName.StringName (self.GetStatusOrState()))
+            (fun _ -> self.GetState() <> "Booting")
+            (fun _ -> LogInfo "Waiting until %s is ready: %s" self.ShortName.StringName (self.GetStatusOrState()))
 
     member self.WaitUntilSynced() =
         RetryUntilTrue
-            (fun _ ->
-                self.GetState() = "Synced!"
-                )
-            (fun _ ->
-                LogInfo "Waiting until %s is synced: %s"
-                    self.ShortName.StringName (self.GetStatusOrState()))
+            (fun _ -> self.GetState() = "Synced!")
+            (fun _ -> LogInfo "Waiting until %s is synced: %s" self.ShortName.StringName (self.GetStatusOrState()))
 
-    member self.WaitForAuthenticatedPeers(n:int) =
+    member self.WaitForAuthenticatedPeers(n: int) =
         RetryUntilTrue
             (fun _ -> self.GetInfo().Peers.AuthenticatedCount >= n)
-            (fun _ -> LogInfo "Waiting until %s has >= %d authenticated peers"
-                          self.ShortName.StringName n)
+            (fun _ -> LogInfo "Waiting until %s has >= %d authenticated peers" self.ShortName.StringName n)
 
-let ReportAllPeerStatus (nCfg:NetworkCfg) =
+let ReportAllPeerStatus (nCfg: NetworkCfg) =
     nCfg.EachPeer
-        begin
-        fun (p:Peer) ->
+        (fun (p: Peer) ->
             let info = p.GetInfo()
             let metrics = p.GetMetrics()
-            LogInfo "Peer '%s' startedOn '%s', state '%s', overlay reading %.1f bytes/sec"
-                      p.ShortName.StringName (info.StartedOn.ToString())
-                      info.State metrics.OverlayByteRead.MeanRate
-        end
+
+            LogInfo
+                "Peer '%s' startedOn '%s', state '%s', overlay reading %.1f bytes/sec"
+                p.ShortName.StringName
+                (info.StartedOn.ToString())
+                info.State
+                metrics.OverlayByteRead.MeanRate)

@@ -21,6 +21,10 @@ jobs:
         dotnet-version: '5.0.x'
     - name: Install dependencies
       run: dotnet restore
+    - name: Install tool dependencies
+      run: dotnet tool restore
+    - name: Check formatting
+      run: dotnet tool run fantomas --check --recurse src
     - name: Build
       run: dotnet build --configuration Release --no-restore
     - name: Test

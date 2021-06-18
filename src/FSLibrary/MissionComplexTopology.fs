@@ -10,33 +10,47 @@ open StellarFormation
 open StellarSupercluster
 open StellarCoreHTTP
 
-let complexTopology (context : MissionContext) =
+let complexTopology (context: MissionContext) =
     let context = context.WithNominalLoad
-    let coreSet = MakeLiveCoreSet "core"
-                    { CoreSetOptions.GetDefault context.image with
-                        nodeCount = 4
-                        quorumSet = CoreSetQuorum(CoreSetName "core")
-                        accelerateTime = true }
-    let publicSet = MakeLiveCoreSet "public"
-                      { CoreSetOptions.GetDefault context.image with
-                          nodeCount = 2
-                          quorumSet = CoreSetQuorum(CoreSetName "core")
-                          accelerateTime = true
-                          initialization = CoreSetInitialization.DefaultNoForceSCP
-                          validate = false }
-    let orgSet = MakeLiveCoreSet "org"
-                   { CoreSetOptions.GetDefault context.image with
-                       nodeCount = 1
-                       quorumSet = CoreSetQuorum(CoreSetName "core")
-                       peers = Some([CoreSetName "public"])
-                       accelerateTime = true
-                       initialization = CoreSetInitialization.DefaultNoForceSCP
-                       validate = false }
 
-    context.Execute [coreSet; publicSet; orgSet] None (fun (formation: StellarFormation) ->
-        formation.WaitUntilSynced [coreSet; publicSet; orgSet]
-        formation.UpgradeProtocolToLatest [coreSet]
+    let coreSet =
+        MakeLiveCoreSet
+            "core"
+            { CoreSetOptions.GetDefault context.image with
+                  nodeCount = 4
+                  quorumSet = CoreSetQuorum(CoreSetName "core")
+                  accelerateTime = true }
 
-        formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
-        formation.RunLoadgen coreSet context.GeneratePaymentLoad
-    )
+    let publicSet =
+        MakeLiveCoreSet
+            "public"
+            { CoreSetOptions.GetDefault context.image with
+                  nodeCount = 2
+                  quorumSet = CoreSetQuorum(CoreSetName "core")
+                  accelerateTime = true
+                  initialization = CoreSetInitialization.DefaultNoForceSCP
+                  validate = false }
+
+    let orgSet =
+        MakeLiveCoreSet
+            "org"
+            { CoreSetOptions.GetDefault context.image with
+                  nodeCount = 1
+                  quorumSet = CoreSetQuorum(CoreSetName "core")
+                  peers = Some([ CoreSetName "public" ])
+                  accelerateTime = true
+                  initialization = CoreSetInitialization.DefaultNoForceSCP
+                  validate = false }
+
+    context.Execute
+        [ coreSet; publicSet; orgSet ]
+        None
+        (fun (formation: StellarFormation) ->
+            formation.WaitUntilSynced [ coreSet
+                                        publicSet
+                                        orgSet ]
+
+            formation.UpgradeProtocolToLatest [ coreSet ]
+
+            formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
+            formation.RunLoadgen coreSet context.GeneratePaymentLoad)

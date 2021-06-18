@@ -10,7 +10,7 @@ open StellarFormation
 open StellarSupercluster
 open StellarCoreHTTP
 
-let versionMixNewCatchupToOld (context : MissionContext) =
+let versionMixNewCatchupToOld (context: MissionContext) =
     let context = context.WithNominalLoad
     let newImage = context.image
     let oldImage = GetOrDefault context.oldImage newImage
@@ -18,7 +18,10 @@ let versionMixNewCatchupToOld (context : MissionContext) =
     let catchupOptions = { generatorImage = oldImage; catchupImage = newImage; versionImage = oldImage }
     let catchupSets = MakeCatchupSets catchupOptions
     let sets = catchupSets.AllSetList()
-    context.Execute sets None (fun (formation: StellarFormation) ->
-        formation.WaitUntilAllLiveSynced()
-        doCatchup context formation catchupSets
-    )
+
+    context.Execute
+        sets
+        None
+        (fun (formation: StellarFormation) ->
+            formation.WaitUntilAllLiveSynced()
+            doCatchup context formation catchupSets)
