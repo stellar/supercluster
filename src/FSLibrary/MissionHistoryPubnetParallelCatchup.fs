@@ -45,6 +45,7 @@ let historyPubnetParallelCatchup (context: MissionContext) =
     let opts =
         { PubnetCoreSetOptions context.image with
               localHistory = false
+              invariantChecks = AllInvariantsExceptBucketConsistencyChecks
               initialization = CoreSetInitialization.OnlyNewDb }
 
     let mutable jobQueue = Array.toList (Array.rev jobArr)

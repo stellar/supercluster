@@ -123,6 +123,14 @@ type QuorumSetSpec =
     | ExplicitQuorum of QuorumSet
     | AllPeersQuorum
 
+// FIXME: see bug https://github.com/stellar/stellar-core/issues/2304
+// the BucketListIsConsistentWithDatabase invariant blocks too long,
+// so we provide a special variant to allow disabling it.
+type InvariantChecksSpec =
+    | AllInvariants
+    | AllInvariantsExceptBucketConsistencyChecks
+    | NoInvariants
+
 type CoreSetOptions =
     { nodeCount: int
       nodeLocs: GeoLoc list option
@@ -143,6 +151,7 @@ type CoreSetOptions =
       catchupMode: CatchupMode
       image: string
       initialization: CoreSetInitialization
+      invariantChecks: InvariantChecksSpec
       dumpDatabase: bool
       maxSlotsToRemember: int
       maxBatchWriteCount: int
@@ -170,6 +179,7 @@ type CoreSetOptions =
           catchupMode = CatchupComplete
           image = image
           initialization = CoreSetInitialization.Default
+          invariantChecks = InvariantChecksSpec.AllInvariants
           dumpDatabase = true
           maxSlotsToRemember = 12
           maxBatchWriteCount = 1024

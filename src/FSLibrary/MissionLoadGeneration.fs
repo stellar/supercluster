@@ -12,7 +12,11 @@ open StellarCoreHTTP
 
 let loadGeneration (context: MissionContext) =
     let coreSet =
-        MakeLiveCoreSet "core" { CoreSetOptions.GetDefault context.image with dumpDatabase = false }
+        MakeLiveCoreSet
+            "core"
+            { CoreSetOptions.GetDefault context.image with
+                  invariantChecks = AllInvariantsExceptBucketConsistencyChecks
+                  dumpDatabase = false }
 
     let context = { context with numAccounts = 2000; numTxs = 2000; txRate = 20 }
 

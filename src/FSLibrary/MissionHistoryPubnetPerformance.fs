@@ -17,6 +17,7 @@ let historyPubnetPerformance (context: MissionContext) =
     let opts =
         { PubnetCoreSetOptions context.image with
               localHistory = false
+              invariantChecks = AllInvariantsExceptBucketConsistencyChecks
               initialization = CoreSetInitialization.OnlyNewDb }
 
     context.ExecuteJobs
