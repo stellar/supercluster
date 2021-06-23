@@ -12,7 +12,11 @@ open StellarCoreHTTP
 
 let loadGenerationWithSpikes (context: MissionContext) =
     let coreSet =
-        MakeLiveCoreSet "core" { CoreSetOptions.GetDefault context.image with dumpDatabase = false }
+        MakeLiveCoreSet
+            "core"
+            { CoreSetOptions.GetDefault context.image with
+                  invariantChecks = AllInvariantsExceptBucketConsistencyChecks
+                  dumpDatabase = false }
 
     let context =
         { context with

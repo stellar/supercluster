@@ -17,6 +17,7 @@ let benchmarkIncreaseTxRate (context: MissionContext) =
         MakeLiveCoreSet
             "core"
             { CoreSetOptions.GetDefault context.image with
+                  invariantChecks = AllInvariantsExceptBucketConsistencyChecks
                   nodeCount = context.numNodes
                   accelerateTime = false }
 

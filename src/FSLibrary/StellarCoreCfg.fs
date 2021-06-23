@@ -113,7 +113,7 @@ type StellarCoreCfg =
       accelerateTime: bool
       generateLoad: bool
       manualClose: bool
-      invariantChecks: string list
+      invariantChecks: InvariantChecksSpec
       unsafeQuorum: bool
       failureSafety: int
       quorumSet: QuorumSet
@@ -194,7 +194,14 @@ type StellarCoreCfg =
 
         t.Add("QUORUM_INTERSECTION_CHECKER", false) |> ignore
         t.Add("MANUAL_CLOSE", self.manualClose) |> ignore
-        t.Add("INVARIANT_CHECKS", self.invariantChecks) |> ignore
+
+        let invList =
+            match self.invariantChecks with
+            | AllInvariants -> [ ".*" ]
+            | AllInvariantsExceptBucketConsistencyChecks -> [ "(?!BucketListIsConsistentWithDatabase).*" ]
+            | NoInvariants -> []
+
+        t.Add("INVARIANT_CHECKS", invList) |> ignore
         t.Add("UNSAFE_QUORUM", self.unsafeQuorum) |> ignore
         t.Add("FAILURE_SAFETY", self.failureSafety) |> ignore
 
@@ -358,10 +365,7 @@ type NetworkCfg with
           accelerateTime = opts.accelerateTime
           generateLoad = true
           manualClose = false
-          // FIXME: see bug https://github.com/stellar/stellar-core/issues/2304
-          // the BucketListIsConsistentWithDatabase invariant blocks too long,
-          // so we explicitly disable it here.
-          invariantChecks = [ "(?!BucketListIsConsistentWithDatabase).*" ]
+          invariantChecks = opts.invariantChecks
           unsafeQuorum = opts.unsafeQuorum
           failureSafety = 0
           quorumSet = self.QuorumSet opts
@@ -394,10 +398,7 @@ type NetworkCfg with
           accelerateTime = c.options.accelerateTime
           generateLoad = true
           manualClose = false
-          // FIXME: see bug https://github.com/stellar/stellar-core/issues/2304
-          // the BucketListIsConsistentWithDatabase invariant blocks too long,
-          // so we explicitly disable it here.
-          invariantChecks = [ "(?!BucketListIsConsistentWithDatabase).*" ]
+          invariantChecks = c.options.invariantChecks
           unsafeQuorum = c.options.unsafeQuorum
           failureSafety = 0
           quorumSet = self.QuorumSet c.options

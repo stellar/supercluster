@@ -28,6 +28,7 @@ let benchmarkConsensusOnly (context: MissionContext) =
                   localHistory = false
                   maxSlotsToRemember = 24
                   syncStartupDelay = Some(30)
+                  invariantChecks = AllInvariantsExceptBucketConsistencyChecks
                   dumpDatabase = false }
 
     context.ExecuteWithPerformanceReporter

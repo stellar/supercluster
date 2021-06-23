@@ -17,6 +17,7 @@ let historyTestnetPerformance (context: MissionContext) =
     let opts =
         { TestnetCoreSetOptions context.image with
               localHistory = false
+              invariantChecks = AllInvariantsExceptBucketConsistencyChecks
               initialization = CoreSetInitialization.OnlyNewDb }
 
     // Testnet is reset every quarter (~90 days) so this test is not _perfectly_

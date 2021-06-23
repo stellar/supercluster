@@ -196,6 +196,7 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) : CoreSet l
               // for networks as large as this, otherwise it loses
               // sync before all the nodes are online.
               syncStartupDelay = Some(30)
+              invariantChecks = AllInvariantsExceptBucketConsistencyChecks
               dumpDatabase = false }
 
     // Sorted list of known geolocations.

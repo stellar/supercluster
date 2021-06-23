@@ -15,6 +15,7 @@ let historyTestnetCompleteCatchup (context: MissionContext) =
     let set =
         { TestnetCoreSetOptions context.image with
               nodeCount = 1
+              invariantChecks = AllInvariantsExceptBucketConsistencyChecks
               catchupMode = CatchupComplete }
 
     let coreSet = MakeLiveCoreSet "core" set
