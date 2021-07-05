@@ -31,8 +31,8 @@ how to use it.
 
 ## Contributions and support
 
-See [doc/contributing.md]. Support for uses outside of SDF will be provided on a
-best-effort basis.
+See [doc/contributing.md](doc/contributing.md). Support for uses outside of SDF
+will be provided on a best-effort basis.
 
 ## License
 
