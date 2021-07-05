@@ -24,9 +24,6 @@ at [SDF](https://stellar.org) since late 2019, and is capable of testing much
 larger and much more complex scenarios than SCC was, while being easier to
 maintain and more robust to errors.
 
-There is also [a presentation](doc/Stellar-Supercluster.pdf) from early in
-SSC's development which gives some more details.
-
 ## Getting started
 
 See [doc/getting-started.md](doc/getting-started.md) for brief instructions on

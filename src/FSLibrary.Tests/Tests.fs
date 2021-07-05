@@ -77,8 +77,8 @@ let ctx : MissionContext =
       networkSizeLimit = 100
       pubnetParallelCatchupStartingLedger = 0 }
 
-let netdata = __SOURCE_DIRECTORY__ + "/../../data/public-network-data-2021-01-05.json"
-let pubkeys = __SOURCE_DIRECTORY__ + "/../../data/tier1keys.json"
+let netdata = __SOURCE_DIRECTORY__ + "/../../../data/public-network-data-2021-01-05.json"
+let pubkeys = __SOURCE_DIRECTORY__ + "/../../../data/tier1keys.json"
 let pubnetctx = { ctx with pubnetData = Some netdata; tier1Keys = Some pubkeys }
 
 let nCfg = MakeNetworkCfg ctx [ coreSet ] passOpt
