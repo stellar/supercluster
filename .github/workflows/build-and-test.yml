@@ -17,10 +17,12 @@ jobs:
       uses: rinx/setup-k3d@v0.0.3
       with:
         ingressPort: 80
+        agents: 1
     - name: Wait for k3s ready
       run: |
         while true
         do
+          kubectl get pod --all-namespaces
           if kubectl wait --for=condition=ready pod --selector=app=traefik --namespace=kube-system
           then
             break
