@@ -55,5 +55,7 @@ type MissionContext =
       installNetworkDelay: bool option
       simulateApplyDuration: seq<int> option
       simulateApplyWeight: seq<int> option
+      loadGenOpCount: seq<int> option
+      loadGenOpCountDistribution: seq<int> option
       networkSizeLimit: int
       pubnetParallelCatchupStartingLedger: int }

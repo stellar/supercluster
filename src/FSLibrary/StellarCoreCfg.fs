@@ -212,6 +212,16 @@ type StellarCoreCfg =
                 System.ArgumentException "simulate-apply-weight and simulate-apply-duration must be defined together"
             )
 
+        match self.network.missionContext.loadGenOpCount, self.network.missionContext.loadGenOpCountDistribution with
+        | None, None -> ()
+        | Some counts, Some distribution ->
+            t.Add("LOADGEN_OP_COUNT_FOR_TESTING", counts) |> ignore
+            t.Add("LOADGEN_OP_COUNT_DISTRIBUTION_FOR_TESTING", distribution) |> ignore
+        | _, _ ->
+            raise (
+                System.ArgumentException "loadgen-op-count and loadgen-op-count-distribution must be defined together"
+            )
+
         let n = self.preferredPeers.Length
         t.Add("TARGET_PEER_CONNECTIONS", self.targetPeerConnections) |> ignore
         t.Add("MAX_ADDITIONAL_PEER_CONNECTIONS", min n 128) |> ignore

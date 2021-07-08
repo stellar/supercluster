@@ -69,6 +69,8 @@ type MissionOptions
         installNetworkDelay: bool option,
         simulateApplyDuration: seq<string>,
         simulateApplyWeight: seq<string>,
+        loadGenOpCount: seq<string>,
+        loadGenOpCountDistribution: seq<string>,
         networkSizeLimit: int,
         pubnetParallelCatchupStartingLedger: int
     ) =
@@ -232,6 +234,16 @@ type MissionOptions
              Required = false)>]
     member self.SimulateApplyWeight = simulateApplyWeight
 
+    [<Option("loadgen-op-count",
+             HelpText = "A space-separated list of how much to sleep for in simulation (See LOADGEN_OP_COUNT_FOR_TESTING)",
+             Required = false)>]
+    member self.LoadGenOpCount = loadGenOpCount
+
+    [<Option("loadgen-op-count-distribution",
+             HelpText = "A space-separated indicating how often to sleep for a specified amount (See LOADGEN_OP_COUNT_DISTRIBUTION_FOR_TESTING)",
+             Required = false)>]
+    member self.LoadGenOpCountDistribution = loadGenOpCountDistribution
+
     [<Option("network-size-limit",
              HelpText = "The number of nodes to run in SimulatePubnet",
              Required = false,
@@ -314,6 +326,8 @@ let main argv =
                   installNetworkDelay = None
                   simulateApplyDuration = None
                   simulateApplyWeight = None
+                  loadGenOpCount = None
+                  loadGenOpCountDistribution = None
                   networkSizeLimit = 0
                   pubnetParallelCatchupStartingLedger = 0 }
 
@@ -359,6 +373,8 @@ let main argv =
                      LogInfo "Starting mission: %s" m
                      LogInfo "-----------------------------------"
 
+                     let processInputSeq s = if Seq.isEmpty s then None else Some((Seq.map int) s)
+
                      try
                          let missionContext =
                              { MissionContext.kube = kube
@@ -391,16 +407,10 @@ let main argv =
                                pubnetData = mission.PubnetData
                                tier1Keys = mission.Tier1Keys
                                installNetworkDelay = mission.InstallNetworkDelay
-                               simulateApplyDuration =
-                                   if Seq.isEmpty mission.SimulateApplyDuration then
-                                       None
-                                   else
-                                       Some((Seq.map int) mission.SimulateApplyDuration)
-                               simulateApplyWeight =
-                                   if Seq.isEmpty mission.SimulateApplyWeight then
-                                       None
-                                   else
-                                       Some((Seq.map int) mission.SimulateApplyWeight)
+                               simulateApplyDuration = processInputSeq mission.SimulateApplyDuration
+                               simulateApplyWeight = processInputSeq mission.SimulateApplyWeight
+                               loadGenOpCount = processInputSeq mission.LoadGenOpCount
+                               loadGenOpCountDistribution = processInputSeq mission.LoadGenOpCountDistribution
                                networkSizeLimit = mission.NetworkSizeLimit
                                pubnetParallelCatchupStartingLedger = mission.PubnetParallelCatchupStartingLedger }
 
