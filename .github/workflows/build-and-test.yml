@@ -16,7 +16,7 @@ jobs:
     - name: Setup k3d
       uses: rinx/setup-k3d@v0.0.3
       with:
-        version: v3.1.5
+        version: v3.4.0
         ingressPort: 80
         agents: 1
     - name: Wait for k3s ready
