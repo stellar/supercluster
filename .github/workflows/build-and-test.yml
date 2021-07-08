@@ -13,8 +13,10 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
-    - name: Setup k3s
-      uses: graydon/actions-k3s@d58ce61bef5a763614dc281dbe80457fc0b66c53
+    - name: Setup k3d
+      uses: rinx/setup-k3d@v0.0.3
+      with:
+        ingressPort: 80
     - name: Wait for k3s ready
       run: |
         while true
