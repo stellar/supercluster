@@ -86,7 +86,7 @@ type StellarFormation with
             if ok then
                 LogInfo "Job %s passed" name
             else
-                self.LogState j
+                self.LogFailedJobState j
                 failwith ("Job " + name + " failed")
 
             try
@@ -263,7 +263,7 @@ type StellarFormation with
         assert (jst.NumRunning() = 0)
         jst.GetFinishedTable()
 
-    member self.LogState(j: V1Job) =
+    member self.LogFailedJobState(j: V1Job) =
         let jobName = j.Metadata.Name
         let ns = j.Metadata.NamespaceProperty
         let mutable message = new System.Text.StringBuilder()
@@ -293,24 +293,12 @@ type StellarFormation with
                         )
 
             // Pod events
-            let fs = sprintf "involvedObject.name=%s" podName
-            self.sleepUntilNextRateLimitedApiCallTime ()
-            let events = self.Kube.ListNamespacedEvent(namespaceParameter = ns, fieldSelector = fs)
-
-            for ev in events.Items do
-                if ev.Reason <> "DNSConfigForming" && ev.Type <> "Normal" then
-                    addMsg (
-                        sprintf "Pod Event %s - Type=%s, Reason=%s, Message=%s" podName ev.Type ev.Reason ev.Message
-                    )
+            for ev in self.GetAbnormalEventsForObject(podName) do
+                addMsg (ev.ToString("Pod", podName))
 
         // Job events
-        let fs = sprintf "involvedObject.name=%s" jobName
-        self.sleepUntilNextRateLimitedApiCallTime ()
-        let events = self.Kube.ListNamespacedEvent(namespaceParameter = ns, fieldSelector = fs)
-
-        for ev in events.Items do
-            if ev.Reason <> "DNSConfigForming" && ev.Type <> "Normal" then
-                addMsg (sprintf "Job Event %s - Type=%s, Reason=%s, Message=%s" jobName ev.Type ev.Reason ev.Message)
+        for ev in self.GetAbnormalEventsForObject(jobName) do
+            addMsg (ev.ToString("Job", jobName))
 
         LogWarn "%s" (message.ToString())
 
