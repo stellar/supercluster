@@ -16,7 +16,7 @@ jobs:
     - name: Setup k3d
       uses: debianmaster/actions-k3s@master
       with:
-        version: 'v1.21.2-k3s1'
+        version: 'v1.20.8-k3s1'
     - name: Setup .NET SDK 5
       uses: actions/setup-dotnet@v1
       with:
