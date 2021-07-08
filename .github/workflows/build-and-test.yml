@@ -14,25 +14,7 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - name: Setup k3d
-      uses: rinx/setup-k3d@v0.0.3
-      with:
-        ingressPort: 80
-        agents: 1
-    - name: Wait for k3s ready
-      run: |
-        while true
-        do
-          if kubectl get pod --all-namespaces
-          then
-            if kubectl wait --for=condition=ready pod --selector=app.kubernetes.io/name=traefik --namespace=kube-system
-            then
-              break
-            else
-              echo "k3s not ready"
-              sleep 5
-            fi
-          fi
-        done
+      uses: debianmaster/actions-k3s@master
     - name: Setup .NET SDK 5
       uses: actions/setup-dotnet@v1
       with:
