@@ -16,7 +16,17 @@ jobs:
     - name: Setup k3s
       uses: graydon/actions-k3s@d58ce61bef5a763614dc281dbe80457fc0b66c53
     - name: Wait for k3s ready
-      run: kubectl wait --for=condition=ready pod --selector=app=traefik --namespace=kube-system
+      run: |
+        while true
+        do
+          if kubectl wait --for=condition=ready pod --selector=app=traefik --namespace=kube-system
+          then
+            break
+          else
+            echo "k3s not ready"
+            sleep 5
+          fi
+        done
     - name: Setup .NET SDK 5
       uses: actions/setup-dotnet@v1
       with:
