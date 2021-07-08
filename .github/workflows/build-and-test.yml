@@ -23,13 +23,15 @@ jobs:
       run: |
         while true
         do
-          kubectl get pod --all-namespaces
-          if kubectl wait --for=condition=ready pod --selector=app.kubernetes.io/name=traefik --namespace=kube-system
+          if kubectl get pod --all-namespaces
           then
-            break
-          else
-            echo "k3s not ready"
-            sleep 5
+            if kubectl wait --for=condition=ready pod --selector=app.kubernetes.io/name=traefik --namespace=kube-system
+            then
+              break
+            else
+              echo "k3s not ready"
+              sleep 5
+            fi
           fi
         done
     - name: Setup .NET SDK 5
