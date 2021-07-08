@@ -22,8 +22,8 @@ jobs:
       run: |
         while true
         do
-          kubectl describe pod --all-namespaces
-          if kubectl wait --for=condition=ready pod --selector=app=traefik --namespace=kube-system
+          kubectl get pod --all-namespaces
+          if kubectl wait --for=condition=ready pod --selector=app.kubernetes.io/name=traefik --namespace=kube-system
           then
             break
           else
