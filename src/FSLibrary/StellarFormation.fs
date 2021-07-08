@@ -16,6 +16,18 @@ open StellarTransaction
 open StellarNamespaceContent
 open System
 
+// The default ToString on Corev1Event just says "k8s.models.Corev1Event", not
+// very useful. We dress it up a bit here.
+type Corev1Event with
+    member self.ToString(objType: string, objName: string) =
+        sprintf
+            "Event on %s Name=%s - Type=%s, Reason=%s, Message=%s"
+            objType
+            objName
+            self.Type
+            self.Reason
+            self.Message
+
 // Typically you want to instantiate one of these per mission / test scenario,
 // and run methods on it. Unlike most other types in this library it's a class
 // type with a fair amount of internal mutable state, and implements
@@ -91,6 +103,16 @@ type StellarFormation
         let ns = networkCfg.NamespaceProperty
         sprintf "%s/%s" ns name
 
+    member self.GetEventsForObject(name: string) =
+        let ns = self.NetworkCfg.NamespaceProperty
+        let fs = sprintf "involvedObject.name=%s" name
+        self.sleepUntilNextRateLimitedApiCallTime ()
+        self.Kube.ListNamespacedEvent(namespaceParameter = ns, fieldSelector = fs)
+
+    member self.GetAbnormalEventsForObject(name: string) =
+        let events = List.ofSeq (self.GetEventsForObject(name).Items)
+        List.filter (fun (ev: Corev1Event) -> ev.Type <> "Normal" && ev.Reason <> "DNSConfigForming") events
+
     // Watches the provided StatefulSet until the count of ready replicas equals the
     // count of configured replicas. This normally represents "successful startup".
     member self.WaitForAllReplicasReady(ss: V1StatefulSet) =
@@ -112,10 +134,8 @@ type StellarFormation
                     // First we check to see if we've been woken up because a FailedCreate + forbidden
                     // event occurred; this happens typically when we exceed quotas on a cluster or
                     // some other policy reason.
-                    let fs = sprintf "involvedObject.name=%s" name
-                    self.sleepUntilNextRateLimitedApiCallTime ()
 
-                    for ev in self.Kube.ListNamespacedEvent(namespaceParameter = ns, fieldSelector = fs).Items do
+                    for ev in self.GetEventsForObject(name).Items do
                         if ev.Reason = "FailedCreate" && ev.Message.Contains("forbidden") then
                             // If so, we record the causal event and wake up the waiter.
                             forbiddenEvent <- Some(ev)
@@ -257,6 +277,14 @@ type StellarFormation
             (peer.GetSeqAndBalance dst)
             self
 
+    member self.CheckNoAbnormalKubeEvents(p: Peer) =
+        let name = p.PodName.StringName
+
+        for evt in self.GetAbnormalEventsForObject(p.PodName.StringName) do
+            let estr = evt.ToString("Pod", name)
+            LogError "Found abnormal event: %s" estr
+            failwith estr
+
     member self.CheckNoErrorsAndPairwiseConsistency() =
         let cs = List.filter (fun cs -> cs.live = true) networkCfg.CoreSetList
 
@@ -265,6 +293,7 @@ type StellarFormation
 
             networkCfg.EachPeer
                 (fun p ->
+                    self.CheckNoAbnormalKubeEvents p
                     p.CheckNoErrorMetrics(includeTxInternalErrors = false)
                     p.CheckConsistencyWith peer)
 
