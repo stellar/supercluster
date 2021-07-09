@@ -111,7 +111,13 @@ type StellarFormation
 
     member self.GetAbnormalEventsForObject(name: string) =
         let events = List.ofSeq (self.GetEventsForObject(name).Items)
-        List.filter (fun (ev: Corev1Event) -> ev.Type <> "Normal" && ev.Reason <> "DNSConfigForming") events
+
+        List.filter
+            (fun (ev: Corev1Event) ->
+                ev.Type <> "Normal"
+                && ev.Reason <> "DNSConfigForming"
+                && ev.Reason <> "FailedMount")
+            events
 
     // Watches the provided StatefulSet until the count of ready replicas equals the
     // count of configured replicas. This normally represents "successful startup".
