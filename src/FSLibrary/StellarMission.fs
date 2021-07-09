@@ -4,6 +4,7 @@
 
 module StellarMission
 
+open MissionBootAndSync
 open MissionSimplePayment
 open MissionComplexTopology
 open MissionLoadGeneration
@@ -38,7 +39,8 @@ type Mission = (MissionContext -> unit)
 
 
 let allMissions : Map<string, Mission> =
-    Map.ofSeq [| ("SimplePayment", simplePayment)
+    Map.ofSeq [| ("BootAndSync", bootAndSync)
+                 ("SimplePayment", simplePayment)
                  ("ComplexTopology", complexTopology)
                  ("LoadGeneration", loadGeneration)
                  ("LoadGenerationWithSpikes", loadGenerationWithSpikes)

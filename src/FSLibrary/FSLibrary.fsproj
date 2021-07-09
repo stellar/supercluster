@@ -30,6 +30,7 @@
     <Compile Include="StellarPerformanceReporter.fs" />
     <Compile Include="StellarSupercluster.fs" />
     <Compile Include="MissionCatchupHelpers.fs" />
+    <Compile Include="MissionBootAndSync.fs" />
     <Compile Include="MissionSimplePayment.fs" />
     <Compile Include="MissionComplexTopology.fs" />
     <Compile Include="MissionLoadGeneration.fs" />
