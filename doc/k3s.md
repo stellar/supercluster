@@ -6,7 +6,7 @@ Supercluster can run on k3s, and this is a relatively easy way to test it or run
 
 Follow these steps:
 
-  - Install k3s: `curl -sfL https://get.k3s.io | sh -s - --write-kubeconfig-mode 644`
+  - Install k3s: `curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.20.8+k3s1 sh -s - --write-kubeconfig-mode 644 --docker`
 
   - Raise the sysctl limits on your ARP cache. This is necessary to run larger supercluster
     missions. Put something like this in your `/etc/sysctl.conf` and then run `sysctl -p`
