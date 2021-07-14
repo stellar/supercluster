@@ -47,14 +47,26 @@ let CoreContainerVolumeMounts (peerOrJobNames: string array) (configOpt: ConfigO
                    mountPath = CfgVal.jobCfgVolumePath
                ) |]
     | PeerSpecificConfigFile ->
+        let arr =
+            Array.append
+                arr
+                (Array.map
+                    (fun n ->
+                        V1VolumeMount(
+                            name = CfgVal.cfgVolumeName n,
+                            readOnlyProperty = System.Nullable<bool>(true),
+                            mountPath = CfgVal.cfgVolumePath n
+                        ))
+                    peerOrJobNames)
+
         Array.append
             arr
             (Array.map
                 (fun n ->
                     V1VolumeMount(
-                        name = CfgVal.cfgVolumeName n,
+                        name = CfgVal.cfgStartupVolumeName n,
                         readOnlyProperty = System.Nullable<bool>(true),
-                        mountPath = CfgVal.cfgVolumePath n
+                        mountPath = CfgVal.cfgStartupVolumePath n
                     ))
                 peerOrJobNames)
 
@@ -198,11 +210,15 @@ let NetworkDelayScriptContainer (netdelayImage: string) (configOpt: ConfigOption
         volumeMounts = CoreContainerVolumeMounts peerOrJobNames configOpt
     )
 
-let cfgFileArgs (configOpt: ConfigOption) : ShWord array =
+let cfgFileArgs (configOpt: ConfigOption) (startup: bool) : ShWord array =
     match configOpt with
     | NoConfigFile -> [||]
     | SharedJobConfigFile -> Array.map ShWord.OfStr [| "--conf"; CfgVal.jobCfgFilePath |]
-    | PeerSpecificConfigFile -> [| ShWord.OfStr "--conf"; CfgVal.peerNameEnvCfgFileWord |]
+    | PeerSpecificConfigFile ->
+        if startup then
+            [| ShWord.OfStr "--conf"; CfgVal.peerStartupNameEnvCfgFileWord |]
+        else
+            [| ShWord.OfStr "--conf"; CfgVal.peerNameEnvCfgFileWord |]
 
 let CoreContainerForCommand
     (imageName: string)
@@ -220,7 +236,7 @@ let CoreContainerForCommand
     let asanOptionsEnvVar =
         V1EnvVar(name = CfgVal.asanOptionsEnvVarName, value = CfgVal.asanOptionsEnvVarValue)
 
-    let cfgWords = cfgFileArgs configOpt
+    let cfgWords = cfgFileArgs configOpt false
     let containerName = CfgVal.stellarCoreContainerName (Array.get command 0)
 
     let cmdWords =
@@ -265,19 +281,30 @@ let CoreContainerForCommand
         volumeMounts = CoreContainerVolumeMounts peerOrJobNames configOpt
     )
 
-let WithLivenessProbe (container: V1Container) (probeTimeout: int) : V1Container =
+let WithLivenessProbe (container: V1Container) (probeTimeout: int) (withStartupProbe: bool) : V1Container =
     let httpPortStr = IntstrIntOrString(value = CfgVal.httpPort.ToString())
 
     let liveProbe =
         V1Probe(
             periodSeconds = System.Nullable<int>(1),
-            initialDelaySeconds = System.Nullable<int>(120),
             failureThreshold = System.Nullable<int>(60),
             timeoutSeconds = System.Nullable<int>(probeTimeout),
             httpGet = V1HTTPGetAction(path = "/info", port = httpPortStr)
         )
 
     container.LivenessProbe <- liveProbe
+
+    // Allow 10 minute buffer to startup core (this may involve lengthy operations such as bucket application)
+    if withStartupProbe then
+        let startupProbe =
+            V1Probe(
+                periodSeconds = System.Nullable<int>(5),
+                failureThreshold = System.Nullable<int>(120),
+                httpGet = V1HTTPGetAction(path = "/info", port = httpPortStr)
+            )
+
+        container.StartupProbe <- startupProbe
+
     container
 
 let evenTopologyConstraints : V1TopologySpreadConstraint array =
@@ -351,7 +378,7 @@ type NetworkCfg with
     member self.ToConfigMaps() : V1ConfigMap array =
         let peerCfgMap (coreSet: CoreSet) (i: int) =
             let cfgMapName = (self.PeerCfgMapName coreSet i)
-            let cfgFileData = (self.StellarCoreCfg(coreSet, i)).ToString()
+            let cfgFileData = (self.StellarCoreCfg(coreSet, i, false)).ToString()
             let cfgMap = Map.empty.Add(CfgVal.peerCfgFileName, cfgFileData)
 
             let cfgMap =
@@ -367,14 +394,21 @@ type NetworkCfg with
 
             V1ConfigMap(metadata = self.NamespacedMeta cfgMapName, data = cfgMap)
 
+        let peerCfgMapStartup (coreSet: CoreSet) (i: int) =
+            let cfgMapName = (self.PeerCfgMapStartupName coreSet i)
+            let cfgFileData = (self.StellarCoreCfg(coreSet, i, true)).ToString()
+            let cfgMap = Map.empty.Add(CfgVal.peerStartupCfgFileName, cfgFileData)
+            V1ConfigMap(metadata = self.NamespacedMeta cfgMapName, data = cfgMap)
+
         let cfgs = Array.append (self.MapAllPeers peerCfgMap) [| self.HistoryConfigMap() |]
+        let cfgs = Array.append cfgs (self.MapAllPeers peerCfgMapStartup)
 
         match self.jobCoreSetOptions with
         | None -> cfgs
         | Some (opts) -> Array.append cfgs [| self.JobConfigMap(opts) |]
 
     member self.getInitCommands (configOpt: ConfigOption) (opts: CoreSetOptions) : ShCmd array =
-        let cfgWords = cfgFileArgs configOpt
+        let cfgWords = cfgFileArgs configOpt true
 
         let runCore args =
             let cmdAndArgs = (Array.map ShWord.OfStr (Array.append [| CfgVal.stellarCoreBinPath |] args))
@@ -585,6 +619,16 @@ type NetworkCfg with
                 configMap = V1ConfigMapVolumeSource(name = self.HistoryCfgMapName)
             )
 
+        let peerCfgStartupVolume i =
+            let peerName = self.PodName coreSet i
+
+            V1Volume(
+                name = CfgVal.cfgStartupVolumeName peerName.StringName,
+                configMap = V1ConfigMapVolumeSource(name = self.PeerCfgMapStartupName coreSet i)
+            )
+
+        let peerCfgStartupVolumes = Array.mapi (fun i _ -> peerCfgStartupVolume i) coreSet.keys
+
         let dataVol =
             V1Volume(name = CfgVal.dataVolumeName, emptyDir = V1EmptyDirVolumeSource(medium = "Memory"))
 
@@ -592,6 +636,8 @@ type NetworkCfg with
 
         let cfgOpt = PeerSpecificConfigFile
         let volumes = Array.append peerCfgVolumes [| dataVol; historyCfgVolume |]
+        let volumes = Array.append volumes peerCfgStartupVolumes
+
         let initCommands = self.getInitCommands cfgOpt coreSet.options
 
 
@@ -631,6 +677,7 @@ type NetworkCfg with
             [| WithLivenessProbe
                 (CoreContainerForCommand imageName cfgOpt res runCmdMaybeInMemory initCommands peerNames)
                 self.missionContext.probeTimeout
+                true
                HistoryContainer self.missionContext.nginxImage |]
 
         let containers =

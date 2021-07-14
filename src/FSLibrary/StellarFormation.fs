@@ -116,7 +116,8 @@ type StellarFormation
             (fun (ev: Corev1Event) ->
                 ev.Type <> "Normal"
                 && ev.Reason <> "DNSConfigForming"
-                && ev.Reason <> "FailedMount")
+                && ev.Reason <> "FailedMount"
+                && not <| ev.Message.Contains("Startup probe failed"))
             events
 
     // Watches the provided StatefulSet until the count of ready replicas equals the

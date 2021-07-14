@@ -87,7 +87,7 @@ type Tests(output: ITestOutputHelper) =
 
     [<Fact>]
     member __.``TOML Config looks reasonable``() =
-        let cfg = nCfg.StellarCoreCfg(coreSet, 1)
+        let cfg = nCfg.StellarCoreCfg(coreSet, 1, false)
         let toml = cfg.ToString()
         let peer0DNS = (nCfg.PeerDnsName coreSet 0).StringName
         let peer1DNS = (nCfg.PeerDnsName coreSet 1).StringName
@@ -115,7 +115,11 @@ type Tests(output: ITestOutputHelper) =
         Assert.Contains("\"curl -sf http://" + peer0DNS + "/{0} -o {1}\"", toml)
         Assert.Contains("OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING = [10, 100]", toml)
         Assert.Contains("OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING = [30, 70]", toml)
+        Assert.Contains("HTTP_PORT = " + CfgVal.httpPort.ToString(), toml)
 
+        // Test startup config
+        let cfgStartup = nCfg.StellarCoreCfg(coreSet, 1, true)
+        Assert.Contains("HTTP_PORT = 0", cfgStartup.ToString())
 
     [<Fact>]
     member __.``Core init commands look reasonable``() =
@@ -126,9 +130,9 @@ type Tests(output: ITestOutputHelper) =
         let cmdStr = ShAnd(cmds).ToString()
 
         let exp =
-            "{ stellar-core new-db --conf \"/cfg-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core.cfg\" && "
-            + "{ stellar-core new-hist local --conf \"/cfg-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core.cfg\" || true; } && "
-            + "stellar-core force-scp --conf \"/cfg-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core.cfg\"; }"
+            "{ stellar-core new-db --conf \"/cfg-startup-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core-startup.cfg\" && "
+            + "{ stellar-core new-hist local --conf \"/cfg-startup-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core-startup.cfg\" || true; } && "
+            + "stellar-core force-scp --conf \"/cfg-startup-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core-startup.cfg\"; }"
 
         Assert.Equal(exp, cmdStr)
 
@@ -189,7 +193,7 @@ type Tests(output: ITestOutputHelper) =
              let sdfCoreSetName = CoreSetName "www-stellar-org"
              Assert.Contains(coreSets, (fun cs -> cs.name = sdfCoreSetName))
              let sdfCoreSet = List.find (fun cs -> cs.name = sdfCoreSetName) coreSets
-             let cfg = nCfg.StellarCoreCfg(sdfCoreSet, 0)
+             let cfg = nCfg.StellarCoreCfg(sdfCoreSet, 0, false)
              let toml = cfg.ToString()
              Assert.Contains("[QUORUM_SET.sub1]", toml)
              Assert.Contains("[HISTORY.local]", toml)
