@@ -31,12 +31,18 @@ module CfgVal =
     let asanOptionsEnvVarName = "ASAN_OPTIONS"
     let asanOptionsEnvVarValue = "quarantine_size_mb=1:malloc_context_size=5"
     let peerCfgFileName = "stellar-core.cfg"
+    let peerStartupCfgFileName = "stellar-core-startup.cfg"
     let peerDelayCfgFileName = "install-delays.sh"
 
     let peerNameEnvCfgFileWord : ShWord =
         ShWord.ShPieces [| ShBare("/cfg-")
                            ShVar(ShName peerNameEnvVarName)
                            ShBare("/" + peerCfgFileName) |]
+
+    let peerStartupNameEnvCfgFileWord : ShWord =
+        ShWord.ShPieces [| ShBare("/cfg-startup-")
+                           ShVar(ShName peerNameEnvVarName)
+                           ShBare("/" + peerStartupCfgFileName) |]
 
     let peerNameEnvDelayCfgFileWord : ShWord =
         ShWord.ShPieces [| ShBare("/cfg-")
@@ -45,6 +51,10 @@ module CfgVal =
 
     let cfgVolumeName peerOrJobName = sprintf "cfg-%s" peerOrJobName
     let cfgVolumePath peerOrJobName = "/" + (cfgVolumeName peerOrJobName)
+
+    let cfgStartupVolumeName peerOrJobName = sprintf "cfg-startup-%s" peerOrJobName
+    let cfgStartupVolumePath peerOrJobName = "/" + (cfgStartupVolumeName peerOrJobName)
+
     let jobCfgVolumeName = "cfg-job"
     let jobCfgVolumePath = "/" + jobCfgVolumeName
     let jobCfgFileName = "stellar-core.cfg"
@@ -122,7 +132,8 @@ type StellarCoreCfg =
       localHistory: bool
       maxSlotsToRemember: int
       maxBatchWriteCount: int
-      inMemoryMode: bool }
+      inMemoryMode: bool
+      startup: bool }
 
     member self.ToTOML() : TomlTable =
         let t = Toml.Create()
@@ -147,7 +158,11 @@ type StellarCoreCfg =
         let preferredPeers = List.map (fun (x: PeerDnsName) -> x.StringName) self.preferredPeers
 
         t.Add("DATABASE", self.database.ToString()) |> ignore
-        t.Add("HTTP_PORT", int64 (CfgVal.httpPort)) |> ignore
+
+        match self.startup with
+        | false -> t.Add("HTTP_PORT", int64 (CfgVal.httpPort)) |> ignore
+        | true -> t.Add("HTTP_PORT", 0) |> ignore
+
         t.Add("PUBLIC_HTTP_PORT", true) |> ignore
         t.Add("BUCKET_DIR_PATH", CfgVal.bucketsPath) |> ignore
         t.Add("NETWORK_PASSPHRASE", self.networkPassphrase.ToString()) |> ignore
@@ -374,9 +389,10 @@ type NetworkCfg with
           localHistory = opts.localHistory
           maxSlotsToRemember = opts.maxSlotsToRemember
           maxBatchWriteCount = opts.maxBatchWriteCount
-          inMemoryMode = opts.inMemoryMode }
+          inMemoryMode = opts.inMemoryMode
+          startup = false }
 
-    member self.StellarCoreCfg(c: CoreSet, i: int) : StellarCoreCfg =
+    member self.StellarCoreCfg(c: CoreSet, i: int, setNolisten: bool) : StellarCoreCfg =
         { network = self
           database = self.getDbUrl c.options
           networkPassphrase = self.networkPassphrase
@@ -407,4 +423,5 @@ type NetworkCfg with
           localHistory = c.options.localHistory
           maxSlotsToRemember = c.options.maxSlotsToRemember
           maxBatchWriteCount = c.options.maxBatchWriteCount
-          inMemoryMode = c.options.inMemoryMode }
+          inMemoryMode = c.options.inMemoryMode
+          startup = setNolisten }
