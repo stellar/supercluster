@@ -198,15 +198,14 @@ let NetworkDelayScriptContainer (netdelayImage: string) (configOpt: ConfigOption
         volumeMounts = CoreContainerVolumeMounts peerOrJobNames configOpt
     )
 
-let cfgFileArgs (configOpt: ConfigOption) (startup: bool) : ShWord array =
+let cfgFileArgs (configOpt: ConfigOption) (ctype: CoreContainerType) : ShWord array =
     match configOpt with
     | NoConfigFile -> [||]
     | SharedJobConfigFile -> Array.map ShWord.OfStr [| "--conf"; CfgVal.jobCfgFilePath |]
     | PeerSpecificConfigFile ->
-        if startup then
-            [| ShWord.OfStr "--conf"; CfgVal.peerStartupNameEnvCfgFileWord |]
-        else
-            [| ShWord.OfStr "--conf"; CfgVal.peerNameEnvCfgFileWord |]
+        match ctype with
+        | InitCoreContainer -> [| ShWord.OfStr "--conf"; CfgVal.peerNameEnvInitCfgFileWord |]
+        | MainCoreContainer -> [| ShWord.OfStr "--conf"; CfgVal.peerNameEnvCfgFileWord |]
 
 let CoreContainerForCommand
     (imageName: string)
@@ -224,7 +223,7 @@ let CoreContainerForCommand
     let asanOptionsEnvVar =
         V1EnvVar(name = CfgVal.asanOptionsEnvVarName, value = CfgVal.asanOptionsEnvVarValue)
 
-    let cfgWords = cfgFileArgs configOpt false
+    let cfgWords = cfgFileArgs configOpt MainCoreContainer
     let containerName = CfgVal.stellarCoreContainerName (Array.get command 0)
 
     let cmdWords =
@@ -269,7 +268,7 @@ let CoreContainerForCommand
         volumeMounts = CoreContainerVolumeMounts peerOrJobNames configOpt
     )
 
-let WithLivenessProbe (container: V1Container) (probeTimeout: int) (withStartupProbe: bool) : V1Container =
+let WithLivenessProbe (container: V1Container) (probeTimeout: int) : V1Container =
     let httpPortStr = IntstrIntOrString(value = CfgVal.httpPort.ToString())
 
     let liveProbe =
@@ -366,11 +365,11 @@ type NetworkCfg with
     member self.ToConfigMaps() : V1ConfigMap array =
         let peerCfgMap (coreSet: CoreSet) (i: int) =
             let cfgMapName = (self.PeerCfgMapName coreSet i)
-            let cfgFileData = (self.StellarCoreCfg(coreSet, i, false)).ToString()
+            let cfgFileData = (self.StellarCoreCfg(coreSet, i, MainCoreContainer)).ToString()
             let cfgMap = Map.empty.Add(CfgVal.peerCfgFileName, cfgFileData)
 
-            let startupCfgFileData = (self.StellarCoreCfg(coreSet, i, true)).ToString()
-            let cfgMap = cfgMap.Add(CfgVal.peerStartupCfgFileName, startupCfgFileData)
+            let startupCfgFileData = (self.StellarCoreCfg(coreSet, i, InitCoreContainer)).ToString()
+            let cfgMap = cfgMap.Add(CfgVal.peerInitCfgFileName, startupCfgFileData)
 
             let cfgMap =
                 if self.NeedNetworkDelayScript then
@@ -392,7 +391,7 @@ type NetworkCfg with
         | Some (opts) -> Array.append cfgs [| self.JobConfigMap(opts) |]
 
     member self.getInitCommands (configOpt: ConfigOption) (opts: CoreSetOptions) : ShCmd array =
-        let cfgWords = cfgFileArgs configOpt true
+        let cfgWords = cfgFileArgs configOpt InitCoreContainer
 
         let runCore args =
             let cmdAndArgs = (Array.map ShWord.OfStr (Array.append [| CfgVal.stellarCoreBinPath |] args))
