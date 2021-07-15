@@ -190,9 +190,8 @@ type StellarCoreCfg =
         t.Add("ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING", self.accelerateTime) |> ignore
         t.Add("ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING", self.generateLoad) |> ignore
 
-        match self.inMemoryMode with
-        | false -> ()
-        | true -> t.Add("METADATA_OUTPUT_STREAM", CfgVal.metaStreamPath) |> ignore
+        if self.inMemoryMode then
+            t.Add("METADATA_OUTPUT_STREAM", CfgVal.metaStreamPath) |> ignore
 
         match self.network.missionContext.simulateApplyWeight, self.network.missionContext.simulateApplyDuration with
         | None, None -> ()

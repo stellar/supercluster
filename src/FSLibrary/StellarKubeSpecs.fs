@@ -617,10 +617,11 @@ type NetworkCfg with
             else
                 runCmd
 
-        let runCmdMaybeInMemory =
-            match coreSet.options.inMemoryMode with
-            | true -> Array.append runCmd [| "--in-memory" |]
-            | false -> runCmd
+        let runCmd =
+            if coreSet.options.inMemoryMode then
+                Array.append runCmd [| "--in-memory" |]
+            else
+                runCmd
 
         let usePostgres = (coreSet.options.dbType = Postgres)
         let exportToPrometheus = self.missionContext.exportToPrometheus
@@ -629,7 +630,7 @@ type NetworkCfg with
 
         let containers =
             [| WithProbes
-                (CoreContainerForCommand imageName cfgOpt res runCmdMaybeInMemory initCommands peerNames)
+                (CoreContainerForCommand imageName cfgOpt res runCmd initCommands peerNames)
                 self.missionContext.probeTimeout
                HistoryContainer self.missionContext.nginxImage |]
 
