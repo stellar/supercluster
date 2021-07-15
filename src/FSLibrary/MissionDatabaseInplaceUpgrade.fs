@@ -39,7 +39,7 @@ let databaseInplaceUpgrade (context: MissionContext) =
                       { newDb = false
                         newHist = false
                         initialCatchup = false
-                        forceScp = false
+                        waitForConsensus = true
                         fetchDBFromPeer = fetchFromPeer } }
 
     context.Execute

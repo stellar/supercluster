@@ -466,7 +466,6 @@ type NetworkCfg with
 
 
         let initialCatchup = runCoreIf init.initialCatchup [| "catchup"; "current/0" |]
-        let forceScp = runCoreIf init.forceScp [| "force-scp" |]
 
         let cmds =
             Array.choose
@@ -478,8 +477,7 @@ type NetworkCfg with
                         waitForTime
                         newDb
                         newHistIgnoreError
-                        initialCatchup
-                        forceScp |])
+                        initialCatchup |])
                     createDbs)
 
         let restoreDBStep coreSet i : ShCmd array =
@@ -567,7 +565,7 @@ type NetworkCfg with
     // Returns a PodTemplate that mounts the ConfigMap on /cfg and an empty data
     // volume on /data. Then initializes a local stellar-core database in
     // /data/stellar.db with buckets in /data/buckets and history archive in
-    // /data/history, forces SCP on next startup, and runs.
+    // /data/history, optionally does offline catchup, and runs.
     member self.ToPodTemplateSpec(coreSet: CoreSet) : V1PodTemplateSpec =
 
         // We cannot limit _individual_ peers within a CoreSet to only mount
@@ -613,30 +611,16 @@ type NetworkCfg with
 
         let runCmd = [| "run" |]
 
-        let firstProtocolWithDefaultForceSCP = 14
-
-        let getCoreVersion (coreVersion: string) =
-            let m = Regex.Match(coreVersion, "[0-9]([0-9]?).[0-9]([0-9]?).[0-9]([0-9]?)")
-            if m.Success then Some(m.Value) else None
-
-        let imageProtoVersion =
-            match (getCoreVersion coreSet.options.image) with
-            | None -> firstProtocolWithDefaultForceSCP
-            | Some v -> int (v.Split '.').[0]
-
-        let runCmdWithOpts =
-            match coreSet.options.initialization.forceScp with
-            | true -> runCmd
-            | false ->
-                if (imageProtoVersion >= firstProtocolWithDefaultForceSCP) then
-                    Array.append runCmd [| "--wait-for-consensus" |]
-                else
-                    runCmd
+        let runCmd =
+            if coreSet.options.initialization.waitForConsensus then
+                Array.append runCmd [| "--wait-for-consensus" |]
+            else
+                runCmd
 
         let runCmdMaybeInMemory =
             match coreSet.options.inMemoryMode with
-            | true -> Array.append runCmdWithOpts [| "--in-memory" |]
-            | false -> runCmdWithOpts
+            | true -> Array.append runCmd [| "--in-memory" |]
+            | false -> runCmd
 
         let usePostgres = (coreSet.options.dbType = Postgres)
         let exportToPrometheus = self.missionContext.exportToPrometheus

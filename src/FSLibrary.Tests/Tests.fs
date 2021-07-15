@@ -131,8 +131,7 @@ type Tests(output: ITestOutputHelper) =
 
         let exp =
             "{ stellar-core new-db --conf \"/cfg-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core-init.cfg\" && "
-            + "{ stellar-core new-hist local --conf \"/cfg-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core-init.cfg\" || true; } && "
-            + "stellar-core force-scp --conf \"/cfg-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core-init.cfg\"; }"
+            + "{ stellar-core new-hist local --conf \"/cfg-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core-init.cfg\" || true; }; }"
 
         Assert.Equal(exp, cmdStr)
 

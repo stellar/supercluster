@@ -76,7 +76,6 @@ type StellarFormation with
         self.DumpPeerCommandLogs destination "new-db" p
         self.DumpPeerCommandLogs destination "new-hist" p
         self.DumpPeerCommandLogs destination "catchup" p
-        self.DumpPeerCommandLogs destination "force-scp" p
         self.DumpPeerCommandLogs destination "run" p
 
     member self.BackupDatabaseToHistory(p: Peer) =

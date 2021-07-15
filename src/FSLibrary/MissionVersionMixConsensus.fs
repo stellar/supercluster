@@ -38,7 +38,7 @@ let versionMixConsensus (context: MissionContext) =
                       { newDb = false
                         newHist = false
                         initialCatchup = false
-                        forceScp = true
+                        waitForConsensus = false
                         fetchDBFromPeer = fetchFromPeer } }
 
     let oldCoreSet =
@@ -52,7 +52,7 @@ let versionMixConsensus (context: MissionContext) =
                       { newDb = false
                         newHist = false
                         initialCatchup = false
-                        forceScp = true
+                        waitForConsensus = false
                         fetchDBFromPeer = fetchFromPeer } }
 
     context.Execute
