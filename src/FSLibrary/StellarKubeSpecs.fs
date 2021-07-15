@@ -47,26 +47,14 @@ let CoreContainerVolumeMounts (peerOrJobNames: string array) (configOpt: ConfigO
                    mountPath = CfgVal.jobCfgVolumePath
                ) |]
     | PeerSpecificConfigFile ->
-        let arr =
-            Array.append
-                arr
-                (Array.map
-                    (fun n ->
-                        V1VolumeMount(
-                            name = CfgVal.cfgVolumeName n,
-                            readOnlyProperty = System.Nullable<bool>(true),
-                            mountPath = CfgVal.cfgVolumePath n
-                        ))
-                    peerOrJobNames)
-
         Array.append
             arr
             (Array.map
                 (fun n ->
                     V1VolumeMount(
-                        name = CfgVal.cfgStartupVolumeName n,
+                        name = CfgVal.cfgVolumeName n,
                         readOnlyProperty = System.Nullable<bool>(true),
-                        mountPath = CfgVal.cfgStartupVolumePath n
+                        mountPath = CfgVal.cfgVolumePath n
                     ))
                 peerOrJobNames)
 
@@ -381,6 +369,9 @@ type NetworkCfg with
             let cfgFileData = (self.StellarCoreCfg(coreSet, i, false)).ToString()
             let cfgMap = Map.empty.Add(CfgVal.peerCfgFileName, cfgFileData)
 
+            let startupCfgFileData = (self.StellarCoreCfg(coreSet, i, true)).ToString()
+            let cfgMap = cfgMap.Add(CfgVal.peerStartupCfgFileName, startupCfgFileData)
+
             let cfgMap =
                 if self.NeedNetworkDelayScript then
                     let delayFileData = (self.NetworkDelayScript coreSet i).ToString()
@@ -394,14 +385,7 @@ type NetworkCfg with
 
             V1ConfigMap(metadata = self.NamespacedMeta cfgMapName, data = cfgMap)
 
-        let peerCfgMapStartup (coreSet: CoreSet) (i: int) =
-            let cfgMapName = (self.PeerCfgMapStartupName coreSet i)
-            let cfgFileData = (self.StellarCoreCfg(coreSet, i, true)).ToString()
-            let cfgMap = Map.empty.Add(CfgVal.peerStartupCfgFileName, cfgFileData)
-            V1ConfigMap(metadata = self.NamespacedMeta cfgMapName, data = cfgMap)
-
         let cfgs = Array.append (self.MapAllPeers peerCfgMap) [| self.HistoryConfigMap() |]
-        let cfgs = Array.append cfgs (self.MapAllPeers peerCfgMapStartup)
 
         match self.jobCoreSetOptions with
         | None -> cfgs
@@ -619,16 +603,6 @@ type NetworkCfg with
                 configMap = V1ConfigMapVolumeSource(name = self.HistoryCfgMapName)
             )
 
-        let peerCfgStartupVolume i =
-            let peerName = self.PodName coreSet i
-
-            V1Volume(
-                name = CfgVal.cfgStartupVolumeName peerName.StringName,
-                configMap = V1ConfigMapVolumeSource(name = self.PeerCfgMapStartupName coreSet i)
-            )
-
-        let peerCfgStartupVolumes = Array.mapi (fun i _ -> peerCfgStartupVolume i) coreSet.keys
-
         let dataVol =
             V1Volume(name = CfgVal.dataVolumeName, emptyDir = V1EmptyDirVolumeSource(medium = "Memory"))
 
@@ -636,10 +610,8 @@ type NetworkCfg with
 
         let cfgOpt = PeerSpecificConfigFile
         let volumes = Array.append peerCfgVolumes [| dataVol; historyCfgVolume |]
-        let volumes = Array.append volumes peerCfgStartupVolumes
 
         let initCommands = self.getInitCommands cfgOpt coreSet.options
-
 
         let runCmd = [| "run" |]
 

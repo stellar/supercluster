@@ -40,7 +40,7 @@ module CfgVal =
                            ShBare("/" + peerCfgFileName) |]
 
     let peerStartupNameEnvCfgFileWord : ShWord =
-        ShWord.ShPieces [| ShBare("/cfg-startup-")
+        ShWord.ShPieces [| ShBare("/cfg-")
                            ShVar(ShName peerNameEnvVarName)
                            ShBare("/" + peerStartupCfgFileName) |]
 
@@ -51,9 +51,6 @@ module CfgVal =
 
     let cfgVolumeName peerOrJobName = sprintf "cfg-%s" peerOrJobName
     let cfgVolumePath peerOrJobName = "/" + (cfgVolumeName peerOrJobName)
-
-    let cfgStartupVolumeName peerOrJobName = sprintf "cfg-startup-%s" peerOrJobName
-    let cfgStartupVolumePath peerOrJobName = "/" + (cfgStartupVolumeName peerOrJobName)
 
     let jobCfgVolumeName = "cfg-job"
     let jobCfgVolumePath = "/" + jobCfgVolumeName

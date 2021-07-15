@@ -130,9 +130,9 @@ type Tests(output: ITestOutputHelper) =
         let cmdStr = ShAnd(cmds).ToString()
 
         let exp =
-            "{ stellar-core new-db --conf \"/cfg-startup-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core-startup.cfg\" && "
-            + "{ stellar-core new-hist local --conf \"/cfg-startup-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core-startup.cfg\" || true; } && "
-            + "stellar-core force-scp --conf \"/cfg-startup-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core-startup.cfg\"; }"
+            "{ stellar-core new-db --conf \"/cfg-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core-startup.cfg\" && "
+            + "{ stellar-core new-hist local --conf \"/cfg-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core-startup.cfg\" || true; } && "
+            + "stellar-core force-scp --conf \"/cfg-${STELLAR_CORE_PEER_SHORT_NAME}/stellar-core-startup.cfg\"; }"
 
         Assert.Equal(exp, cmdStr)
 
