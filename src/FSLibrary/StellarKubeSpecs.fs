@@ -282,15 +282,14 @@ let WithLivenessProbe (container: V1Container) (probeTimeout: int) : V1Container
     container.LivenessProbe <- liveProbe
 
     // Allow 10 minute buffer to startup core (this may involve lengthy operations such as bucket application)
-    if withStartupProbe then
-        let startupProbe =
-            V1Probe(
-                periodSeconds = System.Nullable<int>(5),
-                failureThreshold = System.Nullable<int>(120),
-                httpGet = V1HTTPGetAction(path = "/info", port = httpPortStr)
-            )
+    let startupProbe =
+        V1Probe(
+            periodSeconds = System.Nullable<int>(5),
+            failureThreshold = System.Nullable<int>(120),
+            httpGet = V1HTTPGetAction(path = "/info", port = httpPortStr)
+        )
 
-        container.StartupProbe <- startupProbe
+    container.StartupProbe <- startupProbe
 
     container
 
@@ -648,7 +647,6 @@ type NetworkCfg with
             [| WithLivenessProbe
                 (CoreContainerForCommand imageName cfgOpt res runCmdMaybeInMemory initCommands peerNames)
                 self.missionContext.probeTimeout
-                true
                HistoryContainer self.missionContext.nginxImage |]
 
         let containers =
