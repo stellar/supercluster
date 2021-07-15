@@ -268,7 +268,7 @@ let CoreContainerForCommand
         volumeMounts = CoreContainerVolumeMounts peerOrJobNames configOpt
     )
 
-let WithLivenessProbe (container: V1Container) (probeTimeout: int) : V1Container =
+let WithProbes (container: V1Container) (probeTimeout: int) : V1Container =
     let httpPortStr = IntstrIntOrString(value = CfgVal.httpPort.ToString())
 
     let liveProbe =
@@ -644,7 +644,7 @@ type NetworkCfg with
         let res = self.missionContext.coreResources
 
         let containers =
-            [| WithLivenessProbe
+            [| WithProbes
                 (CoreContainerForCommand imageName cfgOpt res runCmdMaybeInMemory initCommands peerNames)
                 self.missionContext.probeTimeout
                HistoryContainer self.missionContext.nginxImage |]
