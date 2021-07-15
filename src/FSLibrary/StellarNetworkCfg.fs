@@ -82,9 +82,6 @@ type NetworkCfg =
 
     member self.PeerCfgMapName (cs: CoreSet) (i: int) : string = sprintf "%s-cfg-map" (self.PodName cs i).StringName
 
-    member self.PeerDelayCfgMapName (cs: CoreSet) (i: int) : string =
-        sprintf "%s-delay-cfg-map" (self.PodName cs i).StringName
-
     member self.JobCfgMapName : string = sprintf "%s-job-cfg-map" self.Nonce
 
     member self.HistoryCfgMapName : string = sprintf "%s-history-cfg-map" self.Nonce
