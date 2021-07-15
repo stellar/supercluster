@@ -72,42 +72,42 @@ type CoreSetInitialization =
     { newDb: bool
       newHist: bool
       initialCatchup: bool
-      forceScp: bool
+      waitForConsensus: bool
       fetchDBFromPeer: (CoreSetName * int) option }
 
     static member Default =
         { newDb = true
           newHist = true
           initialCatchup = false
-          forceScp = true
+          waitForConsensus = false
           fetchDBFromPeer = None }
 
     static member DefaultNoForceSCP =
         { newDb = true
           newHist = true
           initialCatchup = false
-          forceScp = false
+          waitForConsensus = true
           fetchDBFromPeer = None }
 
     static member CatchupNoForceSCP =
         { newDb = true
           newHist = true
           initialCatchup = true
-          forceScp = false
+          waitForConsensus = true
           fetchDBFromPeer = None }
 
     static member OnlyNewDb =
         { newDb = true
           newHist = false
           initialCatchup = false
-          forceScp = false
+          waitForConsensus = true
           fetchDBFromPeer = None }
 
     static member NoInitCmds =
         { newDb = false
           newHist = false
           initialCatchup = false
-          forceScp = false
+          waitForConsensus = true
           fetchDBFromPeer = None }
 
 type GeoLoc = { lat: float; lon: float }
@@ -157,7 +157,8 @@ type CoreSetOptions =
       maxBatchWriteCount: int
       inMemoryMode: bool }
 
-    member self.WithForceSCP(f: bool) = { self with initialization = { self.initialization with forceScp = f } }
+    member self.WithWaitForConsensus(w: bool) =
+        { self with initialization = { self.initialization with waitForConsensus = w } }
 
     static member GetDefault(image: string) =
         { nodeCount = 3

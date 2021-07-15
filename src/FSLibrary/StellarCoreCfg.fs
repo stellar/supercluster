@@ -31,7 +31,7 @@ module CfgVal =
     let asanOptionsEnvVarName = "ASAN_OPTIONS"
     let asanOptionsEnvVarValue = "quarantine_size_mb=1:malloc_context_size=5"
     let peerCfgFileName = "stellar-core.cfg"
-    let peerStartupCfgFileName = "stellar-core-startup.cfg"
+    let peerInitCfgFileName = "stellar-core-init.cfg"
     let peerDelayCfgFileName = "install-delays.sh"
 
     let peerNameEnvCfgFileWord : ShWord =
@@ -39,10 +39,10 @@ module CfgVal =
                            ShVar(ShName peerNameEnvVarName)
                            ShBare("/" + peerCfgFileName) |]
 
-    let peerStartupNameEnvCfgFileWord : ShWord =
-        ShWord.ShPieces [| ShBare("/cfg-startup-")
+    let peerNameEnvInitCfgFileWord : ShWord =
+        ShWord.ShPieces [| ShBare("/cfg-")
                            ShVar(ShName peerNameEnvVarName)
-                           ShBare("/" + peerStartupCfgFileName) |]
+                           ShBare("/" + peerInitCfgFileName) |]
 
     let peerNameEnvDelayCfgFileWord : ShWord =
         ShWord.ShPieces [| ShBare("/cfg-")
@@ -51,9 +51,6 @@ module CfgVal =
 
     let cfgVolumeName peerOrJobName = sprintf "cfg-%s" peerOrJobName
     let cfgVolumePath peerOrJobName = "/" + (cfgVolumeName peerOrJobName)
-
-    let cfgStartupVolumeName peerOrJobName = sprintf "cfg-startup-%s" peerOrJobName
-    let cfgStartupVolumePath peerOrJobName = "/" + (cfgStartupVolumeName peerOrJobName)
 
     let jobCfgVolumeName = "cfg-job"
     let jobCfgVolumePath = "/" + jobCfgVolumeName
@@ -105,6 +102,10 @@ let curlGetCmd (uri: System.Uri) : string = sprintf "curl -sf %s{0} -o {1}" (uri
 
 let curlGetCmdFromPeer (peer: PeerDnsName) : string = curlGetCmd (System.UriBuilder("http", peer.StringName).Uri)
 
+type CoreContainerType =
+    | InitCoreContainer
+    | MainCoreContainer
+
 // Represents the contents of a stellar-core.cfg file, along with method to
 // write it out to TOML.
 type StellarCoreCfg =
@@ -133,7 +134,7 @@ type StellarCoreCfg =
       maxSlotsToRemember: int
       maxBatchWriteCount: int
       inMemoryMode: bool
-      startup: bool }
+      containerType: CoreContainerType }
 
     member self.ToTOML() : TomlTable =
         let t = Toml.Create()
@@ -159,9 +160,9 @@ type StellarCoreCfg =
 
         t.Add("DATABASE", self.database.ToString()) |> ignore
 
-        match self.startup with
-        | false -> t.Add("HTTP_PORT", int64 (CfgVal.httpPort)) |> ignore
-        | true -> t.Add("HTTP_PORT", 0) |> ignore
+        match self.containerType with
+        | MainCoreContainer -> t.Add("HTTP_PORT", int64 (CfgVal.httpPort)) |> ignore
+        | InitCoreContainer -> t.Add("HTTP_PORT", 0) |> ignore
 
         t.Add("PUBLIC_HTTP_PORT", true) |> ignore
         t.Add("BUCKET_DIR_PATH", CfgVal.bucketsPath) |> ignore
@@ -189,9 +190,8 @@ type StellarCoreCfg =
         t.Add("ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING", self.accelerateTime) |> ignore
         t.Add("ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING", self.generateLoad) |> ignore
 
-        match self.inMemoryMode with
-        | false -> ()
-        | true -> t.Add("METADATA_OUTPUT_STREAM", CfgVal.metaStreamPath) |> ignore
+        if self.inMemoryMode then
+            t.Add("METADATA_OUTPUT_STREAM", CfgVal.metaStreamPath) |> ignore
 
         match self.network.missionContext.simulateApplyWeight, self.network.missionContext.simulateApplyDuration with
         | None, None -> ()
@@ -390,9 +390,9 @@ type NetworkCfg with
           maxSlotsToRemember = opts.maxSlotsToRemember
           maxBatchWriteCount = opts.maxBatchWriteCount
           inMemoryMode = opts.inMemoryMode
-          startup = false }
+          containerType = MainCoreContainer }
 
-    member self.StellarCoreCfg(c: CoreSet, i: int, setNolisten: bool) : StellarCoreCfg =
+    member self.StellarCoreCfg(c: CoreSet, i: int, ctype: CoreContainerType) : StellarCoreCfg =
         { network = self
           database = self.getDbUrl c.options
           networkPassphrase = self.networkPassphrase
@@ -424,4 +424,4 @@ type NetworkCfg with
           maxSlotsToRemember = c.options.maxSlotsToRemember
           maxBatchWriteCount = c.options.maxBatchWriteCount
           inMemoryMode = c.options.inMemoryMode
-          startup = setNolisten }
+          containerType = ctype }

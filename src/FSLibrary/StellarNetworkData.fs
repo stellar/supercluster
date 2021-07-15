@@ -276,8 +276,8 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) : CoreSet l
                           nodeLocs = Some [ getGeoLocOrDefault n ]
                           preferredPeersMap = Some(keysToPreferredPeersMap keys) }
 
-                let shouldForceScp = not manualclose
-                let coreSetOpts = coreSetOpts.WithForceSCP shouldForceScp
+                let shouldWaitForConsensus = manualclose
+                let coreSetOpts = coreSetOpts.WithWaitForConsensus shouldWaitForConsensus
                 makeCoreSetWithExplicitKeys hdn coreSetOpts keys)
             miscNodes
 
@@ -297,8 +297,8 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) : CoreSet l
                           nodeLocs = Some(List.map getGeoLocOrDefault nodeList)
                           preferredPeersMap = Some(keysToPreferredPeersMap keys) }
 
-                let shouldForceScp = not manualclose
-                let coreSetOpts = coreSetOpts.WithForceSCP shouldForceScp
+                let shouldWaitForConsensus = manualclose
+                let coreSetOpts = coreSetOpts.WithWaitForConsensus shouldWaitForConsensus
                 makeCoreSetWithExplicitKeys hdn coreSetOpts keys)
             groupedOrgNodes
 
@@ -343,7 +343,7 @@ let PubnetCoreSetOptions (image: string) =
           historyGetCommands = PubnetGetCommands
           peersDns = PubnetPeers
           accelerateTime = false
-          initialization = { CoreSetInitialization.Default with forceScp = false }
+          initialization = { CoreSetInitialization.Default with waitForConsensus = true }
           dumpDatabase = false }
 
 let TestnetGetCommands =
@@ -378,5 +378,5 @@ let TestnetCoreSetOptions (image: string) =
           historyGetCommands = TestnetGetCommands
           peersDns = TestnetPeers
           accelerateTime = false
-          initialization = { CoreSetInitialization.Default with forceScp = false }
+          initialization = { CoreSetInitialization.Default with waitForConsensus = true }
           dumpDatabase = false }
