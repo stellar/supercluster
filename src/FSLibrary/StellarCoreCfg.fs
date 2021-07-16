@@ -77,6 +77,7 @@ module CfgVal =
     let bucketsDownloadPath = dataVolumePath + "/buckets.tar.gz"
 
     let metaStreamPath = "metadata.xdr"
+    let maximumLedgerClosetimeDrift = 120
 
 // This is the formula stellar-core uses to calculate a threshold from
 // a percent.
@@ -174,6 +175,7 @@ type StellarCoreCfg =
         t.Add("PREFERRED_PEERS_ONLY", self.preferredPeersOnly) |> ignore
         t.Add("COMMANDS", logLevelCommands) |> ignore
         t.Add("CATCHUP_COMPLETE", self.catchupMode = CatchupComplete) |> ignore
+        t.Add("MAXIMUM_LEDGER_CLOSETIME_DRIFT", CfgVal.maximumLedgerClosetimeDrift) |> ignore
 
         t.Add(
             "CATCHUP_RECENT",
