@@ -289,7 +289,8 @@ let WithProbes (container: V1Container) (probeTimeout: int) : V1Container =
             httpGet = V1HTTPGetAction(path = "/info", port = httpPortStr)
         )
 
-    container.StartupProbe <- startupProbe
+    // REVERTME: Temporarily disable startup probes
+    // container.StartupProbe <- startupProbe
 
     container
 
