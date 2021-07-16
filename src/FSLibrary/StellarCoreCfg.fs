@@ -161,8 +161,8 @@ type StellarCoreCfg =
         t.Add("DATABASE", self.database.ToString()) |> ignore
 
         match self.containerType with
-        | MainCoreContainer -> t.Add("HTTP_PORT", int64 (CfgVal.httpPort)) |> ignore
-        | InitCoreContainer -> t.Add("HTTP_PORT", 0) |> ignore
+        // REVERTME: temporarily use same nonzero port for both container types.
+        | _ -> t.Add("HTTP_PORT", int64 (CfgVal.httpPort)) |> ignore
 
         t.Add("PUBLIC_HTTP_PORT", true) |> ignore
         t.Add("BUCKET_DIR_PATH", CfgVal.bucketsPath) |> ignore

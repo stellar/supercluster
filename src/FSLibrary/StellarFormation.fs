@@ -300,7 +300,8 @@ type StellarFormation
 
             networkCfg.EachPeer
                 (fun p ->
-                    self.CheckNoAbnormalKubeEvents p
+                    // REVERTME: Temporarily disable abnormal-event checking
+                    // self.CheckNoAbnormalKubeEvents p
                     p.CheckNoErrorMetrics(includeTxInternalErrors = false)
                     p.CheckConsistencyWith peer)
 
