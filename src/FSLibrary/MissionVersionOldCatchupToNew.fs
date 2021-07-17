@@ -7,6 +7,7 @@ module MissionVersionMixOldCatchupToNew
 open MissionCatchupHelpers
 open StellarMissionContext
 open StellarFormation
+open StellarStatefulSets
 open StellarSupercluster
 open StellarCoreHTTP
 

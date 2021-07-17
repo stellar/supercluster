@@ -9,6 +9,7 @@ open StellarCorePeer
 open StellarCoreSet
 open StellarMissionContext
 open StellarFormation
+open StellarStatefulSets
 open StellarDataDump
 open StellarSupercluster
 

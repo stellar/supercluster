@@ -283,7 +283,7 @@ let main argv =
 
             let ctx =
                 { kube = kube
-                  destination = DefaultDestination
+                  destination = Destination("destination")
                   image = "stellar/stellar-core"
                   oldImage = None
                   netdelayImage = ""

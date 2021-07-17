@@ -9,6 +9,7 @@ open StellarCoreSet
 open StellarMissionContext
 open StellarPerformanceReporter
 open StellarFormation
+open StellarStatefulSets
 open StellarSupercluster
 
 let benchmarkBaseline (context: MissionContext) =

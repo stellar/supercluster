@@ -13,6 +13,7 @@ open StellarDataDump
 open StellarMissionContext
 open StellarNetworkCfg
 open StellarFormation
+open StellarStatefulSets
 open StellarCoreSet
 open StellarKubeSpecs
 open StellarNamespaceContent
@@ -212,7 +213,8 @@ type MissionContext with
 
     member self.MakeFormation (coreSetList: CoreSet list) (passphrase: NetworkPassphrase option) : StellarFormation =
         let networkCfg = MakeNetworkCfg self coreSetList passphrase
-        self.kube.MakeFormation networkCfg
+        let formation = self.kube.MakeFormation networkCfg
+        formation
 
     member self.MakeFormationForJob
         (opts: CoreSetOptions option)
@@ -233,7 +235,7 @@ type MissionContext with
             try
                 run formation
             finally
-                formation.DumpJobData self.destination
+                formation.DumpJobData()
         with x ->
             (if self.keepData then formation.KeepData()
              reraise ())
@@ -251,7 +253,7 @@ type MissionContext with
                 run formation
                 formation.CheckNoErrorsAndPairwiseConsistency()
             finally
-                formation.DumpData self.destination
+                formation.DumpData()
         with x ->
             (if self.keepData then formation.KeepData()
              reraise ())
@@ -270,8 +272,8 @@ type MissionContext with
                 run formation performanceReporter
                 formation.CheckNoErrorsAndPairwiseConsistency()
             finally
-                performanceReporter.DumpPerformanceMetrics self.destination
-                formation.DumpData self.destination
+                performanceReporter.DumpPerformanceMetrics()
+                formation.DumpData()
         with x ->
             (if self.keepData then formation.KeepData()
              reraise ())

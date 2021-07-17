@@ -8,6 +8,7 @@ open StellarCoreSet
 open StellarMissionContext
 open StellarSupercluster
 open StellarFormation
+open StellarStatefulSets
 
 let bootAndSync (context: MissionContext) =
     let coreSet = MakeLiveCoreSet "core" (CoreSetOptions.GetDefault context.image)

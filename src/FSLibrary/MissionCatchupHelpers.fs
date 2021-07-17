@@ -9,6 +9,7 @@ open StellarCorePeer
 open StellarCoreSet
 open StellarMissionContext
 open StellarFormation
+open StellarStatefulSets
 open Logging
 
 type CatchupMissionOptions = { generatorImage: string; catchupImage: string; versionImage: string }

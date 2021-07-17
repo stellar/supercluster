@@ -26,7 +26,6 @@ let historyPubnetPerformance (context: MissionContext) =
         (fun (formation: StellarFormation) ->
 
             (formation.RunSingleJobWithTimeout
-                context.destination
                 (Some(TimeSpan.FromMinutes(10.0)))
                 [| "catchup"; "20000000/0" |]
                 context.image
@@ -34,7 +33,6 @@ let historyPubnetPerformance (context: MissionContext) =
             |> formation.CheckAllJobsSucceeded
 
             (formation.RunSingleJobWithTimeout
-                context.destination
                 (Some(TimeSpan.FromHours(4.0)))
                 [| "catchup"; "20050000/50000" |]
                 context.image

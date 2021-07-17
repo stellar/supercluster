@@ -11,6 +11,7 @@ open StellarMissionContext
 open StellarNetworkCfg
 open StellarNetworkData
 open StellarFormation
+open StellarStatefulSets
 open StellarSupercluster
 
 let protocolUpgradeTestnet (context: MissionContext) =

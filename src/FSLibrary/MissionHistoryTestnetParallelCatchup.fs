@@ -42,5 +42,5 @@ let historyTestnetParallelCatchup (context: MissionContext) =
         (Some(opts))
         (Some(SDFTestNet))
         (fun (formation: StellarFormation) ->
-            (formation.RunParallelJobsInRandomOrder parallelism context.destination jobArr context.image)
+            (formation.RunParallelJobsInRandomOrder parallelism jobArr context.image)
             |> formation.CheckAllJobsSucceeded)

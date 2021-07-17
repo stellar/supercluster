@@ -9,6 +9,7 @@ open StellarMissionContext
 open StellarSupercluster
 open StellarTransaction
 open StellarFormation
+open StellarStatefulSets
 
 let simplePayment (context: MissionContext) =
     let coreSet = MakeLiveCoreSet "core" (CoreSetOptions.GetDefault context.image)

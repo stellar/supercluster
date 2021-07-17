@@ -19,7 +19,12 @@ module CfgVal =
     let labels = Map.ofSeq [ "app", "stellar-core" ]
     let labelSelector = "app = stellar-core"
     let stellarCoreBinPath = "stellar-core"
-    let stellarCoreContainerName (cmd: string) = "stellar-core-" + cmd
+    let allCoreContainerCmds = [| "new-hist"; "new-db"; "catchup"; "run" |]
+
+    let stellarCoreContainerName (cmd: string) =
+        assert (Array.contains cmd allCoreContainerCmds)
+        "stellar-core-" + cmd
+
     let dataVolumeName = "data-volume"
     let dataVolumePath = "/data"
     let databasePath = dataVolumePath + "/stellar.db"
