@@ -7,6 +7,7 @@ module MissionLoadGeneration
 open StellarCoreSet
 open StellarMissionContext
 open StellarFormation
+open StellarStatefulSets
 open StellarSupercluster
 open StellarCoreHTTP
 

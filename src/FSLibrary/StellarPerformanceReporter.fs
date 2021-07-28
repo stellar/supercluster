@@ -142,13 +142,16 @@ type PerformanceReporter(networkCfg: NetworkCfg) =
                 let newPeerData = List.append data.[p.PodName] [ metrics ]
                 data <- Map.add p.PodName newPeerData data)
 
-    member self.DumpPerformanceMetrics(destination: Destination) =
-        let dumpPeerPerformanceMetrics (destination: Destination) ns (p: Peer) =
+    member self.DumpPerformanceMetrics() =
+        let destination = networkCfg.missionContext.destination
+        let ns = networkCfg.NamespaceProperty
+
+        let dumpPeerPerformanceMetrics (p: Peer) =
             let toCsvRow (x: PerformanceRow) = x.ToCsvRow()
             let name = p.PodName
 
             if data.ContainsKey name then
                 let csv = new PerformanceCsv(data.[name] |> (Seq.map toCsvRow) |> Seq.toList)
-                destination.WriteString ns (sprintf "%s.perf" name.StringName) (csv.SaveToString('\t'))
+                destination.WriteString(sprintf "%s.perf" name.StringName) (csv.SaveToString('\t'))
 
-        networkCfg.EachPeer(dumpPeerPerformanceMetrics destination networkCfg.NamespaceProperty)
+        networkCfg.EachPeer(dumpPeerPerformanceMetrics)

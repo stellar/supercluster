@@ -37,7 +37,6 @@ let historyTestnetPerformance (context: MissionContext) =
         (fun (formation: StellarFormation) ->
 
             (formation.RunSingleJobWithTimeout
-                context.destination
                 (Some(TimeSpan.FromMinutes(10.0)))
                 [| "catchup"; sprintf "%d/0" firstLedger |]
                 context.image
@@ -45,7 +44,6 @@ let historyTestnetPerformance (context: MissionContext) =
             |> formation.CheckAllJobsSucceeded
 
             (formation.RunSingleJobWithTimeout
-                context.destination
                 (Some(TimeSpan.FromHours(4.0)))
                 [| "catchup"; sprintf "%d/%d" secondLedger delta |]
                 context.image

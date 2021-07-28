@@ -20,9 +20,64 @@ open System.Threading.Tasks
 open Microsoft.Rest.Serialization
 open StellarCoreSet
 
+let logName (podOrJob: string) (cmd: string) : string = sprintf "%s-%s.log" podOrJob cmd
+
+let prevLogName (podOrJob: string) (cmd: string) : string = sprintf "%s-%s-previous.log" podOrJob cmd
+
+let tailLogName (podOrJob: string) (cmd: string) : string = sprintf "%s-%s-tail.log" podOrJob cmd
+
 type StellarFormation with
 
-    member self.DumpLogs (destination: Destination) (podName: PodName) (containerName: string) =
+    member self.LaunchLogTailingTask (podName: PodName) (containerName: string) =
+        let ns = self.NetworkCfg.NamespaceProperty
+        self.sleepUntilNextRateLimitedApiCallTime ()
+
+        let task =
+            async {
+                try
+                    let! stream =
+                        self.Kube.ReadNamespacedPodLogAsync(
+                            name = podName.StringName,
+                            namespaceParameter = ns,
+                            container = containerName,
+                            follow = Nullable<bool>(true)
+                        )
+                        |> Async.AwaitTask
+
+                    let filename = tailLogName podName.StringName containerName
+                    do! self.Destination.WriteStreamAsync filename stream
+                    stream.Close()
+                with :? Microsoft.Rest.HttpOperationException as ex ->
+                    LogError "HTTP Operation exception: %s " (ex.Response.Content.ToString())
+            }
+
+        Async.Start task
+
+    member self.LaunchLogTailingTasksForPod(podName: PodName) =
+        let pod =
+            self.Kube.ReadNamespacedPodStatus(
+                name = podName.StringName,
+                namespaceParameter = self.NetworkCfg.NamespaceProperty
+            )
+
+        let containerNames =
+            List.map (fun (c: V1ContainerStatus) -> c.Name) (List.ofSeq pod.Status.ContainerStatuses)
+
+        for containerName in containerNames do
+            self.LaunchLogTailingTask podName containerName
+
+    member self.LaunchLogTailingTasksForCoreSet(cs: CoreSet) =
+        for i = 0 to (cs.CurrentCount - 1) do
+            let podName = self.NetworkCfg.PodName cs i
+            self.LaunchLogTailingTasksForPod podName
+
+    member self.LaunchLogTailingTasksForAllPeers() =
+        self.NetworkCfg.MapAllPeers
+            (fun (cs: CoreSet) (i: int) ->
+                let podName = self.NetworkCfg.PodName cs i
+                self.LaunchLogTailingTasksForPod podName)
+
+    member self.DumpLogs (podName: PodName) (containerName: string) =
         let ns = self.NetworkCfg.NamespaceProperty
 
         try
@@ -35,8 +90,13 @@ type StellarFormation with
                     container = containerName
                 )
 
-            destination.WriteStream ns (sprintf "%s-%s.log" podName.StringName containerName) stream
+            let filename = logName podName.StringName containerName
+            self.Destination.WriteStream filename stream
             stream.Close()
+
+            // remove any tail log if it exists, now that we have a final Log
+            let tailfile = tailLogName podName.StringName containerName
+            self.Destination.RemoveIfExists tailfile
 
             // dump previous container log if it exists
             self.sleepUntilNextRateLimitedApiCallTime ()
@@ -49,11 +109,12 @@ type StellarFormation with
                     previous = System.Nullable<bool>(true)
                 )
 
-            destination.WriteStream ns (sprintf "%s-%s-previous.log" podName.StringName containerName) streamPrevious
+            let prevfile = prevLogName podName.StringName containerName
+            self.Destination.WriteStream prevfile streamPrevious
             streamPrevious.Close()
         with x -> ()
 
-    member self.DumpJobLogs (destination: Destination) (jobName: string) =
+    member self.DumpJobLogs(jobName: string) =
         let ns = self.NetworkCfg.NamespaceProperty
         self.sleepUntilNextRateLimitedApiCallTime ()
 
@@ -65,18 +126,16 @@ type StellarFormation with
 
             for container in pod.Spec.Containers do
                 let containerName = container.Name
-                self.DumpLogs destination (PodName podName) containerName
+                self.DumpLogs(PodName podName) containerName
 
-    member self.DumpPeerCommandLogs (destination: Destination) (command: string) (p: Peer) =
+    member self.DumpPeerCommandLogs (command: string) (p: Peer) =
         let podName = self.NetworkCfg.PodName p.coreSet p.peerNum
         let containerName = CfgVal.stellarCoreContainerName command
-        self.DumpLogs destination podName containerName
+        self.DumpLogs podName containerName
 
-    member self.DumpPeerLogs (destination: Destination) (p: Peer) =
-        self.DumpPeerCommandLogs destination "new-db" p
-        self.DumpPeerCommandLogs destination "new-hist" p
-        self.DumpPeerCommandLogs destination "catchup" p
-        self.DumpPeerCommandLogs destination "run" p
+    member self.DumpPeerLogs(p: Peer) =
+        for containerCmd in StellarCoreCfg.CfgVal.allCoreContainerCmds do
+            self.DumpPeerCommandLogs containerCmd p
 
     member self.BackupDatabaseToHistory(p: Peer) =
         let ns = self.NetworkCfg.NamespaceProperty
@@ -118,7 +177,7 @@ type StellarFormation with
         if task.GetAwaiter().GetResult() <> 0 then
             failwith "Failed to back up database and buckets"
 
-    member self.DumpPeerDatabase (destination: Destination) (p: Peer) =
+    member self.DumpPeerDatabase(p: Peer) =
         try
             let ns = self.NetworkCfg.NamespaceProperty
             let name = self.NetworkCfg.PodName p.coreSet p.peerNum
@@ -147,18 +206,18 @@ type StellarFormation with
 
             LogInfo "Dumping SQL database of peer %s" name.StringName
             muxedStream.Start()
-            destination.WriteStream ns (sprintf "%s.sql" name.StringName) stdOut
+            self.Destination.WriteStream(sprintf "%s.sql" name.StringName) stdOut
             let errors = errorReader.ReadToEndAsync().GetAwaiter().GetResult()
             let returnMessage = SafeJsonConvert.DeserializeObject<V1Status>(errors)
             Kubernetes.GetExitCodeOrThrow(returnMessage) |> ignore
         with x -> ()
 
-    member self.DumpPeerData (destination: Destination) (p: Peer) =
-        self.DumpPeerLogs destination p
-        if p.coreSet.options.dumpDatabase then self.DumpPeerDatabase destination p
+    member self.DumpPeerData(p: Peer) =
+        self.DumpPeerLogs p
+        if p.coreSet.options.dumpDatabase then self.DumpPeerDatabase p
 
-    member self.DumpJobData(destination: Destination) =
+    member self.DumpJobData() =
         for i in self.AllJobNums do
-            self.DumpJobLogs destination (self.NetworkCfg.JobName i)
+            self.DumpJobLogs(self.NetworkCfg.JobName i)
 
-    member self.DumpData(destination: Destination) = self.NetworkCfg.EachPeer(self.DumpPeerData destination)
+    member self.DumpData() = self.NetworkCfg.EachPeer(self.DumpPeerData)

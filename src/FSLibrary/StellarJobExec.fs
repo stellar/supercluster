@@ -7,7 +7,7 @@ module StellarJobExec
 open k8s
 open k8s.Models
 open Logging
-open StellarDestination
+open StellarCoreSet
 open StellarDataDump
 open StellarFormation
 open StellarKubeSpecs
@@ -36,6 +36,11 @@ type StellarFormation with
             self.sleepUntilNextRateLimitedApiCallTime ()
             let j = self.Kube.CreateNamespacedJob(body = j, namespaceParameter = ns)
             self.NamespaceContent.Add(j)
+            let pods = self.GetJobPods j
+
+            for (pod: V1Pod) in pods.Items do
+                self.LaunchLogTailingTasksForPod(PodName pod.Metadata.Name)
+
             j
         with :? HttpOperationException as w ->
             LogError "err: %s" w.Message
@@ -43,7 +48,11 @@ type StellarFormation with
             LogError "err: %s" w.Response.ReasonPhrase
             reraise ()
 
-    member self.CheckJob (j: V1Job) (jst: JobStatusTable) (destination: Destination) =
+    member self.GetJobPods(j: V1Job) : V1PodList =
+        let ns = self.NetworkCfg.NamespaceProperty
+        self.Kube.ListNamespacedPod(namespaceParameter = ns, labelSelector = "job-name=" + j.Metadata.Name)
+
+    member self.CheckJob (j: V1Job) (jst: JobStatusTable) =
         let name = j.Metadata.Name
         assert (not (jst.IsFinished(name)))
         let ns = j.Metadata.NamespaceProperty
@@ -61,8 +70,7 @@ type StellarFormation with
             if jobFailedPodCount > 0 then
                 self.sleepUntilNextRateLimitedApiCallTime ()
 
-                let pods =
-                    self.Kube.ListNamespacedPod(namespaceParameter = ns, labelSelector = "job-name=" + name)
+                let pods = self.GetJobPods j
 
                 for pod in pods.Items do
                     if pod.Status.ContainerStatuses <> null then
@@ -90,23 +98,17 @@ type StellarFormation with
                 failwith ("Job " + name + " failed")
 
             try
-                self.FinishJob destination j
+                self.FinishJob j
             with e ->
                 LogError "Error occurred during cleanup of job %s" name
                 raise e
 
             LogInfo "Finished cleaning up after job %s" name
 
-    member self.RunSingleJob
-        (destination: Destination)
-        (job: (string array))
-        (image: string)
-        (useConfigFile: bool)
-        : Map<string, bool> =
-        self.RunSingleJobWithTimeout destination None job image useConfigFile
+    member self.RunSingleJob (job: (string array)) (image: string) (useConfigFile: bool) : Map<string, bool> =
+        self.RunSingleJobWithTimeout None job image useConfigFile
 
     member self.RunSingleJobWithTimeout
-        (destination: Destination)
         (timeout: TimeSpan option)
         (cmd: (string array))
         (image: string)
@@ -131,7 +133,7 @@ type StellarFormation with
             self.sleepUntilNextRateLimitedApiCallTime ()
 
             let js = self.Kube.ReadNamespacedJob(name = name, namespaceParameter = ns)
-            self.CheckJob js jst destination
+            self.CheckJob js jst
             Thread.Sleep(30000)
 
         let endTime = DateTime.UtcNow
@@ -140,7 +142,6 @@ type StellarFormation with
 
     member self.RunParallelJobsInRandomOrder
         (parallelism: int)
-        (destination: Destination)
         (allJobs: ((string array) array))
         (image: string)
         : Map<string, bool> =
@@ -162,7 +163,6 @@ type StellarFormation with
 
         self.RunParallelJobs
             parallelism
-            destination
             (fun _ ->
                 (match jobQueue with
                  | [] -> None
@@ -173,7 +173,6 @@ type StellarFormation with
 
     member self.RunParallelJobs
         (parallelism: int)
-        (destination: Destination)
         (nextJob: (unit -> (string array) option))
         (image: string)
         : Map<string, bool> =
@@ -239,7 +238,7 @@ type StellarFormation with
 
             for job in jobs.Items do
                 if jst.IsRunning(job.Metadata.Name) then
-                    self.CheckJob job jst destination
+                    self.CheckJob job jst
                     jobCount <- jobCount + 1
 
             // We remove from the running set before deleting the job, so the
@@ -320,10 +319,10 @@ type StellarFormation with
         let jobNum = self.NextJobNum
         self.StartJob(self.NetworkCfg.GetJobFor jobNum cmd image useConfigFile)
 
-    member self.FinishJob (destination: Destination) (j: V1Job) : unit =
+    member self.FinishJob(j: V1Job) : unit =
         // We need to dump the job logs as we go and mop up the jobs
         // because the namespace we're running within has a limited
         // quota for number of jobs / pods available and a big parallel
         // catchup will exhaust that set.
-        self.DumpJobLogs destination j.Metadata.Name
+        self.DumpJobLogs j.Metadata.Name
         self.NamespaceContent.Del(j)

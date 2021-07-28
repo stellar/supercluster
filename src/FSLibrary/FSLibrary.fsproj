@@ -26,6 +26,7 @@
     <Compile Include="StellarFormation.fs" />
     <Compile Include="StellarRemoteCommandExec.fs" />
     <Compile Include="StellarDataDump.fs" />
+    <Compile Include="StellarStatefulSets.fs" />
     <Compile Include="StellarJobExec.fs" />
     <Compile Include="StellarPerformanceReporter.fs" />
     <Compile Include="StellarSupercluster.fs" />

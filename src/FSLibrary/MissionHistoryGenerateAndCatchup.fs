@@ -9,6 +9,7 @@ open StellarCoreHTTP
 open StellarCorePeer
 open StellarMissionContext
 open StellarFormation
+open StellarStatefulSets
 open StellarSupercluster
 
 let historyGenerateAndCatchup (context: MissionContext) =

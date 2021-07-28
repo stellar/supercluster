@@ -56,7 +56,6 @@ let historyPubnetParallelCatchup (context: MissionContext) =
         (fun (formation: StellarFormation) ->
             (formation.RunParallelJobs
                 parallelism
-                context.destination
                 (fun _ ->
                     (match jobQueue with
                      | [] -> None

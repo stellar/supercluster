@@ -10,6 +10,7 @@ module MissionSimulatePubnet
 open StellarCoreSet
 open StellarMissionContext
 open StellarFormation
+open StellarStatefulSets
 open StellarNetworkData
 open StellarSupercluster
 open StellarCoreHTTP

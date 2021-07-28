@@ -8,6 +8,7 @@ open StellarCoreSet
 open StellarMissionContext
 open StellarFormation
 open StellarSupercluster
+open StellarStatefulSets
 open StellarCoreHTTP
 
 let runInMemoryMode (context: MissionContext) =

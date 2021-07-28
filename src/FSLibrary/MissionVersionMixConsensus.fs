@@ -10,6 +10,7 @@ open StellarCoreSet
 open StellarMissionContext
 open StellarTransaction
 open StellarFormation
+open StellarStatefulSets
 open StellarDataDump
 open StellarSupercluster
 
