@@ -1,0 +1,10 @@
+# This Dockerfile builds a small helper image containing the 'ip', 'tc' and
+# 'host' commands run by the install-delays.sh script, used in
+# MissionSimulatePubnet.fs.
+#
+# It should be rebuilt (when necessary) with a command like:
+#
+# docker build -t stellar/sdf-netdelay:latest -f Dockerfile.netdelay .
+
+FROM ubuntu:20.04
+RUN apt-get -y -q update && DEBIAN_FRONTEND=noninteractive apt-get -y -q install iproute2 bind9-host
