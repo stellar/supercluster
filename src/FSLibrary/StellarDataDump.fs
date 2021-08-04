@@ -60,8 +60,16 @@ type StellarFormation with
                 namespaceParameter = self.NetworkCfg.NamespaceProperty
             )
 
+        // NB: sometimes (for no clear reason) k8s returns an empty container-status list
+        // which gives us nothing to work with here. Possibly it's a startup race, but
+        // given that this is (a) rare and (b) only causes us to fail-to-tail a single
+        // container's logs when it happens, we just swallow the error rather than trying
+        // to compensate for it (eg. retrying). You don't get a tailed log in this case.
         let containerNames =
-            List.map (fun (c: V1ContainerStatus) -> c.Name) (List.ofSeq pod.Status.ContainerStatuses)
+            if isNull pod.Status.ContainerStatuses then
+                []
+            else
+                List.map (fun (c: V1ContainerStatus) -> c.Name) (List.ofSeq pod.Status.ContainerStatuses)
 
         for containerName in containerNames do
             self.LaunchLogTailingTask podName containerName
