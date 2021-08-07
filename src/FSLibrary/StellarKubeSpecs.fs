@@ -302,14 +302,25 @@ let evenTopologyConstraints : V1TopologySpreadConstraint array =
            labelSelector = V1LabelSelector(matchLabels = CfgVal.labels)
        ) |]
 
-let workerAffinity : V1Affinity =
-    let req =
-        V1NodeSelectorRequirement(key = "node-role.kubernetes.io/master", operatorProperty = "DoesNotExist")
+let nonMaster : V1NodeSelectorRequirement =
+    V1NodeSelectorRequirement(key = "node-role.kubernetes.io/master", operatorProperty = "DoesNotExist")
 
-    let terms = [| V1NodeSelectorTerm(matchExpressions = [| req |]) |]
-    let sel = V1NodeSelector(nodeSelectorTerms = terms)
-    let na = V1NodeAffinity(requiredDuringSchedulingIgnoredDuringExecution = sel)
-    V1Affinity(nodeAffinity = na)
+let avoidNodeLabel ((key: string), (value: string)) : V1NodeSelectorRequirement =
+    V1NodeSelectorRequirement(key = key, operatorProperty = "NotIn", values = [| value |])
+
+let requireNodeLabel ((key: string), (value: string)) : V1NodeSelectorRequirement =
+    V1NodeSelectorRequirement(key = key, operatorProperty = "In", values = [| value |])
+
+let affinity (requirements: V1NodeSelectorRequirement list) : V1Affinity option =
+    if List.isEmpty requirements then
+        None
+    else
+        // An affinity is satisfied if _all_ matchExpressions are satisfied.
+        let terms = [| V1NodeSelectorTerm(matchExpressions = Array.ofList requirements) |]
+        let sel = V1NodeSelector(nodeSelectorTerms = terms)
+        let na = V1NodeAffinity(requiredDuringSchedulingIgnoredDuringExecution = sel)
+        Some(V1Affinity(nodeAffinity = na))
+
 
 // Extend NetworkCfg type with methods for producing various Kubernetes objects.
 type NetworkCfg with
@@ -319,6 +330,27 @@ type NetworkCfg with
 
     member self.NamespacedMeta(name: string) : V1ObjectMeta =
         V1ObjectMeta(name = name, labels = CfgVal.labels, namespaceProperty = self.NamespaceProperty)
+
+    member self.Affinity() : V1Affinity option =
+        let require = List.map requireNodeLabel self.missionContext.requireNodeLabels
+        let avoid = List.map avoidNodeLabel self.missionContext.avoidNodeLabels
+        // If we're trying to do even scheduling, we need to provide extra
+        // anti-affinity from the master nodes, in order to make the even-spread
+        // topology constraint happy. If we're doing uneven scheduling the taint
+        // on the master nodes will suffice to avoid them. This is all fairly
+        // mysterious kubernetes lore, likely subject to change.
+        let both = List.append require avoid
+
+        if self.missionContext.unevenSched then
+            affinity both
+        else
+            affinity (nonMaster :: both)
+
+    member self.TopologyConstraints() : V1TopologySpreadConstraint array =
+        if self.missionContext.unevenSched then [||] else evenTopologyConstraints
+
+    member self.Tolerations() : V1Toleration array =
+        Array.ofList (List.map (fun s -> V1Toleration(key = s)) self.missionContext.tolerateNodeTaints)
 
     member self.HistoryConfigMap() : V1ConfigMap =
         let cfgmapname = self.HistoryCfgMapName
@@ -535,19 +567,14 @@ type NetworkCfg with
                 | Postgres -> [| coreContainer; PostgresContainer self.missionContext.postgresImage |]
                 | _ -> [| coreContainer |]
 
-        let (affinity, topologyConstraints) =
-            if self.missionContext.unevenSched then
-                (V1Affinity(), [||])
-            else
-                (workerAffinity, evenTopologyConstraints)
-
         V1PodTemplateSpec(
             spec =
                 V1PodSpec(
                     containers = containers,
                     volumes = [| jobCfgVol; dataVol |],
-                    topologySpreadConstraints = topologyConstraints,
-                    affinity = affinity,
+                    ?affinity = self.Affinity(),
+                    tolerations = self.Tolerations(),
+                    topologySpreadConstraints = self.TopologyConstraints(),
                     restartPolicy = "Never",
                     shareProcessNamespace = System.Nullable<bool>(true)
                 ),
@@ -663,17 +690,12 @@ type NetworkCfg with
             else
                 Map.empty
 
-        let (affinity, topologyConstraints) =
-            if self.missionContext.unevenSched then
-                (V1Affinity(), [||])
-            else
-                (workerAffinity, evenTopologyConstraints)
-
         let podSpec =
             V1PodSpec(
                 containers = containers,
-                topologySpreadConstraints = topologyConstraints,
-                affinity = affinity,
+                ?affinity = self.Affinity(),
+                tolerations = self.Tolerations(),
+                topologySpreadConstraints = self.TopologyConstraints(),
                 volumes = volumes
             )
 
