@@ -15,6 +15,112 @@ open StellarNetworkData
 open StellarSupercluster
 open StellarCoreHTTP
 
+
+let defaultLoadGenOpCountDistribution =
+    // When no value is given, use the default values derived from observing the pubnet.
+    seq {
+        23963454
+        2030836
+        271337
+        1541733
+        90889
+        203725
+        14779
+        234994
+        12150
+        36822
+        4135
+        201868
+        1701
+        54246
+        3188
+        118494
+        1590
+        1226
+        596
+        7911
+        297
+        330
+        1118
+        29146
+        530
+        592
+        737
+        561
+        875
+        1234
+        1216
+        325
+        100
+        93
+        84
+        60
+        47
+        11071
+        44
+        21
+        46
+        601
+        67
+        2847
+        30
+        27
+        24
+        22
+        23
+        29
+        236
+        22
+        18
+        16
+        17
+        16
+        13
+        14
+        11
+        4408
+        18
+        19
+        18
+        16
+        18
+        19
+        21
+        16
+        14
+        4
+        129
+        17
+        23
+        24
+        13
+        26
+        26
+        101
+        443
+        701
+        1042
+        153
+        72
+        20
+        25
+        20
+        17
+        15
+        15
+        20
+        18
+        20
+        9
+        13
+        12
+        17
+        20
+        25
+        26
+        11746
+    }
+
 let simulatePubnet (context: MissionContext) =
     let context =
         { context with
@@ -43,115 +149,15 @@ let simulatePubnet (context: MissionContext) =
                           }
                       )
                   )
-              loadGenOpCount = Some(context.loadGenOpCount |> Option.defaultValue (seq { 1 .. 100 }))
               loadGenOpCountDistribution =
                   Some(
                       context.loadGenOpCountDistribution
-                      |> Option.defaultValue (
-                          // When no value is given, use the default values derived from observing the pubnet.
-                          seq {
-                              23963454
-                              2030836
-                              271337
-                              1541733
-                              90889
-                              203725
-                              14779
-                              234994
-                              12150
-                              36822
-                              4135
-                              201868
-                              1701
-                              54246
-                              3188
-                              118494
-                              1590
-                              1226
-                              596
-                              7911
-                              297
-                              330
-                              1118
-                              29146
-                              530
-                              592
-                              737
-                              561
-                              875
-                              1234
-                              1216
-                              325
-                              100
-                              93
-                              84
-                              60
-                              47
-                              11071
-                              44
-                              21
-                              46
-                              601
-                              67
-                              2847
-                              30
-                              27
-                              24
-                              22
-                              23
-                              29
-                              236
-                              22
-                              18
-                              16
-                              17
-                              16
-                              13
-                              14
-                              11
-                              4408
-                              18
-                              19
-                              18
-                              16
-                              18
-                              19
-                              21
-                              16
-                              14
-                              4
-                              129
-                              17
-                              23
-                              24
-                              13
-                              26
-                              26
-                              101
-                              443
-                              701
-                              1042
-                              153
-                              72
-                              20
-                              25
-                              20
-                              17
-                              15
-                              15
-                              20
-                              18
-                              20
-                              9
-                              13
-                              12
-                              17
-                              20
-                              25
-                              26
-                              11746
-                          }
-                      )
+                      |> Option.defaultValue defaultLoadGenOpCountDistribution
+                  )
+              loadGenOpCount =
+                  Some(
+                      context.loadGenOpCount
+                      |> Option.defaultValue (seq { 1 .. (Seq.length defaultLoadGenOpCountDistribution) })
                   )
               // This spike configuration was derived from some pubnet data.
               // Most ledgers are expected to have roughly 60 * 5 = 300 txs,
