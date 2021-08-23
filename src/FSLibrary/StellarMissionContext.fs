@@ -52,6 +52,7 @@ type MissionContext =
       apiRateLimit: int
       pubnetData: string option
       tier1Keys: string option
+      opCountDistribution: string option
       installNetworkDelay: bool option
       simulateApplyDuration: seq<int> option
       simulateApplyWeight: seq<int> option

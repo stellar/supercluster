@@ -66,6 +66,7 @@ type MissionOptions
         apiRateLimit: int,
         pubnetData: string option,
         tier1Keys: string option,
+        opCountDistribution: string option,
         installNetworkDelay: bool option,
         simulateApplyDuration: seq<string>,
         simulateApplyWeight: seq<string>,
@@ -219,6 +220,9 @@ type MissionOptions
     [<Option("tier1-keys", HelpText = "JSON file containing list of 'tier-1' pubkeys from pubnet", Required = false)>]
     member self.Tier1Keys = tier1Keys
 
+    [<Option("op-count-distribution", HelpText = "Operation count distribution for SimulatePubnet", Required = false)>]
+    member self.OpCountDistribution = opCountDistribution
+
     [<Option("install-network-delay",
              HelpText = "Installs network delay estimated from node locations",
              Required = false)>]
@@ -323,6 +327,7 @@ let main argv =
                   apiRateLimit = 30
                   pubnetData = None
                   tier1Keys = None
+                  opCountDistribution = None
                   installNetworkDelay = None
                   simulateApplyDuration = None
                   simulateApplyWeight = None
@@ -406,6 +411,7 @@ let main argv =
                                apiRateLimit = mission.ApiRateLimit
                                pubnetData = mission.PubnetData
                                tier1Keys = mission.Tier1Keys
+                               opCountDistribution = mission.OpCountDistribution
                                installNetworkDelay = mission.InstallNetworkDelay
                                simulateApplyDuration = processInputSeq mission.SimulateApplyDuration
                                simulateApplyWeight = processInputSeq mission.SimulateApplyWeight

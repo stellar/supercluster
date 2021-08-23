@@ -7,6 +7,7 @@ module MissionSimulatePubnet
 // The point of this mission is to simulate pubnet as closely as possible,
 // for evaluating the likely effect of a change to core when deployed.
 
+open FSharp.Data
 open StellarCoreSet
 open StellarMissionContext
 open StellarFormation
@@ -16,112 +17,17 @@ open StellarSupercluster
 open StellarCoreHTTP
 
 
-let defaultLoadGenOpCountDistribution =
-    // When no value is given, use the default values derived from observing the pubnet.
-    seq {
-        23963454
-        2030836
-        271337
-        1541733
-        90889
-        203725
-        14779
-        234994
-        12150
-        36822
-        4135
-        201868
-        1701
-        54246
-        3188
-        118494
-        1590
-        1226
-        596
-        7911
-        297
-        330
-        1118
-        29146
-        530
-        592
-        737
-        561
-        875
-        1234
-        1216
-        325
-        100
-        93
-        84
-        60
-        47
-        11071
-        44
-        21
-        46
-        601
-        67
-        2847
-        30
-        27
-        24
-        22
-        23
-        29
-        236
-        22
-        18
-        16
-        17
-        16
-        13
-        14
-        11
-        4408
-        18
-        19
-        18
-        16
-        18
-        19
-        21
-        16
-        14
-        4
-        129
-        17
-        23
-        24
-        13
-        26
-        26
-        101
-        443
-        701
-        1042
-        153
-        72
-        20
-        25
-        20
-        17
-        15
-        15
-        20
-        18
-        20
-        9
-        13
-        12
-        17
-        20
-        25
-        26
-        11746
-    }
+type Distribution =
+    CsvProvider<"csv-type-samples/sample-loadgen-op-count-distribution.csv", HasHeaders=true, ResolutionFolder=cwd>
 
 let simulatePubnet (context: MissionContext) =
+    let defaultLoadGenOpCountDistribution =
+        if context.opCountDistribution.IsSome then
+            let distribution = Distribution.Load(context.opCountDistribution.Value)
+            seq { for row in distribution.Rows -> row.OpCount, row.Frequency }
+        else
+            seq { (1, 1) }
+
     let context =
         { context with
               coreResources = SimulatePubnetResources
@@ -149,15 +55,15 @@ let simulatePubnet (context: MissionContext) =
                           }
                       )
                   )
-              loadGenOpCountDistribution =
-                  Some(
-                      context.loadGenOpCountDistribution
-                      |> Option.defaultValue defaultLoadGenOpCountDistribution
-                  )
               loadGenOpCount =
                   Some(
                       context.loadGenOpCount
-                      |> Option.defaultValue (seq { 1 .. (Seq.length defaultLoadGenOpCountDistribution) })
+                      |> Option.defaultValue (defaultLoadGenOpCountDistribution |> Seq.map fst)
+                  )
+              loadGenOpCountDistribution =
+                  Some(
+                      context.loadGenOpCountDistribution
+                      |> Option.defaultValue (defaultLoadGenOpCountDistribution |> Seq.map snd)
                   )
               // This spike configuration was derived from some pubnet data.
               // Most ledgers are expected to have roughly 60 * 5 = 300 txs,

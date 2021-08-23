@@ -59,6 +59,7 @@ let ctx : MissionContext =
       apiRateLimit = 10
       pubnetData = None
       tier1Keys = None
+      opCountDistribution = None
       installNetworkDelay = Some true
       simulateApplyDuration =
           Some(
