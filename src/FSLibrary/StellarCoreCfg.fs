@@ -4,6 +4,7 @@
 
 module StellarCoreCfg
 
+open FSharp.Data
 open stellar_dotnet_sdk
 open Nett
 open System.Text.RegularExpressions
@@ -112,6 +113,15 @@ type CoreContainerType =
     | InitCoreContainer
     | MainCoreContainer
 
+// This exists to work around a buggy interaction between FSharp.Data and
+// dotnet 5.0.300: __SOURCE_DIRECTORY__ is not [<Literal>] anymore, but
+// JsonProvider's ResolutionFolder argument needs to be.
+[<Literal>]
+let cwd = __SOURCE_DIRECTORY__
+
+type Distribution =
+    CsvProvider<"csv-type-samples/sample-loadgen-op-count-distribution.csv", HasHeaders=true, ResolutionFolder=cwd>
+
 // Represents the contents of a stellar-core.cfg file, along with method to
 // write it out to TOML.
 type StellarCoreCfg =
@@ -211,6 +221,20 @@ type StellarCoreCfg =
             raise (
                 System.ArgumentException "simulate-apply-weight and simulate-apply-duration must be defined together"
             )
+
+        if self.network.missionContext.opCountDistribution.IsSome then
+            // Read the content of the file specified by `opCountDistribution`
+            // and convert that into the config options.
+            let distribution =
+                seq {
+                    for row in Distribution.Load(self.network.missionContext.opCountDistribution.Value).Rows ->
+                        row.OpCount, row.Frequency
+                }
+
+            t.Add("LOADGEN_OP_COUNT_FOR_TESTING", distribution |> Seq.map fst) |> ignore
+
+            t.Add("LOADGEN_OP_COUNT_DISTRIBUTION_FOR_TESTING", distribution |> Seq.map snd)
+            |> ignore
 
         let n = self.preferredPeers.Length
         t.Add("TARGET_PEER_CONNECTIONS", self.targetPeerConnections) |> ignore

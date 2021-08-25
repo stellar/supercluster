@@ -11,12 +11,6 @@ open StellarCoreCfg
 open StellarMissionContext
 open Logging
 
-// This exists to work around a buggy interaction between FSharp.Data and
-// dotnet 5.0.300: __SOURCE_DIRECTORY__ is not [<Literal>] anymore, but
-// JsonProvider's ResolutionFolder argument needs to be.
-[<Literal>]
-let cwd = __SOURCE_DIRECTORY__
-
 type HistoryArchiveState = JsonProvider<"json-type-samples/sample-stellar-history.json", ResolutionFolder=cwd>
 
 let PubnetLatestHistoryArchiveState =

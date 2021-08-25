@@ -15,6 +15,7 @@ open StellarNetworkData
 open StellarSupercluster
 open StellarCoreHTTP
 
+
 let simulatePubnet (context: MissionContext) =
     let context =
         { context with
@@ -73,5 +74,5 @@ let simulatePubnet (context: MissionContext) =
             formation.UpgradeMaxTxSize tier1 1000000
 
             formation.RunLoadgen sdf context.GenerateAccountCreationLoad
-            formation.RunLoadgen sdf context.GeneratePaymentLoad
+            formation.RunLoadgen sdf context.GeneratePretendLoad
             formation.EnsureAllNodesInSync fullCoreSet)

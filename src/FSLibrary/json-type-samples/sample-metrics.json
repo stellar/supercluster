@@ -3403,6 +3403,16 @@
         "5_min_rate": 6.91049e-08,
         "15_min_rate": 6.91049e-08
       },
+      "loadgen.pretend.submitted": {
+        "type": "meter",
+        "count": 5,
+        "event_type": "op",
+        "rate_unit": "s",
+        "mean_rate": 6.91049e-08,
+        "1_min_rate": 6.91049e-08,
+        "5_min_rate": 6.91049e-08,
+        "15_min_rate": 6.91049e-08
+      },
       "loadgen.run.complete": {
         "type": "meter",
         "count": 5,

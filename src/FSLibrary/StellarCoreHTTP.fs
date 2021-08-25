@@ -36,11 +36,13 @@ type PerformanceCsv = CsvProvider<"csv-type-samples/sample-performance.csv", Has
 type LoadGenMode =
     | GenerateAccountCreationLoad
     | GeneratePaymentLoad
+    | GeneratePretendLoad
 
     override self.ToString() =
         match self with
         | GenerateAccountCreationLoad -> "create"
         | GeneratePaymentLoad -> "pay"
+        | GeneratePretendLoad -> "pretend"
 
 
 type LoadGen =
@@ -79,6 +81,16 @@ type MissionContext with
 
     member self.GeneratePaymentLoad : LoadGen =
         { mode = GeneratePaymentLoad
+          accounts = self.numAccounts
+          txs = self.numTxs
+          txrate = self.txRate
+          spikesize = self.spikeSize
+          spikeinterval = self.spikeInterval
+          offset = 0
+          batchsize = 100 }
+
+    member self.GeneratePretendLoad : LoadGen =
+        { mode = GeneratePretendLoad
           accounts = self.numAccounts
           txs = self.numTxs
           txrate = self.txRate
