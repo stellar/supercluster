@@ -7,7 +7,6 @@ module MissionSimulatePubnet
 // The point of this mission is to simulate pubnet as closely as possible,
 // for evaluating the likely effect of a change to core when deployed.
 
-open FSharp.Data
 open StellarCoreSet
 open StellarMissionContext
 open StellarFormation
@@ -17,17 +16,7 @@ open StellarSupercluster
 open StellarCoreHTTP
 
 
-type Distribution =
-    CsvProvider<"csv-type-samples/sample-loadgen-op-count-distribution.csv", HasHeaders=true, ResolutionFolder=cwd>
-
 let simulatePubnet (context: MissionContext) =
-    let defaultLoadGenOpCountDistribution =
-        if context.opCountDistribution.IsSome then
-            let distribution = Distribution.Load(context.opCountDistribution.Value)
-            seq { for row in distribution.Rows -> row.OpCount, row.Frequency }
-        else
-            seq { (1, 1) }
-
     let context =
         { context with
               coreResources = SimulatePubnetResources
@@ -54,16 +43,6 @@ let simulatePubnet (context: MissionContext) =
                               3
                           }
                       )
-                  )
-              loadGenOpCount =
-                  Some(
-                      context.loadGenOpCount
-                      |> Option.defaultValue (defaultLoadGenOpCountDistribution |> Seq.map fst)
-                  )
-              loadGenOpCountDistribution =
-                  Some(
-                      context.loadGenOpCountDistribution
-                      |> Option.defaultValue (defaultLoadGenOpCountDistribution |> Seq.map snd)
                   )
               // This spike configuration was derived from some pubnet data.
               // Most ledgers are expected to have roughly 60 * 5 = 300 txs,

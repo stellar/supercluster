@@ -59,7 +59,6 @@ let ctx : MissionContext =
       apiRateLimit = 10
       pubnetData = None
       tier1Keys = None
-      opCountDistribution = None
       installNetworkDelay = Some true
       simulateApplyDuration =
           Some(
@@ -75,21 +74,10 @@ let ctx : MissionContext =
                   70
               }
           )
-      loadGenOpCount =
+      opCountDistribution =
           Some(
-              seq {
-                  1
-                  2
-                  10
-              }
-          )
-      loadGenOpCountDistribution =
-          Some(
-              seq {
-                  80
-                  19
-                  1
-              }
+              __SOURCE_DIRECTORY__
+              + "/../FSLibrary/csv-type-samples/sample-loadgen-op-count-distribution.csv"
           )
       networkSizeLimit = 100
       pubnetParallelCatchupStartingLedger = 0 }

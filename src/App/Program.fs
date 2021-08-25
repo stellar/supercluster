@@ -70,8 +70,6 @@ type MissionOptions
         installNetworkDelay: bool option,
         simulateApplyDuration: seq<string>,
         simulateApplyWeight: seq<string>,
-        loadGenOpCount: seq<string>,
-        loadGenOpCountDistribution: seq<string>,
         networkSizeLimit: int,
         pubnetParallelCatchupStartingLedger: int
     ) =
@@ -220,7 +218,9 @@ type MissionOptions
     [<Option("tier1-keys", HelpText = "JSON file containing list of 'tier-1' pubkeys from pubnet", Required = false)>]
     member self.Tier1Keys = tier1Keys
 
-    [<Option("op-count-distribution", HelpText = "Operation count distribution for SimulatePubnet", Required = false)>]
+    [<Option("op-count-distribution",
+             HelpText = "Operation count distribution for SimulatePubnet. See csv-type-samples/sample-loadgen-op-count-distribution.csv for the format",
+             Required = false)>]
     member self.OpCountDistribution = opCountDistribution
 
     [<Option("install-network-delay",
@@ -237,16 +237,6 @@ type MissionOptions
              HelpText = "A space-separated indicating how often to sleep for a specified amount (See OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING)",
              Required = false)>]
     member self.SimulateApplyWeight = simulateApplyWeight
-
-    [<Option("loadgen-op-count",
-             HelpText = "A space-separated list of how much to sleep for in simulation (See LOADGEN_OP_COUNT_FOR_TESTING)",
-             Required = false)>]
-    member self.LoadGenOpCount = loadGenOpCount
-
-    [<Option("loadgen-op-count-distribution",
-             HelpText = "A space-separated indicating how often to sleep for a specified amount (See LOADGEN_OP_COUNT_DISTRIBUTION_FOR_TESTING)",
-             Required = false)>]
-    member self.LoadGenOpCountDistribution = loadGenOpCountDistribution
 
     [<Option("network-size-limit",
              HelpText = "The number of nodes to run in SimulatePubnet",
@@ -331,8 +321,6 @@ let main argv =
                   installNetworkDelay = None
                   simulateApplyDuration = None
                   simulateApplyWeight = None
-                  loadGenOpCount = None
-                  loadGenOpCountDistribution = None
                   networkSizeLimit = 0
                   pubnetParallelCatchupStartingLedger = 0 }
 
@@ -415,8 +403,6 @@ let main argv =
                                installNetworkDelay = mission.InstallNetworkDelay
                                simulateApplyDuration = processInputSeq mission.SimulateApplyDuration
                                simulateApplyWeight = processInputSeq mission.SimulateApplyWeight
-                               loadGenOpCount = processInputSeq mission.LoadGenOpCount
-                               loadGenOpCountDistribution = processInputSeq mission.LoadGenOpCountDistribution
                                networkSizeLimit = mission.NetworkSizeLimit
                                pubnetParallelCatchupStartingLedger = mission.PubnetParallelCatchupStartingLedger }
 
