@@ -352,18 +352,12 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) : CoreSet l
     // If the given node has geolocation info, use it.
     // Otherwise, pseudo-randomly select one from the list of geolocations that we are aware of.
     // As mentioned above, this assignment is weighted. (i.e., A common geolocation is more likely to be selected.)
-    // Since the assignment depends on the pubnet public key,
+    // Since the assignment depends on the Random object with a fixed seed,
     // this assignment is persistent across different runs.
     let getGeoLocOrDefault (n: PubnetNode.Root) : GeoLoc =
         match n.SbGeoData with
         | Some geoData -> { lat = float geoData.Latitude; lon = float geoData.Longitude }
-        | None ->
-            let len = Array.length geoLocations
-            // A deterministic, fairly elementary hashing function that adds the ASCII code
-            // of each character.
-            // All we need is a deterministic, mostly randomized mapping.
-            let h = n.PublicKey |> Seq.sumBy int
-            geoLocations.[h % len]
+        | None -> geoLocations.[random.Next(0, Array.length geoLocations)]
 
     let makeCoreSetWithExplicitKeys (hdn: HomeDomainName) (options: CoreSetOptions) (keys: KeyPair array) =
         { name = CoreSetName(hdn.StringName)
