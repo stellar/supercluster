@@ -71,6 +71,9 @@ type MissionOptions
         simulateApplyDuration: seq<string>,
         simulateApplyWeight: seq<string>,
         networkSizeLimit: int,
+        tier1OrgsToAdd: int,
+        nonTier1NodesToAdd: int,
+        randomSeed: int,
         pubnetParallelCatchupStartingLedger: int
     ) =
 
@@ -238,6 +241,19 @@ type MissionOptions
              Required = false)>]
     member self.SimulateApplyWeight = simulateApplyWeight
 
+    [<Option("tier-1-orgs-to-add",
+             HelpText = "The number of tier-1 organizations to add while scaling the network in SimulatePubnet",
+             Required = false)>]
+    member self.Tier1OrgsToAdd = tier1OrgsToAdd
+
+    [<Option("non-tier-1-nodes-to-add",
+             HelpText = "The number of non-tier-1 nodes to add while scaling the network in SimulatePubnet",
+             Required = false)>]
+    member self.NonTier1NodesToAdd = nonTier1NodesToAdd
+
+    [<Option("random-seed", HelpText = "The seed used for a random number generator.", Required = false)>]
+    member self.RandomSeed = randomSeed
+
     [<Option("network-size-limit",
              HelpText = "The number of nodes to run in SimulatePubnet",
              Required = false,
@@ -321,6 +337,9 @@ let main argv =
                   installNetworkDelay = None
                   simulateApplyDuration = None
                   simulateApplyWeight = None
+                  tier1OrgsToAdd = 0
+                  nonTier1NodesToAdd = 0
+                  randomSeed = 0
                   networkSizeLimit = 0
                   pubnetParallelCatchupStartingLedger = 0 }
 
@@ -403,7 +422,10 @@ let main argv =
                                installNetworkDelay = mission.InstallNetworkDelay
                                simulateApplyDuration = processInputSeq mission.SimulateApplyDuration
                                simulateApplyWeight = processInputSeq mission.SimulateApplyWeight
+                               tier1OrgsToAdd = mission.Tier1OrgsToAdd
+                               nonTier1NodesToAdd = mission.NonTier1NodesToAdd
                                networkSizeLimit = mission.NetworkSizeLimit
+                               randomSeed = mission.RandomSeed
                                pubnetParallelCatchupStartingLedger = mission.PubnetParallelCatchupStartingLedger }
 
                          allMissions.[m] missionContext
