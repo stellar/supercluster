@@ -45,10 +45,13 @@ let simulatePubnet (context: MissionContext) =
                       )
                   )
               // This spike configuration was derived from some pubnet data.
-              // Most ledgers are expected to have roughly 60 * 5 = 300 txs,
+              // Most ledgers are expected to have roughly 60 * 5 = 300 ops,
               // and 1 in 13 ledgers are expected to have roughly 60 * 5 + 700 = 1000 txs.
-              txRate = 60
-              spikeSize = 700
+              // We expect that a transaction contains 1.65 ops on average.
+              // * txRate = (60 op / s) / (1.65 op / tx) = 36 tx / s.
+              // * spikeSize = 700 op / (1.65 op / tx) = 424 tx.
+              txRate = 36
+              spikeSize = 424
               spikeInterval = 65 }
 
     let fullCoreSet = FullPubnetCoreSets context true
