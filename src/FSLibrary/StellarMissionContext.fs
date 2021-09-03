@@ -49,6 +49,9 @@ type MissionContext =
       coreResources: CoreResources
       keepData: bool
       unevenSched: bool
+      requireNodeLabels: ((string * string) list)
+      avoidNodeLabels: ((string * string) list)
+      tolerateNodeTaints: string list
       apiRateLimit: int
       pubnetData: string option
       tier1Keys: string option

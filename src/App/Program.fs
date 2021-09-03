@@ -63,6 +63,9 @@ type MissionOptions
         spikeInterval: int,
         keepData: bool,
         unevenSched: bool,
+        requireNodeLabels: seq<string>,
+        avoidNodeLabels: seq<string>,
+        tolerateNodeTaints: seq<string>,
         apiRateLimit: int,
         pubnetData: string option,
         tier1Keys: string option,
@@ -206,6 +209,15 @@ type MissionOptions
              Default = false)>]
     member self.UnevenSched = unevenSched
 
+    [<Option("require-node-labels", HelpText = "Only run on nodes with matching `key:value` labels", Required = false)>]
+    member self.RequireNodeLabels = requireNodeLabels
+
+    [<Option("avoid-node-labels", HelpText = "Do not run on nodes with matching `key:value` labels", Required = false)>]
+    member self.AvoidNodeLabels = avoidNodeLabels
+
+    [<Option("tolerate-node-taints", HelpText = "Allow running on nodes with matching taints", Required = false)>]
+    member self.TolerateNodeTaints = tolerateNodeTaints
+
     [<Option("api-rate-limit",
              HelpText = "Limit of kubernetes API requests per second to make",
              Required = false,
@@ -251,6 +263,10 @@ type MissionOptions
     member self.PubnetParallelCatchupStartingLedger = pubnetParallelCatchupStartingLedger
 
 
+let splitLabel (lab: string) : (string * string) =
+    match lab.Split ':' with
+    | [| a; b |] -> (a, b)
+    | _ -> failwith ("unexpected label '" + lab + "', need string of form 'key:value'")
 
 [<EntryPoint>]
 let main argv =
@@ -314,6 +330,9 @@ let main argv =
                   coreResources = SmallTestResources
                   keepData = false
                   unevenSched = true
+                  requireNodeLabels = []
+                  avoidNodeLabels = []
+                  tolerateNodeTaints = []
                   apiRateLimit = 30
                   pubnetData = None
                   tier1Keys = None
@@ -396,6 +415,9 @@ let main argv =
                                coreResources = SmallTestResources
                                keepData = mission.KeepData
                                unevenSched = mission.UnevenSched
+                               requireNodeLabels = List.map splitLabel (List.ofSeq mission.RequireNodeLabels)
+                               avoidNodeLabels = List.map splitLabel (List.ofSeq mission.AvoidNodeLabels)
+                               tolerateNodeTaints = List.ofSeq mission.TolerateNodeTaints
                                apiRateLimit = mission.ApiRateLimit
                                pubnetData = mission.PubnetData
                                tier1Keys = mission.Tier1Keys
