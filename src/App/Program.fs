@@ -263,10 +263,11 @@ type MissionOptions
     member self.PubnetParallelCatchupStartingLedger = pubnetParallelCatchupStartingLedger
 
 
-let splitLabel (lab: string) : (string * string) =
+let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' with
-    | [| a; b |] -> (a, b)
-    | _ -> failwith ("unexpected label '" + lab + "', need string of form 'key:value'")
+    | [| x |] -> (x, None)
+    | [| a; b |] -> (a, Some b)
+    | _ -> failwith ("unexpected label '" + lab + "', need string of form 'key' or 'key:value'")
 
 [<EntryPoint>]
 let main argv =
@@ -417,7 +418,7 @@ let main argv =
                                unevenSched = mission.UnevenSched
                                requireNodeLabels = List.map splitLabel (List.ofSeq mission.RequireNodeLabels)
                                avoidNodeLabels = List.map splitLabel (List.ofSeq mission.AvoidNodeLabels)
-                               tolerateNodeTaints = List.ofSeq mission.TolerateNodeTaints
+                               tolerateNodeTaints = List.map splitLabel (List.ofSeq mission.TolerateNodeTaints)
                                apiRateLimit = mission.ApiRateLimit
                                pubnetData = mission.PubnetData
                                tier1Keys = mission.Tier1Keys
