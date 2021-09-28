@@ -83,6 +83,9 @@ let ctx : MissionContext =
               + "/../FSLibrary/csv-type-samples/sample-loadgen-op-count-distribution.csv"
           )
       networkSizeLimit = 100
+      tier1OrgsToAdd = 0
+      nonTier1NodesToAdd = 0
+      randomSeed = 0
       pubnetParallelCatchupStartingLedger = 0 }
 
 let netdata = __SOURCE_DIRECTORY__ + "/../../../data/public-network-data-2021-01-05.json"

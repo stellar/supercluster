@@ -22,36 +22,135 @@ let TestnetLatestHistoryArchiveState =
 type PubnetNode = JsonProvider<"json-type-samples/sample-network-data.json", SampleIsList=false, ResolutionFolder=cwd>
 type Tier1PublicKey = JsonProvider<"json-type-samples/sample-keys.json", SampleIsList=false, ResolutionFolder=cwd>
 
+// When scaling the network, we need to pick
+// the degree of each new node.
+// The following numbers are added here based on pubnet observations/educated guesses.
+let minPeerCountTier1 = 25
 
-// Recursively check if the given quorum set only contains tier 1.
-let rec checkOnlyContainsTier1 (tier1KeySet: Set<string>) (q: PubnetNode.SbQuorumSet) : bool =
-    Array.forall (fun k -> Set.contains k tier1KeySet) q.Validators
-    && Array.forall (checkOnlyContainsTier1Inner tier1KeySet) q.InnerQuorumSets
+let maxPeerCountTier1 = 81
 
-and checkOnlyContainsTier1Inner (tier1KeySet: Set<string>) (iq: PubnetNode.InnerQuorumSet) : bool =
-    let q = new PubnetNode.SbQuorumSet(iq.JsonValue)
-    checkOnlyContainsTier1 tier1KeySet q
+let peerCountTier1 (random: System.Random) : int = random.Next(minPeerCountTier1, maxPeerCountTier1)
 
+let minPeerCountNonTier1 = 1
 
-// Recursively convert json qsets to typed QuorumSet type
-let rec qsetOfNodeQset
-    (pubKeysToValidators: (string array) -> Map<PeerShortName, KeyPair>)
-    (q: PubnetNode.SbQuorumSet)
-    : QuorumSet =
-    let sz = q.Validators.Length + q.InnerQuorumSets.Length
-    let pct = percentOfThreshold sz (int (q.Threshold))
+let maxPeerCountNonTier1 = 71
 
-    { thresholdPercent = Some pct
-      validators = pubKeysToValidators q.Validators
-      innerQuorumSets = Array.map (qsetOfNodeInnerQset pubKeysToValidators) q.InnerQuorumSets }
+let peerCountNonTier1 (random: System.Random) : int =
+    if random.Next(2) = 0 then
+        8
+    else
+        random.Next(minPeerCountNonTier1, maxPeerCountNonTier1)
 
-and qsetOfNodeInnerQset
-    (pubKeysToValidators: (string array) -> Map<PeerShortName, KeyPair>)
-    (iq: PubnetNode.InnerQuorumSet)
-    : QuorumSet =
-    let q = new PubnetNode.SbQuorumSet(iq.JsonValue)
-    qsetOfNodeQset pubKeysToValidators q
+// For simplicity, we will make each new tier-1 organization contain exactly 3 nodes
+// while scaling the pubnet.
+let tier1OrgSize = 3
 
+// Each edge connecting a and b is represented as (a, b) if a < b, and (b, a) otherwise.
+// This makes sense as the graph is undirected, and it also makes it easier to handle a set of edges.
+let extractEdges (graph: PubnetNode.Root array) : (string * string) array =
+    let getEdgesFromNode (node: PubnetNode.Root) : (string * string) array =
+        node.Peers
+        |> Array.filter (fun peer -> peer < node.PublicKey) // This filter ensures that we add each edge exactly once.
+        |> Array.map (fun peer -> (peer, node.PublicKey))
+
+    graph |> Array.map getEdgesFromNode |> Array.reduce Array.append
+
+// Given `edgeSet` containing edges (each edge is represented as a pair of strings),
+// create a map whose key is a pubkey and the corresponding value is the list of
+// nodes it's connected to.
+let createAdjacencyMap (edgeList: (string * string) list) : Map<string, string list> =
+    // So far, each edge connecting a and b is represented by the tuple (a, b) or (b, a).
+    // When creating the adjacency list for the given graph,
+    // we would like to add b to a's list, and a to b's list.
+    // Therefore, for each edge, we swap the vertices and append it to the edge list.
+    let adjacencyList : (string * (string list)) list =
+        edgeList
+        |> List.append (List.map (fun (x, y) -> (y, x)) edgeList)
+        |> List.groupBy fst
+        |> List.map (fun (x, y) -> (x, List.map snd y))
+
+    Map.ofList adjacencyList
+
+// Add edges for `newNodes` and return a new adjacency map.
+// The degree of each new node is determined by
+// 1. Check if it's a tier-1 node by `tier1KeySet`.
+// 2. Use `peerCountTier1` or `peerCountNonTier1` to decide.
+//
+// To preserve the degree of each existing node,
+// each new node's edges come from splitting an existing edge.
+//
+// More specifically, if we're adding a new node u,
+// then we pick a random edge (a, b), remove (a, b) and add (a, u) and (u, b).
+// We continue this process until u has a desired degree.
+let addEdges
+    (graph: PubnetNode.Root array)
+    (newNodes: string array)
+    (tier1KeySet: Set<string>)
+    (random: System.Random)
+    : Map<string, string list> =
+
+    // Note that each edge is represented by a pair (a, b) with a < b.
+    // This ensures that each edge appears exactly once in edgeArray.
+    let edgeArray = extractEdges graph
+
+    // At any point, both `edgeArrayList` and `edgeSet` contain all the edges. (and nothing more)
+    // `edgeArrayList` is used to pick a random edge,
+    // and `edgeSet` helps us efficiently determine if a certain edge already exists.
+    let edgeArrayList : ResizeArray<string * string> = new ResizeArray<string * string>(edgeArray)
+    let mutable edgeSet : Set<string * string> = edgeArray |> Set.ofArray
+
+    for u in newNodes do
+        let mutable degreeRemaining =
+            if Set.contains u tier1KeySet then
+                peerCountTier1 random
+            else
+                peerCountNonTier1 random
+
+        if degreeRemaining >= (Array.length graph) then
+            // The chosen degree is larger than the given graph's cardinality.
+            // This error is likely caused by passing the incorrect pubnet graph file.
+            // We choose to throw here because
+            // 1. This new node would have a degree significantly larger
+            //    than any node in the original graph.
+            // 2. The following algorithm would likely fail to find enough edges.
+            // 3. If we adjust `degreeRemaining`, then the degree distribution would be impacted.
+            failwith "The original graph is too small"
+
+        let maxRetryCount = 100
+        let mutable errorCount = 0
+
+        while degreeRemaining > 0 do
+            let index = random.Next(0, Set.count edgeSet)
+            let (a, b) = edgeArrayList.[index]
+            let maybeNewEdge1 = (min a u, max a u)
+            let maybeNewEdge2 = (min b u, max b u)
+
+            if (a <> u)
+               && (b <> u)
+               && (not (Set.contains maybeNewEdge1 edgeSet))
+               && (not (Set.contains maybeNewEdge2 edgeSet)) then
+                degreeRemaining <- degreeRemaining - 2
+                // 1. Replace the current edge with maybeNewEdge1
+                // 2. Append maybeNewEdge2
+                //
+                // This ensures that edgeArrayList is exactly the list of all edges.
+                edgeArrayList.[index] <- maybeNewEdge1
+                edgeArrayList.Add(maybeNewEdge2)
+                edgeSet <- edgeSet.Add(maybeNewEdge1)
+                edgeSet <- edgeSet.Add(maybeNewEdge2)
+                edgeSet <- edgeSet.Remove((a, b))
+                errorCount <- 0
+            else
+                errorCount <- errorCount + 1
+
+                if errorCount >= maxRetryCount then
+                    // We have failed to find an edge for this node
+                    // `errorCount` times in a row.
+                    // This implies that there is likely no edge that `u` can be connected to.
+                    // Therefore, we choose to throw here.
+                    failwith (sprintf "Unable to find an edge for %s after %d attempts" u maxRetryCount)
+
+    createAdjacencyMap (Set.toList edgeSet)
 
 let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) : CoreSet list =
 
@@ -63,10 +162,40 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) : CoreSet l
 
     let allPubnetNodes : PubnetNode.Root array = PubnetNode.Load(context.pubnetData.Value)
 
+    // A Random object with a fixed seed.
+    let random = System.Random context.randomSeed
+
+    let newTier1Nodes =
+        [ for i in 1 .. context.tier1OrgsToAdd * tier1OrgSize ->
+              PubnetNode.Parse(
+                  sprintf
+                      """ [{ "publicKey": "%s", "sb_homeDomain": "home.domain.%d" }] """
+                      (KeyPair.Random().Address)
+                      ((i - 1) / tier1OrgSize)
+              ).[0] ]
+        |> Array.ofList
+
+    let newNonTier1Nodes =
+        [ for i in 1 .. context.nonTier1NodesToAdd ->
+              PubnetNode.Parse(sprintf """ [{ "publicKey": "%s" }] """ (KeyPair.Random().Address)).[0] ]
+        |> Array.ofList
+
     let tier1KeySet : Set<string> =
+        let newTier1Keys = Array.map (fun (n: PubnetNode.Root) -> n.PublicKey) newTier1Nodes in
+
         Tier1PublicKey.Load(context.tier1Keys.Value)
         |> Array.map (fun n -> n.PublicKey)
+        |> Array.append newTier1Keys
         |> Set.ofArray
+
+
+    // Shuffle the nodes to ensure that the order will
+    // not affect the outcome of the scaling algorithm.
+    let newNodes =
+        Array.append newTier1Nodes newNonTier1Nodes
+        |> Array.sortBy (fun _ -> random.Next())
+
+    let allPubnetNodes = allPubnetNodes |> Array.append newNodes
 
     // For each pubkey in the pubnet, we map it to an actual KeyPair (with a private
     // key) to use in the simulation. It's important to keep these straight! The keys
@@ -86,6 +215,12 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) : CoreSet l
             let k = KeyPair.Random()
             pubnetKeyToSimKey <- pubnetKeyToSimKey.Add(pubkey, k)
             k
+
+    // It is important that we add edges before trimming using `networkSizeLimit`.
+    // This is because `networkSizeLimit` may be smaller than the degree of some new node
+    // and cause an issue to the scaling algorithm.
+    let adjacencyMap =
+        addEdges allPubnetNodes (Array.map (fun (n: PubnetNode.Root) -> n.PublicKey) newNodes) tier1KeySet random
 
     // First we partition nodes in the network into those that have home domains and
     // those that do not. We call the former "org" nodes and the latter "misc" nodes.
@@ -161,26 +296,29 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) : CoreSet l
         |> Array.map (fun k -> (peerShortNameForKey k, getSimKey k))
         |> Map.ofArray
 
+    // A full-tier-1 qset.
+    // This contains all tier-1 nodes with
+    // * 3f + 1 for cross organization thresholds (top level).
+    // * 2f + 1 for thresholds within each organization.
     let defaultQuorum : QuorumSet =
-        { thresholdPercent = None
-          validators =
-              allPubnetNodes
-              |> Array.filter (fun (n: PubnetNode.Root) -> n.SbHomeDomain = Some "www.stellar.org")
-              |> Array.map (fun (n: PubnetNode.Root) -> n.PublicKey)
-              |> pubKeysToValidators
-          innerQuorumSets = Array.empty }
+        let tier1NodesGroupedByHomeDomain : (string array) array =
+            allPubnetNodes
+            |> Array.filter
+                (fun (n: PubnetNode.Root) -> (Set.contains n.PublicKey tier1KeySet) && n.SbHomeDomain.IsSome)
+            |> Array.groupBy (fun (n: PubnetNode.Root) -> n.SbHomeDomain.Value)
+            |> Array.map
+                (fun (_, nodes: PubnetNode.Root []) -> Array.map (fun (n: PubnetNode.Root) -> n.PublicKey) nodes)
 
-    assert (not (Map.isEmpty defaultQuorum.validators))
+        let orgToQSet (org: string array) : QuorumSet =
+            { thresholdPercent = Some(51) // Simple majority
+              validators = pubKeysToValidators org
+              innerQuorumSets = Array.empty }
 
-    let qsetOfNodeQsetOrDefault (qOption: PubnetNode.SbQuorumSet option) : QuorumSet =
-        match qOption with
-        | Some q ->
-            if (q.Validators.Length <> 0 || q.InnerQuorumSets.Length <> 0)
-               && checkOnlyContainsTier1 tier1KeySet q then
-                qsetOfNodeQset pubKeysToValidators q
-            else
-                defaultQuorum
-        | None -> defaultQuorum
+        let nOrgs = Array.length tier1NodesGroupedByHomeDomain
+
+        { thresholdPercent = Some(67) // 3f + 1
+          validators = Map.empty
+          innerQuorumSets = Array.map orgToQSet tier1NodesGroupedByHomeDomain }
 
     let pubnetOpts =
         { CoreSetOptions.GetDefault context.image with
@@ -196,6 +334,8 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) : CoreSet l
     // Sorted list of known geolocations.
     // We can choose an arbitrary geolocation such that the distribution follows that of the given data
     // by uniformly randomly selecting an element from this array.
+    // Since this list contains duplicates, it is weighted. (i.e., A common geolocation appears
+    // multiple times in the list and thus is more likely to get selected.)
     // Since this is sorted, we will have the same assignments across different runs
     // as long as the random function is persistent.
     let geoLocations : GeoLoc array =
@@ -211,18 +351,13 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) : CoreSet l
 
     // If the given node has geolocation info, use it.
     // Otherwise, pseudo-randomly select one from the list of geolocations that we are aware of.
-    // Since the assignment depends on the pubnet public key,
+    // As mentioned above, this assignment is weighted. (i.e., A common geolocation is more likely to be selected.)
+    // Since the assignment depends on the Random object with a fixed seed,
     // this assignment is persistent across different runs.
     let getGeoLocOrDefault (n: PubnetNode.Root) : GeoLoc =
         match n.SbGeoData with
         | Some geoData -> { lat = float geoData.Latitude; lon = float geoData.Longitude }
-        | None ->
-            let len = Array.length geoLocations
-            // A deterministic, fairly elementary hashing function that adds the ASCII code
-            // of each character.
-            // All we need is a deterministic, mostly randomized mapping.
-            let h = n.PublicKey |> Seq.sumBy int
-            geoLocations.[h % len]
+        | None -> geoLocations.[random.Next(0, Array.length geoLocations)]
 
     let makeCoreSetWithExplicitKeys (hdn: HomeDomainName) (options: CoreSetOptions) (keys: KeyPair array) =
         { name = CoreSetName(hdn.StringName)
@@ -239,12 +374,11 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) : CoreSet l
                 let key = getSimPubKey n.PublicKey
 
                 let peers =
-                    n.Peers
+                    Map.find n.PublicKey adjacencyMap
                     |>
                     // This filtering is necessary since we intentionally remove some nodes
                     // using networkSizeLimit.
-                    Array.filter (fun (k: string) -> Set.contains k allPubnetNodeKeys)
-                    |> List.ofArray
+                    List.filter (fun (k: string) -> Set.contains k allPubnetNodeKeys)
                     |> List.map getSimPubKey
 
                 (key, peers))
@@ -259,13 +393,12 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) : CoreSet l
         Array.mapi
             (fun (_: int) (n: PubnetNode.Root) ->
                 let hdn = homeDomainNameForKey n.PublicKey
-                let qset = qsetOfNodeQsetOrDefault n.SbQuorumSet
                 let keys = [| getSimKey n.PublicKey |]
 
                 let coreSetOpts =
                     { pubnetOpts with
                           nodeCount = 1
-                          quorumSet = ExplicitQuorum qset
+                          quorumSet = ExplicitQuorum defaultQuorum
                           tier1 = Some(Set.contains n.PublicKey tier1KeySet)
                           nodeLocs = Some [ getGeoLocOrDefault n ]
                           preferredPeersMap = Some(keysToPreferredPeersMap keys) }
@@ -279,14 +412,13 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) : CoreSet l
         Array.map
             (fun (hdn: HomeDomainName, nodes: PubnetNode.Root array) ->
                 assert (nodes.Length <> 0)
-                let qset = qsetOfNodeQsetOrDefault nodes.[0].SbQuorumSet
                 let nodeList = List.ofArray nodes
                 let keys = Array.map (fun (n: PubnetNode.Root) -> getSimKey n.PublicKey) nodes
 
                 let coreSetOpts =
                     { pubnetOpts with
                           nodeCount = Array.length nodes
-                          quorumSet = ExplicitQuorum qset
+                          quorumSet = ExplicitQuorum defaultQuorum
                           tier1 = Some(Set.contains nodes.[0].PublicKey tier1KeySet)
                           nodeLocs = Some(List.map getGeoLocOrDefault nodeList)
                           preferredPeersMap = Some(keysToPreferredPeersMap keys) }
