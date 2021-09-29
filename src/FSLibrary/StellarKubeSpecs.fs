@@ -302,14 +302,20 @@ let evenTopologyConstraints : V1TopologySpreadConstraint array =
            labelSelector = V1LabelSelector(matchLabels = CfgVal.labels)
        ) |]
 
-let nonMaster : V1NodeSelectorRequirement =
-    V1NodeSelectorRequirement(key = "node-role.kubernetes.io/master", operatorProperty = "DoesNotExist")
+let avoidNodeLabel ((key: string), (value: string option)) : V1NodeSelectorRequirement =
+    match value with
+    | None -> V1NodeSelectorRequirement(key = key, operatorProperty = "DoesNotExist")
+    | Some v -> V1NodeSelectorRequirement(key = key, operatorProperty = "NotIn", values = [| v |])
 
-let avoidNodeLabel ((key: string), (value: string)) : V1NodeSelectorRequirement =
-    V1NodeSelectorRequirement(key = key, operatorProperty = "NotIn", values = [| value |])
+let requireNodeLabel ((key: string), (value: string option)) : V1NodeSelectorRequirement =
+    match value with
+    | None -> V1NodeSelectorRequirement(key = key, operatorProperty = "Exists")
+    | Some v -> V1NodeSelectorRequirement(key = key, operatorProperty = "In", values = [| v |])
 
-let requireNodeLabel ((key: string), (value: string)) : V1NodeSelectorRequirement =
-    V1NodeSelectorRequirement(key = key, operatorProperty = "In", values = [| value |])
+let tolerateTaint ((key: string), (value: string option)) =
+    match value with
+    | None -> V1Toleration(key = key, operatorProperty = "Exists")
+    | Some v -> V1Toleration(key = key, operatorProperty = "Equal", value = v)
 
 let affinity (requirements: V1NodeSelectorRequirement list) : V1Affinity option =
     if List.isEmpty requirements then
@@ -344,13 +350,14 @@ type NetworkCfg with
         if self.missionContext.unevenSched then
             affinity both
         else
+            let nonMaster = avoidNodeLabel ("node-role.kubernetes.io/master", None)
             affinity (nonMaster :: both)
 
     member self.TopologyConstraints() : V1TopologySpreadConstraint array =
         if self.missionContext.unevenSched then [||] else evenTopologyConstraints
 
     member self.Tolerations() : V1Toleration array =
-        Array.ofList (List.map (fun s -> V1Toleration(key = s)) self.missionContext.tolerateNodeTaints)
+        Array.ofList (List.map tolerateTaint self.missionContext.tolerateNodeTaints)
 
     member self.HistoryConfigMap() : V1ConfigMap =
         let cfgmapname = self.HistoryCfgMapName
