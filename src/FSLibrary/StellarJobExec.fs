@@ -196,26 +196,27 @@ type StellarFormation with
                 LogInfo "Checking for pod buildup"
                 let pods = self.Kube.ListNamespacedPod(namespaceParameter = ns)
 
-                for pod in pods.Items do
-                    let stillPending = (pod.Status.Phase = "Pending")
+                if pods <> null then
+                    for pod in pods.Items do
+                        let stillPending = (pod.Status.Phase = "Pending")
 
-                    let notReady =
-                        (pod.Status.ContainerStatuses.Count > 0
-                         && pod.Status.ContainerStatuses.[0].Ready = false)
+                        let notReady =
+                            (pod.Status.ContainerStatuses.Count > 0
+                             && pod.Status.ContainerStatuses.[0].Ready = false)
 
-                    let waitingTooLong =
-                        (pod.Metadata.CreationTimestamp.HasValue
-                         && now.Subtract(pod.Metadata.CreationTimestamp.Value).Minutes > podBuildupTimeoutMinutes)
+                        let waitingTooLong =
+                            (pod.Metadata.CreationTimestamp.HasValue
+                             && now.Subtract(pod.Metadata.CreationTimestamp.Value).Minutes > podBuildupTimeoutMinutes)
 
-                    if (stillPending || notReady) && waitingTooLong then
-                        failwith (
-                            sprintf
-                                "Pod '%s' has been 'Pending' for more than %d minutes, cluster resources likely exhausted"
-                                pod.Metadata.Name
-                                podBuildupTimeoutMinutes
-                        )
-                    else
-                        ()
+                        if (stillPending || notReady) && waitingTooLong then
+                            failwith (
+                                sprintf
+                                    "Pod '%s' has been 'Pending' for more than %d minutes, cluster resources likely exhausted"
+                                    pod.Metadata.Name
+                                    podBuildupTimeoutMinutes
+                            )
+                        else
+                            ()
 
                 LogInfo "Did not find pod buildup"
 
