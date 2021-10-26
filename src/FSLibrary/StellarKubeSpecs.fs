@@ -117,8 +117,8 @@ let NonParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
 
 let UpgradeCoreResourceRequirements : V1ResourceRequirements =
     // When doing upgrade tests, we give each container
-    // 256MB RAM and 1 vCPU, bursting to 4vCPU and 8000MB
-    makeResourceRequirements 1000 256 4000 8000
+    // 256MB RAM and 1 vCPU, bursting to 4vCPU and 24GB
+    makeResourceRequirements 1000 256 4000 24000
 
 let SmallTestCoreResourceRequirements : V1ResourceRequirements =
     // When running most missions, there are few core nodes, so each
