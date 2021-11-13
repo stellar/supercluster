@@ -18,6 +18,7 @@ type CoreResources =
     | SmallTestResources
     | AcceptanceTestResources
     | SimulatePubnetResources
+    | InMemoryParallelCatchupResources
     | ParallelCatchupResources
     | NonParallelCatchupResources
     | UpgradeResources
@@ -63,4 +64,5 @@ type MissionContext =
       nonTier1NodesToAdd: int
       randomSeed: int
       networkSizeLimit: int
-      pubnetParallelCatchupStartingLedger: int }
+      pubnetParallelCatchupStartingLedger: int
+      inMemoryParallelCatchup: bool }

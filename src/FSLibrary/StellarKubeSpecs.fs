@@ -105,6 +105,11 @@ let SimulatePubnetCoreResourceRequirements : V1ResourceRequirements =
     // 0.025vCPU request and 0.5vCPU limit to each.
     makeResourceRequirements 25 64 500 400
 
+let InMemoryParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
+    // When doing in memory parallel catchup, we give each container
+    // 256MB RAM and 0.1 vCPUs, bursting to 1vCPU and 14GB
+    makeResourceRequirements 100 256 1000 14000
+
 let ParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
     // When doing parallel catchup, we give each container
     // 256MB RAM and 0.1 vCPUs, bursting to 1vCPU and 600MB
@@ -253,6 +258,7 @@ let CoreContainerForCommand
         | SmallTestResources -> SmallTestCoreResourceRequirements
         | AcceptanceTestResources -> AcceptanceTestCoreResourceRequirements
         | SimulatePubnetResources -> SimulatePubnetCoreResourceRequirements
+        | InMemoryParallelCatchupResources -> InMemoryParallelCatchupCoreResourceRequirements
         | ParallelCatchupResources -> ParallelCatchupCoreResourceRequirements
         | NonParallelCatchupResources -> NonParallelCatchupCoreResourceRequirements
         | UpgradeResources -> UpgradeCoreResourceRequirements

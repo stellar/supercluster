@@ -86,7 +86,8 @@ let ctx : MissionContext =
       tier1OrgsToAdd = 0
       nonTier1NodesToAdd = 0
       randomSeed = 0
-      pubnetParallelCatchupStartingLedger = 0 }
+      pubnetParallelCatchupStartingLedger = 0
+      inMemoryParallelCatchup = false }
 
 let netdata = __SOURCE_DIRECTORY__ + "/../../../data/public-network-data-2021-01-05.json"
 let pubkeys = __SOURCE_DIRECTORY__ + "/../../../data/tier1keys.json"
@@ -394,7 +395,7 @@ type Tests(output: ITestOutputHelper) =
     member __.``Parallel catchup ranges are reasonable``() =
 
         // startingLedger = 0
-        let jobArr1 = getCatchupRanges 5 0 19 1
+        let jobArr1 = getCatchupRanges 5 0 19 1 false
         Assert.Equal(4, jobArr1.Length)
         Assert.Equal("4/6", jobArr1.[0].[1])
         Assert.Equal("9/6", jobArr1.[1].[1])
@@ -403,13 +404,13 @@ type Tests(output: ITestOutputHelper) =
 
         // next range would end at startingLedger(50), but it's
         // already contained in the previously calculated range (56/8)
-        let jobArr2 = getCatchupRanges 6 50 62 2
+        let jobArr2 = getCatchupRanges 6 50 62 2 false
         Assert.Equal(2, jobArr2.Length)
         Assert.Equal("56/8", jobArr2.[0].[1])
         Assert.Equal("62/8", jobArr2.[1].[1])
 
 
-        let jobArr3 = getCatchupRanges 5 50 61 1
+        let jobArr3 = getCatchupRanges 5 50 61 1 false
         Assert.Equal(3, jobArr3.Length)
         Assert.Equal("51/6", jobArr3.[0].[1])
         Assert.Equal("56/6", jobArr3.[1].[1])

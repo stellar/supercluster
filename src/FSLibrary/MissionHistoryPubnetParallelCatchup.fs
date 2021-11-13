@@ -15,18 +15,25 @@ open StellarSupercluster
 open MissionCatchupHelpers
 
 let historyPubnetParallelCatchup (context: MissionContext) =
-    let context = { context with coreResources = ParallelCatchupResources }
+    let resources =
+        if context.inMemoryParallelCatchup then
+            InMemoryParallelCatchupResources
+        else
+            ParallelCatchupResources
+
+    let context = { context with coreResources = resources }
 
     let checkpointsPerJob = 250
     let ledgersPerCheckpoint = 64
     let latestLedgerNum = GetLatestPubnetLedgerNumber()
     let ledgersPerJob = checkpointsPerJob * ledgersPerCheckpoint
     let startingLedger = max context.pubnetParallelCatchupStartingLedger 0
-    let parallelism = 128
+    let parallelism = if context.inMemoryParallelCatchup then 60 else 128
     let overlapCheckpoints = 5
     let overlapLedgers = overlapCheckpoints * ledgersPerCheckpoint
 
-    let jobArr = getCatchupRanges ledgersPerJob startingLedger latestLedgerNum overlapLedgers
+    let jobArr =
+        getCatchupRanges ledgersPerJob startingLedger latestLedgerNum overlapLedgers context.inMemoryParallelCatchup
 
     LogInfo
         "Running %d jobs (%d-way parallel) of %d checkpoints each, to catch up to ledger %d starting from %d"

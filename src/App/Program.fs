@@ -77,7 +77,8 @@ type MissionOptions
         tier1OrgsToAdd: int,
         nonTier1NodesToAdd: int,
         randomSeed: int,
-        pubnetParallelCatchupStartingLedger: int
+        pubnetParallelCatchupStartingLedger: int,
+        inMemoryParallelCatchup: bool
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -278,6 +279,12 @@ type MissionOptions
              Default = 0)>]
     member self.PubnetParallelCatchupStartingLedger = pubnetParallelCatchupStartingLedger
 
+    [<Option("in-memory-parallel-catchup",
+             HelpText = "parallel catchup with captive core",
+             Required = false,
+             Default = false)>]
+    member self.InMemoryParallelCatchup = inMemoryParallelCatchup
+
 
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' with
@@ -361,7 +368,8 @@ let main argv =
                   nonTier1NodesToAdd = 0
                   randomSeed = 0
                   networkSizeLimit = 0
-                  pubnetParallelCatchupStartingLedger = 0 }
+                  pubnetParallelCatchupStartingLedger = 0
+                  inMemoryParallelCatchup = false }
 
             let nCfg = MakeNetworkCfg ctx [] None
             use formation = kube.MakeEmptyFormation nCfg
@@ -449,7 +457,8 @@ let main argv =
                                nonTier1NodesToAdd = mission.NonTier1NodesToAdd
                                networkSizeLimit = mission.NetworkSizeLimit
                                randomSeed = mission.RandomSeed
-                               pubnetParallelCatchupStartingLedger = mission.PubnetParallelCatchupStartingLedger }
+                               pubnetParallelCatchupStartingLedger = mission.PubnetParallelCatchupStartingLedger
+                               inMemoryParallelCatchup = mission.InMemoryParallelCatchup }
 
                          allMissions.[m] missionContext
 

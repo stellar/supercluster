@@ -23,7 +23,7 @@ let historyTestnetParallelCatchup (context: MissionContext) =
     let overlapCheckpoints = 5
     let overlapLedgers = overlapCheckpoints * ledgersPerCheckpoint
 
-    let jobArr = getCatchupRanges ledgersPerJob 0 totalLedgers overlapLedgers
+    let jobArr = getCatchupRanges ledgersPerJob 0 totalLedgers overlapLedgers false
 
     LogInfo
         "Running %d jobs (%d-way parallel) of %d checkpoints each, to catch up to ledger %d"

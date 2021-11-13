@@ -171,7 +171,13 @@ let doCatchup (context: MissionContext) (formation: StellarFormation) (catchupSe
     doCatchupForVersion context formation catchupSets version
 
 
-let getCatchupRanges (ledgersPerJob: int) (startingLedger: int) (latestLedgerNum: int) (overlapLedgers: int) =
+let getCatchupRanges
+    (ledgersPerJob: int)
+    (startingLedger: int)
+    (latestLedgerNum: int)
+    (overlapLedgers: int)
+    (inMemory: bool)
+    =
     // we require some overlap
     assert (overlapLedgers > 0)
 
@@ -180,7 +186,14 @@ let getCatchupRanges (ledgersPerJob: int) (startingLedger: int) (latestLedgerNum
 
     while endRange > startingLedger do
         let range = sprintf "%d/%d" (endRange) (ledgersPerJob + overlapLedgers)
-        ranges <- Array.append [| [| "catchup"; range |] |] ranges
+
+        let cmd =
+            if inMemory then
+                [| "catchup"; range; "--in-memory" |]
+            else
+                [| "catchup"; range |]
+
+        ranges <- Array.append [| cmd |] ranges
         endRange <- endRange - ledgersPerJob
 
     ranges
