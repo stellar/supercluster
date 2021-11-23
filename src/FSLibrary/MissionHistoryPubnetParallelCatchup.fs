@@ -28,7 +28,7 @@ let historyPubnetParallelCatchup (context: MissionContext) =
     let latestLedgerNum = GetLatestPubnetLedgerNumber()
     let ledgersPerJob = checkpointsPerJob * ledgersPerCheckpoint
     let startingLedger = max context.pubnetParallelCatchupStartingLedger 0
-    let parallelism = if context.inMemoryParallelCatchup then 60 else 128
+    let parallelism = if context.inMemoryParallelCatchup then 48 else 128
     let overlapCheckpoints = 5
     let overlapLedgers = overlapCheckpoints * ledgersPerCheckpoint
 

@@ -107,8 +107,8 @@ let SimulatePubnetCoreResourceRequirements : V1ResourceRequirements =
 
 let InMemoryParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
     // When doing in memory parallel catchup, we give each container
-    // 256MB RAM and 0.1 vCPUs, bursting to 1vCPU and 14GB
-    makeResourceRequirements 100 256 1000 14000
+    // 256MB RAM and 0.1 vCPUs, bursting to 1vCPU and 21GB
+    makeResourceRequirements 100 256 1000 21000
 
 let ParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
     // When doing parallel catchup, we give each container
@@ -565,7 +565,7 @@ type NetworkCfg with
         let jobCfgVol =
             V1Volume(name = CfgVal.jobCfgVolumeName, configMap = V1ConfigMapVolumeSource(name = self.JobCfgMapName))
 
-        let dataVol = V1Volume(name = CfgVal.dataVolumeName, emptyDir = V1EmptyDirVolumeSource())
+        let dataVol = V1Volume(name = CfgVal.dataVolumeName, emptyDir = V1EmptyDirVolumeSource(medium = "Memory"))
 
         let res = self.missionContext.coreResources
 
