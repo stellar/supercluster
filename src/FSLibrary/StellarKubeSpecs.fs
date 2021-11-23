@@ -105,6 +105,11 @@ let SimulatePubnetCoreResourceRequirements : V1ResourceRequirements =
     // 0.025vCPU request and 0.5vCPU limit to each.
     makeResourceRequirements 25 64 500 400
 
+let InMemoryParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
+    // When doing in memory parallel catchup, we give each container
+    // 256MB RAM and 0.1 vCPUs, bursting to 1vCPU and 21GB
+    makeResourceRequirements 100 256 1000 21000
+
 let ParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
     // When doing parallel catchup, we give each container
     // 256MB RAM and 0.1 vCPUs, bursting to 1vCPU and 600MB
@@ -253,6 +258,7 @@ let CoreContainerForCommand
         | SmallTestResources -> SmallTestCoreResourceRequirements
         | AcceptanceTestResources -> AcceptanceTestCoreResourceRequirements
         | SimulatePubnetResources -> SimulatePubnetCoreResourceRequirements
+        | InMemoryParallelCatchupResources -> InMemoryParallelCatchupCoreResourceRequirements
         | ParallelCatchupResources -> ParallelCatchupCoreResourceRequirements
         | NonParallelCatchupResources -> NonParallelCatchupCoreResourceRequirements
         | UpgradeResources -> UpgradeCoreResourceRequirements
@@ -559,7 +565,7 @@ type NetworkCfg with
         let jobCfgVol =
             V1Volume(name = CfgVal.jobCfgVolumeName, configMap = V1ConfigMapVolumeSource(name = self.JobCfgMapName))
 
-        let dataVol = V1Volume(name = CfgVal.dataVolumeName, emptyDir = V1EmptyDirVolumeSource())
+        let dataVol = V1Volume(name = CfgVal.dataVolumeName, emptyDir = V1EmptyDirVolumeSource(medium = "Memory"))
 
         let res = self.missionContext.coreResources
 
