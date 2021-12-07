@@ -388,6 +388,8 @@ let main argv =
                  1)
             | None ->
                 (LogInfo "-----------------------------------"
+                 LogInfo "Supercluster command line: %s" (System.String.Join(" ", argv))
+                 LogInfo "-----------------------------------"
                  LogInfo "Connecting to Kubernetes cluster"
                  LogInfo "-----------------------------------"
 
