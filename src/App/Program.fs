@@ -77,7 +77,8 @@ type MissionOptions
         tier1OrgsToAdd: int,
         nonTier1NodesToAdd: int,
         randomSeed: int,
-        pubnetParallelCatchupStartingLedger: int
+        pubnetParallelCatchupStartingLedger: int,
+        tag: string option
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -278,6 +279,9 @@ type MissionOptions
              Default = 0)>]
     member self.PubnetParallelCatchupStartingLedger = pubnetParallelCatchupStartingLedger
 
+    [<Option("tag", HelpText = "optional name to tag the run with", Required = false)>]
+    member self.Tag = tag
+
 
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' with
@@ -361,7 +365,8 @@ let main argv =
                   nonTier1NodesToAdd = 0
                   randomSeed = 0
                   networkSizeLimit = 0
-                  pubnetParallelCatchupStartingLedger = 0 }
+                  pubnetParallelCatchupStartingLedger = 0
+                  tag = None }
 
             let nCfg = MakeNetworkCfg ctx [] None
             use formation = kube.MakeEmptyFormation nCfg
@@ -383,6 +388,8 @@ let main argv =
                  1)
             | None ->
                 (LogInfo "-----------------------------------"
+                 LogInfo "Supercluster command line: %s" (System.String.Join(" ", argv))
+                 LogInfo "-----------------------------------"
                  LogInfo "Connecting to Kubernetes cluster"
                  LogInfo "-----------------------------------"
 
@@ -449,7 +456,8 @@ let main argv =
                                nonTier1NodesToAdd = mission.NonTier1NodesToAdd
                                networkSizeLimit = mission.NetworkSizeLimit
                                randomSeed = mission.RandomSeed
-                               pubnetParallelCatchupStartingLedger = mission.PubnetParallelCatchupStartingLedger }
+                               pubnetParallelCatchupStartingLedger = mission.PubnetParallelCatchupStartingLedger
+                               tag = mission.Tag }
 
                          allMissions.[m] missionContext
 

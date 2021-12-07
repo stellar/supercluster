@@ -62,5 +62,6 @@ type MissionContext =
       tier1OrgsToAdd: int
       nonTier1NodesToAdd: int
       randomSeed: int
+      tag: string option
       networkSizeLimit: int
       pubnetParallelCatchupStartingLedger: int }

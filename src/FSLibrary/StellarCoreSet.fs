@@ -8,7 +8,7 @@ open stellar_dotnet_sdk
 
 // A PodName followed by the (nonce-qualified) service DNS suffix for a
 // given network, such as
-// ssc-483463dbb624-sts-www-stellar-org-io-0.ssc-483463dbb624-stellar-core.sandbox.svc.cluster.local
+// ssc-483463dbb624-sts-stellar-io-0.ssc-483463dbb624-stellar-core.sandbox.svc.cluster.local
 type PeerDnsName =
     | PeerDnsName of string
     member self.StringName =
@@ -16,16 +16,23 @@ type PeerDnsName =
         | PeerDnsName (n) -> n
 
 // A StatefulSetName followed by a number, such as ssc-483463dbb624-sts-core-0
-// or ssc-483463dbb624-sts-www-stellar-org-2. These are the names that
+// or ssc-483463dbb624-sts-stellar-2. These are the names that
 // kubernetes will assign to pods in a statefulset as it instantiates the pod
 // template.
 type PodName =
     | PodName of string
     member self.StringName =
         match self with
-        | PodName (n) -> n
+        | PodName (n) ->
+            // Kubernetes will stick a 11-digit trailing nonce on this name and
+            // complain if the result is any larger than 63 characters. This
+            // is a DNS label-length limitation, evidently.
+            if n.Length + 11 > 63 then
+                failwith "Pod name %s is too long, Kubernetes will reject it"
 
-// A nonce-qualified CoreSetName like ssc-483463dbb624-sts-www-stellar-org that
+            n
+
+// A nonce-qualified CoreSetName like ssc-483463dbb624-sts-stellar that
 // can be used to identify a statefulset in kubernetes without colliding with
 // others in the namespace.
 type StatefulSetName =
@@ -35,7 +42,7 @@ type StatefulSetName =
         | StatefulSetName (n) -> n
 
 // A CoreSetName followed by a number, such as core-0 or
-// www-stellar-org-1. Identifies a peer within a statefulset in places that are
+// stellar-1. Identifies a peer within a statefulset in places that are
 // already qualified (eg. pod labels for use in prometheus time series)
 type PeerShortName =
     | PeerShortName of string
@@ -44,7 +51,7 @@ type PeerShortName =
         | PeerShortName (n) -> n
 
 // A short symbolic name like "core" or one derived from a HomeDomainName like
-// "www-stellar-org", used in deriving statefulset names.
+// "stellar", used in deriving statefulset names.
 type CoreSetName =
     | CoreSetName of string
     member self.StringName =

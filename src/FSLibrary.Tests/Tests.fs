@@ -18,9 +18,9 @@ open Xunit.Abstractions
 
 [<Fact>]
 let ``Network nonce looks reasonable`` () =
-    let nonce = MakeNetworkNonce()
+    let nonce = MakeNetworkNonce None
     let nstr = nonce.ToString()
-    Assert.Matches(Regex("^ssc-[a-f0-9]+$"), nstr)
+    Assert.Matches(Regex("^ssc-[a-z0-9-]+$"), nstr)
 
 let coreSetOptions =
     { CoreSetOptions.GetDefault "stellar/stellar-core" with
@@ -86,7 +86,8 @@ let ctx : MissionContext =
       tier1OrgsToAdd = 0
       nonTier1NodesToAdd = 0
       randomSeed = 0
-      pubnetParallelCatchupStartingLedger = 0 }
+      pubnetParallelCatchupStartingLedger = 0
+      tag = None }
 
 let netdata = __SOURCE_DIRECTORY__ + "/../../../data/public-network-data-2021-01-05.json"
 let pubkeys = __SOURCE_DIRECTORY__ + "/../../../data/tier1keys.json"
@@ -203,20 +204,20 @@ type Tests(output: ITestOutputHelper) =
         if System.IO.File.Exists(netdata) && System.IO.File.Exists(pubkeys) then
             (let coreSets = FullPubnetCoreSets pubnetctx false
              let nCfg = MakeNetworkCfg pubnetctx coreSets passOpt
-             let sdfCoreSetName = CoreSetName "www-stellar-org"
+             let sdfCoreSetName = CoreSetName "stellar"
              Assert.Contains(coreSets, (fun cs -> cs.name = sdfCoreSetName))
              let sdfCoreSet = List.find (fun cs -> cs.name = sdfCoreSetName) coreSets
              let cfg = nCfg.StellarCoreCfg(sdfCoreSet, 0, MainCoreContainer)
              let toml = cfg.ToString()
              Assert.Contains("[QUORUM_SET.sub1]", toml)
              Assert.Contains("[HISTORY.local]", toml)
-             Assert.Matches(Regex("VALIDATORS.*stellar-blockdaemon-com-0"), toml)
-             Assert.Matches(Regex("VALIDATORS.*www-stellar-org-0"), toml)
-             Assert.Matches(Regex("VALIDATORS.*keybase-io-0"), toml)
-             Assert.Matches(Regex("VALIDATORS.*wirexapp-com-0"), toml)
-             Assert.Matches(Regex("VALIDATORS.*coinqvest-com-0"), toml)
-             Assert.Matches(Regex("VALIDATORS.*satoshipay-io-0"), toml)
-             Assert.Matches(Regex("VALIDATORS.*lobstr-co-0"), toml))
+             Assert.Matches(Regex("VALIDATORS.*blockdaemon-0"), toml)
+             Assert.Matches(Regex("VALIDATORS.*stellar-0"), toml)
+             Assert.Matches(Regex("VALIDATORS.*keybase-0"), toml)
+             Assert.Matches(Regex("VALIDATORS.*wirexapp-0"), toml)
+             Assert.Matches(Regex("VALIDATORS.*coinqvest-0"), toml)
+             Assert.Matches(Regex("VALIDATORS.*satoshipay-0"), toml)
+             Assert.Matches(Regex("VALIDATORS.*lobstr-0"), toml))
 
     [<Fact>]
     member __.``Geographic calculations are reasonable``() =
@@ -383,8 +384,7 @@ type Tests(output: ITestOutputHelper) =
             (let allCoreSets = FullPubnetCoreSets pubnetctx true
              let fullNetCfg = MakeNetworkCfg pubnetctx allCoreSets passOpt
 
-             let sdf =
-                 List.find (fun (cs: CoreSet) -> cs.name.StringName = "www-stellar-org") allCoreSets
+             let sdf = List.find (fun (cs: CoreSet) -> cs.name.StringName = "stellar") allCoreSets
 
              let delayCmd = fullNetCfg.NetworkDelayScript sdf 0
              let str = delayCmd.ToString()
