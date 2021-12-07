@@ -465,6 +465,7 @@ let PubnetPeers =
 
 let PubnetCoreSetOptions (image: string) =
     { CoreSetOptions.GetDefault image with
+          emptyDirType = DiskBackedEmptyDir
           quorumSet = ExplicitQuorum PubnetQuorum
           historyGetCommands = PubnetGetCommands
           peersDns = PubnetPeers
@@ -500,6 +501,7 @@ let TestnetPeers =
 
 let TestnetCoreSetOptions (image: string) =
     { CoreSetOptions.GetDefault image with
+          emptyDirType = DiskBackedEmptyDir
           quorumSet = ExplicitQuorum TestnetQuorum
           historyGetCommands = TestnetGetCommands
           peersDns = TestnetPeers

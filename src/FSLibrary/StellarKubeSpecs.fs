@@ -207,6 +207,19 @@ let cfgFileArgs (configOpt: ConfigOption) (ctype: CoreContainerType) : ShWord ar
         | InitCoreContainer -> [| ShWord.OfStr "--conf"; CfgVal.peerNameEnvInitCfgFileWord |]
         | MainCoreContainer -> [| ShWord.OfStr "--conf"; CfgVal.peerNameEnvCfgFileWord |]
 
+let emptyDirDataVolumeSpec (c: CoreSetOptions option) : V1Volume =
+    let ty =
+        match c with
+        | None -> DiskBackedEmptyDir
+        | Some co -> co.emptyDirType
+
+    let src =
+        match ty with
+        | MemoryBackedEmptyDir -> V1EmptyDirVolumeSource(medium = "Memory")
+        | DiskBackedEmptyDir -> V1EmptyDirVolumeSource()
+
+    V1Volume(name = CfgVal.dataVolumeName, emptyDir = src)
+
 let CoreContainerForCommand
     (imageName: string)
     (configOpt: ConfigOption)
@@ -559,7 +572,7 @@ type NetworkCfg with
         let jobCfgVol =
             V1Volume(name = CfgVal.jobCfgVolumeName, configMap = V1ConfigMapVolumeSource(name = self.JobCfgMapName))
 
-        let dataVol = V1Volume(name = CfgVal.dataVolumeName, emptyDir = V1EmptyDirVolumeSource())
+        let dataVol = emptyDirDataVolumeSpec (self.jobCoreSetOptions)
 
         let res = self.missionContext.coreResources
 
@@ -634,8 +647,7 @@ type NetworkCfg with
                 configMap = V1ConfigMapVolumeSource(name = self.HistoryCfgMapName)
             )
 
-        let dataVol =
-            V1Volume(name = CfgVal.dataVolumeName, emptyDir = V1EmptyDirVolumeSource(medium = "Memory"))
+        let dataVol = emptyDirDataVolumeSpec (Some(coreSet.options))
 
         let imageName = coreSet.options.image
 

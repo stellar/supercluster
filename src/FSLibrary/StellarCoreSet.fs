@@ -68,6 +68,10 @@ type DBType =
     | SqliteMemory
     | Postgres
 
+type EmptyDirType =
+    | MemoryBackedEmptyDir
+    | DiskBackedEmptyDir
+
 type CoreSetInitialization =
     { newDb: bool
       newHist: bool
@@ -135,6 +139,7 @@ type CoreSetOptions =
     { nodeCount: int
       nodeLocs: GeoLoc list option
       dbType: DBType
+      emptyDirType: EmptyDirType
       syncStartupDelay: int option
       quorumSet: QuorumSetSpec
       historyNodes: CoreSetName list option
@@ -164,6 +169,7 @@ type CoreSetOptions =
         { nodeCount = 3
           nodeLocs = None
           dbType = Sqlite
+          emptyDirType = MemoryBackedEmptyDir
           syncStartupDelay = Some(5)
           quorumSet = AllPeersQuorum
           historyNodes = None
