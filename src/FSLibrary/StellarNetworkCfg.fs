@@ -8,21 +8,38 @@ open stellar_dotnet_sdk
 open StellarMissionContext
 open StellarCoreSet
 
-// Random nonce used as both a Kubernetes namespace and a stellar network
-// identifier to qualify the remaining objects we construct.
+// We identify SSC runs using a "nonce" composed from an hours-and-minutes
+// timestamp, a random 24-bit value, and an optional user-provided tag.
 
 type NetworkNonce =
-    | NetworkNonce of byte array
+    | NetworkNonce of (System.DateTime * byte array * string option)
     override self.ToString() =
-        let (NetworkNonce n) = self
-        // "ssc" == "stellar supercluster", just to help group namespaces.
-        "ssc-" + (Util.BytesToHex n).ToLower()
+        let (NetworkNonce (utcTime, bytes, tag)) = self
+        // "ssc" == "stellar supercluster", just to help group objects.
+        //
+        // Note that this name is used to build DNS entries and so will
+        // be lowercased by .NET libraries when canonicalizing them,
+        // so to avoid surprise case-changes, don't use upper-case.
+        let d = utcTime.ToString("HHmm") + "z"
+        let b = (Util.BytesToHex bytes).ToLower()
+        let root = "ssc-" + d + "-" + b
 
-let MakeNetworkNonce () : NetworkNonce =
-    let bytes : byte array = Array.zeroCreate 6
+        match tag with
+        | None -> root
+        | Some t -> root + "-" + t
+
+let MakeNetworkNonce (tag: string option) : NetworkNonce =
+    let utcTime = System.DateTime.UtcNow
+    let bytes : byte array = Array.zeroCreate 3
     let rng = System.Security.Cryptography.RNGCryptoServiceProvider.Create()
+
+    match tag with
+    | Some s when (not (System.Text.RegularExpressions.Regex("^[a-z0-9-]+$").IsMatch(s))) ->
+        failwith "tag must match regex [a-z0-9-]+"
+    | _ -> ()
+
     rng.GetBytes(bytes) |> ignore
-    NetworkNonce bytes
+    NetworkNonce(utcTime, bytes, tag)
 
 // Symbolic type for the different sorts of NETWORK_PASSPHRASE that can show up
 // in a stellar-core.cfg file. Usually use PrivateNet, which takes a nonce and
@@ -114,7 +131,7 @@ let MakeNetworkCfg
     (coreSetList: CoreSet list)
     (passphrase: NetworkPassphrase option)
     : NetworkCfg =
-    let nonce = MakeNetworkNonce()
+    let nonce = MakeNetworkNonce missionContext.tag
 
     { missionContext = missionContext
       networkNonce = nonce

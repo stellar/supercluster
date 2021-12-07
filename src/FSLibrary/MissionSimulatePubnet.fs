@@ -56,8 +56,7 @@ let simulatePubnet (context: MissionContext) =
 
     let fullCoreSet = FullPubnetCoreSets context true
 
-    let sdf =
-        List.find (fun (cs: CoreSet) -> cs.name.StringName = "www-stellar-org") fullCoreSet
+    let sdf = List.find (fun (cs: CoreSet) -> cs.name.StringName = "stellar") fullCoreSet
 
     let tier1 = List.filter (fun (cs: CoreSet) -> cs.options.tier1 = Some true) fullCoreSet
 

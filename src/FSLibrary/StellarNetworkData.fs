@@ -255,7 +255,10 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) : CoreSet l
     let groupedOrgNodes : (HomeDomainName * PubnetNode.Root array) array =
         Array.groupBy
             (fun (n: PubnetNode.Root) ->
-                let cleanOrgName = n.SbHomeDomain.Value.Replace('.', '-')
+                let domain = n.SbHomeDomain.Value
+                // We turn 'www.stellar.org' into 'stellar'
+                // and 'stellar.blockdaemon.com' into 'blockdaemon'
+                let cleanOrgName = if domain.Contains('.') then ((Array.rev (domain.Split('.'))).[1]) else domain
                 let lowercase = cleanOrgName.ToLower()
                 HomeDomainName lowercase)
             orgNodes
