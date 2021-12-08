@@ -431,8 +431,8 @@ type NetworkCfg with
           preferredPeersOnly = false
           targetPeerConnections = 16
           catchupMode = opts.catchupMode
-          automaticMaintenancePeriod = 10
-          automaticMaintenanceCount = 50000
+          automaticMaintenancePeriod = if opts.performMaintenance then 10 else 0
+          automaticMaintenanceCount = if opts.performMaintenance then 50000 else 0
           accelerateTime = opts.accelerateTime
           generateLoad = true
           manualClose = false
@@ -465,8 +465,8 @@ type NetworkCfg with
               | None -> 16
               | _ -> self.PreferredPeersForNode c.options (c.keys.[i]) |> List.length
           catchupMode = c.options.catchupMode
-          automaticMaintenancePeriod = 0
-          automaticMaintenanceCount = 0
+          automaticMaintenancePeriod = if c.options.performMaintenance then 10 else 0
+          automaticMaintenanceCount = if c.options.performMaintenance then 50000 else 0
           accelerateTime = c.options.accelerateTime
           generateLoad = true
           manualClose = false
