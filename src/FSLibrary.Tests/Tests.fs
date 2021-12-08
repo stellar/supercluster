@@ -229,58 +229,6 @@ type Tests(output: ITestOutputHelper) =
         // We want to test ping time and distance calculations for
         // a variety of node locations both far apart and close together.
 
-        // Ashburn Virginia USA suburb of Washington a.k.a. AWS us-east-1
-        // and GCP us-east-4; home to all SDF nodes, 2 LOBSTR nodes,
-        // PaySend, Stellarbeat, 2 Satoshipay nodes, BAC, LockerX,
-        // and all Blockdaemon nodes.
-        let Ashburn = { lat = 38.89511; lon = -77.03637 }
-
-        // Beauharnois, suburb of Montreal a.k.a. OVH DC, home of LAPO 4,
-        // PublicNode Bootes, etc.
-        let Beauharnois = { lat = 45.2986777; lon = -73.9288762 }
-
-        // Chennai India a.k.a. IBM/Softlayer DC, home of IBM India node
-        let Chennai = { lat = 13.08784; lon = 80.27847 }
-
-        // Columbus Ohio USA a.k.a. AWS DC (us-east-2) home of Stellarport Ohio
-        let Columbus = { lat = 39.9828671; lon = -83.1309106 }
-
-        // Falkenstein/Vogtland Germany a.k.a. Hetzner DC
-        // home of StellarExpertV2, LOBSTR 1, HelpCoin 1, COINQVEST
-        // "germany", PublicNode Hercules, etc.
-        let Falkenstein = { lat = 50.4788652; lon = 12.3348363 }
-
-        // Frankfurt Germany a.k.a. AWS DC (eu-central-1) and Hetzner DC
-        // home of keybase 2 and SCHUNK 1
-        let Frankfurt = { lat = 50.11552; lon = 8.68417 }
-
-        // IBM/Softlayer DC home of IBM HK node
-        let HongKong = { lat = 22.3526738; lon = 113.9876171 }
-
-        // Portland Oregon USA a.k.a. AWS DC (us-west-1) home of keybase1
-        let Portland = { lat = 45.5426916; lon = -122.7243663 }
-
-        // Pudong, suburb of Shanghai a.k.a. Azure DC (china-east-2),
-        // home of fchain core3
-        let Pudong = { lat = 31.0856396; lon = 121.4547635 }
-
-        // Purfleet UK, suburb of London, a.k.a. OVH and Azure DCs (uksouth)
-        // home of StellarExpertV3, PublicNode Lyra, Wirex UK, Sakkex UK, etc.
-        let Purfleet = { lat = 51.4819587; lon = 0.2220319 }
-
-        // Sao Paulo Brazil a.k.a. AWS DC (sa-east-1) and IBM/Softlayer
-        // DC, home of at least IBM Brazil node
-        let SaoPaulo = { lat = -23.6821604; lon = -46.8754795 }
-
-        // Singapore a.k.a. DCs for OVH, AWS (ap-southeast-1),
-        // Azure (southeastasia), DigitalOcean. Home of LAPO 6,
-        // Wirex Singapore, fchain core 2, Hawking, etc.
-        let Singapore = { lat = 1.3437449; lon = 103.7540051 }
-
-        // Tokyo Japan a.k.a. AWS DC (ap-northeast-1) home of lots
-        // of nodes.
-        let Tokyo = { lat = 35.6895; lon = 139.69171 }
-
         // Ashburn to Beauharnois: empirically 792km, pingtime 29ms
         // Calculated approximation: 756km, 15ms
         Assert.InRange(greatCircleDistanceInKm Ashburn Beauharnois, 750.0, 760.0)

@@ -450,7 +450,6 @@ let GetLatestTestnetLedgerNumber _ : int =
     let has = HistoryArchiveState.Load(TestnetLatestHistoryArchiveState)
     has.CurrentLedger
 
-
 let PubnetGetCommands =
     [ PeerShortName "core_live_001", "curl -sf http://history.stellar.org/prd/core-live/core_live_001/{0} -o {1}"
       PeerShortName "core_live_002", "curl -sf http://history.stellar.org/prd/core-live/core_live_002/{0} -o {1}"
@@ -519,3 +518,133 @@ let TestnetCoreSetOptions (image: string) =
           accelerateTime = false
           initialization = { CoreSetInitialization.Default with waitForConsensus = true }
           dumpDatabase = false }
+
+// A bunch of specific GeoLocs follow
+
+// Ashburn, suburb of Washington DC USA a.k.a. AWS us-east-1
+// and GCP us-east-4; home to all SDF nodes, 1 LOBSTR node,
+// PaySend, Stellarbeat, 2 Satoshipay nodes, BAC, LockerX.
+let Ashburn = { lat = 38.89511; lon = -77.03637 }
+
+// Brussels Belgium a.k.a. GCP europe-west1 home of
+// Blockdaemon 1
+let Brussels = { lat = 50.9009; lon = 4.4855 }
+
+// Beauharnois, suburb of Montreal a.k.a. OVH DC, home of LAPO 4,
+// PublicNode Bootes, etc.
+let Beauharnois = { lat = 45.2986777; lon = -73.9288762 }
+
+// Bengaluru India a.k.a. DigitalOcean DC home of LOBSTR 5
+let Bengaluru = { lat = 12.9634; lon = 77.5855 }
+
+// Chennai India a.k.a. IBM/Softlayer DC, home of IBM India node
+let Chennai = { lat = 13.08784; lon = 80.27847 }
+
+// Clifton USA a.k.a. DigitalOcean DC home of LOBSTR 3
+let Clifton = { lat = 40.8364; lon = -74.1403 }
+
+// Columbus USA a.k.a. AWS DC (us-east-2) home of Stellarport Ohio
+let Columbus = { lat = 39.9828671; lon = -83.1309106 }
+
+// Council Bluffs USA a.k.a. GCP us-central1 home of Blockdaemon 2
+let CouncilBluffs = { lat = 41.2619; lon = -95.8608 }
+
+// Falkenstein/Vogtland Germany a.k.a. Hetzner DC
+// home of StellarExpertV2, LOBSTR 1, HelpCoin 1, COINQVEST
+// "germany", PublicNode Hercules, etc.
+let Falkenstein = { lat = 50.4788652; lon = 12.3348363 }
+
+// Frankfurt Germany a.k.a. AWS DC (eu-central-1) and Hetzner DC
+// home of keybase 2 and SCHUNK 1
+let Frankfurt = { lat = 50.11552; lon = 8.68417 }
+
+// Helsinki Finland a.k.a. Hetzner DC home of COINQVEST "finland"
+let Helsinki = { lat = 60.1719; lon = 24.9347 }
+
+// Hong Kong a.k.a. IBM/Softlayer DC home of IBM HK node
+let HongKong = { lat = 22.3526738; lon = 113.9876171 }
+
+// Portland USA a.k.a. AWS DC (us-west-1) home of keybase1
+let Portland = { lat = 45.5426916; lon = -122.7243663 }
+
+// Pudong, suburb of Shanghai China a.k.a. Azure DC (china-east-2),
+// home of fchain core3
+let Pudong = { lat = 31.0856396; lon = 121.4547635 }
+
+// Purfleet, suburb of London UK, a.k.a. OVH and Azure DCs (uksouth)
+// home of StellarExpertV3, PublicNode Lyra, Wirex UK, Sakkex UK, etc.
+let Purfleet = { lat = 51.4819587; lon = 0.2220319 }
+
+// Sao Paulo Brazil a.k.a. AWS DC (sa-east-1) and IBM/Softlayer
+// DC, home of at least IBM Brazil node
+let SaoPaulo = { lat = -23.6821604; lon = -46.8754795 }
+
+// Singapore a.k.a. DCs for OVH, AWS (ap-southeast-1),
+// Azure (southeastasia), DigitalOcean. Home of LAPO 6,
+// Wirex Singapore, fchain core 2, Hawking, etc.
+let Singapore = { lat = 1.3437449; lon = 103.7540051 }
+
+// Taipei Taiwan a.k.a. asia-east1 home of Blockdaemon 3
+let Taipei = { lat = 25.0329; lon = 121.5654 }
+
+// Tokyo Japan a.k.a. AWS DC (ap-northeast-1) home of lots
+// of nodes.
+let Tokyo = { lat = 35.6895; lon = 139.69171 }
+
+
+// This coreset is a synthetic approximation of the Tier1 group, intended
+// to be used in stable benchmarks rather than experiments.
+let StableApproximateTier1CoreSets image : CoreSet list =
+    let allOrgs : Map<string, GeoLoc list> =
+        Map.ofList [ ("bd", [ Brussels; CouncilBluffs; Taipei ])
+                     ("cq", [ Falkenstein; Helsinki; HongKong ])
+                     ("kb", [ Ashburn; Frankfurt; Portland ])
+                     ("lo", [ Ashburn; Bengaluru; Falkenstein; Helsinki; Singapore ])
+                     ("sp", [ CouncilBluffs; Frankfurt; Singapore ])
+                     ("sdf", [ Ashburn; Ashburn; Ashburn ])
+                     ("wx", [ CouncilBluffs; Purfleet; Singapore ]) ]
+
+    let allOrgPairs = Map.toList allOrgs
+    let orgKeys _ nodes = List.map (fun _ -> KeyPair.Random()) nodes
+    let allKeys = Map.map orgKeys allOrgs
+    let pk (k: KeyPair) : byte [] = k.PublicKey
+    let allPksList : List<byte []> = Map.toList allKeys |> List.collect (fun (_, keys) -> List.map pk keys)
+    let connections = List.map (fun k -> (k, List.except [ k ] allPksList)) allPksList |> Map.ofList
+
+    let namedKeys org =
+        List.indexed allKeys.[org]
+        |> List.map (fun (i, k) -> (PeerShortName(sprintf "%s-%d" org i), k))
+        |> Map.ofList
+
+    let orgToQset org =
+        { thresholdPercent = Some(51)
+          validators = namedKeys org
+          innerQuorumSets = Array.empty }
+
+    let topQset =
+        { thresholdPercent = Some(67)
+          validators = Map.empty
+          innerQuorumSets = Map.toArray allOrgs |> Array.map (fun (org, _) -> orgToQset org) }
+
+    let orgCoreSet (org: string, locs: GeoLoc list) : CoreSet =
+        let coreSetOpts =
+            { CoreSetOptions.GetDefault image with
+                  emptyDirType = DiskBackedEmptyDir
+                  performMaintenance = true
+                  nodeCount = locs.Length
+                  nodeLocs = Some(locs)
+                  preferredPeersMap = Some(connections)
+                  quorumSet = ExplicitQuorum topQset
+                  localHistory = false
+                  accelerateTime = false
+                  tier1 = Some(true)
+                  initialization = CoreSetInitialization.OnlyNewDb
+                  invariantChecks = InvariantChecksSpec.NoInvariants
+                  dumpDatabase = false }
+
+        { name = CoreSetName(org)
+          keys = Array.ofList allKeys.[org]
+          live = true
+          options = coreSetOpts }
+
+    List.map orgCoreSet allOrgPairs

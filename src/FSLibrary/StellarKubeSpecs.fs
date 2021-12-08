@@ -113,6 +113,12 @@ let GetSimulatePubnetResources networkSize : V1ResourceRequirements =
     let k = if networkSize >= 200 then 2 else 1
     makeResourceRequirements (k * cpuReqMili) (k * memReqMebi) (k * cpuLimMili) (k * memLimMebi)
 
+let SimulatePubnetTier1PerfCoreResourceRequirements : V1ResourceRequirements =
+    // Tier1 perf simulation is interested in "how fast can we go in practice"
+    // which means configuring the nodes like a real operator would: 1-4 vCPU
+    // and 128MB-2GB RAM.
+    makeResourceRequirements 1000 128 4000 2000
+
 let ParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
     // When doing parallel catchup, we give each container
     // 256MB RAM and 0.1 vCPUs, bursting to 1vCPU and 600MB
@@ -286,6 +292,7 @@ let CoreContainerForCommand
         | SmallTestResources -> SmallTestCoreResourceRequirements
         | AcceptanceTestResources -> AcceptanceTestCoreResourceRequirements
         | SimulatePubnetResources size -> GetSimulatePubnetResources size
+        | SimulatePubnetTier1PerfResources -> SimulatePubnetTier1PerfCoreResourceRequirements
         | ParallelCatchupResources -> ParallelCatchupCoreResourceRequirements
         | NonParallelCatchupResources -> NonParallelCatchupCoreResourceRequirements
         | UpgradeResources -> UpgradeCoreResourceRequirements
