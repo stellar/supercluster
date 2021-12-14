@@ -62,7 +62,8 @@ type LoadGen =
           ("txrate", self.txrate.ToString())
           ("spikesize", self.spikesize.ToString())
           ("spikeinterval", self.spikeinterval.ToString())
-          ("batchsize", self.batchsize.ToString()) ]
+          ("batchsize", self.batchsize.ToString())
+          ("offset", self.offset.ToString()) ]
 
 type MissionContext with
 
@@ -445,29 +446,34 @@ type Peer with
         countAndLogStates tier1StatusList "tier1"
         countAndLogStates nonTier1StatusList "non-tier1"
 
+    member self.IsLoadGenComplete() =
+        if self.GetState() <> "Synced!" then
+            (NodeLostSyncException self.ShortName.StringName) |> raise
+
+        let m = self.GetMetrics()
+
+        if (MeterCountOr 0 m.LoadgenRunFailed) <> 0 then
+            failwith "Loadgen failed"
+        else
+            (MeterCountOr 0 m.LoadgenRunStart) = (MeterCountOr 0 m.LoadgenRunComplete)
+
+    member self.LogLoadGenProgressTowards(loadGen: LoadGen) =
+        let m = self.GetMetrics()
+
+        LogInfo
+            "Waiting for loadgen run %d on %s to finish, %d/%d accts, %d/%d txns"
+            (MeterCountOr 0 m.LoadgenRunStart)
+            self.ShortName.StringName
+            (MeterCountOr 0 m.LoadgenAccountCreated)
+            loadGen.accounts
+            (MeterCountOr 0 m.LoadgenTxnAttempted)
+            loadGen.txs
+
     member self.WaitForLoadGenComplete(loadGen: LoadGen) =
         RetryUntilTrue
+            (fun _ -> self.IsLoadGenComplete())
             (fun _ ->
-                if self.GetState() <> "Synced!" then
-                    (NodeLostSyncException self.ShortName.StringName) |> raise
-
-                let m = self.GetMetrics()
-
-                if (MeterCountOr 0 m.LoadgenRunFailed) <> 0 then
-                    failwith "Loadgen failed"
-                else
-                    (MeterCountOr 0 m.LoadgenRunStart) = (MeterCountOr 0 m.LoadgenRunComplete))
-            (fun _ ->
-                let m = self.GetMetrics()
-
-                LogInfo
-                    "Waiting for loadgen run %d to finish, %d/%d accts, %d/%d txns"
-                    (MeterCountOr 0 m.LoadgenRunStart)
-                    (MeterCountOr 0 m.LoadgenAccountCreated)
-                    loadGen.accounts
-                    (MeterCountOr 0 m.LoadgenTxnAttempted)
-                    loadGen.txs
-
+                self.LogLoadGenProgressTowards loadGen
                 self.LogCoreSetListStatusWithTiers self.networkCfg.CoreSetList)
 
     // WaitUntilConnected waits until every node is connected to all the nodes in

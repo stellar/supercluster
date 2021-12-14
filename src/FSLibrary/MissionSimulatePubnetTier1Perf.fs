@@ -40,5 +40,5 @@ let simulatePubnetTier1Perf (context: MissionContext) =
             formation.UpgradeMaxTxSize tier1 (10 * context.maxTxRate)
 
             formation.RunLoadgen sdf context.GenerateAccountCreationLoad
-            formation.RunLoadgen sdf context.GeneratePaymentLoad
+            formation.RunMultiLoadgen tier1 context.GeneratePaymentLoad
             formation.EnsureAllNodesInSync tier1)

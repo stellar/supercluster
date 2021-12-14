@@ -15,6 +15,7 @@ open StellarCorePeer
 open StellarCoreHTTP
 open StellarTransaction
 open System
+open System.Threading
 
 type StellarFormation with
 
@@ -213,6 +214,31 @@ type StellarFormation with
         let peer = self.NetworkCfg.GetPeer coreSet 0
         LogInfo "Loadgen: %s" (peer.GenerateLoad loadGen)
         peer.WaitForLoadGenComplete loadGen
+
+    // This is similar to RunLoadgen but runs a 1/N fractional portion of a
+    // given LoadGen on node 0 of each of N CoreSets.
+    member self.RunMultiLoadgen (coreSets: CoreSet list) (fullLoadGen: LoadGen) =
+        let n = List.length coreSets
+
+        let fractionalLoadGen =
+            { fullLoadGen with
+                  accounts = fullLoadGen.accounts / n
+                  txs = fullLoadGen.txs / n
+                  spikesize = fullLoadGen.spikesize / n
+                  txrate = fullLoadGen.txrate / n }
+
+        let loadGenPeers = List.map (fun cs -> self.NetworkCfg.GetPeer cs 0) coreSets
+
+        for (i, peer) in (List.indexed loadGenPeers) do
+            let offset = fractionalLoadGen.accounts * i
+            let peerSpecificLoadgen = { fractionalLoadGen with offset = offset }
+            LogInfo "Loadgen: %s with offset %d" (peer.GenerateLoad peerSpecificLoadgen) offset
+
+        while not (List.fold (fun (all: bool) (peer: Peer) -> (peer.IsLoadGenComplete()) && all) true loadGenPeers) do
+            Thread.Sleep(millisecondsTimeout = 3000)
+
+            for peer in loadGenPeers do
+                peer.LogLoadGenProgressTowards fractionalLoadGen
 
     member self.RunLoadgenAndCheckNoErrors(coreSet: CoreSet) =
         let peer = self.NetworkCfg.GetPeer coreSet 0
