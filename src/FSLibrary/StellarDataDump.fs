@@ -228,4 +228,31 @@ type StellarFormation with
         for i in self.AllJobNums do
             self.DumpJobLogs(self.NetworkCfg.JobName i)
 
-    member self.DumpData() = self.NetworkCfg.EachPeer(self.DumpPeerData)
+    member self.DumpData() =
+        self.NetworkCfg.EachPeer(self.DumpPeerData)
+        self.LogContainerErrors()
+
+    member self.LogContainerErrors() =
+        // Get terminated container error codes for all pods
+        self.sleepUntilNextRateLimitedApiCallTime ()
+
+        let ns = self.NetworkCfg.NamespaceProperty
+        let pods = self.Kube.ListNamespacedPod(namespaceParameter = ns)
+
+        let checkState (state: V1ContainerState) (containerName: string) (podName: string) =
+            if state <> null && state.Terminated <> null && state.Terminated.ExitCode <> 0 // Success
+            then
+                LogWarn
+                    "Container %s terminated. Pod = %s, ExitCode = %d, Reason = %s"
+                    containerName
+                    podName
+                    state.Terminated.ExitCode
+                    state.Terminated.Reason
+
+        for pod in pods.Items do
+            if pod.Status.ContainerStatuses <> null then
+                let podName = pod.Metadata.Name
+
+                for status in pod.Status.ContainerStatuses do
+                    checkState status.LastState status.Name podName
+                    checkState status.State status.Name podName
