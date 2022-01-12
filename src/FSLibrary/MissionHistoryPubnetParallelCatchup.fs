@@ -44,7 +44,6 @@ let historyPubnetParallelCatchup (context: MissionContext) =
 
     let opts =
         { PubnetCoreSetOptions context.image with
-              emptyDirType = MemoryBackedEmptyDir
               localHistory = false
               invariantChecks = AllInvariantsExceptBucketConsistencyChecks
               initialization = CoreSetInitialization.OnlyNewDb }
