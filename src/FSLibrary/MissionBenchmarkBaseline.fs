@@ -27,7 +27,7 @@ let benchmarkBaseline (context: MissionContext) =
         (fun (formation: StellarFormation) (performanceReporter: PerformanceReporter) ->
             formation.WaitUntilSynced [ coreSet ]
             formation.UpgradeProtocolToLatest [ coreSet ]
-            formation.UpgradeMaxTxSize [ coreSet ] 1000000
+            formation.UpgradeMaxTxSetSize [ coreSet ] 1000000
 
             formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
 

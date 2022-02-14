@@ -73,7 +73,7 @@ let simulatePubnet (context: MissionContext) =
             // to fail asap in case of a misconfiguration
             formation.WaitUntilSynced fullCoreSet
             formation.UpgradeProtocolToLatest tier1
-            formation.UpgradeMaxTxSize tier1 1000000
+            formation.UpgradeMaxTxSetSize tier1 1000000
 
             formation.RunLoadgen sdf context.GenerateAccountCreationLoad
             formation.RunLoadgen sdf context.GeneratePretendLoad

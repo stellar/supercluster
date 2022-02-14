@@ -150,11 +150,15 @@ type StellarFormation with
         let latest = peer.GetSupportedProtocolVersion()
         self.UpgradeProtocol coreSetList latest
 
-    member self.UpgradeMaxTxSize (coreSetList: CoreSet list) (maxTxSize: int) =
+    member self.UpgradeMaxTxSetSize (coreSetList: CoreSet list) (maxTxSetSize: int) =
         let upgradeTime = System.DateTime.UtcNow.AddSeconds(15.0)
-        self.NetworkCfg.EachPeerInSets(coreSetList |> Array.ofList) (fun p -> p.UpgradeMaxTxSize maxTxSize upgradeTime)
+
+        self.NetworkCfg.EachPeerInSets
+            (coreSetList |> Array.ofList)
+            (fun p -> p.UpgradeMaxTxSetSize maxTxSetSize upgradeTime)
+
         let peer = self.NetworkCfg.GetPeer coreSetList.[0] 0
-        peer.WaitForMaxTxSetSize maxTxSize |> ignore
+        peer.WaitForMaxTxSetSize maxTxSetSize |> ignore
 
     member self.ReportStatus() = ReportAllPeerStatus self.NetworkCfg
 
