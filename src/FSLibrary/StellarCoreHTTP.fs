@@ -115,7 +115,7 @@ type UpgradeParameters =
     { upgradeTime: System.DateTime
       protocolVersion: Option<int>
       baseFee: Option<int>
-      maxTxSize: Option<int>
+      maxTxSetSize: Option<int>
       baseReserve: Option<int> }
 
     member self.ToQuery : (string * string) list =
@@ -126,13 +126,13 @@ type UpgradeParameters =
                        maybe "protocolversion" self.protocolVersion
                        maybe "basefee" self.baseFee
                        maybe "basereserve" self.baseReserve
-                       maybe "maxtxsize" self.maxTxSize |]
+                       maybe "maxtxsetsize" self.maxTxSetSize |]
 
 let DefaultUpgradeParameters =
     { upgradeTime = System.DateTime.Parse("1970-01-01T00:00:00Z")
       protocolVersion = None
       baseFee = None
-      maxTxSize = None
+      maxTxSetSize = None
       baseReserve = None }
 
 
@@ -224,8 +224,12 @@ type Peer with
 
         self.SetUpgrades(upgrades)
 
-    member self.UpgradeMaxTxSize (txSize: int) (time: System.DateTime) =
-        let upgrades = { DefaultUpgradeParameters with maxTxSize = Some(txSize); upgradeTime = time }
+    member self.UpgradeMaxTxSetSize (txSetSize: int) (time: System.DateTime) =
+        let upgrades =
+            { DefaultUpgradeParameters with
+                  maxTxSetSize = Some(txSetSize)
+                  upgradeTime = time }
+
         self.SetUpgrades(upgrades)
 
     member self.WaitForLedgerNum(n: int) =
@@ -249,7 +253,7 @@ type Peer with
     member self.WaitForMaxTxSetSize(n: int) =
         RetryUntilTrue
             (fun _ -> self.GetMaxTxSetSize() = n)
-            (fun _ -> LogInfo "Waiting for MaxTxSize=%d on %s" n self.ShortName.StringName)
+            (fun _ -> LogInfo "Waiting for MaxTxSetSize=%d on %s" n self.ShortName.StringName)
 
     member self.WaitForNextSeq (src: string) (n: int64) =
         let desiredSeq = n + int64 (1)

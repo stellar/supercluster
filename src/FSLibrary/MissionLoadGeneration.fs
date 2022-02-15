@@ -27,7 +27,7 @@ let loadGeneration (context: MissionContext) =
         (fun (formation: StellarFormation) ->
             formation.WaitUntilSynced [ coreSet ]
             formation.UpgradeProtocolToLatest [ coreSet ]
-            formation.UpgradeMaxTxSize [ coreSet ] 100000
+            formation.UpgradeMaxTxSetSize [ coreSet ] 100000
 
             formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
             formation.RunLoadgen coreSet context.GeneratePaymentLoad)

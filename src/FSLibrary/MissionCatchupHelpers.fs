@@ -154,7 +154,7 @@ let doCatchupForVersion
     generatorPeer.UpgradeProtocol version System.DateTime.UtcNow
 
     if context.numTxs > 100 then
-        generatorPeer.UpgradeMaxTxSize 1000000 System.DateTime.UtcNow
+        generatorPeer.UpgradeMaxTxSetSize 1000000 System.DateTime.UtcNow
 
     formation.RunLoadgen catchupSets.generatorSet context.GenerateAccountCreationLoad
     formation.RunLoadgen catchupSets.generatorSet context.GeneratePaymentLoad
