@@ -222,10 +222,18 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) : CoreSet l
     let adjacencyMap =
         addEdges allPubnetNodes (Array.map (fun (n: PubnetNode.Root) -> n.PublicKey) newNodes) tier1KeySet random
 
-    // First we partition nodes in the network into those that have home domains and
+    // First, we will remove all nodes with <= 4 connections because those nodes
+    // seem to fail to stay in sync with the network.
+    // Note that removing nodes may lead to more nodes having <= 4 connections,
+    // but anecdotally this has never been an issue.
+    // Next, we partition nodes in the network into those that have home domains and
     // those that do not. We call the former "org" nodes and the latter "misc" nodes.
+    let minAllowedConnectionCount = 5
+
     let orgNodes, miscNodes =
-        Array.partition (fun (n: PubnetNode.Root) -> n.SbHomeDomain.IsSome) allPubnetNodes
+        allPubnetNodes
+        |> Array.filter (fun (n: PubnetNode.Root) -> minAllowedConnectionCount <= Array.length n.Peers)
+        |> Array.partition (fun (n: PubnetNode.Root) -> n.SbHomeDomain.IsSome)
 
     // We then trim down the set of misc nodes so that they fit within simulation
     // size limit passed. If we can't even fit the org nodes, we fail here.
