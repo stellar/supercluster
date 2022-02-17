@@ -90,7 +90,8 @@ let NetworkDelayScriptResourceRequirements : V1ResourceRequirements =
     // The network delay script needs 0.05 vCPU and 32MB RAM
     makeResourceRequirements 10 32 50 32
 
-let SimulatePubnetCoreResourceRequirements : V1ResourceRequirements =
+
+let GetSimulatePubnetResources networkSize : V1ResourceRequirements =
     // Running simulate-pubnet _needs_ a ways over 200MB RSS per node, and
     // depending on queue backups it can spike over 300MB; we have 64GB limit
     // for quota so to be generous we give each node 400MB limit and run only
@@ -103,7 +104,14 @@ let SimulatePubnetCoreResourceRequirements : V1ResourceRequirements =
     //
     // So we allocate a 64MB RAM request and 400MB RAM limit to each, and a
     // 0.025vCPU request and 0.5vCPU limit to each.
-    makeResourceRequirements 25 64 500 400
+    //
+    // It increases the resource requirement in case the network size is big.
+    let cpuReqMili = 25
+    let memReqMebi = 64
+    let cpuLimMili = 500
+    let memLimMebi = 400
+    let k = if networkSize >= 200 then 2 else 1
+    makeResourceRequirements (k * cpuReqMili) (k * memReqMebi) (k * cpuLimMili) (k * memLimMebi)
 
 let ParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
     // When doing parallel catchup, we give each container
@@ -265,7 +273,7 @@ let CoreContainerForCommand
         match cr with
         | SmallTestResources -> SmallTestCoreResourceRequirements
         | AcceptanceTestResources -> AcceptanceTestCoreResourceRequirements
-        | SimulatePubnetResources -> SimulatePubnetCoreResourceRequirements
+        | SimulatePubnetResources size -> GetSimulatePubnetResources size
         | ParallelCatchupResources -> ParallelCatchupCoreResourceRequirements
         | NonParallelCatchupResources -> NonParallelCatchupCoreResourceRequirements
         | UpgradeResources -> UpgradeCoreResourceRequirements
