@@ -176,6 +176,10 @@ type StellarCoreCfg =
 
         t.Add("DATABASE", self.database.ToString()) |> ignore
 
+        match self.network.missionContext.enableFlowControl with
+        | None -> ()
+        | Some enable -> t.Add("ENABLE_OVERLAY_FLOW_CONTROL", enable) |> ignore
+
         match self.containerType with
         // REVERTME: temporarily use same nonzero port for both container types.
         | _ -> t.Add("HTTP_PORT", int64 (CfgVal.httpPort)) |> ignore
@@ -190,6 +194,25 @@ type StellarCoreCfg =
         t.Add("PREFERRED_PEERS_ONLY", self.preferredPeersOnly) |> ignore
         t.Add("COMMANDS", logLevelCommands) |> ignore
         t.Add("CATCHUP_COMPLETE", self.catchupMode = CatchupComplete) |> ignore
+
+        match self.network.missionContext.peerReadingCapacity, self.network.missionContext.peerFloodCapacity with
+        | None, None -> ()
+        | Some read, Some flood ->
+            t.Add("PEER_FLOOD_READING_CAPACITY", flood) |> ignore
+            t.Add("PEER_READING_CAPACITY", read) |> ignore
+        | _, _ ->
+            raise (
+                System.ArgumentException
+                    "PEER_FLOOD_READING_CAPACITY and PEER_READING_CAPACITY must be defined together"
+            )
+
+        match self.network.missionContext.sleepMainThread with
+        | None -> ()
+        | Some sleep -> t.Add("ARTIFICIALLY_SLEEP_MAIN_THREAD_FOR_TESTING", sleep) |> ignore
+
+        match self.network.missionContext.flowControlSendMoreBatchSize with
+        | None -> ()
+        | Some batchSize -> t.Add("FLOW_CONTROL_SEND_MORE_BATCH_SIZE", batchSize) |> ignore
 
         t.Add("MAXIMUM_LEDGER_CLOSETIME_DRIFT", CfgVal.maximumLedgerClosetimeDrift)
         |> ignore
