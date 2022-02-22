@@ -62,6 +62,11 @@ let ctx : MissionContext =
       apiRateLimit = 10
       pubnetData = None
       tier1Keys = None
+      peerReadingCapacity = None
+      peerFloodCapacity = None
+      sleepMainThread = None
+      enableFlowControl = None
+      flowControlSendMoreBatchSize = None
       installNetworkDelay = Some true
       simulateApplyDuration =
           Some(

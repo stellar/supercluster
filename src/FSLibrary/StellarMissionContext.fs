@@ -59,6 +59,11 @@ type MissionContext =
       installNetworkDelay: bool option
       simulateApplyDuration: seq<int> option
       simulateApplyWeight: seq<int> option
+      peerReadingCapacity: int option
+      peerFloodCapacity: int option
+      sleepMainThread: int option
+      enableFlowControl: bool option
+      flowControlSendMoreBatchSize: int option
       tier1OrgsToAdd: int
       nonTier1NodesToAdd: int
       randomSeed: int
