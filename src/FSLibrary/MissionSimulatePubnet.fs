@@ -19,7 +19,7 @@ open StellarCoreHTTP
 let simulatePubnet (context: MissionContext) =
     let context =
         { context with
-              coreResources = SimulatePubnetResources
+              coreResources = SimulatePubnetResources context.networkSizeLimit
               // When no value is given, use the default values derived from observing the pubnet.
               // 9/10, 88/100, 3/1000 denote 9% => 10 usec, 88% => 100 usec, 3% => 1000 usec.
               simulateApplyDuration =

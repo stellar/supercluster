@@ -17,7 +17,7 @@ type LogLevels = { LogDebugPartitions: string list; LogTracePartitions: string l
 type CoreResources =
     | SmallTestResources
     | AcceptanceTestResources
-    | SimulatePubnetResources
+    | SimulatePubnetResources of int
     | ParallelCatchupResources
     | NonParallelCatchupResources
     | UpgradeResources
