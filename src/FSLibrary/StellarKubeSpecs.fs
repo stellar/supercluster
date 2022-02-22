@@ -176,6 +176,18 @@ let PrometheusExporterSidecarContainer (prometheusExporterImage: string) =
         resources = PrometheusExporterSidecarResourceRequirements
     )
 
+let TryAddPrometheusContainer (missionContext: MissionContext) (containers: V1Container array) =
+    if missionContext.exportToPrometheus then
+        Array.append containers [| PrometheusExporterSidecarContainer missionContext.prometheusExporterImage |]
+    else
+        containers
+
+let TryGetPrometheusAnnotation (missionContext: MissionContext) =
+    if missionContext.exportToPrometheus then
+        Map.ofList [ ("prometheus.io/scrape", "true") ]
+    else
+        Map.empty
+
 let NetworkDelayScriptContainer (netdelayImage: string) (configOpt: ConfigOption) (peerOrJobNames: string array) =
     let peerNameFieldSel = V1ObjectFieldSelector(fieldPath = "metadata.name")
     let peerNameEnvVarSource = V1EnvVarSource(fieldRef = peerNameFieldSel)
@@ -595,6 +607,9 @@ type NetworkCfg with
                 | Postgres -> [| coreContainer; PostgresContainer self.missionContext.postgresImage |]
                 | _ -> [| coreContainer |]
 
+        let containers = TryAddPrometheusContainer self.missionContext containers
+        let annotations = TryGetPrometheusAnnotation self.missionContext
+
         V1PodTemplateSpec(
             spec =
                 V1PodSpec(
@@ -606,7 +621,12 @@ type NetworkCfg with
                     restartPolicy = "Never",
                     shareProcessNamespace = System.Nullable<bool>(true)
                 ),
-            metadata = V1ObjectMeta(labels = CfgVal.labels, namespaceProperty = self.NamespaceProperty)
+            metadata =
+                V1ObjectMeta(
+                    labels = CfgVal.labels,
+                    annotations = annotations,
+                    namespaceProperty = self.NamespaceProperty
+                )
         )
 
     member self.GetJobFor (jobNum: int) (command: string array) (image: string) (useConfigFile: bool) : V1Job =
@@ -696,14 +716,6 @@ type NetworkCfg with
                 containers
 
         let containers =
-            if exportToPrometheus then
-                Array.append
-                    containers
-                    [| PrometheusExporterSidecarContainer self.missionContext.prometheusExporterImage |]
-            else
-                containers
-
-        let containers =
             if self.NeedNetworkDelayScript then
                 Array.append
                     containers
@@ -711,11 +723,8 @@ type NetworkCfg with
             else
                 containers
 
-        let annotations =
-            if exportToPrometheus then
-                Map.ofList [ ("prometheus.io/scrape", "true") ]
-            else
-                Map.empty
+        let containers = TryAddPrometheusContainer self.missionContext containers
+        let annotations = TryGetPrometheusAnnotation self.missionContext
 
         let podSpec =
             V1PodSpec(
