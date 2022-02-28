@@ -37,7 +37,7 @@ let simulatePubnetTier1Perf (context: MissionContext) =
 
             // Set max tx size to 10x the rate -- at 5x we overflow too often
             // and lose sync.
-            formation.UpgradeMaxTxSize tier1 (10 * context.maxTxRate)
+            formation.UpgradeMaxTxSetSize tier1 (10 * context.maxTxRate)
 
             formation.RunLoadgen sdf context.GenerateAccountCreationLoad
             formation.RunMultiLoadgen tier1 context.GeneratePaymentLoad
