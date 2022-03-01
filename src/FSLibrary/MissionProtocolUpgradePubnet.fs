@@ -21,6 +21,7 @@ let protocolUpgradePubnet (context: MissionContext) =
         { CoreSetOptions.GetDefault context.image with
               nodeCount = 1
               quorumSet = CoreSetQuorum(CoreSetName "core")
+              emptyDirType = DiskBackedEmptyDir
               historyNodes = Some([])
               historyGetCommands = PubnetGetCommands
               catchupMode = CatchupRecent(0)
