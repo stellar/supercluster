@@ -263,11 +263,18 @@ type NetworkCfg with
             (self.MapAllPeers(fun cs i -> if cs.keys.[i].PublicKey = k then self.LocAndDnsName cs i else None))
 
     member self.NeedNetworkDelayScript : bool =
-        let firstLoc = Map.tryPick (fun _ cs -> cs.options.nodeLocs) self.coreSets
-        // firstLoc.IsSome is about whether it's possible to install network delays.
-        // installNetworkDelay is about whether we want install network delays.
-        // We should install network delays iff we can and we want to do so.
-        (self.missionContext.installNetworkDelay = Some true) && firstLoc.IsSome
+        if self.missionContext.installNetworkDelay = Some true then
+            let atLeastOneLocation = Map.exists (fun _ cs -> cs.options.nodeLocs.IsSome) self.coreSets
+
+            if atLeastOneLocation then
+                true
+            else
+                // If there's _some_ geo info, we can extrapolate.
+                // However, if there's _no_ geo info, we can't really do anything.
+                // Don't install network delay if your topology has no geo info.
+                failwith "Network delays can't be installed if no geo info provided."
+        else
+            false
 
     member self.NetworkDelayScript (cs: CoreSet) (i: int) : ShCmd =
         match cs.options.nodeLocs with

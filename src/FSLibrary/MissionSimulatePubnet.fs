@@ -44,6 +44,12 @@ let simulatePubnet (context: MissionContext) =
                           }
                       )
                   )
+              // As the goal of `SimulatePubnet` is to simulate a pubnet,
+              // network delays are, in general, indispensable.
+              // Therefore, unless explicitly told otherwise, we will use
+              // network delays.
+              installNetworkDelay = Some(context.installNetworkDelay |> Option.defaultValue true)
+
               // This spike configuration was derived from some pubnet data.
               // Most ledgers are expected to have roughly 60 * 5 = 300 ops,
               // and 1 in 13 ledgers are expected to have roughly 60 * 5 + 700 = 1000 txs.
