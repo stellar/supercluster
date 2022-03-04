@@ -266,7 +266,14 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) : CoreSet l
                 let domain = n.SbHomeDomain.Value
                 // We turn 'www.stellar.org' into 'stellar'
                 // and 'stellar.blockdaemon.com' into 'blockdaemon'
-                let cleanOrgName = if domain.Contains('.') then ((Array.rev (domain.Split('.'))).[1]) else domain
+                // 'validator.stellar.expert' is a special case
+                // since it would also turn into 'stellar'.
+                // As a slightly hacky fix, we will call it 'exert'.
+                let cleanOrgName =
+                    if domain = "validator.stellar.expert" then "expert"
+                    else if domain.Contains('.') then ((Array.rev (domain.Split('.'))).[1])
+                    else domain
+
                 let lowercase = cleanOrgName.ToLower()
                 HomeDomainName lowercase)
             orgNodes
