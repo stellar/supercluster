@@ -36,12 +36,13 @@ let historyTestnetPerformance (context: MissionContext) =
         (Some(SDFTestNet))
         (fun (formation: StellarFormation) ->
 
-            (formation.RunSingleJobWithTimeout
-                (Some(TimeSpan.FromMinutes(10.0)))
-                [| "catchup"; sprintf "%d/0" firstLedger |]
-                context.image
-                true)
-            |> formation.CheckAllJobsSucceeded
+            if firstLedger > 1L then
+                (formation.RunSingleJobWithTimeout
+                    (Some(TimeSpan.FromMinutes(10.0)))
+                    [| "catchup"; sprintf "%d/0" firstLedger |]
+                    context.image
+                    true)
+                |> formation.CheckAllJobsSucceeded
 
             (formation.RunSingleJobWithTimeout
                 (Some(TimeSpan.FromHours(4.0)))
