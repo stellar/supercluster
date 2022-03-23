@@ -211,7 +211,11 @@ type Tests(output: ITestOutputHelper) =
              let nCfg = MakeNetworkCfg pubnetctx coreSets passOpt
              let sdfCoreSetName = CoreSetName "stellar"
              Assert.Contains(coreSets, (fun cs -> cs.name = sdfCoreSetName))
+             // Ensure that 'validator.stellar.expert' got a different name from
+             // 'www.stellar.org'.
+             Assert.Contains(coreSets, (fun cs -> cs.name = (CoreSetName "expert")))
              let sdfCoreSet = List.find (fun cs -> cs.name = sdfCoreSetName) coreSets
+             Assert.Equal(3, sdfCoreSet.options.nodeCount)
              let cfg = nCfg.StellarCoreCfg(sdfCoreSet, 0, MainCoreContainer)
              let toml = cfg.ToString()
              Assert.Contains("[QUORUM_SET.sub1]", toml)
