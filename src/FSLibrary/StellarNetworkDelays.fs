@@ -132,7 +132,7 @@ let getNetworkDelayCommands (loc1: GeoLoc) (locsAndNames: (GeoLoc * PeerDnsName)
                         sprintf "1:%d" n
                         "htb"
                         "rate"
-                        "100mbit" |]
+                        "10gbit" |]
 
     let peerVar (n: int) : string = sprintf "PEER%d" n
 
