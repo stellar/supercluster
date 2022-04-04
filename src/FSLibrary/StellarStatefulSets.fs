@@ -220,25 +220,28 @@ type StellarFormation with
     member self.RunMultiLoadgen (coreSets: CoreSet list) (fullLoadGen: LoadGen) =
         let n = List.length coreSets
 
-        let fractionalLoadGen =
+        let fractionalLoadGen (i: int) : LoadGen =
+            let getFraction attr = if i + 1 = n then (attr / n + attr % n) else attr / n
+
             { fullLoadGen with
                   accounts = fullLoadGen.accounts / n
                   txs = fullLoadGen.txs / n
-                  spikesize = fullLoadGen.spikesize / n
-                  txrate = fullLoadGen.txrate / n }
+                  spikesize = getFraction fullLoadGen.spikesize
+                  txrate = getFraction fullLoadGen.txrate }
 
         let loadGenPeers = List.map (fun cs -> self.NetworkCfg.GetPeer cs 0) coreSets
 
         for (i, peer) in (List.indexed loadGenPeers) do
-            let offset = fractionalLoadGen.accounts * i
-            let peerSpecificLoadgen = { fractionalLoadGen with offset = offset }
+            let loadGen = fractionalLoadGen i
+            let offset = loadGen.accounts * i
+            let peerSpecificLoadgen = { loadGen with offset = offset }
             LogInfo "Loadgen: %s with offset %d" (peer.GenerateLoad peerSpecificLoadgen) offset
 
         while not (List.fold (fun (all: bool) (peer: Peer) -> (peer.IsLoadGenComplete()) && all) true loadGenPeers) do
             Thread.Sleep(millisecondsTimeout = 3000)
 
-            for peer in loadGenPeers do
-                peer.LogLoadGenProgressTowards fractionalLoadGen
+            for (i, peer) in (List.indexed loadGenPeers) do
+                peer.LogLoadGenProgressTowards(fractionalLoadGen i)
 
     member self.RunLoadgenAndCheckNoErrors(coreSet: CoreSet) =
         let peer = self.NetworkCfg.GetPeer coreSet 0
