@@ -171,37 +171,37 @@ type MissionOptions
     member self.prometheusExporterImage = prometheusExporterImage
 
     [<Option("tx-rate",
-             HelpText = "Transaction rate for benchamarks and load generation tests",
+             HelpText = "Transaction rate for benchmarks and load generation tests",
              Required = false,
-             Default = 100)>]
+             Default = 200)>]
     member self.TxRate = txRate
 
     [<Option("max-tx-rate",
-             HelpText = "Maximum transaction rate for benchamarks and load generation tests",
+             HelpText = "Maximum transaction rate for benchmarks and load generation tests",
              Required = false,
-             Default = 300)>]
+             Default = 1000)>]
     member self.MaxTxRate = maxTxRate
 
     [<Option("num-accounts",
-             HelpText = "Number of accounts for benchamarks and load generation tests",
+             HelpText = "Number of accounts for benchmarks and load generation tests",
              Required = false,
              Default = 100000)>]
     member self.NumAccounts = numAccounts
 
     [<Option("num-txs",
-             HelpText = "Number of transactions for benchamarks and load generation tests",
+             HelpText = "Number of transactions for benchmarks and load generation tests",
              Required = false,
              Default = 100000)>]
     member self.NumTxs = numTxs
 
     [<Option("spike-size",
-             HelpText = "Number of transactions per spike for benchamarks and load generation tests",
+             HelpText = "Number of transactions per spike for benchmarks and load generation tests",
              Required = false,
              Default = 100000)>]
     member self.SpikeSize = spikeSize
 
     [<Option("spike-interval",
-             HelpText = "A spike will occur every spikeInterval seconds for benchamarks and load generation tests",
+             HelpText = "A spike will occur every spikeInterval seconds for benchmarks and load generation tests",
              Required = false,
              Default = 0)>]
     member self.SpikeInterval = spikeInterval

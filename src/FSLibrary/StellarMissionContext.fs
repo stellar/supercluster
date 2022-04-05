@@ -18,6 +18,7 @@ type CoreResources =
     | SmallTestResources
     | AcceptanceTestResources
     | SimulatePubnetResources of int
+    | SimulatePubnetTier1PerfResources
     | ParallelCatchupResources
     | NonParallelCatchupResources
     | UpgradeResources

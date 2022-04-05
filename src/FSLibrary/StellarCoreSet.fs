@@ -156,6 +156,7 @@ type CoreSetOptions =
       peers: CoreSetName list option
       peersDns: PeerDnsName list
       accelerateTime: bool
+      performMaintenance: bool
       unsafeQuorum: bool
       awaitSync: bool
       validate: bool
@@ -186,6 +187,7 @@ type CoreSetOptions =
           peers = None
           peersDns = List.empty
           accelerateTime = true
+          performMaintenance = true
           unsafeQuorum = true
           awaitSync = true
           validate = true
