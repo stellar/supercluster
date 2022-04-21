@@ -19,7 +19,7 @@ let historyTestnetParallelCatchup (context: MissionContext) =
     let ledgersPerCheckpoint = 64
     let ledgersPerJob = checkpointsPerJob * ledgersPerCheckpoint
     let totalLedgers = GetLatestTestnetLedgerNumber()
-    let parallelism = 128
+    let parallelism = 256
     let overlapCheckpoints = 5
     let overlapLedgers = overlapCheckpoints * ledgersPerCheckpoint
 
