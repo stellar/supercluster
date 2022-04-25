@@ -438,7 +438,7 @@ let main argv =
                          reraise ()
 
                  // Poll cluster every minute to make sure we don't have any issues
-                 let timer = new System.Threading.Timer(TimerCallback(heartbeatHandler), null, 1000, 60000)
+                 let timer = new System.Threading.Timer(TimerCallback(heartbeatHandler), null, 1000, 300000)
 
                  for m in mission.Missions do
                      LogInfo "-----------------------------------"
