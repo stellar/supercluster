@@ -22,7 +22,7 @@ let simulatePubnetTier1Perf (context: MissionContext) =
               coreResources = SimulatePubnetTier1PerfResources
               installNetworkDelay = Some(context.installNetworkDelay |> Option.defaultValue true)
               // Start with at least 300 tx/s
-              txRate = max context.txRate 300
+              txRate = max context.txRate 400
               // No additional DB overhead unless specified (this will measure the in-memory SQLite DB only)
               simulateApplyDuration = Some(context.simulateApplyDuration |> Option.defaultValue (seq { 0 }))
               simulateApplyWeight = Some(context.simulateApplyWeight |> Option.defaultValue (seq { 100 })) }
