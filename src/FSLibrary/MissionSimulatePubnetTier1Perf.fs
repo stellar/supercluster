@@ -21,8 +21,6 @@ let simulatePubnetTier1Perf (context: MissionContext) =
         { context with
               coreResources = SimulatePubnetTier1PerfResources
               installNetworkDelay = Some(context.installNetworkDelay |> Option.defaultValue true)
-              // Start with at least 300 tx/s
-              txRate = max context.txRate 400
               // No additional DB overhead unless specified (this will measure the in-memory SQLite DB only)
               simulateApplyDuration = Some(context.simulateApplyDuration |> Option.defaultValue (seq { 0 }))
               simulateApplyWeight = Some(context.simulateApplyWeight |> Option.defaultValue (seq { 100 })) }
@@ -44,31 +42,50 @@ let simulatePubnetTier1Perf (context: MissionContext) =
             formation.WaitUntilSynced tier1
             formation.UpgradeProtocolToLatest tier1
             // Set max tx size to 10x the rate -- at 5x we overflow the transaction queue too often.
-            formation.UpgradeMaxTxSetSize tier1 (10 * context.maxTxRate)
+            let mutable finalTxRate = None
+            let mutable lowerBound = max context.txRate 400
+            let mutable upperBound = context.maxTxRate
+            // Ad the runs take a while, set a threshold of 10, so we get a reasonbale approximation
+            let threshold = 10
+
+            formation.UpgradeMaxTxSetSize tier1 (10 * upperBound)
 
             formation.RunLoadgen sdf context.GenerateAccountCreationLoad
 
-            let mutable finalTxRate = context.txRate
+            while upperBound - lowerBound > threshold do
+                let middle = lowerBound + (upperBound - lowerBound) / 2
 
-            try
-                for txRate in context.txRate .. (20) .. context.maxTxRate do
-                    finalTxRate <- txRate
+                try
+                    LogInfo "Run started at tx rate %i" middle
 
                     let loadGen =
                         { mode = GeneratePaymentLoad
                           accounts = context.numAccounts
                           // Roughly 15 min of load
-                          txs = txRate * 1000
+                          txs = middle * 1000
                           spikesize = context.spikeSize
                           spikeinterval = context.spikeInterval
-                          txrate = txRate
+                          txrate = middle
                           offset = 0
                           batchsize = 100 }
 
                     formation.RunMultiLoadgen tier1 loadGen
                     formation.EnsureAllNodesInSync tier1
 
-                    // After each iteration, let the mission stabilize a bit before running the next one
-                    System.Threading.Thread.Sleep(60000)
+                    // Increase the tx rate
+                    lowerBound <- middle
+                    finalTxRate <- Some middle
+                    LogInfo "Run succeeded at tx rate %i" middle
 
-            with _ -> LogInfo "Simulation failed at tx rate %i" finalTxRate)
+                with _ ->
+                    LogInfo "Run failed at tx rate %i" middle
+                    upperBound <- middle
+                    // After each failed iteration, let the mission stabilize a bit before running the next one
+                    System.Threading.Thread.Sleep(120000)
+
+                formation.clearMetrics tier1
+
+            if finalTxRate.IsSome then
+                LogInfo "Final tx rate %i" finalTxRate.Value
+            else
+                failwith (sprintf "No successful runs at tx rate %i or higher" lowerBound))

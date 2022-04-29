@@ -215,6 +215,9 @@ type StellarFormation with
         LogInfo "Loadgen: %s" (peer.GenerateLoad loadGen)
         peer.WaitForLoadGenComplete loadGen
 
+    member self.clearMetrics(coreSets: CoreSet list) =
+        self.NetworkCfg.EachPeerInSets(coreSets |> List.toArray) (fun peer -> peer.ClearMetrics())
+
     // This is similar to RunLoadgen but runs a 1/N fractional portion of a
     // given LoadGen on node 0 of each of N CoreSets.
     member self.RunMultiLoadgen (coreSets: CoreSet list) (fullLoadGen: LoadGen) =
