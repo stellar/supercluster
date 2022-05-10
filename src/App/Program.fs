@@ -173,7 +173,7 @@ type MissionOptions
     [<Option("tx-rate",
              HelpText = "Transaction rate for benchmarks and load generation tests",
              Required = false,
-             Default = 200)>]
+             Default = 20)>]
     member self.TxRate = txRate
 
     [<Option("max-tx-rate",
