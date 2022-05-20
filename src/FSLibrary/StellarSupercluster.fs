@@ -240,9 +240,10 @@ type MissionContext with
             (if self.keepData then formation.KeepData()
              reraise ())
 
-    member self.Execute
+    member self.ExecuteWithOptionalConsistencyCheck
         (coreSetList: CoreSet list)
         (passphrase: NetworkPassphrase option)
+        (checkConsistency: bool)
         (run: StellarFormation -> unit)
         : unit =
         use formation = self.MakeFormation coreSetList passphrase
@@ -251,12 +252,19 @@ type MissionContext with
             try
                 formation.WaitUntilReady()
                 run formation
-                formation.CheckNoErrorsAndPairwiseConsistency()
+                if checkConsistency then formation.CheckNoErrorsAndPairwiseConsistency()
             finally
                 formation.DumpData()
         with x ->
             (if self.keepData then formation.KeepData()
              reraise ())
+
+    member self.Execute
+        (coreSetList: CoreSet list)
+        (passphrase: NetworkPassphrase option)
+        (run: StellarFormation -> unit)
+        : unit =
+        self.ExecuteWithOptionalConsistencyCheck coreSetList passphrase true run
 
     member self.ExecuteWithPerformanceReporter
         (coreSetList: CoreSet list)
