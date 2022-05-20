@@ -28,64 +28,108 @@ let simulatePubnetTier1Perf (context: MissionContext) =
     let tier1 = StableApproximateTier1CoreSets context.image
     let sdf = List.find (fun (cs: CoreSet) -> cs.name.StringName = "sdf") tier1
 
-    context.Execute
+    context.ExecuteWithOptionalConsistencyCheck
         tier1
         None
+        false
         (fun (formation: StellarFormation) ->
-            // Setup overlay connections first before manually closing
-            // ledger, which kick off consensus
-            formation.WaitUntilConnected tier1
-            formation.ManualClose tier1
 
-            // Wait until the whole network is synced before proceeding,
-            // to fail asap in case of a misconfiguration
-            formation.WaitUntilSynced tier1
-            formation.UpgradeProtocolToLatest tier1
-            // Set max tx size to 10x the rate -- at 5x we overflow the transaction queue too often.
-            let mutable finalTxRate = None
-            let mutable lowerBound = max context.txRate 400
-            let mutable upperBound = context.maxTxRate
-            // Ad the runs take a while, set a threshold of 10, so we get a reasonbale approximation
+            let numAccounts = 10000
+
+            let setupCoreSets (coreSets: CoreSet list) (rate: int) =
+                // Setup overlay connections first before manually closing
+                // ledger, which kick off consensus
+                formation.WaitUntilConnected coreSets
+                formation.ManualClose coreSets
+
+                // Wait until the whole network is synced before proceeding,
+                // to fail asap in case of a misconfiguration
+                formation.WaitUntilSynced coreSets
+                formation.UpgradeProtocolToLatest coreSets
+                // Set max tx size to 10x the rate -- at 5x we overflow the transaction queue too often.
+                formation.UpgradeMaxTxSetSize coreSets (10 * rate)
+                formation.RunLoadgen sdf { context.GenerateAccountCreationLoad with accounts = numAccounts }
+
+            let restartCoreSets (coreSets: CoreSet list) =
+                for set in tier1 do
+                    formation.Stop set.name
+
+                for set in tier1 do
+                    formation.Start set.name
+
+            let getMiddle (low: int) (high: int) = low + (high - low) / 2
+
+            let binarySearchWithThreshold (low: int) (high: int) (threshold: int) =
+
+                let mutable lowerBound = low
+                let mutable upperBound = high
+                let mutable shouldRestart = false
+                let mutable finalTxRate = None
+
+                setupCoreSets tier1 (getMiddle lowerBound upperBound)
+
+                while upperBound - lowerBound > threshold do
+                    let middle = getMiddle lowerBound upperBound
+
+                    if shouldRestart then
+                        // Stop and start the network, to make sure next iteration of the test is not impacted by previous
+                        restartCoreSets tier1
+                        setupCoreSets tier1 middle
+
+                    formation.clearMetrics tier1
+
+                    try
+                        LogInfo "Run started at tx rate %i" middle
+
+                        let loadGen =
+                            { mode = GeneratePaymentLoad
+                              accounts = numAccounts
+                              // Roughly 15 min of load
+                              txs = middle * 1000
+                              spikesize = context.spikeSize
+                              spikeinterval = context.spikeInterval
+                              txrate = middle
+                              offset = 0
+                              batchsize = 100 }
+
+                        formation.RunMultiLoadgen tier1 loadGen
+                        formation.CheckNoErrorsAndPairwiseConsistency()
+                        formation.EnsureAllNodesInSync tier1
+
+                        // Increase the tx rate
+                        lowerBound <- middle
+                        finalTxRate <- Some middle
+                        LogInfo "Run succeeded at tx rate %i" middle
+                        shouldRestart <- false
+
+                    with _ ->
+                        LogInfo "Run failed at tx rate %i" middle
+                        upperBound <- middle
+                        shouldRestart <- true
+
+                if finalTxRate.IsSome then
+                    LogInfo "Found max tx rate %i" finalTxRate.Value
+
+                    if context.maxTxRate - finalTxRate.Value <= threshold then
+                        LogInfo "Tx rate reached the upper bound, increase max-tx-rate for more accurate results"
+                else
+                    failwith (sprintf "No successful runs at tx rate %i or higher" lowerBound)
+
+                finalTxRate.Value
+
+            let mutable results = []
+            // As the runs take a while, set a threshold of 10, so we get a reasonbale approximation
             let threshold = 10
+            let numRuns = 3
 
-            formation.UpgradeMaxTxSetSize tier1 (10 * upperBound)
+            for run in 1 .. numRuns do
+                LogInfo "Starting max TPS run %i" run
+                let resultRate = binarySearchWithThreshold (max context.txRate 400) context.maxTxRate threshold
+                results <- List.append results [ resultRate ]
+                if run < numRuns then restartCoreSets tier1
 
-            formation.RunLoadgen sdf context.GenerateAccountCreationLoad
-
-            while upperBound - lowerBound > threshold do
-                let middle = lowerBound + (upperBound - lowerBound) / 2
-
-                try
-                    LogInfo "Run started at tx rate %i" middle
-
-                    let loadGen =
-                        { mode = GeneratePaymentLoad
-                          accounts = context.numAccounts
-                          // Roughly 15 min of load
-                          txs = middle * 1000
-                          spikesize = context.spikeSize
-                          spikeinterval = context.spikeInterval
-                          txrate = middle
-                          offset = 0
-                          batchsize = 100 }
-
-                    formation.RunMultiLoadgen tier1 loadGen
-                    formation.EnsureAllNodesInSync tier1
-
-                    // Increase the tx rate
-                    lowerBound <- middle
-                    finalTxRate <- Some middle
-                    LogInfo "Run succeeded at tx rate %i" middle
-
-                with _ ->
-                    LogInfo "Run failed at tx rate %i" middle
-                    upperBound <- middle
-                    // After each failed iteration, let the mission stabilize a bit before running the next one
-                    System.Threading.Thread.Sleep(120000)
-
-                formation.clearMetrics tier1
-
-            if finalTxRate.IsSome then
-                LogInfo "Final tx rate %i" finalTxRate.Value
-            else
-                failwith (sprintf "No successful runs at tx rate %i or higher" lowerBound))
+            LogInfo
+                "Final tx rate averaged to %i over %i runs for image %s"
+                (results |> List.map float |> List.average |> int)
+                numRuns
+                context.image)
