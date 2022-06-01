@@ -196,7 +196,7 @@ type StellarFormation with
                 LogInfo "Checking for pod buildup"
                 let pods = self.Kube.ListNamespacedPod(namespaceParameter = ns)
 
-                if pods <> null then
+                if pods <> null && pods.Items <> null then
                     for pod in pods.Items do
                         let stillPending = (pod.Status.Phase = "Pending")
 
