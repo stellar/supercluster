@@ -176,10 +176,6 @@ type StellarCoreCfg =
 
         t.Add("DATABASE", self.database.ToString()) |> ignore
 
-        match self.network.missionContext.enableFlowControl with
-        | None -> ()
-        | Some enable -> t.Add("ENABLE_OVERLAY_FLOW_CONTROL", enable) |> ignore
-
         match self.containerType with
         // REVERTME: temporarily use same nonzero port for both container types.
         | _ -> t.Add("HTTP_PORT", int64 (CfgVal.httpPort)) |> ignore

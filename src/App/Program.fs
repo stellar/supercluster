@@ -74,7 +74,6 @@ type MissionOptions
         peerReadingCapacity: int option,
         peerFloodCapacity: int option,
         sleepMainThread: int option,
-        enableFlowControl: bool option,
         flowControlSendMoreBatchSize: int option,
         simulateApplyDuration: seq<string>,
         simulateApplyWeight: seq<string>,
@@ -264,11 +263,8 @@ type MissionOptions
              Required = false)>]
     member self.SleepMainThread = sleepMainThread
 
-    [<Option("enable-flow-control", HelpText = "Enable flow control (See ENABLE_OVERLAY_FLOW_CONTROL)", Required = false)>]
-    member self.EnableFlowControl = enableFlowControl
-
     [<Option("flow-control-send-more-batch-size",
-             HelpText = "When flow control is enabled, peer asks for more data every time it processes `FLOW_CONTROL_SEND_MORE_BATCH_SIZE` messages (See FLOW_CONTROL_SEND_MORE_BATCH_SIZE)",
+             HelpText = "Peer asks for more data every time it processes `FLOW_CONTROL_SEND_MORE_BATCH_SIZE` messages (See FLOW_CONTROL_SEND_MORE_BATCH_SIZE)",
              Required = false)>]
     member self.FlowControlSendMoreBatchSize = flowControlSendMoreBatchSize
 
@@ -392,7 +388,6 @@ let main argv =
                   peerFloodCapacity = None
                   peerReadingCapacity = None
                   sleepMainThread = None
-                  enableFlowControl = None
                   flowControlSendMoreBatchSize = None
                   tier1OrgsToAdd = 0
                   nonTier1NodesToAdd = 0
@@ -488,7 +483,6 @@ let main argv =
                                peerReadingCapacity = mission.PeerReadingCapacity
                                peerFloodCapacity = mission.PeerFloodCapacity
                                sleepMainThread = mission.SleepMainThread
-                               enableFlowControl = mission.EnableFlowControl
                                flowControlSendMoreBatchSize = mission.FlowControlSendMoreBatchSize
                                tier1OrgsToAdd = mission.Tier1OrgsToAdd
                                nonTier1NodesToAdd = mission.NonTier1NodesToAdd

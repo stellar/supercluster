@@ -65,7 +65,6 @@ let ctx : MissionContext =
       peerReadingCapacity = None
       peerFloodCapacity = None
       sleepMainThread = None
-      enableFlowControl = None
       flowControlSendMoreBatchSize = None
       installNetworkDelay = Some true
       simulateApplyDuration =
