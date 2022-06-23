@@ -249,9 +249,7 @@ type MissionOptions
              Required = false)>]
     member self.InstallNetworkDelay = installNetworkDelay
 
-    [<Option("flat-network-delay",
-             HelpText = "Constant value to set network delay to",
-             Required = false)>]
+    [<Option("flat-network-delay", HelpText = "Constant value to set network delay to", Required = false)>]
     member self.FlatNetworkDelay = flatNetworkDelay
 
     [<Option("peer-reading-capacity",

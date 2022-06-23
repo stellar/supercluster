@@ -25,11 +25,20 @@ let simulatePubnetTier1Perf (context: MissionContext) =
               simulateApplyDuration = Some(context.simulateApplyDuration |> Option.defaultValue (seq { 0 }))
               simulateApplyWeight = Some(context.simulateApplyWeight |> Option.defaultValue (seq { 100 })) }
 
-    let tier1 = StableApproximateTier1CoreSets context.image
+    let allNodes =
+        if context.pubnetData.IsSome then
+            FullPubnetCoreSets context true false
+        else
+            StableApproximateTier1CoreSets context.image
+
+    let tier1 =
+        allNodes
+        |> List.filter (fun (cs: CoreSet) -> List.contains cs.name.StringName tier1OrgNames)
+
     let sdf = List.find (fun (cs: CoreSet) -> cs.name.StringName = "sdf") tier1
 
     context.ExecuteWithOptionalConsistencyCheck
-        tier1
+        allNodes
         None
         false
         (fun (formation: StellarFormation) ->
@@ -51,10 +60,10 @@ let simulatePubnetTier1Perf (context: MissionContext) =
                 formation.RunLoadgen sdf { context.GenerateAccountCreationLoad with accounts = numAccounts }
 
             let restartCoreSets (coreSets: CoreSet list) =
-                for set in tier1 do
+                for set in allNodes do
                     formation.Stop set.name
 
-                for set in tier1 do
+                for set in allNodes do
                     formation.Start set.name
 
             let getMiddle (low: int) (high: int) = low + (high - low) / 2
@@ -66,17 +75,17 @@ let simulatePubnetTier1Perf (context: MissionContext) =
                 let mutable shouldRestart = false
                 let mutable finalTxRate = None
 
-                setupCoreSets tier1 (getMiddle lowerBound upperBound)
+                setupCoreSets allNodes (getMiddle lowerBound upperBound)
 
                 while upperBound - lowerBound > threshold do
                     let middle = getMiddle lowerBound upperBound
 
                     if shouldRestart then
                         // Stop and start the network, to make sure next iteration of the test is not impacted by previous
-                        restartCoreSets tier1
-                        setupCoreSets tier1 middle
+                        restartCoreSets allNodes
+                        setupCoreSets allNodes middle
 
-                    formation.clearMetrics tier1
+                    formation.clearMetrics allNodes
 
                     try
                         LogInfo "Run started at tx rate %i" middle
@@ -94,7 +103,7 @@ let simulatePubnetTier1Perf (context: MissionContext) =
 
                         formation.RunMultiLoadgen tier1 loadGen
                         formation.CheckNoErrorsAndPairwiseConsistency()
-                        formation.EnsureAllNodesInSync tier1
+                        formation.EnsureAllNodesInSync allNodes
 
                         // Increase the tx rate
                         lowerBound <- middle
@@ -124,9 +133,9 @@ let simulatePubnetTier1Perf (context: MissionContext) =
 
             for run in 1 .. numRuns do
                 LogInfo "Starting max TPS run %i" run
-                let resultRate = binarySearchWithThreshold (max context.txRate 400) context.maxTxRate threshold
+                let resultRate = binarySearchWithThreshold context.txRate context.maxTxRate threshold
                 results <- List.append results [ resultRate ]
-                if run < numRuns then restartCoreSets tier1
+                if run < numRuns then restartCoreSets allNodes
 
             LogInfo
                 "Final tx rate averaged to %i over %i runs for image %s"

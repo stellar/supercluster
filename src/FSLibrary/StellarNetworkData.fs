@@ -45,6 +45,102 @@ let peerCountNonTier1 (random: System.Random) : int =
 // while scaling the pubnet.
 let tier1OrgSize = 3
 
+// A bunch of specific GeoLocs follow
+
+// Ashburn, suburb of Washington DC USA a.k.a. AWS us-east-1
+// and GCP us-east-4; home to all SDF nodes, 1 LOBSTR node,
+// PaySend, Stellarbeat, 2 Satoshipay nodes, BAC, LockerX.
+let Ashburn = { lat = 38.89511; lon = -77.03637 }
+
+// Brussels Belgium a.k.a. GCP europe-west1 home of
+// Blockdaemon 1
+let Brussels = { lat = 50.9009; lon = 4.4855 }
+
+// Beauharnois, suburb of Montreal a.k.a. OVH DC, home of LAPO 4,
+// PublicNode Bootes, etc.
+let Beauharnois = { lat = 45.2986777; lon = -73.9288762 }
+
+// Bengaluru India a.k.a. DigitalOcean DC home of LOBSTR 5
+let Bengaluru = { lat = 12.9634; lon = 77.5855 }
+
+// Chennai India a.k.a. IBM/Softlayer DC, home of IBM India node
+let Chennai = { lat = 13.08784; lon = 80.27847 }
+
+// Clifton USA a.k.a. DigitalOcean DC home of LOBSTR 3
+let Clifton = { lat = 40.8364; lon = -74.1403 }
+
+// Columbus USA a.k.a. AWS DC (us-east-2) home of Stellarport Ohio
+let Columbus = { lat = 39.9828671; lon = -83.1309106 }
+
+// Council Bluffs USA a.k.a. GCP us-central1 home of Blockdaemon 2
+let CouncilBluffs = { lat = 41.2619; lon = -95.8608 }
+
+// Falkenstein/Vogtland Germany a.k.a. Hetzner DC
+// home of StellarExpertV2, LOBSTR 1, HelpCoin 1, COINQVEST
+// "germany", PublicNode Hercules, etc.
+let Falkenstein = { lat = 50.4788652; lon = 12.3348363 }
+
+// Frankfurt Germany a.k.a. AWS DC (eu-central-1) and Hetzner DC
+// home of keybase 2 and SCHUNK 1
+let Frankfurt = { lat = 50.11552; lon = 8.68417 }
+
+// Helsinki Finland a.k.a. Hetzner DC home of COINQVEST "finland"
+let Helsinki = { lat = 60.1719; lon = 24.9347 }
+
+// Hong Kong a.k.a. IBM/Softlayer DC home of IBM HK node
+let HongKong = { lat = 22.3526738; lon = 113.9876171 }
+
+// Portland USA a.k.a. AWS DC (us-west-1) home of keybase1
+let Portland = { lat = 45.5426916; lon = -122.7243663 }
+
+// Pudong, suburb of Shanghai China a.k.a. Azure DC (china-east-2),
+// home of fchain core3
+let Pudong = { lat = 31.0856396; lon = 121.4547635 }
+
+// Purfleet, suburb of London UK, a.k.a. OVH and Azure DCs (uksouth)
+// home of StellarExpertV3, PublicNode Lyra, Wirex UK, Sakkex UK, etc.
+let Purfleet = { lat = 51.4819587; lon = 0.2220319 }
+
+// Sao Paulo Brazil a.k.a. AWS DC (sa-east-1) and IBM/Softlayer
+// DC, home of at least IBM Brazil node
+let SaoPaulo = { lat = -23.6821604; lon = -46.8754795 }
+
+// Singapore a.k.a. DCs for OVH, AWS (ap-southeast-1),
+// Azure (southeastasia), DigitalOcean. Home of LAPO 6,
+// Wirex Singapore, fchain core 2, Hawking, etc.
+let Singapore = { lat = 1.3437449; lon = 103.7540051 }
+
+// Taipei Taiwan a.k.a. asia-east1 home of Blockdaemon 3
+let Taipei = { lat = 25.0329; lon = 121.5654 }
+
+// Tokyo Japan a.k.a. AWS DC (ap-northeast-1) home of lots
+// of nodes.
+let Tokyo = { lat = 35.6895; lon = 139.69171 }
+
+let locations =
+    [ Ashburn
+      Brussels
+      Beauharnois
+      Bengaluru
+      Chennai
+      Clifton
+      Columbus
+      CouncilBluffs
+      Falkenstein
+      Frankfurt
+      Helsinki
+      HongKong
+      Portland
+      Pudong
+      Purfleet
+      SaoPaulo
+      Singapore
+      Taipei
+      Tokyo ]
+    |> Array.ofList
+
+let tier1OrgNames = [ "sdf"; "bd"; "lo"; "wx"; "pn"; "cq"; "sp" ]
+
 // Each edge connecting a and b is represented as (a, b) if a < b, and (b, a) otherwise.
 // This makes sense as the graph is undirected, and it also makes it easier to handle a set of edges.
 let extractEdges (graph: PubnetNode.Root array) : (string * string) array =
@@ -152,13 +248,10 @@ let addEdges
 
     createAdjacencyMap (Set.toList edgeSet)
 
-let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) : CoreSet list =
+let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMinConnectionCount: bool) : CoreSet list =
 
     if context.pubnetData.IsNone then
         failwith "pubnet simulation requires --pubnet-data=<filename.json>"
-
-    if context.tier1Keys.IsNone then
-        failwith "pubnet simulation requires --tier1-keys=<filename.json>"
 
     let allPubnetNodes : PubnetNode.Root array = PubnetNode.Load(context.pubnetData.Value)
 
@@ -181,12 +274,18 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) : CoreSet l
         |> Array.ofList
 
     let tier1KeySet : Set<string> =
-        let newTier1Keys = Array.map (fun (n: PubnetNode.Root) -> n.PublicKey) newTier1Nodes in
+        if context.tier1Keys.IsSome then
+            let newTier1Keys = Array.map (fun (n: PubnetNode.Root) -> n.PublicKey) newTier1Nodes in
 
-        Tier1PublicKey.Load(context.tier1Keys.Value)
-        |> Array.map (fun n -> n.PublicKey)
-        |> Array.append newTier1Keys
-        |> Set.ofArray
+            Tier1PublicKey.Load(context.tier1Keys.Value)
+            |> Array.map (fun n -> n.PublicKey)
+            |> Array.append newTier1Keys
+            |> Set.ofArray
+        else
+            PubnetNode.Load(context.pubnetData.Value)
+            |> Array.filter (fun n -> n.SbHomeDomain.IsSome && List.contains n.SbHomeDomain.Value tier1OrgNames)
+            |> Array.map (fun n -> n.PublicKey)
+            |> Set.ofArray
 
 
     // Shuffle the nodes to ensure that the order will
@@ -228,7 +327,7 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) : CoreSet l
     // but anecdotally this has never been an issue.
     // Next, we partition nodes in the network into those that have home domains and
     // those that do not. We call the former "org" nodes and the latter "misc" nodes.
-    let minAllowedConnectionCount = 5
+    let minAllowedConnectionCount = if enforceMinConnectionCount then 4 else 1
 
     let orgNodes, miscNodes =
         allPubnetNodes
@@ -375,7 +474,11 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) : CoreSet l
     let getGeoLocOrDefault (n: PubnetNode.Root) : GeoLoc =
         match n.SbGeoData with
         | Some geoData -> { lat = float geoData.Latitude; lon = float geoData.Longitude }
-        | None -> geoLocations.[random.Next(0, Array.length geoLocations)]
+        | None ->
+            if Array.length geoLocations <> 0 then
+                geoLocations.[random.Next(0, Array.length geoLocations)]
+            else
+                locations.[random.Next(0, Array.length locations)]
 
     let makeCoreSetWithExplicitKeys (hdn: HomeDomainName) (options: CoreSetOptions) (keys: KeyPair array) =
         { name = CoreSetName(hdn.StringName)
@@ -525,79 +628,6 @@ let TestnetCoreSetOptions (image: string) =
           accelerateTime = false
           initialization = { CoreSetInitialization.Default with waitForConsensus = true }
           dumpDatabase = false }
-
-// A bunch of specific GeoLocs follow
-
-// Ashburn, suburb of Washington DC USA a.k.a. AWS us-east-1
-// and GCP us-east-4; home to all SDF nodes, 1 LOBSTR node,
-// PaySend, Stellarbeat, 2 Satoshipay nodes, BAC, LockerX.
-let Ashburn = { lat = 38.89511; lon = -77.03637 }
-
-// Brussels Belgium a.k.a. GCP europe-west1 home of
-// Blockdaemon 1
-let Brussels = { lat = 50.9009; lon = 4.4855 }
-
-// Beauharnois, suburb of Montreal a.k.a. OVH DC, home of LAPO 4,
-// PublicNode Bootes, etc.
-let Beauharnois = { lat = 45.2986777; lon = -73.9288762 }
-
-// Bengaluru India a.k.a. DigitalOcean DC home of LOBSTR 5
-let Bengaluru = { lat = 12.9634; lon = 77.5855 }
-
-// Chennai India a.k.a. IBM/Softlayer DC, home of IBM India node
-let Chennai = { lat = 13.08784; lon = 80.27847 }
-
-// Clifton USA a.k.a. DigitalOcean DC home of LOBSTR 3
-let Clifton = { lat = 40.8364; lon = -74.1403 }
-
-// Columbus USA a.k.a. AWS DC (us-east-2) home of Stellarport Ohio
-let Columbus = { lat = 39.9828671; lon = -83.1309106 }
-
-// Council Bluffs USA a.k.a. GCP us-central1 home of Blockdaemon 2
-let CouncilBluffs = { lat = 41.2619; lon = -95.8608 }
-
-// Falkenstein/Vogtland Germany a.k.a. Hetzner DC
-// home of StellarExpertV2, LOBSTR 1, HelpCoin 1, COINQVEST
-// "germany", PublicNode Hercules, etc.
-let Falkenstein = { lat = 50.4788652; lon = 12.3348363 }
-
-// Frankfurt Germany a.k.a. AWS DC (eu-central-1) and Hetzner DC
-// home of keybase 2 and SCHUNK 1
-let Frankfurt = { lat = 50.11552; lon = 8.68417 }
-
-// Helsinki Finland a.k.a. Hetzner DC home of COINQVEST "finland"
-let Helsinki = { lat = 60.1719; lon = 24.9347 }
-
-// Hong Kong a.k.a. IBM/Softlayer DC home of IBM HK node
-let HongKong = { lat = 22.3526738; lon = 113.9876171 }
-
-// Portland USA a.k.a. AWS DC (us-west-1) home of keybase1
-let Portland = { lat = 45.5426916; lon = -122.7243663 }
-
-// Pudong, suburb of Shanghai China a.k.a. Azure DC (china-east-2),
-// home of fchain core3
-let Pudong = { lat = 31.0856396; lon = 121.4547635 }
-
-// Purfleet, suburb of London UK, a.k.a. OVH and Azure DCs (uksouth)
-// home of StellarExpertV3, PublicNode Lyra, Wirex UK, Sakkex UK, etc.
-let Purfleet = { lat = 51.4819587; lon = 0.2220319 }
-
-// Sao Paulo Brazil a.k.a. AWS DC (sa-east-1) and IBM/Softlayer
-// DC, home of at least IBM Brazil node
-let SaoPaulo = { lat = -23.6821604; lon = -46.8754795 }
-
-// Singapore a.k.a. DCs for OVH, AWS (ap-southeast-1),
-// Azure (southeastasia), DigitalOcean. Home of LAPO 6,
-// Wirex Singapore, fchain core 2, Hawking, etc.
-let Singapore = { lat = 1.3437449; lon = 103.7540051 }
-
-// Taipei Taiwan a.k.a. asia-east1 home of Blockdaemon 3
-let Taipei = { lat = 25.0329; lon = 121.5654 }
-
-// Tokyo Japan a.k.a. AWS DC (ap-northeast-1) home of lots
-// of nodes.
-let Tokyo = { lat = 35.6895; lon = 139.69171 }
-
 
 // This coreset is a synthetic approximation of the Tier1 group, intended
 // to be used in stable benchmarks rather than experiments.

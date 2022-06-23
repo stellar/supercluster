@@ -207,7 +207,7 @@ type Tests(output: ITestOutputHelper) =
     [<Fact>]
     member __.``Public network conversion looks reasonable``() =
         if System.IO.File.Exists(netdata) && System.IO.File.Exists(pubkeys) then
-            (let coreSets = FullPubnetCoreSets pubnetctx false
+            (let coreSets = FullPubnetCoreSets pubnetctx false true
              let nCfg = MakeNetworkCfg pubnetctx coreSets passOpt
              let sdfCoreSetName = CoreSetName "stellar"
              Assert.Contains(coreSets, (fun cs -> cs.name = sdfCoreSetName))
@@ -338,7 +338,7 @@ type Tests(output: ITestOutputHelper) =
     [<Fact>]
     member __.``Public network delay commands are reasonable``() =
         if System.IO.File.Exists(netdata) && System.IO.File.Exists(pubkeys) then
-            (let allCoreSets = FullPubnetCoreSets pubnetctx true
+            (let allCoreSets = FullPubnetCoreSets pubnetctx true true
              let fullNetCfg = MakeNetworkCfg pubnetctx allCoreSets passOpt
 
              let sdf = List.find (fun (cs: CoreSet) -> cs.name.StringName = "stellar") allCoreSets
