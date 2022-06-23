@@ -71,6 +71,7 @@ type MissionOptions
         tier1Keys: string option,
         opCountDistribution: string option,
         installNetworkDelay: bool option,
+        flatNetworkDelay: int option,
         peerReadingCapacity: int option,
         peerFloodCapacity: int option,
         sleepMainThread: int option,
@@ -248,6 +249,11 @@ type MissionOptions
              Required = false)>]
     member self.InstallNetworkDelay = installNetworkDelay
 
+    [<Option("flat-network-delay",
+             HelpText = "Constant value to set network delay to",
+             Required = false)>]
+    member self.FlatNetworkDelay = flatNetworkDelay
+
     [<Option("peer-reading-capacity",
              HelpText = "A config parameter that controls how many messages from a particular peer core can process simultaneously (See PEER_READING_CAPACITY)",
              Required = false)>]
@@ -383,6 +389,7 @@ let main argv =
                   tier1Keys = None
                   opCountDistribution = None
                   installNetworkDelay = None
+                  flatNetworkDelay = None
                   simulateApplyDuration = None
                   simulateApplyWeight = None
                   peerFloodCapacity = None
@@ -478,6 +485,7 @@ let main argv =
                                tier1Keys = mission.Tier1Keys
                                opCountDistribution = mission.OpCountDistribution
                                installNetworkDelay = mission.InstallNetworkDelay
+                               flatNetworkDelay = mission.FlatNetworkDelay
                                simulateApplyDuration = processInputSeq mission.SimulateApplyDuration
                                simulateApplyWeight = processInputSeq mission.SimulateApplyWeight
                                peerReadingCapacity = mission.PeerReadingCapacity

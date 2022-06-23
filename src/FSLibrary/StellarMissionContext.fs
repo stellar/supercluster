@@ -58,6 +58,7 @@ type MissionContext =
       tier1Keys: string option
       opCountDistribution: string option
       installNetworkDelay: bool option
+      flatNetworkDelay: int option
       simulateApplyDuration: seq<int> option
       simulateApplyWeight: seq<int> option
       peerReadingCapacity: int option
