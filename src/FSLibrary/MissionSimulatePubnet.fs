@@ -60,7 +60,7 @@ let simulatePubnet (context: MissionContext) =
               spikeSize = 424
               spikeInterval = 65 }
 
-    let fullCoreSet = FullPubnetCoreSets context true
+    let fullCoreSet = FullPubnetCoreSets context true true
 
     let sdf = List.find (fun (cs: CoreSet) -> cs.name.StringName = "stellar") fullCoreSet
 
