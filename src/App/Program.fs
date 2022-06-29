@@ -68,6 +68,7 @@ type MissionOptions
         tolerateNodeTaints: seq<string>,
         apiRateLimit: int,
         pubnetData: string option,
+        flatQuorum: bool option,
         tier1Keys: string option,
         opCountDistribution: string option,
         installNetworkDelay: bool option,
@@ -236,6 +237,9 @@ type MissionOptions
     [<Option("pubnet-data", HelpText = "JSON file containing pubnet connectivity graph data", Required = false)>]
     member self.PubnetData = pubnetData
 
+    [<Option("flat-quorum", HelpText = "Use flat Tier1 quorum", Required = false)>]
+    member self.FlatQuorum = flatQuorum
+
     [<Option("tier1-keys", HelpText = "JSON file containing list of 'tier-1' pubkeys from pubnet", Required = false)>]
     member self.Tier1Keys = tier1Keys
 
@@ -384,6 +388,7 @@ let main argv =
                   tolerateNodeTaints = []
                   apiRateLimit = 30
                   pubnetData = None
+                  flatQuorum = None
                   tier1Keys = None
                   opCountDistribution = None
                   installNetworkDelay = None
@@ -480,6 +485,7 @@ let main argv =
                                tolerateNodeTaints = List.map splitLabel (List.ofSeq mission.TolerateNodeTaints)
                                apiRateLimit = mission.ApiRateLimit
                                pubnetData = mission.PubnetData
+                               flatQuorum = mission.FlatQuorum
                                tier1Keys = mission.Tier1Keys
                                opCountDistribution = mission.OpCountDistribution
                                installNetworkDelay = mission.InstallNetworkDelay

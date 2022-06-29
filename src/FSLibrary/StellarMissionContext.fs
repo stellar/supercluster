@@ -55,6 +55,7 @@ type MissionContext =
       tolerateNodeTaints: ((string * string option) list)
       apiRateLimit: int
       pubnetData: string option
+      flatQuorum: bool option
       tier1Keys: string option
       opCountDistribution: string option
       installNetworkDelay: bool option

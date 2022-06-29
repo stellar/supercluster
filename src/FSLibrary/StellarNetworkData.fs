@@ -433,9 +433,17 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
 
         let nOrgs = Array.length tier1NodesGroupedByHomeDomain
 
-        { thresholdPercent = Some(67) // 3f + 1
-          validators = Map.empty
-          innerQuorumSets = Array.map orgToQSet tier1NodesGroupedByHomeDomain }
+        let flatQset =
+            { thresholdPercent = Some(100)
+              validators = pubKeysToValidators (Set.fold (fun l se -> se :: l) [] tier1KeySet |> Array.ofList)
+              innerQuorumSets = Array.empty }
+
+        let qset =
+            { thresholdPercent = Some(67) // 3f + 1
+              validators = Map.empty
+              innerQuorumSets = Array.map orgToQSet tier1NodesGroupedByHomeDomain }
+
+        if context.flatQuorum.IsSome && context.flatQuorum.Value then flatQset else qset
 
     let pubnetOpts =
         { CoreSetOptions.GetDefault context.image with
@@ -631,7 +639,7 @@ let TestnetCoreSetOptions (image: string) =
 
 // This coreset is a synthetic approximation of the Tier1 group, intended
 // to be used in stable benchmarks rather than experiments.
-let StableApproximateTier1CoreSets image : CoreSet list =
+let StableApproximateTier1CoreSets (image: string) (flatQuorum: bool) : CoreSet list =
     let allOrgs : Map<string, GeoLoc list> =
         Map.ofList [ ("bd", [ Brussels; CouncilBluffs; Taipei ])
                      ("cq", [ Falkenstein; Helsinki; HongKong ])
@@ -648,10 +656,18 @@ let StableApproximateTier1CoreSets image : CoreSet list =
     let allPksList : List<byte []> = Map.toList allKeys |> List.collect (fun (_, keys) -> List.map pk keys)
     let connections = List.map (fun k -> (k, List.except [ k ] allPksList)) allPksList |> Map.ofList
 
-    let namedKeys org =
+    let namedKeysList org =
         List.indexed allKeys.[org]
         |> List.map (fun (i, k) -> (PeerShortName(sprintf "%s-%d" org i), k))
+
+    let namedKeys org = namedKeysList org |> Map.ofList
+
+    let allNamedKeys =
+        allOrgPairs
+        |> List.map (fun (k, v) -> namedKeysList k)
+        |> List.concat
         |> Map.ofList
+
 
     let orgToQset org =
         { thresholdPercent = Some(51)
@@ -663,6 +679,12 @@ let StableApproximateTier1CoreSets image : CoreSet list =
           validators = Map.empty
           innerQuorumSets = Map.toArray allOrgs |> Array.map (fun (org, _) -> orgToQset org) }
 
+    let flatQset =
+        // The most aggressive threshold and flat quorum structure to reduce the noise from quorum config in perf measurements
+        { thresholdPercent = Some(100)
+          validators = allNamedKeys
+          innerQuorumSets = Array.empty }
+
     let orgCoreSet (org: string, locs: GeoLoc list) : CoreSet =
         let coreSetOpts =
             { CoreSetOptions.GetDefault image with
@@ -671,7 +693,7 @@ let StableApproximateTier1CoreSets image : CoreSet list =
                   nodeCount = locs.Length
                   nodeLocs = Some(locs)
                   preferredPeersMap = Some(connections)
-                  quorumSet = ExplicitQuorum topQset
+                  quorumSet = ExplicitQuorum(if flatQuorum then flatQset else topQset)
                   localHistory = false
                   accelerateTime = false
                   tier1 = Some(true)
