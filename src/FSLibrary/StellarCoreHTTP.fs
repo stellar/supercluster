@@ -31,7 +31,6 @@ type Metrics = JsonProvider<"json-type-samples/sample-metrics.json", SampleIsLis
 type Info = JsonProvider<"json-type-samples/sample-info.json", SampleIsList=true, ResolutionFolder=cwd>
 type TestAcc = JsonProvider<"json-type-samples/sample-testacc.json", SampleIsList=true, ResolutionFolder=cwd>
 type Tx = JsonProvider<"json-type-samples/sample-tx.json", SampleIsList=true, ResolutionFolder=cwd>
-type PerformanceCsv = CsvProvider<"csv-type-samples/sample-performance.csv", HasHeaders=true, ResolutionFolder=cwd>
 
 type LoadGenMode =
     | GenerateAccountCreationLoad
@@ -183,6 +182,8 @@ type Peer with
 
     member self.GetMetrics() : Metrics.Metrics =
         WebExceptionRetry DefaultRetry (fun _ -> Metrics.Parse(self.fetch "metrics").Metrics)
+
+    member self.GetRawMetrics() = WebExceptionRetry DefaultRetry (fun _ -> self.fetch "metrics")
 
     member self.GetInfo() : Info.Info = WebExceptionRetry DefaultRetry (fun _ -> Info.Parse(self.fetch "info").Info)
 

@@ -7,7 +7,6 @@ module MissionBenchmarkBaseline
 open StellarCoreHTTP
 open StellarCoreSet
 open StellarMissionContext
-open StellarPerformanceReporter
 open StellarFormation
 open StellarStatefulSets
 open StellarSupercluster
@@ -21,16 +20,13 @@ let benchmarkBaseline (context: MissionContext) =
                   nodeCount = context.numNodes
                   accelerateTime = false }
 
-    context.ExecuteWithPerformanceReporter
+    context.Execute
         [ coreSet ]
         None
-        (fun (formation: StellarFormation) (performanceReporter: PerformanceReporter) ->
+        (fun (formation: StellarFormation) ->
             formation.WaitUntilSynced [ coreSet ]
             formation.UpgradeProtocolToLatest [ coreSet ]
             formation.UpgradeMaxTxSetSize [ coreSet ] 1000000
 
             formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
-
-            performanceReporter.RecordPerformanceMetrics
-                context.GeneratePaymentLoad
-                (fun _ -> formation.RunLoadgen coreSet context.GeneratePaymentLoad))
+            formation.RunLoadgen coreSet context.GeneratePaymentLoad)
