@@ -9,6 +9,7 @@ open k8s.Models
 
 open Logging
 open StellarCoreCfg
+open StellarCoreHTTP
 open StellarCorePeer
 open StellarFormation
 open StellarShellCmd
@@ -220,9 +221,15 @@ type StellarFormation with
             Kubernetes.GetExitCodeOrThrow(returnMessage) |> ignore
         with x -> ()
 
+    member self.DumpPeerMetrics(p: Peer) =
+        let destination = self.NetworkCfg.missionContext.destination
+        let name = p.PodName
+        destination.WriteString(sprintf "%s.metrics.json" name.StringName) (p.GetRawMetrics())
+
     member self.DumpPeerData(p: Peer) =
         self.DumpPeerLogs p
         if p.coreSet.options.dumpDatabase then self.DumpPeerDatabase p
+        self.DumpPeerMetrics p
 
     member self.DumpJobData() =
         for i in self.AllJobNums do

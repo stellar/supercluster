@@ -183,6 +183,8 @@ type Peer with
     member self.GetMetrics() : Metrics.Metrics =
         WebExceptionRetry DefaultRetry (fun _ -> Metrics.Parse(self.fetch "metrics").Metrics)
 
+    member self.GetRawMetrics() = WebExceptionRetry DefaultRetry (fun _ -> self.fetch "metrics")
+
     member self.GetInfo() : Info.Info = WebExceptionRetry DefaultRetry (fun _ -> Info.Parse(self.fetch "info").Info)
 
     member self.GetLedgerNum() : int = self.GetInfo().Ledger.Num
