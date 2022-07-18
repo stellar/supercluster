@@ -17,7 +17,6 @@ open StellarStatefulSets
 open StellarCoreSet
 open StellarKubeSpecs
 open StellarNamespaceContent
-open StellarPerformanceReporter
 open System
 
 let ExpandHomeDirTilde (s: string) : string =
@@ -265,23 +264,3 @@ type MissionContext with
         (run: StellarFormation -> unit)
         : unit =
         self.ExecuteWithOptionalConsistencyCheck coreSetList passphrase true run
-
-    member self.ExecuteWithPerformanceReporter
-        (coreSetList: CoreSet list)
-        (passphrase: NetworkPassphrase option)
-        (run: StellarFormation -> PerformanceReporter -> unit)
-        : unit =
-        use formation = self.MakeFormation coreSetList passphrase
-        let performanceReporter = PerformanceReporter formation.NetworkCfg
-
-        try
-            try
-                formation.WaitUntilReady()
-                run formation performanceReporter
-                formation.CheckNoErrorsAndPairwiseConsistency()
-            finally
-                performanceReporter.DumpPerformanceMetrics()
-                formation.DumpData()
-        with x ->
-            (if self.keepData then formation.KeepData()
-             reraise ())

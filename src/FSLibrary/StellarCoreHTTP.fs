@@ -31,7 +31,6 @@ type Metrics = JsonProvider<"json-type-samples/sample-metrics.json", SampleIsLis
 type Info = JsonProvider<"json-type-samples/sample-info.json", SampleIsList=true, ResolutionFolder=cwd>
 type TestAcc = JsonProvider<"json-type-samples/sample-testacc.json", SampleIsList=true, ResolutionFolder=cwd>
 type Tx = JsonProvider<"json-type-samples/sample-tx.json", SampleIsList=true, ResolutionFolder=cwd>
-type PerformanceCsv = CsvProvider<"csv-type-samples/sample-performance.csv", HasHeaders=true, ResolutionFolder=cwd>
 
 type LoadGenMode =
     | GenerateAccountCreationLoad
