@@ -50,11 +50,12 @@ let networkDelayInMs (loc1: GeoLoc) (loc2: GeoLoc) : double =
     let empiricalSlowdownPastIdeal = 2.0
     ms * empiricalSlowdownPastIdeal
 
+
 let networkPingInMs (loc1: GeoLoc) (loc2: GeoLoc) : double =
     // A ping is a round trip, so double one-way delay.
     2.0 * (networkDelayInMs loc1 loc2)
 
-let getNetworkDelayCommands (loc1: GeoLoc) (locsAndNames: (GeoLoc * PeerDnsName) array) : ShCmd =
+let getNetworkDelayCommands (loc1: GeoLoc) (locsAndNames: (GeoLoc * PeerDnsName) array) (delay: int option) : ShCmd =
     // Traffic shaping happens using the 'tc' command on linux. This is a
     // complicated command. We build up the commands in pieces.
 
@@ -228,7 +229,7 @@ let getNetworkDelayCommands (loc1: GeoLoc) (locsAndNames: (GeoLoc * PeerDnsName)
     let perPeerCmds : ShCmd array =
         Array.mapi
             (fun (i: int) (loc2: GeoLoc, peer: PeerDnsName) ->
-                let (msDelay: int) = int (networkDelayInMs loc1 loc2)
+                let (msDelay: int) = if delay.IsSome then delay.Value else int (networkDelayInMs loc1 loc2)
                 let classNo = 1 + i
                 [| addClass classNo; addFilter classNo; addNetemQdisc classNo msDelay |])
             locsAndNames
@@ -263,7 +264,7 @@ type NetworkCfg with
             (self.MapAllPeers(fun cs i -> if cs.keys.[i].PublicKey = k then self.LocAndDnsName cs i else None))
 
     member self.NeedNetworkDelayScript : bool =
-        if self.missionContext.installNetworkDelay = Some true then
+        if self.missionContext.installNetworkDelay.IsSome then
             let atLeastOneLocation = Map.exists (fun _ cs -> cs.options.nodeLocs.IsSome) self.coreSets
 
             if atLeastOneLocation then
@@ -289,4 +290,4 @@ type NetworkCfg with
                     Array.choose self.LocAndDnsNameForKey otherKeys
                 | None -> Array.choose id (self.MapAllPeers self.LocAndDnsName)
 
-            getNetworkDelayCommands selfLoc otherLocsAndNames
+            getNetworkDelayCommands selfLoc otherLocsAndNames self.missionContext.flatNetworkDelay

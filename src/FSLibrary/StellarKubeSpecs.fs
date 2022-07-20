@@ -117,7 +117,7 @@ let SimulatePubnetTier1PerfCoreResourceRequirements : V1ResourceRequirements =
     // Tier1 perf simulation is interested in "how fast can we go in practice"
     // which means configuring the nodes like a real operator would: 1-4 vCPU
     // and 128MB-2GB RAM.
-    makeResourceRequirements 1000 128 4000 2000
+    makeResourceRequirements 500 128 4000 2000
 
 let ParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
     // When doing parallel catchup, we give each container

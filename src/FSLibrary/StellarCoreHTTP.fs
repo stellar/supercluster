@@ -76,7 +76,7 @@ type MissionContext with
           spikesize = 0
           spikeinterval = 0
           // Use conservative rate for account creation, as the network may quickly get overloaded
-          txrate = 5
+          txrate = 2
           offset = 0
           batchsize = 100 }
 
