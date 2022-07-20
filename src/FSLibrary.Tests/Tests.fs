@@ -52,6 +52,7 @@ let ctx : MissionContext =
       ingressExternalHost = None
       ingressExternalPort = 80
       exportToPrometheus = false
+      noConsoleLog = false
       probeTimeout = 10
       coreResources = SmallTestResources
       keepData = true

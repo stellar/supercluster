@@ -705,6 +705,12 @@ type NetworkCfg with
             else
                 runCmd
 
+        let runCmd =
+            if self.missionContext.noConsoleLog then
+                runCmd
+            else
+                Array.append runCmd [| "--console" |]
+
         let usePostgres = (coreSet.options.dbType = Postgres)
         let exportToPrometheus = self.missionContext.exportToPrometheus
 
