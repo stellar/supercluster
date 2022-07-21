@@ -46,6 +46,7 @@ type MissionOptions
         ingressExternalHost: string option,
         ingressExternalPort: int,
         exportToPrometheus: bool,
+        noConsoleLog: bool,
         probeTimeout: int,
         missions: string seq,
         destination: string,
@@ -125,6 +126,9 @@ type MissionOptions
 
     [<Option("export-to-prometheus", HelpText = "Whether to export core metrics to prometheus")>]
     member self.ExportToPrometheus : bool = exportToPrometheus
+
+    [<Option("no-console-log", HelpText = "Disable logging to console")>]
+    member self.NoConsoleLog : bool = noConsoleLog
 
     [<Option("probe-timeout", HelpText = "Timeout for liveness probe", Required = false, Default = 5)>]
     member self.ProbeTimeout = probeTimeout
@@ -371,6 +375,7 @@ let main argv =
                   ingressExternalHost = None
                   ingressExternalPort = 80
                   exportToPrometheus = false
+                  noConsoleLog = false
                   probeTimeout = 5
                   coreResources = SmallTestResources
                   keepData = false
@@ -466,6 +471,7 @@ let main argv =
                                ingressExternalHost = mission.IngressExternalHost
                                ingressExternalPort = mission.IngressExternalPort
                                exportToPrometheus = mission.ExportToPrometheus
+                               noConsoleLog = mission.NoConsoleLog
                                probeTimeout = mission.ProbeTimeout
                                coreResources = SmallTestResources
                                keepData = mission.KeepData

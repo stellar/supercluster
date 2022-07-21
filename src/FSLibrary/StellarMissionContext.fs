@@ -46,6 +46,7 @@ type MissionContext =
       ingressExternalHost: string option
       ingressExternalPort: int
       exportToPrometheus: bool
+      noConsoleLog: bool
       probeTimeout: int
       coreResources: CoreResources
       keepData: bool
