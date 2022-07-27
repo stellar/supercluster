@@ -20,7 +20,7 @@ module CfgVal =
     let labels = Map.ofSeq [ "app", "stellar-core" ]
     let labelSelector = "app = stellar-core"
     let stellarCoreBinPath = "stellar-core"
-    let allCoreContainerCmds = [| "new-hist"; "new-db"; "catchup"; "run" |]
+    let allCoreContainerCmds = [| "new-hist"; "new-db"; "catchup"; "run"; "test" |]
 
     let stellarCoreContainerName (cmd: string) =
         assert (Array.contains cmd allCoreContainerCmds)
