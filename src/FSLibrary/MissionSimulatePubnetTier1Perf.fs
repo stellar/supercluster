@@ -90,7 +90,9 @@ let simulatePubnetTier1Perf (context: MissionContext) =
                               spikeinterval = context.spikeInterval
                               txrate = middle
                               offset = 0
-                              batchsize = 100 }
+                              batchsize = 100
+                              maxfeerate = None
+                              skiplowfeetxs = false }
 
                         formation.RunMultiLoadgen tier1 loadGen
                         formation.CheckNoErrorsAndPairwiseConsistency()
