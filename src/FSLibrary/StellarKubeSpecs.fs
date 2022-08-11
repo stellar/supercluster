@@ -770,7 +770,7 @@ type NetworkCfg with
             V1StatefulSetSpec(
                 selector = V1LabelSelector(matchLabels = CfgVal.labels),
                 serviceName = self.ServiceName,
-                podManagementPolicy = "Parallel",
+                podManagementPolicy = "OrderedReady",
                 template = self.ToPodTemplateSpec coreSet,
                 replicas = System.Nullable<int>(coreSet.CurrentCount)
             )
