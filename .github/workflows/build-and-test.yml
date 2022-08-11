@@ -32,7 +32,7 @@ jobs:
     - name: Test
       run: dotnet test --no-restore --verbosity normal
     - name: Run BootAndSync mission
-      run: dotnet run --project src/App/App.fsproj --configuration Release -- mission BootAndSync --image stellar/stellar-core:17.2.0-620.7cf753c.focal --kubeconfig $KUBECONFIG --namespace default --ingress-class traefik --ingress-internal-domain local --ingress-external-host localhost --uneven-sched
+      run: dotnet run --project src/App/App.fsproj --configuration Release -- mission BootAndSync --image stellar/stellar-core:stable --kubeconfig $KUBECONFIG --namespace default --ingress-class traefik --ingress-internal-domain local --ingress-external-host localhost --uneven-sched
     - uses: actions/upload-artifact@v2
       with:
         name: destination
