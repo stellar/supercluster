@@ -28,7 +28,6 @@
     <Compile Include="StellarDataDump.fs" />
     <Compile Include="StellarStatefulSets.fs" />
     <Compile Include="StellarJobExec.fs" />
-    <Compile Include="StellarPerformanceReporter.fs" />
     <Compile Include="StellarSupercluster.fs" />
     <Compile Include="MissionCatchupHelpers.fs" />
     <Compile Include="MissionBootAndSync.fs" />

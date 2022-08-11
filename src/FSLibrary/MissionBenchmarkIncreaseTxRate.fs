@@ -7,7 +7,6 @@ module MissionBenchmarkIncreaseTxRate
 open StellarCoreHTTP
 open StellarCoreSet
 open StellarMissionContext
-open StellarPerformanceReporter
 open StellarFormation
 open StellarStatefulSets
 open StellarSupercluster
@@ -22,10 +21,10 @@ let benchmarkIncreaseTxRate (context: MissionContext) =
                   nodeCount = context.numNodes
                   accelerateTime = false }
 
-    context.ExecuteWithPerformanceReporter
+    context.Execute
         [ coreSet ]
         None
-        (fun (formation: StellarFormation) (performanceReporter: PerformanceReporter) ->
+        (fun (formation: StellarFormation) ->
             formation.WaitUntilSynced [ coreSet ]
             formation.UpgradeProtocolToLatest [ coreSet ]
             formation.UpgradeMaxTxSetSize [ coreSet ] 1000000
@@ -43,4 +42,4 @@ let benchmarkIncreaseTxRate (context: MissionContext) =
                       offset = 0
                       batchsize = 100 }
 
-                performanceReporter.RecordPerformanceMetrics loadGen (fun _ -> formation.RunLoadgen coreSet loadGen))
+                formation.RunLoadgen coreSet loadGen)
