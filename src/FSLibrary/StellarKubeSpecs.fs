@@ -264,11 +264,13 @@ let CoreContainerForCommand
 
     let cfgWords = cfgFileArgs configOpt MainCoreContainer
     let containerName = CfgVal.stellarCoreContainerName (Array.get command 0)
+    let consoleLogging = [| ShWord.OfStr "--console" |]
 
     let cmdWords =
         Array.concat [ [| ShWord.OfStr CfgVal.stellarCoreBinPath |]
                        Array.map ShWord.OfStr command
-                       cfgWords ]
+                       cfgWords
+                       consoleLogging ]
 
     let toShPieces word = ShPieces [| word |]
     let statusName = ShName "CORE_EXIT_STATUS"
@@ -704,8 +706,6 @@ type NetworkCfg with
                 Array.append runCmd [| "--in-memory" |]
             else
                 runCmd
-
-        let runCmd = Array.append runCmd [| "--console" |]
 
         let usePostgres = (coreSet.options.dbType = Postgres)
         let exportToPrometheus = self.missionContext.exportToPrometheus
