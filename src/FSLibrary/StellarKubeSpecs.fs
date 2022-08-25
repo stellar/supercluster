@@ -264,13 +264,17 @@ let CoreContainerForCommand
 
     let cfgWords = cfgFileArgs configOpt MainCoreContainer
     let containerName = CfgVal.stellarCoreContainerName (Array.get command 0)
-    let consoleLogging = [| ShWord.OfStr "--console" |]
 
     let cmdWords =
         Array.concat [ [| ShWord.OfStr CfgVal.stellarCoreBinPath |]
                        Array.map ShWord.OfStr command
-                       cfgWords
-                       consoleLogging ]
+                       cfgWords ]
+
+    let cmdWords =
+        if Array.get command 0 <> "test" then
+            Array.append cmdWords [| ShWord.OfStr "--console" |]
+        else
+            cmdWords
 
     let toShPieces word = ShPieces [| word |]
     let statusName = ShName "CORE_EXIT_STATUS"
