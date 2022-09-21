@@ -12,6 +12,7 @@ open StellarCoreSet
 open StellarShellCmd
 open StellarNetworkDelays
 open System.Text.RegularExpressions
+open System.Collections.Generic
 open Logging
 
 // Containers that run stellar-core may or may-not have a final '--conf'
@@ -58,21 +59,46 @@ let CoreContainerVolumeMounts (peerOrJobNames: string array) (configOpt: ConfigO
                     ))
                 peerOrJobNames)
 
+let makeResourceRequirementsCommon
+    (cpuReqMili: int)
+    (memReqMebi: int)
+    (cpuLimMili: int)
+    (memLimMebi: int)
+    (storageReqGibi: int)
+    (storageLimGibi: int)
+    (hasStorageLimit: bool)
+    : V1ResourceRequirements =
+    let requests = new Dictionary<string, ResourceQuantity>()
+    requests.Add("cpu", ResourceQuantity(sprintf "%dm" cpuReqMili))
+    requests.Add("memory", ResourceQuantity(sprintf "%dMi" memReqMebi))
+
+    let limits = new Dictionary<string, ResourceQuantity>()
+    limits.Add("cpu", ResourceQuantity(sprintf "%dm" cpuLimMili))
+    limits.Add("memory", ResourceQuantity(sprintf "%dMi" memLimMebi))
+
+    if hasStorageLimit then
+        requests.Add("ephemeral-storage", ResourceQuantity(sprintf "%dGi" storageReqGibi))
+        limits.Add("ephemeral-storage", ResourceQuantity(sprintf "%dGi" storageLimGibi))
+
+    V1ResourceRequirements(requests = requests, limits = limits)
+
 let makeResourceRequirements
     (cpuReqMili: int)
     (memReqMebi: int)
     (cpuLimMili: int)
     (memLimMebi: int)
     : V1ResourceRequirements =
-    let requests =
-        dict [ "cpu", ResourceQuantity(sprintf "%dm" cpuReqMili)
-               "memory", ResourceQuantity(sprintf "%dMi" memReqMebi) ]
+    makeResourceRequirementsCommon cpuReqMili memReqMebi cpuLimMili memLimMebi 0 0 false
 
-    let limits =
-        dict [ "cpu", ResourceQuantity(sprintf "%dm" cpuLimMili)
-               "memory", ResourceQuantity(sprintf "%dMi" memLimMebi) ]
-
-    V1ResourceRequirements(requests = requests, limits = limits)
+let makeResourceRequirementsWithStorageLimit
+    (cpuReqMili: int)
+    (memReqMebi: int)
+    (cpuLimMili: int)
+    (memLimMebi: int)
+    (storageReqGibi: int)
+    (storageLimGibi: int)
+    : V1ResourceRequirements =
+    makeResourceRequirementsCommon cpuReqMili memReqMebi cpuLimMili memLimMebi storageReqGibi storageLimGibi true
 
 let PgResourceRequirements : V1ResourceRequirements =
     // Postgres needs 1 vCPU and 1GB RAM.
@@ -121,8 +147,8 @@ let SimulatePubnetTier1PerfCoreResourceRequirements : V1ResourceRequirements =
 
 let ParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
     // When doing parallel catchup, we give each container
-    // 256MB RAM and 0.1 vCPUs, bursting to 1vCPU and 600MB
-    makeResourceRequirements 100 256 1000 600
+    // 256MB RAM, 0.1 vCPUs, and 40 GB of disk, bursting to 1vCPU, 600MB, and 45 GB
+    makeResourceRequirementsWithStorageLimit 100 256 1000 600 40 45
 
 let NonParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
     // When doing non-parallel catchup, we give each container
