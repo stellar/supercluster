@@ -7,9 +7,11 @@ module StellarMission
 open MissionBootAndSync
 open MissionSimplePayment
 open MissionComplexTopology
-open MissionLoadGeneration
 open MissionInMemoryMode
+open MissionLoadGeneration
 open MissionLoadGenerationWithSpikes
+open MissionLoadGenerationWithTxSetLimit
+open MissionMixedImageLoadGeneration
 open MissionBenchmarkBaseline
 open MissionBenchmarkConsensusOnly
 open MissionBenchmarkIncreaseTxRate
@@ -30,6 +32,7 @@ open MissionVersionMixNewCatchupToOld
 open MissionVersionMixOldCatchupToNew
 open MissionProtocolUpgradeTestnet
 open MissionProtocolUpgradePubnet
+open MissionProtocolUpgradeWithLoad
 open MissionDatabaseInplaceUpgrade
 open MissionAcceptanceUnitTests
 open MissionSimulatePubnet
@@ -45,6 +48,9 @@ let allMissions : Map<string, Mission> =
                  ("ComplexTopology", complexTopology)
                  ("LoadGeneration", loadGeneration)
                  ("LoadGenerationWithSpikes", loadGenerationWithSpikes)
+                 ("LoadGenerationWithTxSetLimit", loadGenerationWithTxSetLimit)
+                 ("MixedImageLoadGenerationWithOldImageMajority", mixedImageLoadGenerationWithOldImageMajority)
+                 ("MixedImageLoadGenerationWithNewImageMajority", mixedImageLoadGenerationWithNewImageMajority)
                  ("InMemoryMode", runInMemoryMode)
                  ("BenchmarkBaseline", benchmarkBaseline)
                  ("BenchmarkConsensusOnly", benchmarkConsensusOnly)
@@ -66,6 +72,7 @@ let allMissions : Map<string, Mission> =
                  ("VersionMixOldCatchupToNew", versionMixOldCatchupToNew)
                  ("ProtocolUpgradeTestnet", protocolUpgradeTestnet)
                  ("ProtocolUpgradePubnet", protocolUpgradePubnet)
+                 ("ProtocolUpgradeWithLoad", protocolUpgradeWithLoad)
                  ("DatabaseInplaceUpgrade", databaseInplaceUpgrade)
                  ("AcceptanceUnitTests", acceptanceUnitTests)
                  ("SimulatePubnet", simulatePubnet)

@@ -52,7 +52,9 @@ type LoadGen =
       spikeinterval: int
       txrate: int
       offset: int
-      batchsize: int }
+      batchsize: int
+      maxfeerate: int option
+      skiplowfeetxs: bool }
 
     member self.ToQuery : (string * string) list =
         [ ("mode", self.mode.ToString())
@@ -62,7 +64,9 @@ type LoadGen =
           ("spikesize", self.spikesize.ToString())
           ("spikeinterval", self.spikeinterval.ToString())
           ("batchsize", self.batchsize.ToString())
-          ("offset", self.offset.ToString()) ]
+          ("offset", self.offset.ToString())
+          ("maxfeerate", (if self.maxfeerate.IsSome then self.maxfeerate.Value.ToString() else ""))
+          ("skiplowfeetxs", (if self.skiplowfeetxs then "true" else "false")) ]
 
 type MissionContext with
 
@@ -77,7 +81,9 @@ type MissionContext with
           // Use conservative rate for account creation, as the network may quickly get overloaded
           txrate = 5
           offset = 0
-          batchsize = 100 }
+          batchsize = 100
+          maxfeerate = self.maxFeeRate
+          skiplowfeetxs = self.skipLowFeeTxs }
 
     member self.GeneratePaymentLoad : LoadGen =
         { mode = GeneratePaymentLoad
@@ -87,7 +93,9 @@ type MissionContext with
           spikesize = self.spikeSize
           spikeinterval = self.spikeInterval
           offset = 0
-          batchsize = 100 }
+          batchsize = 100
+          maxfeerate = self.maxFeeRate
+          skiplowfeetxs = self.skipLowFeeTxs }
 
     member self.GeneratePretendLoad : LoadGen =
         { mode = GeneratePretendLoad
@@ -97,7 +105,9 @@ type MissionContext with
           spikesize = self.spikeSize
           spikeinterval = self.spikeInterval
           offset = 0
-          batchsize = 100 }
+          batchsize = 100
+          maxfeerate = self.maxFeeRate
+          skiplowfeetxs = self.skipLowFeeTxs }
 
 
 let DefaultAccountCreationLoadGen =
@@ -108,7 +118,9 @@ let DefaultAccountCreationLoadGen =
       spikeinterval = 0
       txrate = 10
       offset = 0
-      batchsize = 100 }
+      batchsize = 100
+      maxfeerate = None
+      skiplowfeetxs = false }
 
 
 type UpgradeParameters =

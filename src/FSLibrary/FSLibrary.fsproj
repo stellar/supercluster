@@ -36,6 +36,7 @@
     <Compile Include="MissionLoadGeneration.fs" />
     <Compile Include="MissionInMemoryMode.fs" />
     <Compile Include="MissionLoadGenerationWithSpikes.fs" />
+    <Compile Include="MissionLoadGenerationWithTxSetLimit.fs" />
     <Compile Include="MissionBenchmarkBaseline.fs" />
     <Compile Include="MissionBenchmarkConsensusOnly.fs" />
     <Compile Include="MissionBenchmarkIncreaseTxRate.fs" />
@@ -53,11 +54,13 @@
     <Compile Include="MissionHistoryTestnetMinimumCatchup.fs" />
     <Compile Include="MissionHistoryTestnetParallelCatchup.fs" />
     <Compile Include="MissionHistoryTestnetPerformance.fs" />
+    <Compile Include="MissionMixedImageLoadGeneration.fs" />
     <Compile Include="MissionVersionMixConsensus.fs" />
     <Compile Include="MissionVersionNewCatchupToOld.fs" />
     <Compile Include="MissionVersionOldCatchupToNew.fs" />
     <Compile Include="MissionProtocolUpgradeTestnet.fs" />
     <Compile Include="MissionProtocolUpgradePubnet.fs" />
+    <Compile Include="MissionProtocolUpgradeWithLoad.fs" />
     <Compile Include="MissionDatabaseInplaceUpgrade.fs" />
     <Compile Include="MissionAcceptanceUnitTests.fs" />
     <Compile Include="StellarMission.fs" />

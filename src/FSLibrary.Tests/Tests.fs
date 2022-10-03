@@ -44,6 +44,8 @@ let ctx : MissionContext =
       numTxs = 1000
       spikeSize = 1000
       spikeInterval = 10
+      maxFeeRate = Some(1000)
+      skipLowFeeTxs = false
       numNodes = 100
       namespaceProperty = "stellar-supercluster"
       logLevels = { LogDebugPartitions = []; LogTracePartitions = [] }

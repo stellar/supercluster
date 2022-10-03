@@ -377,15 +377,16 @@ type NetworkCfg with
         self.CoreSetList |> List.map processCoreSet |> List.concat |> Map.ofList
 
     member self.QuorumSet(o: CoreSetOptions) : QuorumSet =
-        let ofNameKeyList (nks: (PeerShortName * KeyPair) array) : QuorumSet =
-            { thresholdPercent = None
+        let ofNameKeyList (nks: (PeerShortName * KeyPair) array) (threshold: int option) : QuorumSet =
+            { thresholdPercent = threshold
               validators = Map.ofArray nks
               innerQuorumSets = [||] }
 
         match o.quorumSet with
-        | AllPeersQuorum -> ofNameKeyList (self.GetNameKeyListAll())
-        | CoreSetQuorum (ns) -> ofNameKeyList (self.GetNameKeyList [ ns ])
-        | CoreSetQuorumList (q) -> ofNameKeyList (self.GetNameKeyList q)
+        | AllPeersQuorum -> ofNameKeyList (self.GetNameKeyListAll()) None
+        | CoreSetQuorum (ns) -> ofNameKeyList (self.GetNameKeyList [ ns ]) None
+        | CoreSetQuorumList (q) -> ofNameKeyList (self.GetNameKeyList q) None
+        | CoreSetQuorumListWithThreshold (q, t) -> ofNameKeyList (self.GetNameKeyList q) (Some(t))
         | ExplicitQuorum (e) -> e
 
     member self.HistoryNodes(o: CoreSetOptions) : Map<PeerShortName, PeerDnsName> =

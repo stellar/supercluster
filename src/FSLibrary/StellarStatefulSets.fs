@@ -146,6 +146,9 @@ type StellarFormation with
         let peer = self.NetworkCfg.GetPeer coreSetList.[0] 0
         peer.WaitForProtocol(version) |> ignore
 
+    member self.ScheduleProtocolUpgrade (coreSetList: CoreSet list) (version: int) (upgradeTime: System.DateTime) =
+        self.NetworkCfg.EachPeerInSets(coreSetList |> Array.ofList) (fun p -> p.UpgradeProtocol version upgradeTime)
+
     member self.UpgradeProtocolToLatest(coreSetList: CoreSet list) =
         let peer = self.NetworkCfg.GetPeer coreSetList.[0] 0
         let latest = peer.GetSupportedProtocolVersion()

@@ -38,6 +38,8 @@ type MissionContext =
       numTxs: int
       spikeSize: int
       spikeInterval: int
+      maxFeeRate: int option
+      skipLowFeeTxs: bool
       numNodes: int
       namespaceProperty: string
       logLevels: LogLevels

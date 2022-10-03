@@ -40,6 +40,8 @@ let benchmarkIncreaseTxRate (context: MissionContext) =
                       spikeinterval = context.spikeInterval
                       txrate = txRate
                       offset = 0
-                      batchsize = 100 }
+                      batchsize = 100
+                      maxfeerate = None
+                      skiplowfeetxs = false }
 
                 formation.RunLoadgen coreSet loadGen)

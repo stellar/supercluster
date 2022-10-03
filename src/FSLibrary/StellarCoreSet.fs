@@ -131,6 +131,7 @@ type QuorumSet =
 type QuorumSetSpec =
     | CoreSetQuorum of CoreSetName
     | CoreSetQuorumList of CoreSetName list
+    | CoreSetQuorumListWithThreshold of CoreSetName list * int
     | ExplicitQuorum of QuorumSet
     | AllPeersQuorum
 
