@@ -65,7 +65,7 @@ type LoadGen =
           ("spikeinterval", self.spikeinterval.ToString())
           ("batchsize", self.batchsize.ToString())
           ("offset", self.offset.ToString())
-          ("maxfeerate", (if self.maxfeerate.IsSome then self.maxfeerate.Value.ToString() else ""))
+          if self.maxfeerate.IsSome then ("maxfeerate", self.maxfeerate.Value.ToString())
           ("skiplowfeetxs", (if self.skiplowfeetxs then "true" else "false")) ]
 
 type MissionContext with
