@@ -455,6 +455,8 @@ type Peer with
 
         if (MeterCountOr 0 m.LoadgenRunFailed) <> 0 then
             failwith "Loadgen failed"
+        elif (MeterCountOr 0 m.LoadgenRunStart) = 0 then
+            failwith "Loadgen is not started"
         else
             (MeterCountOr 0 m.LoadgenRunStart) = (MeterCountOr 0 m.LoadgenRunComplete)
 
