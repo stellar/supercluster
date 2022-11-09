@@ -63,12 +63,14 @@ let ctx : MissionContext =
       tolerateNodeTaints = []
       apiRateLimit = 10
       pubnetData = None
+      flatQuorum = None
       tier1Keys = None
       peerReadingCapacity = None
       peerFloodCapacity = None
       sleepMainThread = None
       flowControlSendMoreBatchSize = None
       installNetworkDelay = Some true
+      flatNetworkDelay = None
       simulateApplyDuration =
           Some(
               seq {
@@ -208,7 +210,7 @@ type Tests(output: ITestOutputHelper) =
     [<Fact>]
     member __.``Public network conversion looks reasonable``() =
         if System.IO.File.Exists(netdata) && System.IO.File.Exists(pubkeys) then
-            (let coreSets = FullPubnetCoreSets pubnetctx false
+            (let coreSets = FullPubnetCoreSets pubnetctx false true
              let nCfg = MakeNetworkCfg pubnetctx coreSets passOpt
              let sdfCoreSetName = CoreSetName "stellar"
              Assert.Contains(coreSets, (fun cs -> cs.name = sdfCoreSetName))
@@ -326,7 +328,7 @@ type Tests(output: ITestOutputHelper) =
         let Chennai = { lat = 13.08784; lon = 80.27847 }
         let dns1 = PeerDnsName "www.foo.com"
         let dns2 = PeerDnsName "www.bar.com"
-        let cmd = getNetworkDelayCommands Ashburn [| (Beauharnois, dns1); (Chennai, dns2) |]
+        let cmd = getNetworkDelayCommands Ashburn [| (Beauharnois, dns1); (Chennai, dns2) |] None
         let cmdStr = cmd.ToString()
 
         Assert.Contains(dns1.StringName, cmdStr)
@@ -339,7 +341,7 @@ type Tests(output: ITestOutputHelper) =
     [<Fact>]
     member __.``Public network delay commands are reasonable``() =
         if System.IO.File.Exists(netdata) && System.IO.File.Exists(pubkeys) then
-            (let allCoreSets = FullPubnetCoreSets pubnetctx true
+            (let allCoreSets = FullPubnetCoreSets pubnetctx true true
              let fullNetCfg = MakeNetworkCfg pubnetctx allCoreSets passOpt
 
              let sdf = List.find (fun (cs: CoreSet) -> cs.name.StringName = "stellar") allCoreSets

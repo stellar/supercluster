@@ -25,11 +25,22 @@ let simulatePubnetTier1Perf (context: MissionContext) =
               simulateApplyDuration = Some(context.simulateApplyDuration |> Option.defaultValue (seq { 0 }))
               simulateApplyWeight = Some(context.simulateApplyWeight |> Option.defaultValue (seq { 100 })) }
 
-    let tier1 = StableApproximateTier1CoreSets context.image
+    let allNodes =
+        if context.pubnetData.IsSome then
+            FullPubnetCoreSets context true false
+        else
+            StableApproximateTier1CoreSets
+                context.image
+                (if context.flatQuorum.IsSome then context.flatQuorum.Value else false)
+
+    let tier1 =
+        allNodes
+        |> List.filter (fun (cs: CoreSet) -> List.contains cs.name.StringName tier1OrgNames)
+
     let sdf = List.find (fun (cs: CoreSet) -> cs.name.StringName = "sdf") tier1
 
     context.ExecuteWithOptionalConsistencyCheck
-        tier1
+        allNodes
         None
         false
         (fun (formation: StellarFormation) ->
@@ -50,12 +61,7 @@ let simulatePubnetTier1Perf (context: MissionContext) =
                 formation.UpgradeMaxTxSetSize coreSets (10 * rate)
                 formation.RunLoadgen sdf { context.GenerateAccountCreationLoad with accounts = numAccounts }
 
-            let restartCoreSets (coreSets: CoreSet list) =
-                for set in tier1 do
-                    formation.Stop set.name
-
-                for set in tier1 do
-                    formation.Start set.name
+            let wait () = System.Threading.Thread.Sleep(5 * 60 * 1000)
 
             let getMiddle (low: int) (high: int) = low + (high - low) / 2
 
@@ -63,20 +69,17 @@ let simulatePubnetTier1Perf (context: MissionContext) =
 
                 let mutable lowerBound = low
                 let mutable upperBound = high
-                let mutable shouldRestart = false
+                let mutable shouldWait = false
                 let mutable finalTxRate = None
 
-                setupCoreSets tier1 (getMiddle lowerBound upperBound)
+                setupCoreSets allNodes (getMiddle lowerBound upperBound)
 
                 while upperBound - lowerBound > threshold do
                     let middle = getMiddle lowerBound upperBound
 
-                    if shouldRestart then
-                        // Stop and start the network, to make sure next iteration of the test is not impacted by previous
-                        restartCoreSets tier1
-                        setupCoreSets tier1 middle
+                    if shouldWait then wait ()
 
-                    formation.clearMetrics tier1
+                    formation.clearMetrics allNodes
 
                     try
                         LogInfo "Run started at tx rate %i" middle
@@ -96,18 +99,18 @@ let simulatePubnetTier1Perf (context: MissionContext) =
 
                         formation.RunMultiLoadgen tier1 loadGen
                         formation.CheckNoErrorsAndPairwiseConsistency()
-                        formation.EnsureAllNodesInSync tier1
+                        formation.EnsureAllNodesInSync allNodes
 
                         // Increase the tx rate
                         lowerBound <- middle
                         finalTxRate <- Some middle
                         LogInfo "Run succeeded at tx rate %i" middle
-                        shouldRestart <- false
+                        shouldWait <- false
 
                     with _ ->
                         LogInfo "Run failed at tx rate %i" middle
                         upperBound <- middle
-                        shouldRestart <- true
+                        shouldWait <- true
 
                 if finalTxRate.IsSome then
                     LogInfo "Found max tx rate %i" finalTxRate.Value
@@ -126,9 +129,9 @@ let simulatePubnetTier1Perf (context: MissionContext) =
 
             for run in 1 .. numRuns do
                 LogInfo "Starting max TPS run %i" run
-                let resultRate = binarySearchWithThreshold (max context.txRate 400) context.maxTxRate threshold
+                let resultRate = binarySearchWithThreshold context.txRate context.maxTxRate threshold
                 results <- List.append results [ resultRate ]
-                if run < numRuns then restartCoreSets tier1
+                if run < numRuns then wait ()
 
             LogInfo
                 "Final tx rate averaged to %i over %i runs for image %s"

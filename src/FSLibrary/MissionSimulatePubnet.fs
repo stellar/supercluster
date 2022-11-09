@@ -60,9 +60,10 @@ let simulatePubnet (context: MissionContext) =
               spikeSize = 424
               spikeInterval = 65 }
 
-    let fullCoreSet = FullPubnetCoreSets context true
+    let fullCoreSet = FullPubnetCoreSets context true true
 
-    let sdf = List.find (fun (cs: CoreSet) -> cs.name.StringName = "stellar") fullCoreSet
+    let sdf =
+        List.find (fun (cs: CoreSet) -> cs.name.StringName = "stellar" || cs.name.StringName = "sdf") fullCoreSet
 
     let tier1 = List.filter (fun (cs: CoreSet) -> cs.options.tier1 = Some true) fullCoreSet
 
