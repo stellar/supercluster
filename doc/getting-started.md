@@ -2,7 +2,7 @@
 
   - Find or make a Kubernetes cluster. The easiest approach currently is probably [k3s](k3s.md) on an ubuntu system, but it should work on a variety of other kubernetes distributions.
 
-  - Make sure you have enabled at least the `dns` and `ingress` components on the Kubernetes cluster, and that the `ingress` controller is [traefik](https://traefik.io). This is the default in k3s.
+  - Make sure you have enabled at least the `dns` and `ingress` components on the Kubernetes cluster, and that the `ingress` controller is [nginx-ingress](https://kubernetes.github.io/ingress-nginx/).
 
   - Download and install [dotnet 5.0 or later](https://dotnet.microsoft.com/download).
 
