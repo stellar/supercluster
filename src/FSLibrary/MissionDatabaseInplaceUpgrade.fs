@@ -56,7 +56,6 @@ let databaseInplaceUpgrade (context: MissionContext) =
 
             formation.RunLoadgen beforeUpgradeCoreSet context.GenerateAccountCreationLoad
             formation.RunLoadgen beforeUpgradeCoreSet context.GeneratePaymentLoad
-            formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
             formation.RunLoadgen coreSet context.GeneratePaymentLoad
 
             formation.BackupDatabaseToHistory peer
@@ -65,7 +64,5 @@ let databaseInplaceUpgrade (context: MissionContext) =
             let afterUpgradeCoreSetLive = formation.NetworkCfg.FindCoreSet afterUpgradeCoreSet.name
             formation.WaitUntilSynced [ afterUpgradeCoreSetLive ]
 
-            formation.RunLoadgen afterUpgradeCoreSet context.GenerateAccountCreationLoad
             formation.RunLoadgen afterUpgradeCoreSet context.GeneratePaymentLoad
-            formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
             formation.RunLoadgen coreSet context.GeneratePaymentLoad)
