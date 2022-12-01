@@ -851,7 +851,7 @@ type NetworkCfg with
     // Returns an Ingress object with rules that map URLs http://$ingressHost/peer-N/foo
     // to the per-Pod Service within the current networkCfg named peer-N (which then, via
     // DNS mapping, goes to the Pod itself). Exposing this to external traffic
-    // requires that you enable the traefik Ingress controller on your k8s
+    // requires that you enable the nginx Ingress controller on your k8s
     // cluster.
     member self.ToIngress() : Extensionsv1beta1Ingress =
         let httpPortStr = IntstrIntOrString(value = CfgVal.httpPort.ToString())
@@ -864,11 +864,21 @@ type NetworkCfg with
 
         let corePath (coreSet: CoreSet) (i: int) : Extensionsv1beta1HTTPIngressPath =
             let pn = self.PodName coreSet i
-            Extensionsv1beta1HTTPIngressPath(path = sprintf "/%s/core/" pn.StringName, backend = coreBackend pn)
+
+            Extensionsv1beta1HTTPIngressPath(
+                path = sprintf "/%s/core(/|$)(.*)" pn.StringName,
+                pathType = "Prefix",
+                backend = coreBackend pn
+            )
 
         let historyPath (coreSet: CoreSet) (i: int) : Extensionsv1beta1HTTPIngressPath =
             let pn = self.PodName coreSet i
-            Extensionsv1beta1HTTPIngressPath(path = sprintf "/%s/history/" pn.StringName, backend = historyBackend pn)
+
+            Extensionsv1beta1HTTPIngressPath(
+                path = sprintf "/%s/history(/|$)(.*)" pn.StringName,
+                pathType = "Prefix",
+                backend = historyBackend pn
+            )
 
         let corePaths = self.MapAllPeers corePath
         let historyPaths = self.MapAllPeers historyPath
@@ -881,8 +891,8 @@ type NetworkCfg with
         let spec = Extensionsv1beta1IngressSpec(rules = rules)
 
         let annotation =
-            Map.ofArray [| ("traefik.ingress.kubernetes.io/rule-type", "PathPrefixStrip")
-                           ("kubernetes.io/ingress.class", self.missionContext.ingressClass) |]
+            Map.ofArray [| ("kubernetes.io/ingress.class", self.missionContext.ingressClass)
+                           ("nginx.ingress.kubernetes.io/rewrite-target", "/$2") |]
 
         let meta =
             V1ObjectMeta(name = self.IngressName, namespaceProperty = self.NamespaceProperty, annotations = annotation)
