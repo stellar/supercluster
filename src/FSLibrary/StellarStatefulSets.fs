@@ -243,11 +243,24 @@ type StellarFormation with
             let peerSpecificLoadgen = { loadGen with offset = offset }
             LogInfo "Loadgen: %s with offset %d" (peer.GenerateLoad peerSpecificLoadgen) offset
 
-        while not (List.fold (fun (all: bool) (peer: Peer) -> (peer.IsLoadGenComplete()) && all) true loadGenPeers) do
+        while not (
+            List.fold
+                (fun (all: bool) (peer: Peer) ->
+                    (peer.IsLoadGenComplete() = Success || peer.IsLoadGenComplete() = Failure)
+                    && all)
+                true
+                loadGenPeers
+        ) do
             Thread.Sleep(millisecondsTimeout = 3000)
 
             for (i, peer) in (List.indexed loadGenPeers) do
                 peer.LogLoadGenProgressTowards(fractionalLoadGen i)
+
+        if (List.fold
+                (fun (anyFailed: bool) (peer: Peer) -> (peer.IsLoadGenComplete() = Failure || anyFailed))
+                false
+                loadGenPeers) then
+            failwith "Loadgen failed!"
 
     member self.RunLoadgenAndCheckNoErrors(coreSet: CoreSet) =
         let peer = self.NetworkCfg.GetPeer coreSet 0
