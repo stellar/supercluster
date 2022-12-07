@@ -106,7 +106,7 @@ type NamespaceContent(kube: Kubernetes, apiRateLimit: int, namespaceProperty: st
 
     member self.Add(statefulSet: V1StatefulSet) = addOne statefulSets statefulSet.Metadata.Name
 
-    member self.Add(ingress: Extensionsv1beta1Ingress) = addOne ingresses ingress.Metadata.Name
+    member self.Add(ingress: V1Ingress) = addOne ingresses ingress.Metadata.Name
 
     member self.Add(job: V1Job) = addOne jobs job.Metadata.Name
 
@@ -116,7 +116,7 @@ type NamespaceContent(kube: Kubernetes, apiRateLimit: int, namespaceProperty: st
 
     member self.Del(statefulSet: V1StatefulSet) = delOne delStatefulSet statefulSets statefulSet.Metadata.Name
 
-    member self.Del(ingress: Extensionsv1beta1Ingress) = delOne delIngress ingresses ingress.Metadata.Name
+    member self.Del(ingress: V1Ingress) = delOne delIngress ingresses ingress.Metadata.Name
 
     member self.Del(job: V1Job) = delOne delJob jobs job.Metadata.Name
 

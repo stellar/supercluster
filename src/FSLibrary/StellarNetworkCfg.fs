@@ -31,7 +31,7 @@ type NetworkNonce =
 let MakeNetworkNonce (tag: string option) : NetworkNonce =
     let utcTime = System.DateTime.UtcNow
     let bytes : byte array = Array.zeroCreate 3
-    let rng = System.Security.Cryptography.RNGCryptoServiceProvider.Create()
+    let rng = System.Security.Cryptography.RandomNumberGenerator.Create()
 
     match tag with
     | Some s when (not (System.Text.RegularExpressions.Regex("^[a-z0-9-]+$").IsMatch(s))) ->
