@@ -32,6 +32,13 @@ type Info = JsonProvider<"json-type-samples/sample-info.json", SampleIsList=true
 type TestAcc = JsonProvider<"json-type-samples/sample-testacc.json", SampleIsList=true, ResolutionFolder=cwd>
 type Tx = JsonProvider<"json-type-samples/sample-tx.json", SampleIsList=true, ResolutionFolder=cwd>
 
+
+type LoadGenStatus =
+    | Success
+    | Failure
+    | NotStarted
+    | Running
+
 type LoadGenMode =
     | GenerateAccountCreationLoad
     | GeneratePaymentLoad
@@ -466,11 +473,13 @@ type Peer with
         let m = self.GetMetrics()
 
         if (MeterCountOr 0 m.LoadgenRunFailed) <> 0 then
-            failwith "Loadgen failed"
+            Failure
         elif (MeterCountOr 0 m.LoadgenRunStart) = 0 then
-            failwith "Loadgen is not started"
+            NotStarted
+        elif (MeterCountOr 0 m.LoadgenRunStart) = (MeterCountOr 0 m.LoadgenRunComplete) then
+            Success
         else
-            (MeterCountOr 0 m.LoadgenRunStart) = (MeterCountOr 0 m.LoadgenRunComplete)
+            Running
 
     member self.LogLoadGenProgressTowards(loadGen: LoadGen) =
         let m = self.GetMetrics()
@@ -486,7 +495,7 @@ type Peer with
 
     member self.WaitForLoadGenComplete(loadGen: LoadGen) =
         RetryUntilTrue
-            (fun _ -> self.IsLoadGenComplete())
+            (fun _ -> self.IsLoadGenComplete() = Success)
             (fun _ ->
                 self.LogLoadGenProgressTowards loadGen
                 self.LogCoreSetListStatusWithTiers self.networkCfg.CoreSetList)

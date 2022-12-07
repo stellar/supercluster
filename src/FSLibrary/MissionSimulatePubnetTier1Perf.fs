@@ -47,19 +47,21 @@ let simulatePubnetTier1Perf (context: MissionContext) =
 
             let numAccounts = 10000
 
-            let setupCoreSets (coreSets: CoreSet list) (rate: int) =
-                // Setup overlay connections first before manually closing
-                // ledger, which kick off consensus
-                formation.WaitUntilConnected coreSets
-                formation.ManualClose coreSets
-
-                // Wait until the whole network is synced before proceeding,
-                // to fail asap in case of a misconfiguration
-                formation.WaitUntilSynced coreSets
-                formation.UpgradeProtocolToLatest coreSets
+            let upgradeMaxTxSetSize (coreSets: CoreSet list) (rate: int) =
                 // Set max tx size to 10x the rate -- at 5x we overflow the transaction queue too often.
                 formation.UpgradeMaxTxSetSize coreSets (10 * rate)
-                formation.RunLoadgen sdf { context.GenerateAccountCreationLoad with accounts = numAccounts }
+
+            // Setup overlay connections first before manually closing
+            // ledger, which kick off consensus
+            formation.WaitUntilConnected allNodes
+            formation.ManualClose allNodes
+
+            // Wait until the whole network is synced before proceeding,
+            // to fail asap in case of a misconfiguration
+            formation.WaitUntilSynced allNodes
+            formation.UpgradeProtocolToLatest allNodes
+            upgradeMaxTxSetSize allNodes 10000
+            formation.RunLoadgen sdf { context.GenerateAccountCreationLoad with accounts = numAccounts }
 
             let wait () = System.Threading.Thread.Sleep(5 * 60 * 1000)
 
@@ -72,7 +74,7 @@ let simulatePubnetTier1Perf (context: MissionContext) =
                 let mutable shouldWait = false
                 let mutable finalTxRate = None
 
-                setupCoreSets allNodes (getMiddle lowerBound upperBound)
+                upgradeMaxTxSetSize allNodes (getMiddle lowerBound upperBound)
 
                 while upperBound - lowerBound > threshold do
                     let middle = getMiddle lowerBound upperBound
