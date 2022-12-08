@@ -147,8 +147,8 @@ let SimulatePubnetTier1PerfCoreResourceRequirements : V1ResourceRequirements =
 
 let ParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
     // When doing parallel catchup, we give each container
-    // 256MB RAM, 0.1 vCPUs, and 40 GB of disk, bursting to 1vCPU, 600MB, and 45 GB
-    makeResourceRequirementsWithStorageLimit 100 256 1000 600 40 45
+    // 256MB RAM, 0.1 vCPUs, and 50 GB of disk, bursting to 1vCPU, 600MB, and 60 GB
+    makeResourceRequirementsWithStorageLimit 100 256 1000 600 50 60
 
 let NonParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
     // When doing non-parallel catchup, we give each container
