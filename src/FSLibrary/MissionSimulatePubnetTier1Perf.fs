@@ -74,14 +74,13 @@ let simulatePubnetTier1Perf (context: MissionContext) =
                 let mutable shouldWait = false
                 let mutable finalTxRate = None
 
-                upgradeMaxTxSetSize allNodes (getMiddle lowerBound upperBound)
-
                 while upperBound - lowerBound > threshold do
                     let middle = getMiddle lowerBound upperBound
 
                     if shouldWait then wait ()
 
                     formation.clearMetrics allNodes
+                    upgradeMaxTxSetSize allNodes middle
 
                     try
                         LogInfo "Run started at tx rate %i" middle
