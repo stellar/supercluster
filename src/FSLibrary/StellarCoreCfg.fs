@@ -150,6 +150,7 @@ type StellarCoreCfg =
       maxSlotsToRemember: int
       maxBatchWriteCount: int
       inMemoryMode: bool
+      enableBucketListDB: bool
       containerType: CoreContainerType }
 
     member self.ToTOML() : TomlTable =
@@ -175,6 +176,7 @@ type StellarCoreCfg =
         let preferredPeers = List.map (fun (x: PeerDnsName) -> x.StringName) self.preferredPeers
 
         t.Add("DATABASE", self.database.ToString()) |> ignore
+        t.Add("EXPERIMENTAL_BUCKETLIST_DB", self.enableBucketListDB) |> ignore
 
         match self.containerType with
         // REVERTME: temporarily use same nonzero port for both container types.
@@ -443,6 +445,7 @@ type NetworkCfg with
           maxSlotsToRemember = opts.maxSlotsToRemember
           maxBatchWriteCount = opts.maxBatchWriteCount
           inMemoryMode = opts.inMemoryMode
+          enableBucketListDB = opts.enableBucketListDB
           containerType = MainCoreContainer }
 
     member self.StellarCoreCfg(c: CoreSet, i: int, ctype: CoreContainerType) : StellarCoreCfg =
@@ -477,4 +480,5 @@ type NetworkCfg with
           maxSlotsToRemember = c.options.maxSlotsToRemember
           maxBatchWriteCount = c.options.maxBatchWriteCount
           inMemoryMode = c.options.inMemoryMode
+          enableBucketListDB = c.options.enableBucketListDB
           containerType = ctype }
