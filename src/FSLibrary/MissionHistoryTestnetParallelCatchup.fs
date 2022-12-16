@@ -36,7 +36,8 @@ let historyTestnetParallelCatchup (context: MissionContext) =
         { TestnetCoreSetOptions context.image with
               localHistory = false
               invariantChecks = AllInvariantsExceptBucketConsistencyChecks
-              initialization = CoreSetInitialization.OnlyNewDb }
+              initialization = CoreSetInitialization.OnlyNewDb
+              enableBucketListDB = true }
 
     context.ExecuteJobs
         (Some(opts))
