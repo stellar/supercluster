@@ -47,6 +47,7 @@ let mixedImageLoadGeneration (oldImageNodeCount: int) (context: MissionContext) 
 
     let context =
         { context with
+              coreResources = MediumTestResources
               numAccounts = 200
               numTxs = 50000
               txRate = 1000
