@@ -165,6 +165,11 @@ let SmallTestCoreResourceRequirements : V1ResourceRequirements =
     // gets 0.1 vCPUs with bursting to 1vCPU and 256MB RAM guaranteed.
     makeResourceRequirements 100 256 1000 256
 
+let MediumTestCoreResourceRequirements : V1ResourceRequirements =
+    // About 2x more resources than for small tests, 0.2 vCPU/512 MB,
+    // bursting to 1 vCPU/1GB.
+    makeResourceRequirements 200 512 1000 1024
+
 let AcceptanceTestCoreResourceRequirements : V1ResourceRequirements =
     // When running acceptance tests we need to give a single core a very large
     // amount of memory because these tests are memory-intensive. 4 vCPU and 4GB
@@ -322,6 +327,7 @@ let CoreContainerForCommand
     let res =
         match cr with
         | SmallTestResources -> SmallTestCoreResourceRequirements
+        | MediumTestResources -> MediumTestCoreResourceRequirements
         | AcceptanceTestResources -> AcceptanceTestCoreResourceRequirements
         | SimulatePubnetResources size -> GetSimulatePubnetResources size
         | SimulatePubnetTier1PerfResources -> SimulatePubnetTier1PerfCoreResourceRequirements

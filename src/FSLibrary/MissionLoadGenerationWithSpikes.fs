@@ -21,6 +21,7 @@ let loadGenerationWithSpikes (context: MissionContext) =
 
     let context =
         { context with
+              coreResources = MediumTestResources
               numAccounts = 2000
               numTxs = 20000
               txRate = 20
