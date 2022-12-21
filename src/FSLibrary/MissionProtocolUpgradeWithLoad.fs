@@ -22,6 +22,7 @@ let protocolUpgradeWithLoad (context: MissionContext) =
 
     let context =
         { context with
+              coreResources = UpgradeResources
               numAccounts = 200
               numTxs = 50000
               txRate = 1000
