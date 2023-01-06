@@ -33,11 +33,10 @@ let simulatePubnetTier1Perf (context: MissionContext) =
                 context.image
                 (if context.flatQuorum.IsSome then context.flatQuorum.Value else false)
 
-    let tier1 =
-        allNodes
-        |> List.filter (fun (cs: CoreSet) -> List.contains cs.name.StringName tier1OrgNames)
+    let sdf =
+        List.find (fun (cs: CoreSet) -> cs.name.StringName = "stellar" || cs.name.StringName = "sdf") allNodes
 
-    let sdf = List.find (fun (cs: CoreSet) -> cs.name.StringName = "sdf") tier1
+    let tier1 = List.filter (fun (cs: CoreSet) -> cs.options.tier1 = Some true) allNodes
 
     context.ExecuteWithOptionalConsistencyCheck
         allNodes
