@@ -257,9 +257,10 @@ type StellarCoreCfg =
             t.Add("LOADGEN_OP_COUNT_DISTRIBUTION_FOR_TESTING", distribution |> Seq.map snd)
             |> ignore
 
-        let n = self.preferredPeers.Length
         t.Add("TARGET_PEER_CONNECTIONS", self.targetPeerConnections) |> ignore
-        t.Add("MAX_ADDITIONAL_PEER_CONNECTIONS", min n 128) |> ignore
+
+        t.Add("MAX_ADDITIONAL_PEER_CONNECTIONS", self.targetPeerConnections * 3)
+        |> ignore
 
         t.Add("QUORUM_INTERSECTION_CHECKER", false) |> ignore
         t.Add("MANUAL_CLOSE", self.manualClose) |> ignore
