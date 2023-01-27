@@ -36,6 +36,7 @@ let databaseInplaceUpgrade (context: MissionContext) =
             { CoreSetOptions.GetDefault newImage with
                   nodeCount = 1
                   quorumSet = quorumSet
+                  localHistory = false
                   initialization =
                       { newDb = false
                         newHist = false
