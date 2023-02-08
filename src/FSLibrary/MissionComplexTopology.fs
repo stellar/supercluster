@@ -19,7 +19,7 @@ let complexTopology (context: MissionContext) =
             "core"
             { CoreSetOptions.GetDefault context.image with
                   nodeCount = 4
-                  quorumSet = CoreSetQuorum(CoreSetName "core")
+                  quorumSet = CoreSetQuorumListWithThreshold([ CoreSetName "core" ], 100)
                   accelerateTime = true }
 
     let publicSet =
