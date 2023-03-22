@@ -16,7 +16,7 @@ jobs:
     - name: Setup k3s
       uses: debianmaster/actions-k3s@master
       with:
-        version: 'v1.22.16-k3s1'
+        version: 'v1.20.8-k3s1'
     - name: Setup nginx-ingress
       run: kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.5.1/deploy/static/provider/cloud/deploy.yaml
     - name: Setup .NET SDK 5
