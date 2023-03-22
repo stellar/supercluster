@@ -859,41 +859,42 @@ type NetworkCfg with
     // DNS mapping, goes to the Pod itself). Exposing this to external traffic
     // requires that you enable the nginx Ingress controller on your k8s
     // cluster.
-    member self.ToIngress() : V1Ingress =
-        let coreBackend (pn: PodName) : V1IngressBackend =
-            let port = V1ServiceBackendPort(number = CfgVal.httpPort)
-            let service = V1IngressServiceBackend(pn.StringName, port = port)
-            V1IngressBackend(service = service)
+    member self.ToIngress() : Extensionsv1beta1Ingress =
+        let httpPortStr = IntstrIntOrString(value = CfgVal.httpPort.ToString())
 
-        let historyBackend (pn: PodName) : V1IngressBackend =
-            let port = V1ServiceBackendPort(number = 80)
-            let service = V1IngressServiceBackend(pn.StringName, port = port)
-            V1IngressBackend(service = service)
+        let coreBackend (pn: PodName) =
+            Extensionsv1beta1IngressBackend(serviceName = pn.StringName, servicePort = httpPortStr)
 
-        let corePath (coreSet: CoreSet) (i: int) : V1HTTPIngressPath =
+        let historyBackend (pn: PodName) : Extensionsv1beta1IngressBackend =
+            Extensionsv1beta1IngressBackend(serviceName = pn.StringName, servicePort = IntstrIntOrString(value = "80"))
+
+        let corePath (coreSet: CoreSet) (i: int) : Extensionsv1beta1HTTPIngressPath =
             let pn = self.PodName coreSet i
-            let ingressPath = V1HTTPIngressPath()
-            ingressPath.Backend <- coreBackend pn
-            ingressPath.Path <- sprintf "/%s/core(/|$)(.*)" pn.StringName
-            ingressPath.PathType <- "Prefix"
-            ingressPath
 
-        let historyPath (coreSet: CoreSet) (i: int) : V1HTTPIngressPath =
+            Extensionsv1beta1HTTPIngressPath(
+                path = sprintf "/%s/core(/|$)(.*)" pn.StringName,
+                pathType = "Prefix",
+                backend = coreBackend pn
+            )
+
+        let historyPath (coreSet: CoreSet) (i: int) : Extensionsv1beta1HTTPIngressPath =
             let pn = self.PodName coreSet i
-            let ingressPath = V1HTTPIngressPath()
-            ingressPath.Backend <- historyBackend pn
-            ingressPath.Path <- sprintf "/%s/history(/|$)(.*)" pn.StringName
-            ingressPath.PathType <- "Prefix"
-            ingressPath
+
+            Extensionsv1beta1HTTPIngressPath(
+                path = sprintf "/%s/history(/|$)(.*)" pn.StringName,
+                pathType = "Prefix",
+                backend = historyBackend pn
+            )
 
         let corePaths = self.MapAllPeers corePath
         let historyPaths = self.MapAllPeers historyPath
 
-        let rule = V1HTTPIngressRuleValue(paths = Array.concat [ corePaths; historyPaths ])
+        let rule =
+            Extensionsv1beta1HTTPIngressRuleValue(paths = Array.concat [ corePaths; historyPaths ])
 
         let host = self.IngressInternalHostName
-        let rules = [| V1IngressRule(host = host, http = rule) |]
-        let spec = V1IngressSpec(rules = rules)
+        let rules = [| Extensionsv1beta1IngressRule(host = host, http = rule) |]
+        let spec = Extensionsv1beta1IngressSpec(rules = rules)
 
         let annotation =
             Map.ofArray [| ("kubernetes.io/ingress.class", self.missionContext.ingressClass)
@@ -902,4 +903,4 @@ type NetworkCfg with
         let meta =
             V1ObjectMeta(name = self.IngressName, namespaceProperty = self.NamespaceProperty, annotations = annotation)
 
-        V1Ingress(spec = spec, metadata = meta)
+        Extensionsv1beta1Ingress(spec = spec, metadata = meta)

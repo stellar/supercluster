@@ -6,7 +6,7 @@ Supercluster can run on k3s, and this is a relatively easy way to test it or run
 
 Follow these steps:
 
-- Install k3s: `curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.22.16+k3s1 sh -s - --write-kubeconfig-mode 644 --docker --kubelet-arg=cgroup-driver=systemd --no-deploy traefik`
+- Install k3s: `curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.20.8+k3s1 sh -s - --write-kubeconfig-mode 644 --docker --kubelet-arg=cgroup-driver=systemd --no-deploy traefik`
 
 - Deploy nginx-ingress: `kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.5.1/deploy/static/provider/cloud/deploy.yaml`
 
