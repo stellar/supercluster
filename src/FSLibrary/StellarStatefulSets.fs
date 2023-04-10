@@ -64,7 +64,7 @@ type StellarFormation with
 
                 self.Kube.WatchNamespacedStatefulSetAsync(
                     name = name,
-                    ``namespace`` = ns,
+                    namespaceParameter = ns,
                     onEvent = action,
                     onClosed = reinstall
                 )

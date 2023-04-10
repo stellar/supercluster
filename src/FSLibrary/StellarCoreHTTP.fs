@@ -413,22 +413,24 @@ type Peer with
 
     member self.SubmitSignedTransaction(tx: Transaction) : Tx.Root =
         let b64 = tx.ToEnvelopeXdrBase64()
-        let uri = (self.URL "tx") + "?blob=" + (System.Uri.EscapeDataString b64)
 
         let s =
             WebExceptionRetry
                 DefaultRetry
                 (fun _ ->
-                    // Work around buggy URI-escaping upstream,
-                    // see https://github.com/fsharp/FSharp.Data/issues/1263
-                    LogDebug "Submitting transaction: %s" uri
-                    let req = System.Net.WebRequest.CreateHttp uri
-                    req.Method <- "GET"
-                    let hdrs = System.Net.WebHeaderCollection()
-                    hdrs.Add(System.Net.HttpRequestHeader.Host, self.networkCfg.IngressInternalHostName)
-                    req.Headers <- hdrs
-                    use stream = req.GetResponse().GetResponseStream()
-                    use reader = new System.IO.StreamReader(stream)
+                    LogDebug
+                        "Submitting transaction: %s"
+                        ((self.URL "tx") + "?blob=" + (System.Uri.EscapeDataString b64))
+
+                    let response =
+                        Http.RequestStream(
+                            (self.URL "tx"),
+                            httpMethod = "GET",
+                            query = [ "blob", b64 ],
+                            headers = [ "Host", self.networkCfg.IngressInternalHostName ]
+                        )
+
+                    use reader = new System.IO.StreamReader(response.ResponseStream)
                     reader.ReadToEnd())
 
         LogDebug "Transaction response: %s" s
