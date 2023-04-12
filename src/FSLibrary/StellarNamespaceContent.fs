@@ -139,7 +139,7 @@ type NamespaceContent(kube: Kubernetes, apiRateLimit: int, namespaceProperty: st
         ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (apiRateLimit)
         ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (apiRateLimit)
 
-        for i in kube.ListNamespacedIngress(namespaceParameter = namespaceProperty).Items do
+        for i in kube.ListNamespacedIngress1(namespaceParameter = namespaceProperty).Items do
             self.Add(i)
 
         ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (apiRateLimit)
