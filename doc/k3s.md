@@ -6,9 +6,14 @@ Supercluster can run on k3s, and this is a relatively easy way to test it or run
 
 Follow these steps:
 
-- Install k3s: `curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.22.16+k3s1 sh -s - --write-kubeconfig-mode 644 --docker --kubelet-arg=cgroup-driver=systemd --no-deploy traefik`
+- Install k3s: `curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.23.17+k3s1 sh -s - --write-kubeconfig-mode 644 --docker --kubelet-arg=cgroup-driver=systemd --no-deploy traefik`
 
-- Deploy nginx-ingress: `kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.5.1/deploy/static/provider/cloud/deploy.yaml`
+- Deploy nginx-ingress:
+
+```
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.5.1/deploy/static/provider/cloud/deploy.yaml \
+&& kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=120s
+```
 
 - Raise the sysctl limits on your ARP cache. This is necessary to run larger supercluster
   missions. Put something like this in your `/etc/sysctl.conf` and then run `sysctl -p`

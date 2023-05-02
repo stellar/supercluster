@@ -16,9 +16,11 @@ jobs:
     - name: Setup k3s
       uses: debianmaster/actions-k3s@master
       with:
-        version: 'v1.22.16-k3s1'
+        version: 'v1.23.17-k3s1'
     - name: Setup nginx-ingress
-      run: kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.5.1/deploy/static/provider/cloud/deploy.yaml
+      run: |
+        kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.5.1/deploy/static/provider/cloud/deploy.yaml
+        kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=120s
     - name: Setup .NET SDK 5
       uses: actions/setup-dotnet@v1
       with:
