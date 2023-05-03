@@ -497,7 +497,7 @@ type Peer with
 
     member self.WaitForLoadGenComplete(loadGen: LoadGen) =
         RetryUntilTrue
-            (fun _ -> self.IsLoadGenComplete() = Success)
+            (fun _ -> (self.IsLoadGenComplete() = Success || self.IsLoadGenComplete() = Failure))
             (fun _ ->
                 self.LogLoadGenProgressTowards loadGen
                 self.LogCoreSetListStatusWithTiers self.networkCfg.CoreSetList)
