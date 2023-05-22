@@ -230,6 +230,21 @@ type StellarCoreCfg =
         t.Add("ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING", self.accelerateTime) |> ignore
         t.Add("ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING", self.generateLoad) |> ignore
 
+        if self.network.missionContext.peerFloodCapacityBytes.IsSome then
+            t.Add("PEER_FLOOD_READING_CAPACITY_BYTES", self.network.missionContext.peerFloodCapacityBytes.Value)
+            |> ignore
+
+        if self.network.missionContext.flowControlSendMoreBatchSizeBytes.IsSome then
+            t.Add(
+                "FLOW_CONTROL_SEND_MORE_BATCH_SIZE_BYTES",
+                self.network.missionContext.flowControlSendMoreBatchSizeBytes.Value
+            )
+            |> ignore
+
+        if self.network.missionContext.outboundByteLimit.IsSome then
+            t.Add("OUTBOUND_TX_QUEUE_BYTE_LIMIT", self.network.missionContext.outboundByteLimit.Value)
+            |> ignore
+
         if self.inMemoryMode then
             t.Add("METADATA_OUTPUT_STREAM", CfgVal.metaStreamPath) |> ignore
 
