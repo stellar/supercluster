@@ -75,6 +75,9 @@ type MissionOptions
         flatNetworkDelay: int option,
         peerReadingCapacity: int option,
         peerFloodCapacity: int option,
+        peerFloodCapacityBytes: int option,
+        flowControlSendMoreBatchSizeBytes: int option,
+        outboundByteLimit: int option,
         sleepMainThread: int option,
         flowControlSendMoreBatchSize: int option,
         simulateApplyDuration: seq<string>,
@@ -266,6 +269,11 @@ type MissionOptions
              Required = false)>]
     member self.PeerFloodCapacity = peerFloodCapacity
 
+    [<Option("peer-flood-capacity-bytes",
+             HelpText = "A config parameter that controls how many bytes (tx or SCP) from a particular peer core can process simultaneously (See PEER_FLOOD_READING_CAPACITY_BYTES)",
+             Required = false)>]
+    member self.PeerFloodCapacityBytes = peerFloodCapacityBytes
+
     [<Option("sleep-main-thread",
              HelpText = "Additional sleep to test behavior of slower nodes (See ARTIFICIALLY_SLEEP_MAIN_THREAD_FOR_TESTING)",
              Required = false)>]
@@ -275,6 +283,14 @@ type MissionOptions
              HelpText = "Peer asks for more data every time it processes `FLOW_CONTROL_SEND_MORE_BATCH_SIZE` messages (See FLOW_CONTROL_SEND_MORE_BATCH_SIZE)",
              Required = false)>]
     member self.FlowControlSendMoreBatchSize = flowControlSendMoreBatchSize
+
+    [<Option("flow-control-send-more-batch-size-bytes",
+             HelpText = "Peer asks for more data every time it processes `FLOW_CONTROL_SEND_MORE_BATCH_SIZE_BYTES` bytes (See FLOW_CONTROL_SEND_MORE_BATCH_SIZE_BYTES)",
+             Required = false)>]
+    member self.FlowControlSendMoreBatchSizeBytes = flowControlSendMoreBatchSizeBytes
+
+    [<Option("outbound-byte-limit", HelpText = "Byte limit for outbound transaction queue", Required = false)>]
+    member self.OutboundByteLimit = outboundByteLimit
 
     [<Option("simulate-apply-duration",
              HelpText = "A space-separated list of how much to sleep for in simulation (See OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING)",
@@ -399,8 +415,11 @@ let main argv =
                   simulateApplyWeight = None
                   peerFloodCapacity = None
                   peerReadingCapacity = None
+                  peerFloodCapacityBytes = None
+                  outboundByteLimit = None
                   sleepMainThread = None
                   flowControlSendMoreBatchSize = None
+                  flowControlSendMoreBatchSizeBytes = None
                   tier1OrgsToAdd = 0
                   nonTier1NodesToAdd = 0
                   randomSeed = 0
@@ -498,8 +517,11 @@ let main argv =
                                simulateApplyWeight = processInputSeq mission.SimulateApplyWeight
                                peerReadingCapacity = mission.PeerReadingCapacity
                                peerFloodCapacity = mission.PeerFloodCapacity
+                               peerFloodCapacityBytes = mission.PeerFloodCapacityBytes
+                               outboundByteLimit = mission.OutboundByteLimit
                                sleepMainThread = mission.SleepMainThread
                                flowControlSendMoreBatchSize = mission.FlowControlSendMoreBatchSize
+                               flowControlSendMoreBatchSizeBytes = mission.FlowControlSendMoreBatchSizeBytes
                                tier1OrgsToAdd = mission.Tier1OrgsToAdd
                                nonTier1NodesToAdd = mission.NonTier1NodesToAdd
                                networkSizeLimit = mission.NetworkSizeLimit

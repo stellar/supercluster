@@ -67,8 +67,11 @@ type MissionContext =
       simulateApplyWeight: seq<int> option
       peerReadingCapacity: int option
       peerFloodCapacity: int option
+      peerFloodCapacityBytes: int option
       sleepMainThread: int option
       flowControlSendMoreBatchSize: int option
+      flowControlSendMoreBatchSizeBytes: int option
+      outboundByteLimit: int option
       tier1OrgsToAdd: int
       nonTier1NodesToAdd: int
       randomSeed: int
