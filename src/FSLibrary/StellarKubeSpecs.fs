@@ -428,7 +428,7 @@ type NetworkCfg with
         if self.missionContext.unevenSched then
             affinity both
         else
-            let nonMaster = avoidNodeLabel ("node-role.kubernetes.io/master", None)
+            let nonMaster = avoidNodeLabel ("node-role.kubernetes.io/control-plane", None)
             affinity (nonMaster :: both)
 
     member self.TopologyConstraints() : V1TopologySpreadConstraint array =
