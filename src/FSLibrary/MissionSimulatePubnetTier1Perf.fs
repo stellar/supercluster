@@ -44,7 +44,7 @@ let simulatePubnetTier1Perf (context: MissionContext) =
         false
         (fun (formation: StellarFormation) ->
 
-            let numAccounts = 10000
+            let numAccounts = 30000
 
             let upgradeMaxTxSetSize (coreSets: CoreSet list) (rate: int) =
                 // Set max tx size to 10x the rate -- at 5x we overflow the transaction queue too often.
