@@ -125,10 +125,10 @@ let simulatePubnetTier1Perf (context: MissionContext) =
             let mutable results = []
             // As the runs take a while, set a threshold of 10, so we get a reasonbale approximation
             let threshold = 10
-            let numRuns = 3
+            let numRuns = (if context.numRuns.IsSome then context.numRuns.Value else 3)
 
             for run in 1 .. numRuns do
-                LogInfo "Starting max TPS run %i" run
+                LogInfo "Starting max TPS run %i out of %i" run numRuns
                 let resultRate = binarySearchWithThreshold context.txRate context.maxTxRate threshold
                 results <- List.append results [ resultRate ]
                 if run < numRuns then wait ()

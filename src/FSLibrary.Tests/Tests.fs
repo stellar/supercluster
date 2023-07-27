@@ -98,7 +98,8 @@ let ctx : MissionContext =
       nonTier1NodesToAdd = 0
       randomSeed = 0
       pubnetParallelCatchupStartingLedger = 0
-      tag = None }
+      tag = None
+      numRuns = None }
 
 let netdata = __SOURCE_DIRECTORY__ + "/../../../data/public-network-data-2021-01-05.json"
 let pubkeys = __SOURCE_DIRECTORY__ + "/../../../data/tier1keys.json"
