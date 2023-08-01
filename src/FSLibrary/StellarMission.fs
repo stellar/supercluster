@@ -38,6 +38,7 @@ open MissionAcceptanceUnitTests
 open MissionSimulatePubnet
 open MissionSimulatePubnetTier1Perf
 open StellarMissionContext
+open MissionSorobanLoadGeneration
 
 type Mission = (MissionContext -> unit)
 
@@ -76,4 +77,5 @@ let allMissions : Map<string, Mission> =
                  ("DatabaseInplaceUpgrade", databaseInplaceUpgrade)
                  ("AcceptanceUnitTests", acceptanceUnitTests)
                  ("SimulatePubnet", simulatePubnet)
-                 ("SimulatePubnetTier1Perf", simulatePubnetTier1Perf) |]
+                 ("SimulatePubnetTier1Perf", simulatePubnetTier1Perf)
+                 ("SorobanLoadGeneration"), sorobanLoadGeneration |]

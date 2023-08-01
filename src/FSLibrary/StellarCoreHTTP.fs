@@ -43,12 +43,14 @@ type LoadGenMode =
     | GenerateAccountCreationLoad
     | GeneratePaymentLoad
     | GeneratePretendLoad
+    | GenerateSorobanLoad
 
     override self.ToString() =
         match self with
         | GenerateAccountCreationLoad -> "create"
         | GeneratePaymentLoad -> "pay"
         | GeneratePretendLoad -> "pretend"
+        | GenerateSorobanLoad -> "soroban"
 
 
 type LoadGen =
@@ -116,6 +118,17 @@ type MissionContext with
           maxfeerate = self.maxFeeRate
           skiplowfeetxs = self.skipLowFeeTxs }
 
+    member self.GenerateSorobanLoad : LoadGen =
+        { mode = GenerateSorobanLoad
+          accounts = self.numAccounts
+          txs = self.numTxs
+          txrate = self.txRate
+          spikesize = self.spikeSize
+          spikeinterval = self.spikeInterval
+          offset = 0
+          batchsize = 100
+          maxfeerate = self.maxFeeRate
+          skiplowfeetxs = self.skipLowFeeTxs }
 
 let DefaultAccountCreationLoadGen =
     { mode = GenerateAccountCreationLoad
