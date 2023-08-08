@@ -139,8 +139,6 @@ let locations =
       Tokyo ]
     |> Array.ofList
 
-let tier1OrgNames = [ "sdf"; "bd"; "lo"; "wx"; "pn"; "cq"; "sp" ]
-
 // Each edge connecting a and b is represented as (a, b) if a < b, and (b, a) otherwise.
 // This makes sense as the graph is undirected, and it also makes it easier to handle a set of edges.
 let extractEdges (graph: PubnetNode.Root array) : (string * string) array =
@@ -283,7 +281,8 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
             |> Set.ofArray
         else
             PubnetNode.Load(context.pubnetData.Value)
-            |> Array.filter (fun n -> n.SbHomeDomain.IsSome && List.contains n.SbHomeDomain.Value tier1OrgNames)
+            // Any node with a home domain is considered tier1.
+            |> Array.filter (fun n -> n.SbHomeDomain.IsSome)
             |> Array.map (fun n -> n.PublicKey)
             |> Set.ofArray
 
