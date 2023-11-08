@@ -145,6 +145,7 @@ let doCatchupForVersion
     (formation: StellarFormation)
     (catchupSets: CatchupSets)
     (version: int)
+    (doSoroban: bool)
     =
     formation.Stop(CoreSetName "version")
 
@@ -152,12 +153,18 @@ let doCatchupForVersion
 
     let generatorPeer = formation.NetworkCfg.GetPeer catchupSets.generatorSet 0
     generatorPeer.UpgradeProtocol version System.DateTime.UtcNow
+    generatorPeer.WaitForProtocol version
 
     if context.numTxs > 100 then
         generatorPeer.UpgradeMaxTxSetSize 1000000 System.DateTime.UtcNow
+        generatorPeer.WaitForMaxTxSetSize 1000000
 
     formation.RunLoadgen catchupSets.generatorSet context.GenerateAccountCreationLoad
-    formation.RunLoadgen catchupSets.generatorSet context.GeneratePaymentLoad
+
+    formation.RunLoadgen
+        catchupSets.generatorSet
+        (if doSoroban then context.GenerateSorobanLoad else context.GeneratePaymentLoad)
+
     generatorPeer.WaitForFewLedgers(5)
 
     for set in catchupSets.deferredSetList do
@@ -168,7 +175,7 @@ let doCatchupForVersion
 let doCatchup (context: MissionContext) (formation: StellarFormation) (catchupSets: CatchupSets) =
     let versionPeer = formation.NetworkCfg.GetPeer catchupSets.versionSet 0
     let version = versionPeer.GetSupportedProtocolVersion()
-    doCatchupForVersion context formation catchupSets version
+    doCatchupForVersion context formation catchupSets version false
 
 
 let getCatchupRanges (ledgersPerJob: int) (startingLedger: int) (latestLedgerNum: int) (overlapLedgers: int) =

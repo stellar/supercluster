@@ -12,6 +12,8 @@ open StellarFormation
 open StellarStatefulSets
 open StellarSupercluster
 
+let sorobanProtocolVersion = 20
+
 let historyGenerateAndCatchup (context: MissionContext) =
     let context = context.WithNominalLoad
     let image = context.image
@@ -32,7 +34,7 @@ let historyGenerateAndCatchup (context: MissionContext) =
 
             doCatchup context formation catchupSets)
 
-    for i in 0 .. (maxVersion - 1) do
+    for i in 0 .. maxVersion do
         let contextCopy = context.WithNominalLoad
 
         contextCopy.Execute
@@ -40,4 +42,14 @@ let historyGenerateAndCatchup (context: MissionContext) =
             None
             (fun (formation: StellarFormation) ->
                 formation.WaitUntilAllLiveSynced()
-                doCatchupForVersion contextCopy formation catchupSets i)
+                doCatchupForVersion contextCopy formation catchupSets i false)
+
+    if maxVersion = sorobanProtocolVersion then
+        let contextCopy = { context with numTxs = 1000; numAccounts = 100; txRate = 1 }
+
+        contextCopy.Execute
+            sets
+            None
+            (fun (formation: StellarFormation) ->
+                formation.WaitUntilAllLiveSynced()
+                doCatchupForVersion contextCopy formation catchupSets sorobanProtocolVersion true)
