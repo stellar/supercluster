@@ -196,7 +196,7 @@ type StellarCoreCfg =
 
         // only latest images support Soroban configs
         let latestCoreVersion (input: string) =
-            let pattern = @"stellar-core:19\.14\.1-\d{4}"
+            let pattern = @"stellar-core:(19\.14\.1|20\.\d\.\d)-\d{4}"
             Regex.IsMatch(input, pattern)
 
         if latestCoreVersion self.image then
