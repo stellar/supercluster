@@ -41,4 +41,5 @@ let runInMemoryMode (context: MissionContext) =
             formation.UpgradeMaxTxSetSize [ coreSet; coreSetWithCaptiveCore ] 100000
 
             formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
-            formation.RunLoadgen coreSet context.GeneratePaymentLoad)
+            formation.RunLoadgen coreSet context.GeneratePaymentLoad
+            formation.RunLoadgen coreSet { context.GenerateSorobanLoad with txrate = 1 })

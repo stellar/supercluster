@@ -23,7 +23,7 @@ let protocolUpgradeWithLoad (context: MissionContext) =
     let context =
         { context with
               coreResources = UpgradeResources
-              numAccounts = 200
+              numAccounts = 20000
               numTxs = 50000
               txRate = 1000
               skipLowFeeTxs = true }
@@ -42,4 +42,5 @@ let protocolUpgradeWithLoad (context: MissionContext) =
             formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
 
             formation.ScheduleProtocolUpgrade [ coreSet ] latestProtocol (System.DateTime.Now.AddSeconds(20.0))
-            formation.RunLoadgen coreSet context.GeneratePaymentLoad)
+            formation.RunLoadgen coreSet context.GeneratePaymentLoad
+            formation.RunLoadgen coreSet { context.GenerateSorobanLoad with txrate = 1; txs = 200 })

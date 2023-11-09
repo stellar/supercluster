@@ -22,7 +22,7 @@ let loadGenerationWithTxSetLimit (context: MissionContext) =
     let context =
         { context with
               coreResources = MediumTestResources
-              numAccounts = 200
+              numAccounts = 20000
               numTxs = 50000
               txRate = 1000
               skipLowFeeTxs = true }
@@ -36,4 +36,5 @@ let loadGenerationWithTxSetLimit (context: MissionContext) =
             formation.UpgradeMaxTxSetSize [ coreSet ] 1000
 
             formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
-            formation.RunLoadgen coreSet context.GeneratePaymentLoad)
+            formation.RunLoadgen coreSet context.GeneratePaymentLoad
+            formation.RunLoadgen coreSet { context.GenerateSorobanLoad with txrate = 1; txs = 200 })

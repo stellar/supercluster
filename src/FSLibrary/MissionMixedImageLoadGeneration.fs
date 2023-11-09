@@ -48,7 +48,7 @@ let mixedImageLoadGeneration (oldImageNodeCount: int) (context: MissionContext) 
     let context =
         { context with
               coreResources = MediumTestResources
-              numAccounts = 200
+              numAccounts = 20000
               numTxs = 50000
               txRate = 1000
               skipLowFeeTxs = true }
@@ -70,7 +70,8 @@ let mixedImageLoadGeneration (oldImageNodeCount: int) (context: MissionContext) 
             formation.UpgradeMaxTxSetSize coreSets 1000
 
             formation.RunLoadgen oldCoreSet context.GenerateAccountCreationLoad
-            formation.RunLoadgen oldCoreSet context.GeneratePaymentLoad)
+            formation.RunLoadgen oldCoreSet context.GeneratePaymentLoad
+            formation.RunLoadgen oldCoreSet { context.GenerateSorobanLoad with txrate = 1; txs = 200 })
 
 let mixedImageLoadGenerationWithOldImageMajority (context: MissionContext) = mixedImageLoadGeneration 2 context
 

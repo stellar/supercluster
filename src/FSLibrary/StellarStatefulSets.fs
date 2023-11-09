@@ -217,6 +217,7 @@ type StellarFormation with
         let peer = self.NetworkCfg.GetPeer coreSet 0
         LogInfo "Loadgen: %s" (peer.GenerateLoad loadGen)
         peer.WaitForLoadGenComplete loadGen
+        if peer.IsLoadGenComplete() <> Success then failwith "Loadgen failed!"
 
     member self.clearMetrics(coreSets: CoreSet list) =
         self.NetworkCfg.EachPeerInSets(coreSets |> List.toArray) (fun peer -> peer.ClearMetrics())

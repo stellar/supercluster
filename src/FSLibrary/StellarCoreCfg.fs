@@ -131,6 +131,7 @@ type StellarCoreCfg =
       nodeSeed: KeyPair
       nodeIsValidator: bool
       runStandalone: bool
+      image: string
       preferredPeers: PeerDnsName list
       targetPeerConnections: int
       preferredPeersOnly: bool
@@ -192,6 +193,14 @@ type StellarCoreCfg =
         t.Add("PREFERRED_PEERS_ONLY", self.preferredPeersOnly) |> ignore
         t.Add("COMMANDS", logLevelCommands) |> ignore
         t.Add("CATCHUP_COMPLETE", self.catchupMode = CatchupComplete) |> ignore
+
+        // only latest images support Soroban configs
+        let latestCoreVersion (input: string) =
+            let pattern = @"stellar-core:19\.14\.1-\d{4}"
+            Regex.IsMatch(input, pattern)
+
+        if latestCoreVersion self.image then
+            t.Add("TESTING_SOROBAN_HIGH_LIMIT_OVERRIDE", true) |> ignore
 
         match self.network.missionContext.peerReadingCapacity, self.network.missionContext.peerFloodCapacity with
         | None, None -> ()
@@ -442,6 +451,7 @@ type NetworkCfg with
           nodeSeed = KeyPair.Random()
           nodeIsValidator = false
           runStandalone = false
+          image = opts.image
           preferredPeers = self.PreferredPeers opts
           preferredPeersOnly = false
           targetPeerConnections = 16
@@ -471,6 +481,7 @@ type NetworkCfg with
           nodeSeed = c.keys.[i]
           nodeIsValidator = c.options.validate
           runStandalone = false
+          image = c.options.image
           preferredPeers =
               match c.options.preferredPeersMap with
               | None -> self.PreferredPeers c.options
