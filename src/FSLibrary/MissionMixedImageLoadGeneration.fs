@@ -11,6 +11,7 @@ open StellarFormation
 open StellarStatefulSets
 open StellarSupercluster
 open StellarCoreHTTP
+open StellarCorePeer
 
 let mixedImageLoadGeneration (oldImageNodeCount: int) (context: MissionContext) =
     let oldNodeCount = oldImageNodeCount
@@ -69,9 +70,14 @@ let mixedImageLoadGeneration (oldImageNodeCount: int) (context: MissionContext) 
             formation.UpgradeProtocolToLatest coreSets
             formation.UpgradeMaxTxSetSize coreSets 1000
 
-            formation.RunLoadgen oldCoreSet context.GenerateAccountCreationLoad
-            formation.RunLoadgen oldCoreSet context.GeneratePaymentLoad
-            formation.RunLoadgen oldCoreSet { context.GenerateSorobanLoad with txrate = 1; txs = 200 })
+            let loadgenCoreSet = coreSets.[0]
+            formation.RunLoadgen loadgenCoreSet context.GenerateAccountCreationLoad
+            formation.RunLoadgen loadgenCoreSet context.GeneratePaymentLoad
+
+            let majorityPeer = formation.NetworkCfg.GetPeer loadgenCoreSet 0
+
+            if majorityPeer.GetLedgerProtocolVersion() >= 20 then
+                formation.RunLoadgen loadgenCoreSet { context.GenerateSorobanLoad with txrate = 1; txs = 200 })
 
 let mixedImageLoadGenerationWithOldImageMajority (context: MissionContext) = mixedImageLoadGeneration 2 context
 
