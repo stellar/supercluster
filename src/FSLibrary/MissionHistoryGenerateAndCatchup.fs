@@ -45,7 +45,7 @@ let historyGenerateAndCatchup (context: MissionContext) =
                 doCatchupForVersion contextCopy formation catchupSets i false)
 
     if maxVersion = sorobanProtocolVersion then
-        let contextCopy = { context with numTxs = 1000; numAccounts = 100; txRate = 1 }
+        let contextCopy = { context with txRate = 1 }
 
         contextCopy.Execute
             sets
