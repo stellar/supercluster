@@ -14,13 +14,15 @@ open StellarCoreHTTP
 
 
 let sorobanLoadGeneration (context: MissionContext) =
+    let rate = 10
+
     let context =
         { context with
               coreResources = SimulatePubnetTier1PerfResources
               installNetworkDelay = Some(context.installNetworkDelay |> Option.defaultValue true)
-              txRate = 10
+              txRate = rate
               numAccounts = 10000
-              numTxs = 10 * 1000
+              numTxs = rate * 2000
               skipLowFeeTxs = true
               maxFeeRate = Some 100000000 }
 
