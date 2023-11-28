@@ -12,9 +12,6 @@ open MissionLoadGeneration
 open MissionLoadGenerationWithSpikes
 open MissionLoadGenerationWithTxSetLimit
 open MissionMixedImageLoadGeneration
-open MissionBenchmarkBaseline
-open MissionBenchmarkConsensusOnly
-open MissionBenchmarkIncreaseTxRate
 open MissionHistoryGenerateAndCatchup
 open MissionHistoryPubnetMinimumCatchup
 open MissionHistoryPubnetRecentCatchup
@@ -55,9 +52,6 @@ let allMissions : Map<string, Mission> =
                  ("MixedImageLoadGenerationWithOldImageMajority", mixedImageLoadGenerationWithOldImageMajority)
                  ("MixedImageLoadGenerationWithNewImageMajority", mixedImageLoadGenerationWithNewImageMajority)
                  ("InMemoryMode", runInMemoryMode)
-                 ("BenchmarkBaseline", benchmarkBaseline)
-                 ("BenchmarkConsensusOnly", benchmarkConsensusOnly)
-                 ("BenchmarkIncreaseTxRate", benchmarkIncreaseTxRate)
                  ("HistoryGenerateAndCatchup", historyGenerateAndCatchup)
                  ("HistoryPubnetMinimumCatchup", historyPubnetMinimumCatchup)
                  ("HistoryPubnetRecentCatchup", historyPubnetRecentCatchup)

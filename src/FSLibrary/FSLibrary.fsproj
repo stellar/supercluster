@@ -37,9 +37,6 @@
     <Compile Include="MissionInMemoryMode.fs" />
     <Compile Include="MissionLoadGenerationWithSpikes.fs" />
     <Compile Include="MissionLoadGenerationWithTxSetLimit.fs" />
-    <Compile Include="MissionBenchmarkBaseline.fs" />
-    <Compile Include="MissionBenchmarkConsensusOnly.fs" />
-    <Compile Include="MissionBenchmarkIncreaseTxRate.fs" />
     <Compile Include="MissionHistoryGenerateAndCatchup.fs" />
     <Compile Include="MissionHistoryPubnetMinimumCatchup.fs" />
     <Compile Include="MissionSimulatePubnet.fs" />
