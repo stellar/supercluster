@@ -29,9 +29,10 @@ let cwd = __SOURCE_DIRECTORY__
 
 type Metrics = JsonProvider<"json-type-samples/sample-metrics.json", SampleIsList=true, ResolutionFolder=cwd>
 type Info = JsonProvider<"json-type-samples/sample-info.json", SampleIsList=true, ResolutionFolder=cwd>
+type SorobanInfo = JsonProvider<"json-type-samples/sample-soroban-info.json", SampleIsList=true, ResolutionFolder=cwd>
 type TestAcc = JsonProvider<"json-type-samples/sample-testacc.json", SampleIsList=true, ResolutionFolder=cwd>
 type Tx = JsonProvider<"json-type-samples/sample-tx.json", SampleIsList=true, ResolutionFolder=cwd>
-
+type Loadgen = JsonProvider<"json-type-samples/loadgen-sample.json", SampleIsList=true, ResolutionFolder=cwd>
 
 type LoadGenStatus =
     | Success
@@ -44,6 +45,10 @@ type LoadGenMode =
     | GeneratePaymentLoad
     | GeneratePretendLoad
     | GenerateSorobanLoad
+    | SetupSorobanUpgrade
+    | CreateSorobanUpgrade
+    | SorobanInvokeSetup
+    | SorobanInvoke
 
     override self.ToString() =
         match self with
@@ -51,7 +56,10 @@ type LoadGenMode =
         | GeneratePaymentLoad -> "pay"
         | GeneratePretendLoad -> "pretend"
         | GenerateSorobanLoad -> "soroban_upload"
-
+        | SetupSorobanUpgrade -> "upgrade_setup"
+        | CreateSorobanUpgrade -> "create_upgrade"
+        | SorobanInvokeSetup -> "soroban_invoke_setup"
+        | SorobanInvoke -> "soroban_invoke"
 
 type LoadGen =
     { mode: LoadGenMode
@@ -61,86 +69,222 @@ type LoadGen =
       spikeinterval: int
       txrate: int
       offset: int
-      batchsize: int
       maxfeerate: int option
-      skiplowfeetxs: bool }
+      skiplowfeetxs: bool
+
+      // New fields for SOROBAN_INVOKE mode
+      dataEntriesLow: int option
+      dataEntriesHigh: int option
+      kiloBytesPerDataEntryLow: int option
+      kiloBytesPerDataEntryHigh: int option
+      txSizeBytesLow: int option
+      txSizeBytesHigh: int option
+      instructionsLow: int64 option
+      instructionsHigh: int64 option
+
+      // Fields for SOROBAN_CREATE_UPGRADE parameters
+      maxContractSizeBytes: int option
+      maxContractDataKeySizeBytes: int option
+      maxContractDataEntrySizeBytes: int option
+      ledgerMaxInstructions: int64 option
+      txMaxInstructions: int64 option
+      txMemoryLimit: int64 option
+      ledgerMaxReadLedgerEntries: int option
+      ledgerMaxReadBytes: int option
+      ledgerMaxWriteLedgerEntries: int option
+      ledgerMaxWriteBytes: int option
+      ledgerMaxTxCount: int option
+      txMaxReadLedgerEntries: int option
+      txMaxReadBytes: int option
+      txMaxWriteLedgerEntries: int option
+      txMaxWriteBytes: int option
+      txMaxContractEventsSizeBytes: int option
+      ledgerMaxTransactionsSizeBytes: int option
+      txMaxSizeBytes: int option
+      bucketListSizeWindowSampleSize: int option
+      evictionScanSize: int64 option
+      startingEvictionScanLevel: int option }
 
     member self.ToQuery : (string * string) list =
-        [ ("mode", self.mode.ToString())
-          ("accounts", self.accounts.ToString())
-          ("txs", self.txs.ToString())
-          ("txrate", self.txrate.ToString())
-          ("spikesize", self.spikesize.ToString())
-          ("spikeinterval", self.spikeinterval.ToString())
-          ("batchsize", self.batchsize.ToString())
-          ("offset", self.offset.ToString())
-          if self.maxfeerate.IsSome then ("maxfeerate", self.maxfeerate.Value.ToString())
-          ("skiplowfeetxs", (if self.skiplowfeetxs then "true" else "false")) ]
+        let mandatoryParams =
+            [ ("mode", self.mode.ToString())
+              ("accounts", self.accounts.ToString())
+              ("txs", self.txs.ToString())
+              ("txrate", self.txrate.ToString())
+              ("spikesize", self.spikesize.ToString())
+              ("spikeinterval", self.spikeinterval.ToString())
+              ("offset", self.offset.ToString())
+              ("skiplowfeetxs", (if self.skiplowfeetxs then "true" else "false")) ]
+
+        let optionalParam (name: string) (value: 'T option) =
+            match value with
+            | Some v -> [ (name, v.ToString()) ]
+            | None -> []
+
+        let optionalParams =
+            optionalParam "maxfeerate" self.maxfeerate
+            @ optionalParam "dataentrieslow" self.dataEntriesLow
+              @ optionalParam "dataentrieshigh" self.dataEntriesHigh
+                @ optionalParam "kilobyteslow" self.kiloBytesPerDataEntryLow
+                  @ optionalParam "kilobyteshigh" self.kiloBytesPerDataEntryHigh
+                    @ optionalParam "txsizelow" self.txSizeBytesLow
+                      @ optionalParam "txsizehigh" self.txSizeBytesHigh
+                        @ optionalParam "cpulow" self.instructionsLow
+                          @ optionalParam "cpuhigh" self.instructionsHigh
+                            @ optionalParam "mxcntrctsz" self.maxContractSizeBytes
+                              @ optionalParam "mxcntrctkeysz" self.maxContractDataKeySizeBytes
+                                @ optionalParam "mxcntrctdatasz" self.maxContractDataEntrySizeBytes
+                                  @ optionalParam "ldgrmxinstrc" self.ledgerMaxInstructions
+                                    @ optionalParam "txmxinstrc" self.txMaxInstructions
+                                      @ optionalParam "txmemlim" self.txMemoryLimit
+                                        @ optionalParam "ldgrmxrdntry" self.ledgerMaxReadLedgerEntries
+                                          @ optionalParam "ldgrmxrdbyt" self.ledgerMaxReadBytes
+                                            @ optionalParam "ldgrmxwrntry" self.ledgerMaxWriteLedgerEntries
+                                              @ optionalParam "ldgrmxwrbyt" self.ledgerMaxWriteBytes
+                                                @ optionalParam "ldgrmxtxcnt" self.ledgerMaxTxCount
+                                                  @ optionalParam "txmxrdntry" self.txMaxReadLedgerEntries
+                                                    @ optionalParam "txmxrdbyt" self.txMaxReadBytes
+                                                      @ optionalParam "txmxwrntry" self.txMaxWriteLedgerEntries
+                                                        @ optionalParam "txmxwrbyt" self.txMaxWriteBytes
+                                                          @ optionalParam "txmxevntsz" self.txMaxContractEventsSizeBytes
+                                                            @ optionalParam
+                                                                "ldgrmxtxsz"
+                                                                self.ledgerMaxTransactionsSizeBytes
+                                                              @ optionalParam "txmxsz" self.txMaxSizeBytes
+                                                                @ optionalParam
+                                                                    "wndowsz"
+                                                                    self.bucketListSizeWindowSampleSize
+                                                                  @ optionalParam "evctsz" self.evictionScanSize
+                                                                    @ optionalParam
+                                                                        "evctlvl"
+                                                                        self.startingEvictionScanLevel
+
+        mandatoryParams @ optionalParams
+
+    static member GetDefault() =
+        { mode = GenerateAccountCreationLoad
+          accounts = 100
+          txs = 100
+          spikesize = 0
+          spikeinterval = 0
+          txrate = 2
+          offset = 0
+          maxfeerate = None
+          skiplowfeetxs = false
+          dataEntriesLow = None
+          dataEntriesHigh = None
+          kiloBytesPerDataEntryLow = None
+          kiloBytesPerDataEntryHigh = None
+          txSizeBytesLow = None
+          txSizeBytesHigh = None
+          instructionsLow = None
+          instructionsHigh = None
+          maxContractSizeBytes = None
+          maxContractDataKeySizeBytes = None
+          maxContractDataEntrySizeBytes = None
+          ledgerMaxInstructions = None
+          txMaxInstructions = None
+          txMemoryLimit = None
+          ledgerMaxReadLedgerEntries = None
+          ledgerMaxReadBytes = None
+          ledgerMaxWriteLedgerEntries = None
+          ledgerMaxWriteBytes = None
+          ledgerMaxTxCount = None
+          txMaxReadLedgerEntries = None
+          txMaxReadBytes = None
+          txMaxWriteLedgerEntries = None
+          txMaxWriteBytes = None
+          txMaxContractEventsSizeBytes = None
+          ledgerMaxTransactionsSizeBytes = None
+          txMaxSizeBytes = None
+          bucketListSizeWindowSampleSize = None
+          evictionScanSize = None
+          startingEvictionScanLevel = None }
 
 type MissionContext with
 
     member self.WithNominalLoad : MissionContext = { self with numTxs = 100; numAccounts = 100 }
 
     member self.GenerateAccountCreationLoad : LoadGen =
-        { mode = GenerateAccountCreationLoad
-          accounts = self.numAccounts
+        { LoadGen.GetDefault() with
+              mode = GenerateAccountCreationLoad
+              accounts = self.numAccounts
+              txs = 0
+              spikesize = 0
+              spikeinterval = 0
+              // Use conservative rate for account creation, as the network may quickly get overloaded
+              txrate = 2
+              offset = 0
+              maxfeerate = self.maxFeeRate
+              skiplowfeetxs = self.skipLowFeeTxs }
+
+    member self.GeneratePaymentLoad : LoadGen =
+        { LoadGen.GetDefault() with
+              mode = GeneratePaymentLoad
+              accounts = self.numAccounts
+              txs = self.numTxs
+              txrate = self.txRate
+              spikesize = self.spikeSize
+              spikeinterval = self.spikeInterval
+              offset = 0
+              maxfeerate = self.maxFeeRate
+              skiplowfeetxs = self.skipLowFeeTxs }
+
+    member self.GeneratePretendLoad : LoadGen =
+        { LoadGen.GetDefault() with
+              mode = GeneratePretendLoad
+              accounts = self.numAccounts
+              txs = self.numTxs
+              txrate = self.txRate
+              spikesize = self.spikeSize
+              spikeinterval = self.spikeInterval
+              offset = 0
+              maxfeerate = self.maxFeeRate
+              skiplowfeetxs = self.skipLowFeeTxs }
+
+    member self.GenerateSorobanLoad : LoadGen =
+        { LoadGen.GetDefault() with
+              mode = GenerateSorobanLoad
+              accounts = self.numAccounts
+              txs = self.numTxs
+              txrate = self.txRate
+              spikesize = self.spikeSize
+              spikeinterval = self.spikeInterval
+              offset = 0
+              maxfeerate = self.maxFeeRate
+              skiplowfeetxs = self.skipLowFeeTxs }
+
+    member self.GenerateSorobanInvokeLoad : LoadGen =
+        { LoadGen.GetDefault() with
+              mode = SorobanInvoke
+              accounts = self.numAccounts
+              txs = self.numTxs
+              txrate = self.txRate
+              spikesize = self.spikeSize
+              spikeinterval = self.spikeInterval
+              offset = 0
+              maxfeerate = self.maxFeeRate
+              skiplowfeetxs = self.skipLowFeeTxs
+              dataEntriesLow = Some(0)
+              dataEntriesHigh = Some(10)
+              kiloBytesPerDataEntryLow = Some(1)
+              kiloBytesPerDataEntryHigh = Some(5)
+              txSizeBytesLow = Some(0)
+              txSizeBytesHigh = Some(1000)
+              instructionsLow = Some(0)
+              instructionsHigh = Some(5000000) }
+
+let DefaultAccountCreationLoadGen =
+    { LoadGen.GetDefault() with
+          mode = GenerateAccountCreationLoad
+          accounts = 1000
           txs = 0
           spikesize = 0
           spikeinterval = 0
-          // Use conservative rate for account creation, as the network may quickly get overloaded
           txrate = 2
           offset = 0
-          batchsize = 100
-          maxfeerate = self.maxFeeRate
-          skiplowfeetxs = self.skipLowFeeTxs }
-
-    member self.GeneratePaymentLoad : LoadGen =
-        { mode = GeneratePaymentLoad
-          accounts = self.numAccounts
-          txs = self.numTxs
-          txrate = self.txRate
-          spikesize = self.spikeSize
-          spikeinterval = self.spikeInterval
-          offset = 0
-          batchsize = 100
-          maxfeerate = self.maxFeeRate
-          skiplowfeetxs = self.skipLowFeeTxs }
-
-    member self.GeneratePretendLoad : LoadGen =
-        { mode = GeneratePretendLoad
-          accounts = self.numAccounts
-          txs = self.numTxs
-          txrate = self.txRate
-          spikesize = self.spikeSize
-          spikeinterval = self.spikeInterval
-          offset = 0
-          batchsize = 100
-          maxfeerate = self.maxFeeRate
-          skiplowfeetxs = self.skipLowFeeTxs }
-
-    member self.GenerateSorobanLoad : LoadGen =
-        { mode = GenerateSorobanLoad
-          accounts = self.numAccounts
-          txs = self.numTxs
-          txrate = self.txRate
-          spikesize = self.spikeSize
-          spikeinterval = self.spikeInterval
-          offset = 0
-          batchsize = 100
-          maxfeerate = self.maxFeeRate
-          skiplowfeetxs = self.skipLowFeeTxs }
-
-let DefaultAccountCreationLoadGen =
-    { mode = GenerateAccountCreationLoad
-      accounts = 1000
-      txs = 0
-      spikesize = 0
-      spikeinterval = 0
-      txrate = 2
-      offset = 0
-      batchsize = 100
-      maxfeerate = None
-      skiplowfeetxs = false }
+          maxfeerate = None
+          skiplowfeetxs = false }
 
 
 type UpgradeParameters =
@@ -148,6 +292,8 @@ type UpgradeParameters =
       protocolVersion: Option<int>
       baseFee: Option<int>
       maxTxSetSize: Option<int>
+      maxSorobanTxSetSize: Option<int>
+      configUpgradeSetKey: Option<string>
       baseReserve: Option<int> }
 
     member self.ToQuery : (string * string) list =
@@ -158,13 +304,17 @@ type UpgradeParameters =
                        maybe "protocolversion" self.protocolVersion
                        maybe "basefee" self.baseFee
                        maybe "basereserve" self.baseReserve
-                       maybe "maxtxsetsize" self.maxTxSetSize |]
+                       maybe "maxtxsetsize" self.maxTxSetSize
+                       maybe "maxsorobantxsetsize" self.maxSorobanTxSetSize
+                       maybe "configupgradesetkey" self.configUpgradeSetKey |]
 
 let DefaultUpgradeParameters =
     { upgradeTime = System.DateTime.Parse("1970-01-01T00:00:00Z")
       protocolVersion = None
       baseFee = None
       maxTxSetSize = None
+      maxSorobanTxSetSize = None
+      configUpgradeSetKey = None
       baseReserve = None }
 
 
@@ -219,13 +369,22 @@ type Peer with
 
     member self.GetInfo() : Info.Info = WebExceptionRetry DefaultRetry (fun _ -> Info.Parse(self.fetch "info").Info)
 
+    member self.GetSorobanInfo() : SorobanInfo.Root =
+        WebExceptionRetry DefaultRetry (fun _ -> SorobanInfo.Parse(self.fetch "sorobaninfo"))
+
     member self.GetLedgerNum() : int = self.GetInfo().Ledger.Num
 
     member self.GetMaxTxSetSize() : int = self.GetInfo().Ledger.MaxTxSetSize
 
+    member self.GetSorobanMaxTxSetSize() : int = self.GetInfo().Ledger.MaxSorobanTxSetSize.Value
+
+    member self.GetMaxTxSize() : int = self.GetSorobanInfo().Tx.MaxSizeBytes
+
     member self.GetLedgerProtocolVersion() : int = self.GetInfo().Ledger.Version
 
     member self.GetSupportedProtocolVersion() : int = self.GetInfo().ProtocolVersion
+
+    member self.GetEvictionScanLevel() : int = self.GetSorobanInfo().StateArchival.StartingEvictionScanLevel
 
     member self.SetUpgrades(upgrades: UpgradeParameters) =
         let res =
@@ -266,6 +425,22 @@ type Peer with
 
         self.SetUpgrades(upgrades)
 
+    member self.UpgradeSorobanMaxTxSetSize (txSetSize: int) (time: System.DateTime) =
+        let upgrades =
+            { DefaultUpgradeParameters with
+                  maxSorobanTxSetSize = Some(txSetSize)
+                  upgradeTime = time }
+
+        self.SetUpgrades(upgrades)
+
+    member self.UpgradeNetworkSetting (configUpgradeSetKey: string) (time: System.DateTime) =
+        let upgrades =
+            { DefaultUpgradeParameters with
+                  configUpgradeSetKey = Some(configUpgradeSetKey)
+                  upgradeTime = time }
+
+        self.SetUpgrades(upgrades)
+
     member self.WaitForLedgerNum(n: int) =
         RetryUntilTrue
             (fun _ -> self.GetLedgerNum() >= n)
@@ -288,6 +463,21 @@ type Peer with
         RetryUntilTrue
             (fun _ -> self.GetMaxTxSetSize() = n)
             (fun _ -> LogInfo "Waiting for MaxTxSetSize=%d on %s" n self.ShortName.StringName)
+
+    member self.WaitForSorobanMaxTxSetSize(n: int) =
+        RetryUntilTrue
+            (fun _ -> self.GetSorobanMaxTxSetSize() = n)
+            (fun _ -> LogInfo "Waiting for SorobanMaxTxSetSize=%d on %s" n self.ShortName.StringName)
+
+    member self.WaitForMaxTxSize(n: int) =
+        RetryUntilTrue
+            (fun _ -> self.GetMaxTxSize() = n)
+            (fun _ -> LogInfo "Waiting for MaxTxSize=%d on %s" n self.ShortName.StringName)
+
+    member self.WaitForEvictionScanLevel(n: int) =
+        RetryUntilTrue
+            (fun _ -> self.GetEvictionScanLevel() = n)
+            (fun _ -> LogInfo "Waiting for EvictionScanLevel=%d on %s" n self.ShortName.StringName)
 
     member self.WaitForNextSeq (src: string) (n: int64) =
         let desiredSeq = n + int64 (1)

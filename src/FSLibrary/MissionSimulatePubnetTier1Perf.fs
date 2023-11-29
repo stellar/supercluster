@@ -85,17 +85,17 @@ let simulatePubnetTier1Perf (context: MissionContext) =
                         LogInfo "Run started at tx rate %i" middle
 
                         let loadGen =
-                            { mode = GeneratePaymentLoad
-                              accounts = numAccounts
-                              // Roughly 15 min of load
-                              txs = middle * 1000
-                              spikesize = context.spikeSize
-                              spikeinterval = context.spikeInterval
-                              txrate = middle
-                              offset = 0
-                              batchsize = 100
-                              maxfeerate = None
-                              skiplowfeetxs = false }
+                            { LoadGen.GetDefault() with
+                                  mode = GeneratePaymentLoad
+                                  accounts = numAccounts
+                                  // Roughly 15 min of load
+                                  txs = middle * 1000
+                                  spikesize = context.spikeSize
+                                  spikeinterval = context.spikeInterval
+                                  txrate = middle
+                                  offset = 0
+                                  maxfeerate = None
+                                  skiplowfeetxs = false }
 
                         formation.RunMultiLoadgen tier1 loadGen
                         formation.CheckNoErrorsAndPairwiseConsistency()

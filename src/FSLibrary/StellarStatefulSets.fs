@@ -164,6 +164,14 @@ type StellarFormation with
         let peer = self.NetworkCfg.GetPeer coreSetList.[0] 0
         peer.WaitForMaxTxSetSize maxTxSetSize |> ignore
 
+    member self.UpgradeSorobanMaxTxSetSize (coreSetList: CoreSet list) (maxTxSetSize: int) =
+        self.NetworkCfg.EachPeerInSets
+            (coreSetList |> Array.ofList)
+            (fun p -> p.UpgradeSorobanMaxTxSetSize maxTxSetSize System.DateTime.UtcNow)
+
+        let peer = self.NetworkCfg.GetPeer coreSetList.[0] 0
+        peer.WaitForSorobanMaxTxSetSize maxTxSetSize |> ignore
+
     member self.ReportStatus() = ReportAllPeerStatus self.NetworkCfg
 
     member self.CreateAccount (coreSet: CoreSet) (u: Username) =
@@ -218,6 +226,27 @@ type StellarFormation with
         LogInfo "Loadgen: %s" (peer.GenerateLoad loadGen)
         peer.WaitForLoadGenComplete loadGen
         if peer.IsLoadGenComplete() <> Success then failwith "Loadgen failed!"
+
+    member self.SetupUpgradeContract(coreSet: CoreSet) =
+        let loadgen = { LoadGen.GetDefault() with mode = SetupSorobanUpgrade }
+        self.RunLoadgen coreSet loadgen
+
+    member self.SetupSorobanInvoke(coreSet: CoreSet) =
+        let loadgen = { LoadGen.GetDefault() with mode = SorobanInvokeSetup }
+        self.RunLoadgen coreSet loadgen
+
+    member self.DeployUpgradeEntriesAndArm (coreSet: CoreSet) (loadGen: LoadGen) (upgradeTime: System.DateTime) =
+        let peer = self.NetworkCfg.GetPeer coreSet 0
+        let resStr = peer.GenerateLoad loadGen
+
+        let contractKey = Loadgen.Parse(resStr).ConfigUpgradeSetKey
+
+        LogInfo "Loadgen: %s" resStr
+        peer.WaitForLoadGenComplete loadGen
+        if peer.IsLoadGenComplete() <> Success then failwith "Loadgen failed!"
+
+        // Arm upgrades on each peer in the core set
+        self.NetworkCfg.EachPeerInSets([| coreSet |]) (fun peer -> peer.UpgradeNetworkSetting contractKey upgradeTime)
 
     member self.clearMetrics(coreSets: CoreSet list) =
         self.NetworkCfg.EachPeerInSets(coreSets |> List.toArray) (fun peer -> peer.ClearMetrics())
