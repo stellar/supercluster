@@ -1,0 +1,41 @@
+// Copyright 2023 Stellar Development Foundation and contributors. Licensed
+// under the Apache License, Version 2.0. See the COPYING file at the root
+// of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
+
+module MissionSorobanInvokeHostLoad
+
+open StellarCoreSet
+open StellarMissionContext
+open StellarFormation
+open StellarStatefulSets
+open StellarSupercluster
+open StellarCoreHTTP
+open StellarCorePeer
+
+let sorobanInvokeHostLoad (context: MissionContext) =
+    let coreSet =
+        MakeLiveCoreSet
+            "core"
+            { CoreSetOptions.GetDefault context.image with
+                  invariantChecks = AllInvariantsExceptBucketConsistencyChecks
+                  emptyDirType = DiskBackedEmptyDir
+                  dumpDatabase = false }
+
+    let context =
+        { context with
+              numAccounts = 100
+              numTxs = 100
+              txRate = 1
+              coreResources = MediumTestResources }
+
+    context.Execute
+        [ coreSet ]
+        None
+        (fun (formation: StellarFormation) ->
+            formation.WaitUntilSynced [ coreSet ]
+            formation.UpgradeProtocolToLatest [ coreSet ]
+            formation.UpgradeMaxTxSetSize [ coreSet ] 100000
+
+            formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
+            formation.SetupSorobanInvoke coreSet
+            formation.RunLoadgen coreSet context.GenerateSorobanInvokeLoad)

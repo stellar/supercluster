@@ -39,6 +39,8 @@ open MissionSimulatePubnet
 open MissionSimulatePubnetTier1Perf
 open StellarMissionContext
 open MissionSorobanLoadGeneration
+open MissionSorobanConfigUpgrades
+open MissionSorobanInvokeHostLoad
 
 type Mission = (MissionContext -> unit)
 
@@ -78,4 +80,6 @@ let allMissions : Map<string, Mission> =
                  ("AcceptanceUnitTests", acceptanceUnitTests)
                  ("SimulatePubnet", simulatePubnet)
                  ("SimulatePubnetTier1Perf", simulatePubnetTier1Perf)
-                 ("SorobanLoadGeneration"), sorobanLoadGeneration |]
+                 ("SorobanLoadGeneration", sorobanLoadGeneration)
+                 ("SorobanConfigUpgrades", sorobanConfigUpgrades)
+                 ("SorobanInvokeHostLoad", sorobanInvokeHostLoad) |]
