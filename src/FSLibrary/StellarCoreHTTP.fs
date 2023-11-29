@@ -50,7 +50,7 @@ type LoadGenMode =
         | GenerateAccountCreationLoad -> "create"
         | GeneratePaymentLoad -> "pay"
         | GeneratePretendLoad -> "pretend"
-        | GenerateSorobanLoad -> "soroban"
+        | GenerateSorobanLoad -> "soroban_upload"
 
 
 type LoadGen =
