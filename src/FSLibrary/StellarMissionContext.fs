@@ -39,6 +39,8 @@ type MissionContext =
       numTxs: int
       spikeSize: int
       spikeInterval: int
+      numWasms: int option
+      numInstances: int option
       maxFeeRate: int option
       skipLowFeeTxs: bool
       numNodes: int

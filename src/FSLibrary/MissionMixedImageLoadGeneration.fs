@@ -77,7 +77,7 @@ let mixedImageLoadGeneration (oldImageNodeCount: int) (context: MissionContext) 
             let majorityPeer = formation.NetworkCfg.GetPeer loadgenCoreSet 0
 
             if majorityPeer.GetLedgerProtocolVersion() >= 20 then
-                formation.RunLoadgen loadgenCoreSet { context.GenerateSorobanLoad with txrate = 1; txs = 200 })
+                formation.RunLoadgen loadgenCoreSet { context.GenerateSorobanUploadLoad with txrate = 1; txs = 200 })
 
 let mixedImageLoadGenerationWithOldImageMajority (context: MissionContext) = mixedImageLoadGeneration 2 context
 

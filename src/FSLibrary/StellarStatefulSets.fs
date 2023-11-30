@@ -231,10 +231,6 @@ type StellarFormation with
         let loadgen = { LoadGen.GetDefault() with mode = SetupSorobanUpgrade }
         self.RunLoadgen coreSet loadgen
 
-    member self.SetupSorobanInvoke(coreSet: CoreSet) =
-        let loadgen = { LoadGen.GetDefault() with mode = SorobanInvokeSetup }
-        self.RunLoadgen coreSet loadgen
-
     member self.DeployUpgradeEntriesAndArm (coreSet: CoreSet) (loadGen: LoadGen) (upgradeTime: System.DateTime) =
         let peer = self.NetworkCfg.GetPeer coreSet 0
         let resStr = peer.GenerateLoad loadGen

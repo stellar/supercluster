@@ -44,7 +44,7 @@ type LoadGenMode =
     | GenerateAccountCreationLoad
     | GeneratePaymentLoad
     | GeneratePretendLoad
-    | GenerateSorobanLoad
+    | GenerateSorobanUploadLoad
     | SetupSorobanUpgrade
     | CreateSorobanUpgrade
     | SorobanInvokeSetup
@@ -55,7 +55,7 @@ type LoadGenMode =
         | GenerateAccountCreationLoad -> "create"
         | GeneratePaymentLoad -> "pay"
         | GeneratePretendLoad -> "pretend"
-        | GenerateSorobanLoad -> "soroban_upload"
+        | GenerateSorobanUploadLoad -> "soroban_upload"
         | SetupSorobanUpgrade -> "upgrade_setup"
         | CreateSorobanUpgrade -> "create_upgrade"
         | SorobanInvokeSetup -> "soroban_invoke_setup"
@@ -73,6 +73,8 @@ type LoadGen =
       skiplowfeetxs: bool
 
       // New fields for SOROBAN_INVOKE mode
+      wasms: int option
+      instances: int option
       dataEntriesLow: int option
       dataEntriesHigh: int option
       kiloBytesPerDataEntryLow: int option
@@ -123,41 +125,45 @@ type LoadGen =
 
         let optionalParams =
             optionalParam "maxfeerate" self.maxfeerate
-            @ optionalParam "dataentrieslow" self.dataEntriesLow
-              @ optionalParam "dataentrieshigh" self.dataEntriesHigh
-                @ optionalParam "kilobyteslow" self.kiloBytesPerDataEntryLow
-                  @ optionalParam "kilobyteshigh" self.kiloBytesPerDataEntryHigh
-                    @ optionalParam "txsizelow" self.txSizeBytesLow
-                      @ optionalParam "txsizehigh" self.txSizeBytesHigh
-                        @ optionalParam "cpulow" self.instructionsLow
-                          @ optionalParam "cpuhigh" self.instructionsHigh
-                            @ optionalParam "mxcntrctsz" self.maxContractSizeBytes
-                              @ optionalParam "mxcntrctkeysz" self.maxContractDataKeySizeBytes
-                                @ optionalParam "mxcntrctdatasz" self.maxContractDataEntrySizeBytes
-                                  @ optionalParam "ldgrmxinstrc" self.ledgerMaxInstructions
-                                    @ optionalParam "txmxinstrc" self.txMaxInstructions
-                                      @ optionalParam "txmemlim" self.txMemoryLimit
-                                        @ optionalParam "ldgrmxrdntry" self.ledgerMaxReadLedgerEntries
-                                          @ optionalParam "ldgrmxrdbyt" self.ledgerMaxReadBytes
-                                            @ optionalParam "ldgrmxwrntry" self.ledgerMaxWriteLedgerEntries
-                                              @ optionalParam "ldgrmxwrbyt" self.ledgerMaxWriteBytes
-                                                @ optionalParam "ldgrmxtxcnt" self.ledgerMaxTxCount
-                                                  @ optionalParam "txmxrdntry" self.txMaxReadLedgerEntries
-                                                    @ optionalParam "txmxrdbyt" self.txMaxReadBytes
-                                                      @ optionalParam "txmxwrntry" self.txMaxWriteLedgerEntries
-                                                        @ optionalParam "txmxwrbyt" self.txMaxWriteBytes
-                                                          @ optionalParam "txmxevntsz" self.txMaxContractEventsSizeBytes
-                                                            @ optionalParam
-                                                                "ldgrmxtxsz"
-                                                                self.ledgerMaxTransactionsSizeBytes
-                                                              @ optionalParam "txmxsz" self.txMaxSizeBytes
+            @ optionalParam "wasms" self.wasms
+              @ optionalParam "instances" self.instances
+                @ optionalParam "dataentrieslow" self.dataEntriesLow
+                  @ optionalParam "dataentrieshigh" self.dataEntriesHigh
+                    @ optionalParam "kilobyteslow" self.kiloBytesPerDataEntryLow
+                      @ optionalParam "kilobyteshigh" self.kiloBytesPerDataEntryHigh
+                        @ optionalParam "txsizelow" self.txSizeBytesLow
+                          @ optionalParam "txsizehigh" self.txSizeBytesHigh
+                            @ optionalParam "cpulow" self.instructionsLow
+                              @ optionalParam "cpuhigh" self.instructionsHigh
+                                @ optionalParam "mxcntrctsz" self.maxContractSizeBytes
+                                  @ optionalParam "mxcntrctkeysz" self.maxContractDataKeySizeBytes
+                                    @ optionalParam "mxcntrctdatasz" self.maxContractDataEntrySizeBytes
+                                      @ optionalParam "ldgrmxinstrc" self.ledgerMaxInstructions
+                                        @ optionalParam "txmxinstrc" self.txMaxInstructions
+                                          @ optionalParam "txmemlim" self.txMemoryLimit
+                                            @ optionalParam "ldgrmxrdntry" self.ledgerMaxReadLedgerEntries
+                                              @ optionalParam "ldgrmxrdbyt" self.ledgerMaxReadBytes
+                                                @ optionalParam "ldgrmxwrntry" self.ledgerMaxWriteLedgerEntries
+                                                  @ optionalParam "ldgrmxwrbyt" self.ledgerMaxWriteBytes
+                                                    @ optionalParam "ldgrmxtxcnt" self.ledgerMaxTxCount
+                                                      @ optionalParam "txmxrdntry" self.txMaxReadLedgerEntries
+                                                        @ optionalParam "txmxrdbyt" self.txMaxReadBytes
+                                                          @ optionalParam "txmxwrntry" self.txMaxWriteLedgerEntries
+                                                            @ optionalParam "txmxwrbyt" self.txMaxWriteBytes
+                                                              @ optionalParam
+                                                                  "txmxevntsz"
+                                                                  self.txMaxContractEventsSizeBytes
                                                                 @ optionalParam
-                                                                    "wndowsz"
-                                                                    self.bucketListSizeWindowSampleSize
-                                                                  @ optionalParam "evctsz" self.evictionScanSize
+                                                                    "ldgrmxtxsz"
+                                                                    self.ledgerMaxTransactionsSizeBytes
+                                                                  @ optionalParam "txmxsz" self.txMaxSizeBytes
                                                                     @ optionalParam
-                                                                        "evctlvl"
-                                                                        self.startingEvictionScanLevel
+                                                                        "wndowsz"
+                                                                        self.bucketListSizeWindowSampleSize
+                                                                      @ optionalParam "evctsz" self.evictionScanSize
+                                                                        @ optionalParam
+                                                                            "evctlvl"
+                                                                            self.startingEvictionScanLevel
 
         mandatoryParams @ optionalParams
 
@@ -171,6 +177,8 @@ type LoadGen =
           offset = 0
           maxfeerate = None
           skiplowfeetxs = false
+          wasms = None
+          instances = None
           dataEntriesLow = None
           dataEntriesHigh = None
           kiloBytesPerDataEntryLow = None
@@ -242,9 +250,9 @@ type MissionContext with
               maxfeerate = self.maxFeeRate
               skiplowfeetxs = self.skipLowFeeTxs }
 
-    member self.GenerateSorobanLoad : LoadGen =
+    member self.GenerateSorobanUploadLoad : LoadGen =
         { LoadGen.GetDefault() with
-              mode = GenerateSorobanLoad
+              mode = GenerateSorobanUploadLoad
               accounts = self.numAccounts
               txs = self.numTxs
               txrate = self.txRate
@@ -271,8 +279,22 @@ type MissionContext with
               kiloBytesPerDataEntryHigh = Some(5)
               txSizeBytesLow = Some(0)
               txSizeBytesHigh = Some(1000)
-              instructionsLow = Some(0)
-              instructionsHigh = Some(5000000) }
+              instructionsLow = Some(0L)
+              instructionsHigh = Some(5000000L) }
+
+    member self.SetupSorobanInvoke : LoadGen =
+        { LoadGen.GetDefault() with
+              mode = SorobanInvokeSetup
+              accounts = self.numAccounts
+              txs = self.numTxs
+              txrate = self.txRate
+              spikesize = self.spikeSize
+              spikeinterval = self.spikeInterval
+              offset = 0
+              maxfeerate = self.maxFeeRate
+              skiplowfeetxs = self.skipLowFeeTxs
+              wasms = self.numWasms
+              instances = self.numInstances }
 
 let DefaultAccountCreationLoadGen =
     { LoadGen.GetDefault() with
@@ -384,8 +406,6 @@ type Peer with
 
     member self.GetSupportedProtocolVersion() : int = self.GetInfo().ProtocolVersion
 
-    member self.GetEvictionScanLevel() : int = self.GetSorobanInfo().StateArchival.StartingEvictionScanLevel
-
     member self.SetUpgrades(upgrades: UpgradeParameters) =
         let res =
             WebExceptionRetry
@@ -473,11 +493,6 @@ type Peer with
         RetryUntilTrue
             (fun _ -> self.GetMaxTxSize() = n)
             (fun _ -> LogInfo "Waiting for MaxTxSize=%d on %s" n self.ShortName.StringName)
-
-    member self.WaitForEvictionScanLevel(n: int) =
-        RetryUntilTrue
-            (fun _ -> self.GetEvictionScanLevel() = n)
-            (fun _ -> LogInfo "Waiting for EvictionScanLevel=%d on %s" n self.ShortName.StringName)
 
     member self.WaitForNextSeq (src: string) (n: int64) =
         let desiredSeq = n + int64 (1)

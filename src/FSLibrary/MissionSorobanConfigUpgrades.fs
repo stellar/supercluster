@@ -56,7 +56,7 @@ let sorobanConfigUpgrades (context: MissionContext) =
             formation.UpgradeSorobanMaxTxSetSize [ coreSet ] 0
 
             try
-                formation.RunLoadgen coreSet context.GenerateSorobanLoad
+                formation.RunLoadgen coreSet context.GenerateSorobanUploadLoad
             with _ -> ()
 
             if peer.IsLoadGenComplete() <> Failure then
@@ -65,7 +65,7 @@ let sorobanConfigUpgrades (context: MissionContext) =
             formation.clearMetrics [ coreSet ]
 
             formation.UpgradeSorobanMaxTxSetSize [ coreSet ] 100
-            formation.RunLoadgen coreSet context.GenerateSorobanLoad
+            formation.RunLoadgen coreSet context.GenerateSorobanUploadLoad
 
             // Slightly increase the limit while generating load
             formation.DeployUpgradeEntriesAndArm
@@ -75,7 +75,7 @@ let sorobanConfigUpgrades (context: MissionContext) =
                       txMaxSizeBytes = Some(150000) }
                 (System.DateTime.UtcNow.AddSeconds(20.0))
 
-            formation.RunLoadgen coreSet context.GenerateSorobanLoad
+            formation.RunLoadgen coreSet context.GenerateSorobanUploadLoad
             peer.WaitForMaxTxSize 150000
 
             // Further increase the limit while generating load
@@ -86,7 +86,7 @@ let sorobanConfigUpgrades (context: MissionContext) =
                       txMaxSizeBytes = Some(500000) }
                 (System.DateTime.UtcNow.AddSeconds(20.0))
 
-            formation.RunLoadgen coreSet context.GenerateSorobanLoad
+            formation.RunLoadgen coreSet context.GenerateSorobanUploadLoad
             peer.WaitForMaxTxSize 500000
 
             // Decrease max tx size to be below classic limit, everything should still work as expected
@@ -98,5 +98,5 @@ let sorobanConfigUpgrades (context: MissionContext) =
                       maxContractSizeBytes = Some(10000) }
                 (System.DateTime.UtcNow.AddSeconds(20.0))
 
-            formation.RunLoadgen coreSet context.GenerateSorobanLoad
+            formation.RunLoadgen coreSet context.GenerateSorobanUploadLoad
             peer.WaitForMaxTxSize 50000)

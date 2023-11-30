@@ -18,8 +18,7 @@ let sorobanInvokeHostLoad (context: MissionContext) =
             "core"
             { CoreSetOptions.GetDefault context.image with
                   invariantChecks = AllInvariantsExceptBucketConsistencyChecks
-                  emptyDirType = DiskBackedEmptyDir
-                  dumpDatabase = false }
+                  emptyDirType = DiskBackedEmptyDir }
 
     let context =
         { context with
@@ -37,5 +36,5 @@ let sorobanInvokeHostLoad (context: MissionContext) =
             formation.UpgradeMaxTxSetSize [ coreSet ] 100000
 
             formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
-            formation.SetupSorobanInvoke coreSet
+            formation.RunLoadgen coreSet context.SetupSorobanInvoke
             formation.RunLoadgen coreSet context.GenerateSorobanInvokeLoad)
