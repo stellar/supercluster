@@ -30,7 +30,6 @@
     <Compile Include="StellarJobExec.fs" />
     <Compile Include="StellarSupercluster.fs" />
     <Compile Include="MissionCatchupHelpers.fs" />
-    <Compile Include="MissionSorobanLoadGeneration.fs" />
     <Compile Include="MissionBootAndSync.fs" />
     <Compile Include="MissionSimplePayment.fs" />
     <Compile Include="MissionComplexTopology.fs" />
@@ -57,6 +56,9 @@
     <Compile Include="MissionHistoryTestnetPerformance.fs" />
     <Compile Include="MissionMixedImageLoadGeneration.fs" />
     <Compile Include="MissionVersionMixConsensus.fs" />
+    <Compile Include="MissionSorobanLoadGeneration.fs" />
+    <Compile Include="MissionSorobanConfigUpgrades.fs" />
+    <Compile Include="MissionSorobanInvokeHostLoad.fs" />
     <Compile Include="MissionVersionNewCatchupToOld.fs" />
     <Compile Include="MissionVersionOldCatchupToNew.fs" />
     <Compile Include="MissionProtocolUpgradeTestnet.fs" />

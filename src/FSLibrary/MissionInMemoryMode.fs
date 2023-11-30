@@ -42,4 +42,4 @@ let runInMemoryMode (context: MissionContext) =
 
             formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
             formation.RunLoadgen coreSet context.GeneratePaymentLoad
-            formation.RunLoadgen coreSet { context.GenerateSorobanLoad with txrate = 1 })
+            formation.RunLoadgen coreSet { context.GenerateSorobanUploadLoad with txrate = 1 })

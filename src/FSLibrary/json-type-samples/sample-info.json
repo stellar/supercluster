@@ -119,5 +119,36 @@
       "startedOn" : "2019-09-19T22:36:47Z",
       "state" : "Joining SCP"
    }
+},
+{
+   "info" : {
+      "build" : "v20.0.0rc2-225-gded55f2bd-dirty",
+      "ledger" : {
+         "age" : 86352,
+         "baseFee" : 100,
+         "baseReserve" : 5000000,
+         "closeTime" : 1700517209,
+         "hash" : "6cf31bc389b380b6127db89be6528248f7deb83882200b5389e2602f2a91f306",
+         "maxSorobanTxSetSize" : 30,
+         "maxTxSetSize" : 105,
+         "num" : 2622079,
+         "version" : 20
+      },
+      "network" : "Test SDF Network ; September 2015",
+      "peers" : {
+         "authenticated_count" : 4,
+         "pending_count" : 2
+      },
+      "protocol_version" : 21,
+      "quorum" : {
+         "node" : "self",
+         "qset" : {
+            "cost" : 0,
+            "lag_ms" : null
+         }
+      },
+      "startedOn" : "2023-11-21T21:52:33Z",
+      "state" : "Connected"
+   }
 }
 ]

@@ -61,6 +61,8 @@ type MissionOptions
         numTxs: int,
         spikeSize: int,
         spikeInterval: int,
+        numWasms: int option,
+        numInstances: int option,
         keepData: bool,
         unevenSched: bool,
         requireNodeLabels: seq<string>,
@@ -210,6 +212,14 @@ type MissionOptions
              Required = false,
              Default = 0)>]
     member self.SpikeInterval = spikeInterval
+
+    [<Option("num-wasms", HelpText = "Number of wasms for benchmarks and load generation tests", Required = false)>]
+    member self.NumWasms = numWasms
+
+    [<Option("num-instances",
+             HelpText = "Number of instances for benchmarks and load generation tests",
+             Required = false)>]
+    member self.NumInstances = numInstances
 
     [<Option("keep-data",
              HelpText = "Keeps namespaces and persistent volumes after mission fails",
@@ -392,6 +402,8 @@ let main argv =
                   numTxs = 100000
                   spikeSize = 100000
                   spikeInterval = 0
+                  numWasms = None
+                  numInstances = None
                   maxFeeRate = Some(1000)
                   skipLowFeeTxs = false
                   numNodes = 3
@@ -495,6 +507,8 @@ let main argv =
                                numTxs = mission.NumTxs
                                spikeSize = mission.SpikeSize
                                spikeInterval = mission.SpikeInterval
+                               numWasms = mission.NumWasms
+                               numInstances = mission.NumInstances
                                maxFeeRate = Some(1000)
                                skipLowFeeTxs = false
                                numNodes = mission.NumNodes

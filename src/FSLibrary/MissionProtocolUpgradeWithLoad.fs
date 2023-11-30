@@ -43,4 +43,4 @@ let protocolUpgradeWithLoad (context: MissionContext) =
 
             formation.ScheduleProtocolUpgrade [ coreSet ] latestProtocol (System.DateTime.Now.AddSeconds(20.0))
             formation.RunLoadgen coreSet context.GeneratePaymentLoad
-            formation.RunLoadgen coreSet { context.GenerateSorobanLoad with txrate = 1; txs = 200 })
+            formation.RunLoadgen coreSet { context.GenerateSorobanUploadLoad with txrate = 1; txs = 200 })

@@ -33,15 +33,15 @@ let benchmarkIncreaseTxRate (context: MissionContext) =
 
             for txRate in context.txRate .. (10) .. context.maxTxRate do
                 let loadGen =
-                    { mode = GeneratePaymentLoad
-                      accounts = context.numAccounts
-                      txs = context.numTxs
-                      spikesize = context.spikeSize
-                      spikeinterval = context.spikeInterval
-                      txrate = txRate
-                      offset = 0
-                      batchsize = 100
-                      maxfeerate = None
-                      skiplowfeetxs = false }
+                    { LoadGen.GetDefault() with
+                          mode = GeneratePaymentLoad
+                          accounts = context.numAccounts
+                          txs = context.numTxs
+                          spikesize = context.spikeSize
+                          spikeinterval = context.spikeInterval
+                          txrate = txRate
+                          offset = 0
+                          maxfeerate = None
+                          skiplowfeetxs = false }
 
                 formation.RunLoadgen coreSet loadGen)

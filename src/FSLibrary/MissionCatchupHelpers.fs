@@ -163,7 +163,10 @@ let doCatchupForVersion
 
     formation.RunLoadgen
         catchupSets.generatorSet
-        (if doSoroban then context.GenerateSorobanLoad else context.GeneratePaymentLoad)
+        (if doSoroban then
+             context.GenerateSorobanUploadLoad
+         else
+             context.GeneratePaymentLoad)
 
     generatorPeer.WaitForFewLedgers(5)
 

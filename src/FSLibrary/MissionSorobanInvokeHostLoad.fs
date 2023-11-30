@@ -1,8 +1,8 @@
-// Copyright 2022 Stellar Development Foundation and contributors. Licensed
+// Copyright 2023 Stellar Development Foundation and contributors. Licensed
 // under the Apache License, Version 2.0. See the COPYING file at the root
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
-module MissionLoadGenerationWithTxSetLimit
+module MissionSorobanInvokeHostLoad
 
 open StellarCoreSet
 open StellarMissionContext
@@ -10,22 +10,22 @@ open StellarFormation
 open StellarStatefulSets
 open StellarSupercluster
 open StellarCoreHTTP
+open StellarCorePeer
 
-let loadGenerationWithTxSetLimit (context: MissionContext) =
+let sorobanInvokeHostLoad (context: MissionContext) =
     let coreSet =
         MakeLiveCoreSet
             "core"
             { CoreSetOptions.GetDefault context.image with
                   invariantChecks = AllInvariantsExceptBucketConsistencyChecks
-                  dumpDatabase = false }
+                  emptyDirType = DiskBackedEmptyDir }
 
     let context =
         { context with
-              coreResources = MediumTestResources
-              numAccounts = 20000
-              numTxs = 50000
-              txRate = 1000
-              skipLowFeeTxs = true }
+              numAccounts = 100
+              numTxs = 100
+              txRate = 1
+              coreResources = MediumTestResources }
 
     context.Execute
         [ coreSet ]
@@ -33,8 +33,8 @@ let loadGenerationWithTxSetLimit (context: MissionContext) =
         (fun (formation: StellarFormation) ->
             formation.WaitUntilSynced [ coreSet ]
             formation.UpgradeProtocolToLatest [ coreSet ]
-            formation.UpgradeMaxTxSetSize [ coreSet ] 1000
+            formation.UpgradeMaxTxSetSize [ coreSet ] 100000
 
             formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
-            formation.RunLoadgen coreSet context.GeneratePaymentLoad
-            formation.RunLoadgen coreSet { context.GenerateSorobanUploadLoad with txrate = 1; txs = 200 })
+            formation.RunLoadgen coreSet context.SetupSorobanInvoke
+            formation.RunLoadgen coreSet context.GenerateSorobanInvokeLoad)
