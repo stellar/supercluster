@@ -77,8 +77,8 @@ type LoadGen =
       instances: int option
       dataEntriesLow: int option
       dataEntriesHigh: int option
-      kiloBytesPerDataEntryLow: int option
-      kiloBytesPerDataEntryHigh: int option
+      ioKiloBytesLow: int option
+      ioKiloBytesHigh: int option
       txSizeBytesLow: int option
       txSizeBytesHigh: int option
       instructionsLow: int64 option
@@ -129,8 +129,8 @@ type LoadGen =
               @ optionalParam "instances" self.instances
                 @ optionalParam "dataentrieslow" self.dataEntriesLow
                   @ optionalParam "dataentrieshigh" self.dataEntriesHigh
-                    @ optionalParam "kilobyteslow" self.kiloBytesPerDataEntryLow
-                      @ optionalParam "kilobyteshigh" self.kiloBytesPerDataEntryHigh
+                    @ optionalParam "kilobyteslow" self.ioKiloBytesLow
+                      @ optionalParam "kilobyteshigh" self.ioKiloBytesHigh
                         @ optionalParam "txsizelow" self.txSizeBytesLow
                           @ optionalParam "txsizehigh" self.txSizeBytesHigh
                             @ optionalParam "cpulow" self.instructionsLow
@@ -181,8 +181,8 @@ type LoadGen =
           instances = None
           dataEntriesLow = None
           dataEntriesHigh = None
-          kiloBytesPerDataEntryLow = None
-          kiloBytesPerDataEntryHigh = None
+          ioKiloBytesLow = None
+          ioKiloBytesHigh = None
           txSizeBytesLow = None
           txSizeBytesHigh = None
           instructionsLow = None
@@ -208,6 +208,26 @@ type LoadGen =
           bucketListSizeWindowSampleSize = None
           evictionScanSize = None
           startingEvictionScanLevel = None }
+
+    static member GetSorobanPhase1Upgrade() =
+        { LoadGen.GetDefault() with
+              mode = CreateSorobanUpgrade
+              ledgerMaxTxCount = Some(30)
+              txMaxInstructions = Some(100_000_000L)
+              txMaxReadBytes = Some(133_120) // 130 KB
+              txMaxWriteBytes = Some(66_560) // 65 KB
+              txMaxReadLedgerEntries = Some(30)
+              txMaxWriteLedgerEntries = Some(20)
+              txMemoryLimit = Some(41_943_040L) // 40 MB
+              txMaxSizeBytes = Some(71_680) // 70 KB
+              txMaxContractEventsSizeBytes = Some(8192) // 8 KB
+              maxContractSizeBytes = Some(65_536) // 64 KB
+              maxContractDataEntrySizeBytes = Some(65_536) // 64 KB
+              ledgerMaxInstructions = Some(100_000_000L)
+              ledgerMaxReadBytes = Some(133_120) // 130 KB
+              ledgerMaxWriteBytes = Some(66_560) // 65 KB
+              ledgerMaxReadLedgerEntries = Some(30)
+              ledgerMaxWriteLedgerEntries = Some(20) }
 
 type MissionContext with
 
@@ -275,8 +295,8 @@ type MissionContext with
               skiplowfeetxs = self.skipLowFeeTxs
               dataEntriesLow = Some(0)
               dataEntriesHigh = Some(10)
-              kiloBytesPerDataEntryLow = Some(1)
-              kiloBytesPerDataEntryHigh = Some(5)
+              ioKiloBytesLow = Some(1)
+              ioKiloBytesHigh = Some(5)
               txSizeBytesLow = Some(0)
               txSizeBytesHigh = Some(1000)
               instructionsLow = Some(0L)

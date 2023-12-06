@@ -22,9 +22,9 @@ let sorobanInvokeHostLoad (context: MissionContext) =
 
     let context =
         { context with
-              numAccounts = 100
-              numTxs = 100
-              txRate = 1
+              numAccounts = 1000
+              numTxs = 1000
+              txRate = 5
               coreResources = MediumTestResources }
 
     context.Execute

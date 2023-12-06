@@ -269,6 +269,12 @@ type StellarFormation with
         LogInfo "Loadgen: %s" (peer.GenerateLoad loadGen)
         peer.WaitForLoadGenComplete loadGen
 
+    member self.RunLoadgenWithPeer (peer: int) (coreSet: CoreSet) (loadGen: LoadGen) =
+        let peer = self.NetworkCfg.GetPeer coreSet peer
+        LogInfo "Loadgen: %s" (peer.GenerateLoad loadGen)
+        peer.WaitForLoadGenComplete loadGen
+        if peer.IsLoadGenComplete() <> Success then failwith "Loadgen failed!"
+
     member self.SetupUpgradeContract(coreSet: CoreSet) =
         let loadgen = { LoadGen.GetDefault() with mode = SetupSorobanUpgrade }
         self.RunLoadgen coreSet loadgen
