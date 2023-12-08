@@ -27,7 +27,7 @@ let simulatePubnetTier1Perf (context: MissionContext) =
 
     let allNodes =
         if context.pubnetData.IsSome then
-            FullPubnetCoreSets context true false
+            FullPubnetCoreSets context true false 0
         else
             StableApproximateTier1CoreSets
                 context.image

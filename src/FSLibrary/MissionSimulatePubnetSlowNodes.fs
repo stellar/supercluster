@@ -1,11 +1,12 @@
-// Copyright 2019 Stellar Development Foundation and contributors. Licensed
+// Copyright 2023 Stellar Development Foundation and contributors. Licensed
 // under the Apache License, Version 2.0. See the COPYING file at the root
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
-module MissionSimulatePubnet
+module MissionSimulatePubnetSlowNodes
 
 // The point of this mission is to simulate pubnet as closely as possible,
 // for evaluating the likely effect of a change to core when deployed.
+// some nodes are artificially "slow"
 
 open StellarCoreSet
 open StellarMissionContext
@@ -14,9 +15,9 @@ open StellarStatefulSets
 open StellarNetworkData
 open StellarSupercluster
 open StellarCoreHTTP
+open Logging
 
-
-let simulatePubnet (context: MissionContext) =
+let simulatePubnetSlowNodes (context: MissionContext) =
     let context =
         { context with
               coreResources = SimulatePubnetResources context.networkSizeLimit
@@ -27,28 +28,30 @@ let simulatePubnet (context: MissionContext) =
                   )
               simulateApplyWeight =
                   Some(context.simulateApplyWeight |> Option.defaultValue (simulateApplyWeightDefault))
-              // As the goal of `SimulatePubnet` is to simulate a pubnet,
-              // network delays are, in general, indispensable.
-              // Therefore, unless explicitly told otherwise, we will use
-              // network delays.
               installNetworkDelay = Some(context.installNetworkDelay |> Option.defaultValue true)
+              numAccounts = 10000
+              txRate = 200
+              sleepMainThread = Some(context.sleepMainThread |> Option.defaultValue 50) }
 
-              // This spike configuration was derived from some pubnet data.
-              // Most ledgers are expected to have roughly 60 * 5 = 300 ops,
-              // and 1 in 13 ledgers are expected to have roughly 60 * 5 + 700 = 1000 txs.
-              // We expect that a transaction contains 1.65 ops on average.
-              // * txRate = (60 op / s) / (1.65 op / tx) = 36 tx / s.
-              // * spikeSize = 700 op / (1.65 op / tx) = 424 tx.
-              txRate = 36
-              spikeSize = 424
-              spikeInterval = 65 }
+    // One tier1 org is "slow", i.e. we add artificial delay to
+    let delay = if context.sleepMainThread.IsSome then context.sleepMainThread.Value else 0
+    let fullCoreSet = FullPubnetCoreSets context true true delay
 
-    let fullCoreSet = FullPubnetCoreSets context true true 0
-
-    let sdf =
-        List.find (fun (cs: CoreSet) -> cs.name.StringName = "stellar" || cs.name.StringName = "sdf") fullCoreSet
+    let sp = List.find (fun (cs: CoreSet) -> cs.name.StringName = "satoshipay") fullCoreSet
 
     let tier1 = List.filter (fun (cs: CoreSet) -> cs.options.tier1 = Some true) fullCoreSet
+
+    let slowCoreSet =
+        List.filter
+            (fun (cs: CoreSet) -> cs.options.addArtificalDelay.IsSome && cs.options.addArtificalDelay.Value > 0)
+            tier1
+
+    assert (slowCoreSet.Length <> 0)
+
+    List.map
+        (fun (cs: CoreSet) -> LogInfo "Adding artificial delay %i to CoreSet %s" delay cs.name.StringName)
+        slowCoreSet
+    |> ignore
 
     context.Execute
         fullCoreSet
@@ -63,8 +66,8 @@ let simulatePubnet (context: MissionContext) =
             // to fail asap in case of a misconfiguration
             formation.WaitUntilSynced fullCoreSet
             formation.UpgradeProtocolToLatest tier1
-            formation.UpgradeMaxTxSetSize tier1 1000000
+            formation.UpgradeMaxTxSetSize tier1 (context.txRate * 20)
 
-            formation.RunLoadgen sdf context.GenerateAccountCreationLoad
-            formation.RunLoadgen sdf context.GeneratePretendLoad
-            formation.EnsureAllNodesInSync fullCoreSet)
+            formation.RunLoadgen sp context.GenerateAccountCreationLoad
+            formation.RunLoadgen sp context.GeneratePretendLoad
+            formation.RunLoadgen sp { context.GenerateSorobanUploadLoad with txrate = 2; txs = 2000 })

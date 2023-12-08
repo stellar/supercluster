@@ -170,6 +170,7 @@ type CoreSetOptions =
       maxSlotsToRemember: int
       maxBatchWriteCount: int
       inMemoryMode: bool
+      addArtificalDelay: int option
       enableBucketListDB: bool }
 
     member self.WithWaitForConsensus(w: bool) =
@@ -202,6 +203,7 @@ type CoreSetOptions =
           maxSlotsToRemember = 12
           maxBatchWriteCount = 1024
           inMemoryMode = false
+          addArtificalDelay = None
           enableBucketListDB = false }
 
 type CoreSet =

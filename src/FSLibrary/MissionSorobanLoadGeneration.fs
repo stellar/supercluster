@@ -26,7 +26,7 @@ let sorobanLoadGeneration (context: MissionContext) =
               skipLowFeeTxs = true
               maxFeeRate = Some 100000000 }
 
-    let fullCoreSet = FullPubnetCoreSets context true true
+    let fullCoreSet = FullPubnetCoreSets context true true 0
 
     let sdf =
         List.find (fun (cs: CoreSet) -> cs.name.StringName = "stellar" || cs.name.StringName = "sdf") fullCoreSet
