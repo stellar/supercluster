@@ -14,7 +14,7 @@ open StellarCoreHTTP
 
 
 let sorobanLoadGeneration (context: MissionContext) =
-    let rate = 10
+    let rate = 5
 
     let context =
         { context with
@@ -49,5 +49,5 @@ let sorobanLoadGeneration (context: MissionContext) =
             formation.UpgradeMaxTxSetSize tier1 1000000
 
             formation.RunLoadgen sdf context.GenerateAccountCreationLoad
-            formation.RunMultiLoadgen tier1 context.GenerateSorobanUploadLoad
+            formation.RunLoadgen sdf context.GenerateSorobanUploadLoad
             formation.EnsureAllNodesInSync fullCoreSet)
