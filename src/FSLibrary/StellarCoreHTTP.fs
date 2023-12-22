@@ -400,6 +400,18 @@ type Peer with
 
     member self.GetSorobanMaxTxSetSize() : int = self.GetInfo().Ledger.MaxSorobanTxSetSize.Value
 
+    member self.GetLedgerMaxInstructions() : int64 = self.GetSorobanInfo().Ledger.MaxInstructions
+
+    member self.GetLedgerReadBytes() : int = self.GetSorobanInfo().Ledger.MaxReadBytes
+
+    member self.GetLedgerWriteBytes() : int = self.GetSorobanInfo().Ledger.MaxWriteBytes
+
+    member self.GetLedgerReadEntries() : int = self.GetSorobanInfo().Ledger.MaxReadLedgerEntries
+
+    member self.GetLedgerWriteEntries() : int = self.GetSorobanInfo().Ledger.MaxWriteLedgerEntries
+
+    member self.GetLedgerMaxTransactionsSizeBytes() : int = self.GetSorobanInfo().Ledger.MaxTxSizeBytes
+
     member self.GetMaxTxSize() : int = self.GetSorobanInfo().Tx.MaxSizeBytes
 
     member self.GetLedgerProtocolVersion() : int = self.GetInfo().Ledger.Version
@@ -488,6 +500,11 @@ type Peer with
         RetryUntilTrue
             (fun _ -> self.GetSorobanMaxTxSetSize() = n)
             (fun _ -> LogInfo "Waiting for SorobanMaxTxSetSize=%d on %s" n self.ShortName.StringName)
+
+    member self.WaitForLedgerMaxInstructions(n: int64) =
+        RetryUntilTrue
+            (fun _ -> self.GetLedgerMaxInstructions() = n)
+            (fun _ -> LogInfo "Waiting for LedgerMaxInstructions=%d on %s" n self.ShortName.StringName)
 
     member self.WaitForMaxTxSize(n: int) =
         RetryUntilTrue

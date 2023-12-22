@@ -164,6 +164,7 @@ let doCatchupForVersion
     formation.RunLoadgen
         catchupSets.generatorSet
         (if doSoroban then
+             formation.UpgradeSorobanLedgerLimitsWithMultiplier [ catchupSets.generatorSet ] 100
              context.GenerateSorobanUploadLoad
          else
              context.GeneratePaymentLoad)

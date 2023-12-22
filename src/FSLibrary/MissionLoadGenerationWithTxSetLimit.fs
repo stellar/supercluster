@@ -37,4 +37,5 @@ let loadGenerationWithTxSetLimit (context: MissionContext) =
 
             formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
             formation.RunLoadgen coreSet context.GeneratePaymentLoad
+            formation.UpgradeSorobanLedgerLimitsWithMultiplier [ coreSet ] 100
             formation.RunLoadgen coreSet { context.GenerateSorobanUploadLoad with txrate = 1; txs = 200 })

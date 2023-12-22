@@ -172,6 +172,27 @@ type StellarFormation with
         let peer = self.NetworkCfg.GetPeer coreSetList.[0] 0
         peer.WaitForSorobanMaxTxSetSize maxTxSetSize |> ignore
 
+    member self.UpgradeSorobanLedgerLimitsWithMultiplier (coreSetList: CoreSet list) (multiplier: int) =
+        self.SetupUpgradeContract coreSetList.[0]
+        let peer = self.NetworkCfg.GetPeer coreSetList.[0] 0
+
+        let expectedInstructions = peer.GetLedgerMaxInstructions() * int64 (multiplier)
+
+        self.DeployUpgradeEntriesAndArm
+            coreSetList
+            { LoadGen.GetDefault() with
+                  mode = CreateSorobanUpgrade
+                  ledgerMaxInstructions = Some(expectedInstructions)
+                  ledgerMaxReadBytes = Some(peer.GetLedgerReadBytes() * multiplier)
+                  ledgerMaxWriteBytes = Some(peer.GetLedgerWriteBytes() * multiplier)
+                  ledgerMaxTxCount = Some(peer.GetSorobanMaxTxSetSize() * multiplier)
+                  ledgerMaxReadLedgerEntries = Some(peer.GetLedgerReadBytes() * multiplier)
+                  ledgerMaxWriteLedgerEntries = Some(peer.GetLedgerWriteBytes() * multiplier)
+                  ledgerMaxTransactionsSizeBytes = Some(peer.GetLedgerMaxTransactionsSizeBytes() * multiplier) }
+            (System.DateTime.UtcNow)
+
+        peer.WaitForLedgerMaxInstructions expectedInstructions |> ignore
+
     member self.ReportStatus() = ReportAllPeerStatus self.NetworkCfg
 
     member self.CreateAccount (coreSet: CoreSet) (u: Username) =
@@ -231,8 +252,12 @@ type StellarFormation with
         let loadgen = { LoadGen.GetDefault() with mode = SetupSorobanUpgrade }
         self.RunLoadgen coreSet loadgen
 
-    member self.DeployUpgradeEntriesAndArm (coreSet: CoreSet) (loadGen: LoadGen) (upgradeTime: System.DateTime) =
-        let peer = self.NetworkCfg.GetPeer coreSet 0
+    member self.DeployUpgradeEntriesAndArm
+        (coreSetList: CoreSet list)
+        (loadGen: LoadGen)
+        (upgradeTime: System.DateTime)
+        =
+        let peer = self.NetworkCfg.GetPeer coreSetList.[0] 0
         let resStr = peer.GenerateLoad loadGen
 
         let contractKey = Loadgen.Parse(resStr).ConfigUpgradeSetKey
@@ -242,7 +267,9 @@ type StellarFormation with
         if peer.IsLoadGenComplete() <> Success then failwith "Loadgen failed!"
 
         // Arm upgrades on each peer in the core set
-        self.NetworkCfg.EachPeerInSets([| coreSet |]) (fun peer -> peer.UpgradeNetworkSetting contractKey upgradeTime)
+        self.NetworkCfg.EachPeerInSets
+            (List.toArray coreSetList)
+            (fun peer -> peer.UpgradeNetworkSetting contractKey upgradeTime)
 
     member self.clearMetrics(coreSets: CoreSet list) =
         self.NetworkCfg.EachPeerInSets(coreSets |> List.toArray) (fun peer -> peer.ClearMetrics())

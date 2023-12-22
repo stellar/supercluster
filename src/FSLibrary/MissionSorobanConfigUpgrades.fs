@@ -50,7 +50,7 @@ let sorobanConfigUpgrades (context: MissionContext) =
             formation.UpgradeProtocolToLatest [ coreSet ]
 
             // will wait until loadgen is done and contract is uploaded
-            formation.SetupUpgradeContract coreSet
+            formation.UpgradeSorobanLedgerLimitsWithMultiplier [ coreSet ] 100
 
             // kill-switch
             formation.UpgradeSorobanMaxTxSetSize [ coreSet ] 0
@@ -69,10 +69,14 @@ let sorobanConfigUpgrades (context: MissionContext) =
 
             // Slightly increase the limit while generating load
             formation.DeployUpgradeEntriesAndArm
-                coreSet
+                [ coreSet ]
                 { LoadGen.GetDefault() with
                       mode = CreateSorobanUpgrade
-                      txMaxSizeBytes = Some(150000) }
+                      txMaxSizeBytes = Some(150000)
+                      ledgerMaxTransactionsSizeBytes = Some(150000 * 100)
+                      maxContractSizeBytes = Some(100000)
+                      txMaxWriteBytes = Some(150000 * 2)
+                      ledgerMaxWriteBytes = Some(150000 * 2 * 100) }
                 (System.DateTime.UtcNow.AddSeconds(20.0))
 
             formation.RunLoadgen coreSet context.GenerateSorobanUploadLoad
@@ -80,10 +84,14 @@ let sorobanConfigUpgrades (context: MissionContext) =
 
             // Further increase the limit while generating load
             formation.DeployUpgradeEntriesAndArm
-                coreSet
+                [ coreSet ]
                 { LoadGen.GetDefault() with
                       mode = CreateSorobanUpgrade
-                      txMaxSizeBytes = Some(500000) }
+                      txMaxSizeBytes = Some(500000)
+                      ledgerMaxTransactionsSizeBytes = Some(500000 * 100)
+                      maxContractSizeBytes = Some(400000)
+                      txMaxWriteBytes = Some(500000 * 2)
+                      ledgerMaxWriteBytes = Some(500000 * 2 * 100) }
                 (System.DateTime.UtcNow.AddSeconds(20.0))
 
             formation.RunLoadgen coreSet context.GenerateSorobanUploadLoad
@@ -91,11 +99,12 @@ let sorobanConfigUpgrades (context: MissionContext) =
 
             // Decrease max tx size to be below classic limit, everything should still work as expected
             formation.DeployUpgradeEntriesAndArm
-                coreSet
+                [ coreSet ]
                 { LoadGen.GetDefault() with
                       mode = CreateSorobanUpgrade
                       txMaxSizeBytes = Some(50000)
-                      maxContractSizeBytes = Some(10000) }
+                      maxContractSizeBytes = Some(10000)
+                      txMaxWriteBytes = Some(50000 * 2) }
                 (System.DateTime.UtcNow.AddSeconds(20.0))
 
             formation.RunLoadgen coreSet context.GenerateSorobanUploadLoad
