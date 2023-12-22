@@ -194,14 +194,6 @@ type StellarCoreCfg =
         t.Add("COMMANDS", logLevelCommands) |> ignore
         t.Add("CATCHUP_COMPLETE", self.catchupMode = CatchupComplete) |> ignore
 
-        // only latest images support Soroban configs
-        let latestCoreVersion (input: string) =
-            let pattern = @"stellar-core:(19\.14\.1|20\.\d\.\d)-\d{4}"
-            Regex.IsMatch(input, pattern)
-
-        if latestCoreVersion self.image then
-            t.Add("TESTING_SOROBAN_HIGH_LIMIT_OVERRIDE", true) |> ignore
-
         match self.network.missionContext.peerReadingCapacity, self.network.missionContext.peerFloodCapacity with
         | None, None -> ()
         | Some read, Some flood ->

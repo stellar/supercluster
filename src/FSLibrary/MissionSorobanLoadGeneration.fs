@@ -49,5 +49,6 @@ let sorobanLoadGeneration (context: MissionContext) =
             formation.UpgradeMaxTxSetSize tier1 1000000
 
             formation.RunLoadgen sdf context.GenerateAccountCreationLoad
+            formation.UpgradeSorobanLedgerLimitsWithMultiplier tier1 100
             formation.RunLoadgen sdf context.GenerateSorobanUploadLoad
             formation.EnsureAllNodesInSync fullCoreSet)
