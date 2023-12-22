@@ -160,11 +160,11 @@ let doCatchupForVersion
         generatorPeer.WaitForMaxTxSetSize 1000000
 
     formation.RunLoadgen catchupSets.generatorSet context.GenerateAccountCreationLoad
-    formation.UpgradeSorobanLedgerLimitsWithMultiplier [ catchupSets.generatorSet ] 100
 
     formation.RunLoadgen
         catchupSets.generatorSet
         (if doSoroban then
+             formation.UpgradeSorobanLedgerLimitsWithMultiplier [ catchupSets.generatorSet ] 100
              context.GenerateSorobanUploadLoad
          else
              context.GeneratePaymentLoad)
