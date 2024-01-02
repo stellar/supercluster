@@ -36,5 +36,7 @@ let sorobanInvokeHostLoad (context: MissionContext) =
             formation.UpgradeMaxTxSetSize [ coreSet ] 100000
 
             formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
+            formation.UpgradeSorobanLedgerLimitsWithMultiplier [ coreSet ] 1000
+            formation.UpgradeSorobanTxLimitsWithMultiplier [ coreSet ] 100
             formation.RunLoadgen coreSet context.SetupSorobanInvoke
             formation.RunLoadgen coreSet context.GenerateSorobanInvokeLoad)
