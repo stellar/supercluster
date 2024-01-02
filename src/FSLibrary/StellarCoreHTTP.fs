@@ -90,7 +90,7 @@ type LoadGen =
       maxContractDataEntrySizeBytes: int option
       ledgerMaxInstructions: int64 option
       txMaxInstructions: int64 option
-      txMemoryLimit: int64 option
+      txMemoryLimit: int option
       ledgerMaxReadLedgerEntries: int option
       ledgerMaxReadBytes: int option
       ledgerMaxWriteLedgerEntries: int option
@@ -412,7 +412,27 @@ type Peer with
 
     member self.GetLedgerMaxTransactionsSizeBytes() : int = self.GetSorobanInfo().Ledger.MaxTxSizeBytes
 
+    member self.GetTxMaxInstructions() : int64 = self.GetSorobanInfo().Tx.MaxInstructions
+
+    member self.GetTxReadBytes() : int = self.GetSorobanInfo().Tx.MaxReadBytes
+
+    member self.GetTxWriteBytes() : int = self.GetSorobanInfo().Tx.MaxWriteBytes
+
+    member self.GetTxReadEntries() : int = self.GetSorobanInfo().Tx.MaxReadLedgerEntries
+
+    member self.GetTxWriteEntries() : int = self.GetSorobanInfo().Tx.MaxWriteLedgerEntries
+
+    member self.GetTxMemoryLimit() : int = self.GetSorobanInfo().Tx.MemoryLimit
+
     member self.GetMaxTxSize() : int = self.GetSorobanInfo().Tx.MaxSizeBytes
+
+    member self.GetMaxContractSize() : int = self.GetSorobanInfo().MaxContractSize
+
+    member self.GetMaxContractDataKeySize() : int = self.GetSorobanInfo().MaxContractDataKeySize
+
+    member self.GetMaxContractDataEntrySize() : int = self.GetSorobanInfo().MaxContractDataEntrySize
+
+    member self.GetTxMaxContractEventsSize() : int = self.GetSorobanInfo().Tx.MaxContractEventsSizeBytes
 
     member self.GetLedgerProtocolVersion() : int = self.GetInfo().Ledger.Version
 
@@ -505,6 +525,11 @@ type Peer with
         RetryUntilTrue
             (fun _ -> self.GetLedgerMaxInstructions() = n)
             (fun _ -> LogInfo "Waiting for LedgerMaxInstructions=%d on %s" n self.ShortName.StringName)
+
+    member self.WaitForTxMaxInstructions(n: int64) =
+        RetryUntilTrue
+            (fun _ -> self.GetTxMaxInstructions() = n)
+            (fun _ -> LogInfo "Waiting for TxMaxInstructions=%d on %s" n self.ShortName.StringName)
 
     member self.WaitForMaxTxSize(n: int) =
         RetryUntilTrue

@@ -186,12 +186,37 @@ type StellarFormation with
                   ledgerMaxReadBytes = Some(peer.GetLedgerReadBytes() * multiplier)
                   ledgerMaxWriteBytes = Some(peer.GetLedgerWriteBytes() * multiplier)
                   ledgerMaxTxCount = Some(peer.GetSorobanMaxTxSetSize() * multiplier)
-                  ledgerMaxReadLedgerEntries = Some(peer.GetLedgerReadBytes() * multiplier)
-                  ledgerMaxWriteLedgerEntries = Some(peer.GetLedgerWriteBytes() * multiplier)
+                  ledgerMaxReadLedgerEntries = Some(peer.GetLedgerReadEntries() * multiplier)
+                  ledgerMaxWriteLedgerEntries = Some(peer.GetLedgerWriteEntries() * multiplier)
                   ledgerMaxTransactionsSizeBytes = Some(peer.GetLedgerMaxTransactionsSizeBytes() * multiplier) }
             (System.DateTime.UtcNow)
 
         peer.WaitForLedgerMaxInstructions expectedInstructions |> ignore
+
+    member self.UpgradeSorobanTxLimitsWithMultiplier (coreSetList: CoreSet list) (multiplier: int) =
+        self.SetupUpgradeContract coreSetList.[0]
+        let peer = self.NetworkCfg.GetPeer coreSetList.[0] 0
+
+        let expectedInstructions = peer.GetTxMaxInstructions() * int64 (multiplier)
+
+        self.DeployUpgradeEntriesAndArm
+            coreSetList
+            { LoadGen.GetDefault() with
+                  mode = CreateSorobanUpgrade
+                  txMaxInstructions = Some(expectedInstructions)
+                  txMaxReadBytes = Some(peer.GetTxReadBytes() * multiplier)
+                  txMaxWriteBytes = Some(peer.GetTxWriteBytes() * multiplier)
+                  txMaxReadLedgerEntries = Some(peer.GetTxReadEntries() * multiplier)
+                  txMaxWriteLedgerEntries = Some(peer.GetTxWriteEntries() * multiplier)
+                  txMaxSizeBytes = Some(peer.GetMaxTxSize() * multiplier)
+                  txMemoryLimit = Some(peer.GetTxMemoryLimit() * multiplier)
+                  maxContractSizeBytes = Some(peer.GetMaxContractSize() * multiplier)
+                  maxContractDataKeySizeBytes = Some(peer.GetMaxContractDataKeySize() * multiplier)
+                  maxContractDataEntrySizeBytes = Some(peer.GetMaxContractDataEntrySize() * multiplier)
+                  txMaxContractEventsSizeBytes = Some(peer.GetTxMaxContractEventsSize() * multiplier) }
+            (System.DateTime.UtcNow)
+
+        peer.WaitForTxMaxInstructions expectedInstructions |> ignore
 
     member self.ReportStatus() = ReportAllPeerStatus self.NetworkCfg
 
