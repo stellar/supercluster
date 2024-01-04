@@ -13,6 +13,16 @@ open StellarSupercluster
 open StellarCoreHTTP
 open StellarCorePeer
 
+let protocolSupported (formation: StellarFormation) (coreSets: list<CoreSet>) : bool =
+    // UpgradeProtocolToLatest upgrades to the version supported by the first peer in coreSets first coreSet
+    let supportedProtocol = (formation.NetworkCfg.GetPeer coreSets.[0] 0).GetSupportedProtocolVersion()
+
+    coreSets
+    |> List.forall
+        (fun coreSet ->
+            let peer = formation.NetworkCfg.GetPeer coreSet 0
+            peer.GetSupportedProtocolVersion() >= supportedProtocol)
+
 let mixedImageLoadGeneration (oldImageNodeCount: int) (context: MissionContext) =
     let oldNodeCount = oldImageNodeCount
     let newNodeCount = 3 - oldImageNodeCount
@@ -67,18 +77,21 @@ let mixedImageLoadGeneration (oldImageNodeCount: int) (context: MissionContext) 
         None
         (fun (formation: StellarFormation) ->
             formation.WaitUntilSynced coreSets
-            formation.UpgradeProtocolToLatest coreSets
-            formation.UpgradeMaxTxSetSize coreSets 1000
 
-            let loadgenCoreSet = coreSets.[0]
-            formation.RunLoadgen loadgenCoreSet context.GenerateAccountCreationLoad
-            formation.RunLoadgen loadgenCoreSet context.GeneratePaymentLoad
+            // End mission early if we can't upgrade all nodes
+            if protocolSupported formation coreSets then
+                formation.UpgradeProtocolToLatest coreSets
+                formation.UpgradeMaxTxSetSize coreSets 1000
 
-            let majorityPeer = formation.NetworkCfg.GetPeer loadgenCoreSet 0
+                let loadgenCoreSet = coreSets.[0]
+                formation.RunLoadgen loadgenCoreSet context.GenerateAccountCreationLoad
+                formation.RunLoadgen loadgenCoreSet context.GeneratePaymentLoad
 
-            if majorityPeer.GetLedgerProtocolVersion() >= 20 then
-                formation.UpgradeSorobanLedgerLimitsWithMultiplier coreSets 100
-                formation.RunLoadgen loadgenCoreSet { context.GenerateSorobanUploadLoad with txrate = 1; txs = 200 })
+                let majorityPeer = formation.NetworkCfg.GetPeer loadgenCoreSet 0
+
+                if majorityPeer.GetLedgerProtocolVersion() >= 20 then
+                    formation.UpgradeSorobanLedgerLimitsWithMultiplier coreSets 100
+                    formation.RunLoadgen loadgenCoreSet { context.GenerateSorobanUploadLoad with txrate = 1; txs = 200 })
 
 let mixedImageLoadGenerationWithOldImageMajority (context: MissionContext) = mixedImageLoadGeneration 2 context
 
