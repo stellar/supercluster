@@ -38,6 +38,7 @@ open StellarMissionContext
 open MissionSorobanLoadGeneration
 open MissionSorobanConfigUpgrades
 open MissionSorobanInvokeHostLoad
+open MissionSorobanCatchupWithPrevAndCurr
 
 type Mission = (MissionContext -> unit)
 
@@ -76,4 +77,5 @@ let allMissions : Map<string, Mission> =
                  ("SimulatePubnetTier1Perf", simulatePubnetTier1Perf)
                  ("SorobanLoadGeneration", sorobanLoadGeneration)
                  ("SorobanConfigUpgrades", sorobanConfigUpgrades)
-                 ("SorobanInvokeHostLoad", sorobanInvokeHostLoad) |]
+                 ("SorobanInvokeHostLoad", sorobanInvokeHostLoad)
+                 ("SorobanCatchupWithPrevAndCurr", sorobanCatchupWithPrevAndCurr) |]
