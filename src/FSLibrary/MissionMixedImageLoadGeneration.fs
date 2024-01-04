@@ -14,18 +14,14 @@ open StellarCoreHTTP
 open StellarCorePeer
 
 let protocolSupported (formation: StellarFormation) (coreSets: list<CoreSet>) : bool =
-    let mutable protocolVersionsValid = true
     // UpgradeProtocolToLatest upgrades to the version supported by the first peer in coreSets first coreSet
     let supportedProtocol = (formation.NetworkCfg.GetPeer coreSets.[0] 0).GetSupportedProtocolVersion()
 
-    for coreSet in coreSets do
-        for i in 0 .. (coreSet.CurrentCount - 1) do
+    coreSets
+    |> List.forall
+        (fun coreSet ->
             let peer = formation.NetworkCfg.GetPeer coreSet 0
-
-            if peer.GetSupportedProtocolVersion() < supportedProtocol then
-                protocolVersionsValid <- false
-
-    protocolVersionsValid
+            peer.GetSupportedProtocolVersion() >= supportedProtocol)
 
 let mixedImageLoadGeneration (oldImageNodeCount: int) (context: MissionContext) =
     let oldNodeCount = oldImageNodeCount
