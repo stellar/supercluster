@@ -62,7 +62,6 @@ let sorobanCatchupWithPrevAndCurr (context: MissionContext) =
 
                 formation.UpgradeProtocol [ coreSet ] (supportedProtocol)
 
-                formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
                 formation.RunLoadgen coreSet context.SetupSorobanInvoke
                 formation.RunLoadgen coreSet context.GenerateSorobanInvokeLoad
 
