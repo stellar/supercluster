@@ -47,7 +47,7 @@ let sorobanCatchupWithPrevAndCurr (context: MissionContext) =
 
             let supportedProtocol = (formation.NetworkCfg.GetPeer coreSet 0).GetSupportedProtocolVersion()
 
-            // We want to test against a protocol boundary that has soroban enalbed on both sides,
+            // We want to test against a protocol boundary that has soroban enabled on both sides,
             // so the image must be on the protocol version after Soroban was introduced.
             // This check can be removed once we're on v21 for good and not just on vnext.
             if supportedProtocol >= 21 then
