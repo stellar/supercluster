@@ -56,6 +56,7 @@
     <Compile Include="MissionSorobanLoadGeneration.fs" />
     <Compile Include="MissionSorobanConfigUpgrades.fs" />
     <Compile Include="MissionSorobanInvokeHostLoad.fs" />
+    <Compile Include="MissionSorobanCatchupWithPrevAndCurr.fs" />
     <Compile Include="MissionVersionNewCatchupToOld.fs" />
     <Compile Include="MissionVersionOldCatchupToNew.fs" />
     <Compile Include="MissionProtocolUpgradeTestnet.fs" />
