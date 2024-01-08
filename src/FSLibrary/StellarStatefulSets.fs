@@ -271,7 +271,6 @@ type StellarFormation with
         let peer = self.NetworkCfg.GetPeer coreSet 0
         LogInfo "Loadgen: %s" (peer.GenerateLoad loadGen)
         peer.WaitForLoadGenComplete loadGen
-        if peer.IsLoadGenComplete() <> Success then failwith "Loadgen failed!"
 
     member self.SetupUpgradeContract(coreSet: CoreSet) =
         let loadgen = { LoadGen.GetDefault() with mode = SetupSorobanUpgrade }
@@ -289,7 +288,6 @@ type StellarFormation with
 
         LogInfo "Loadgen: %s" resStr
         peer.WaitForLoadGenComplete loadGen
-        if peer.IsLoadGenComplete() <> Success then failwith "Loadgen failed!"
 
         // Arm upgrades on each peer in the core set
         self.NetworkCfg.EachPeerInSets
@@ -339,10 +337,3 @@ type StellarFormation with
                 false
                 loadGenPeers) then
             failwith "Loadgen failed!"
-
-    member self.RunLoadgenAndCheckNoErrors(coreSet: CoreSet) =
-        let peer = self.NetworkCfg.GetPeer coreSet 0
-        let loadGen = { DefaultAccountCreationLoadGen with accounts = 10000 }
-        LogInfo "Loadgen: %s" (peer.GenerateLoad loadGen)
-        peer.WaitForLoadGenComplete loadGen
-        self.CheckNoErrorsAndPairwiseConsistency()
