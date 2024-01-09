@@ -762,6 +762,8 @@ type Peer with
                 self.LogLoadGenProgressTowards loadGen
                 self.LogCoreSetListStatusWithTiers self.networkCfg.CoreSetList)
 
+        if self.IsLoadGenComplete() <> Success then failwith "Loadgen failed!"
+
     // WaitUntilConnected waits until every node is connected to all the nodes in
     // its preferredPeersMap. This ensures that the simulation is deterministic.
     member self.WaitUntilConnected =
