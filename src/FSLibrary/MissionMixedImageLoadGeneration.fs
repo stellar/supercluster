@@ -44,6 +44,7 @@ let mixedImageLoadGeneration (oldImageNodeCount: int) (context: MissionContext) 
             { CoreSetOptions.GetDefault oldImage with
                   nodeCount = oldNodeCount
                   invariantChecks = AllInvariantsExceptBucketConsistencyChecks
+                  accelerateTime = false
                   dumpDatabase = false
                   quorumSet = qSet }
 
@@ -53,6 +54,7 @@ let mixedImageLoadGeneration (oldImageNodeCount: int) (context: MissionContext) 
             { CoreSetOptions.GetDefault newImage with
                   nodeCount = newNodeCount
                   invariantChecks = AllInvariantsExceptBucketConsistencyChecks
+                  accelerateTime = false
                   dumpDatabase = false
                   quorumSet = qSet }
 
@@ -61,7 +63,7 @@ let mixedImageLoadGeneration (oldImageNodeCount: int) (context: MissionContext) 
               coreResources = MediumTestResources
               numAccounts = 20000
               numTxs = 50000
-              txRate = 1000
+              txRate = 250
               skipLowFeeTxs = true }
 
     // Put the version with majority of nodes in front of the set to let it generate
@@ -84,7 +86,7 @@ let mixedImageLoadGeneration (oldImageNodeCount: int) (context: MissionContext) 
                 formation.UpgradeMaxTxSetSize coreSets 1000
 
                 let loadgenCoreSet = coreSets.[0]
-                formation.RunLoadgen loadgenCoreSet context.GenerateAccountCreationLoad
+                formation.RunLoadgen loadgenCoreSet { context.GenerateAccountCreationLoad with txrate = 1 }
                 formation.RunLoadgen loadgenCoreSet context.GeneratePaymentLoad
 
                 let majorityPeer = formation.NetworkCfg.GetPeer loadgenCoreSet 0
