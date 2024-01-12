@@ -60,14 +60,14 @@ type StellarFormation with
             let reinstall = System.Action(installHandler)
 
             if not event.IsSet then
-                self.sleepUntilNextRateLimitedApiCallTime ()
+                let fs = sprintf "metadata.name=%s" name
 
-                self.Kube.WatchNamespacedStatefulSetAsync(
-                    name = name,
-                    ``namespace`` = ns,
-                    onEvent = action,
-                    onClosed = reinstall
-                )
+                self
+                    .Kube
+                    .ListNamespacedStatefulSetWithHttpMessagesAsync(namespaceParameter = ns,
+                                                                    fieldSelector = fs,
+                                                                    watch = true)
+                    .Watch<V1StatefulSet, V1StatefulSetList>(onEvent = action, onClosed = reinstall)
                 |> ignore
 
         installHandler ()

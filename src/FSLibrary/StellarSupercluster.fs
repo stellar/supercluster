@@ -146,7 +146,7 @@ type Kubernetes with
                 let ing = nCfg.ToIngress()
                 LogInfo "Creating Ingress %s" ing.Metadata.Name
                 ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
-                let ingress = self.CreateNamespacedIngress1(namespaceParameter = nsStr, body = ing)
+                let ingress = self.CreateNamespacedIngress(namespaceParameter = nsStr, body = ing)
                 namespaceContent.Add(ingress)
 
             let formation =
