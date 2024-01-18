@@ -49,6 +49,8 @@ type StellarFormation with
                 match forbiddenEvent with
                 | Some (ev) -> ()
                 | None ->
+                    self.sleepUntilNextRateLimitedApiCallTime ()
+
                     let s =
                         self
                             .Kube

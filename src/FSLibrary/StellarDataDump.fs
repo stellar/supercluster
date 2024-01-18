@@ -31,11 +31,12 @@ type StellarFormation with
 
     member self.LaunchLogTailingTask (podName: PodName) (containerName: string) =
         let ns = self.NetworkCfg.NamespaceProperty
-        self.sleepUntilNextRateLimitedApiCallTime ()
 
         let task =
             async {
                 try
+                    self.sleepUntilNextRateLimitedApiCallTime ()
+
                     let! stream =
                         self.Kube.ReadNamespacedPodLogAsync(
                             name = podName.StringName,
@@ -45,6 +46,7 @@ type StellarFormation with
                         )
                         |> Async.AwaitTask
 
+                    assert stream.CanRead
                     let filename = tailLogName podName.StringName containerName
                     do! self.Destination.WriteStreamAsync filename stream
                     stream.Close()
@@ -55,6 +57,8 @@ type StellarFormation with
         Async.Start task
 
     member self.LaunchLogTailingTasksForPod(podName: PodName) =
+        self.sleepUntilNextRateLimitedApiCallTime ()
+
         let pod =
             self.Kube.ReadNamespacedPodStatus(
                 name = podName.StringName,
@@ -70,7 +74,10 @@ type StellarFormation with
             if isNull pod.Status.ContainerStatuses then
                 []
             else
-                List.map (fun (c: V1ContainerStatus) -> c.Name) (List.ofSeq pod.Status.ContainerStatuses)
+                List.filter
+                    (fun (c: V1ContainerStatus) -> c.Name = CfgVal.stellarCoreContainerName "run")
+                    (List.ofSeq pod.Status.ContainerStatuses)
+                |> List.map (fun (c: V1ContainerStatus) -> c.Name)
 
         for containerName in containerNames do
             self.LaunchLogTailingTask podName containerName
