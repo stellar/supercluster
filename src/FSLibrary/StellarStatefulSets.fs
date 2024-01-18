@@ -27,51 +27,46 @@ type StellarFormation with
     member self.WaitForAllReplicasReady(ss: V1StatefulSet) =
         let name = ss.Metadata.Name
         let ns = ss.Metadata.NamespaceProperty
+        let fs = sprintf "metadata.name=%s" name
         let mutable forbiddenEvent = None
-        use event = new System.Threading.ManualResetEventSlim(false)
 
         // This pattern of a recursive handler-install routine that reinstalls
         // itself when `onClosed` fires is necessary because watches
         // automatically time out after 100 seconds and the connection closes.
         let rec installHandler () =
-            LogInfo "Waiting for replicas on %s/%s" ns name
+            async {
+                LogInfo "Waiting for replicas on %s/%s" ns name
 
-            let handler (ety: WatchEventType) (ss: V1StatefulSet) =
-                LogInfo "Saw event for statefulset %s: %s" name (ety.ToString())
+                // First we check to see if we've been woken up because a FailedCreate + forbidden
+                // event occurred; this happens typically when we exceed quotas on a cluster or
+                // some other policy reason.
 
-                if not event.IsSet then
-                    // First we check to see if we've been woken up because a FailedCreate + forbidden
-                    // event occurred; this happens typically when we exceed quotas on a cluster or
-                    // some other policy reason.
+                for ev in self.GetEventsForObject(name).Items do
+                    if ev.Reason = "FailedCreate" && ev.Message.Contains("forbidden") then
+                        // If so, we record the causal event and wake up the waiter.
+                        forbiddenEvent <- Some(ev)
 
-                    for ev in self.GetEventsForObject(name).Items do
-                        if ev.Reason = "FailedCreate" && ev.Message.Contains("forbidden") then
-                            // If so, we record the causal event and wake up the waiter.
-                            forbiddenEvent <- Some(ev)
-                            event.Set()
+                match forbiddenEvent with
+                | Some (ev) -> ()
+                | None ->
+                    let s =
+                        self
+                            .Kube
+                            .ListNamespacedStatefulSet(namespaceParameter = ns, fieldSelector = fs)
+                            .Items.Item(0)
                     // Assuming we weren't failed, we look to see how the sts is doing in terms
                     // of creating the number of ready replicas we asked for.
-                    let n = ss.Status.ReadyReplicas.GetValueOrDefault(0)
-                    let k = ss.Spec.Replicas.GetValueOrDefault(0)
+                    let n = s.Status.ReadyReplicas.GetValueOrDefault(0)
+                    let k = s.Spec.Replicas.GetValueOrDefault(0)
                     LogInfo "StatefulSet %s/%s: %d/%d replicas ready" ns name n k
-                    if n = k then event.Set()
 
-            let action = System.Action<WatchEventType, V1StatefulSet>(handler)
-            let reinstall = System.Action(installHandler)
+                    if n <> k then
+                        // Still need to wait a bit longer
+                        do! Async.Sleep(3000)
+                        return! installHandler ()
+            }
 
-            if not event.IsSet then
-                let fs = sprintf "metadata.name=%s" name
-
-                self
-                    .Kube
-                    .ListNamespacedStatefulSetWithHttpMessagesAsync(namespaceParameter = ns,
-                                                                    fieldSelector = fs,
-                                                                    watch = true)
-                    .Watch<V1StatefulSet, V1StatefulSetList>(onEvent = action, onClosed = reinstall)
-                |> ignore
-
-        installHandler ()
-        event.Wait() |> ignore
+        installHandler () |> Async.RunSynchronously
 
         match forbiddenEvent with
         | None -> ()
