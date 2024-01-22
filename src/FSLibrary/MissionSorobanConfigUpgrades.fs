@@ -107,5 +107,15 @@ let sorobanConfigUpgrades (context: MissionContext) =
                       txMaxWriteBytes = Some(50000 * 2) }
                 (System.DateTime.UtcNow.AddSeconds(20.0))
 
-            formation.RunLoadgen coreSet context.GenerateSorobanUploadLoad
+            let peer = formation.NetworkCfg.GetPeer coreSet 0
+            let startingTxCount = peer.GetMetrics().LedgerTransactionApply.Count
+
+            // There is a race condition where previously valid TXs in the TX queue may become invalid
+            // once the tx size limit is reduced. Allow 5% of failures to account for this race.
+            formation.RunLoadgen coreSet { context.GenerateSorobanUploadLoad with skiplowfeetxs = true }
+            let finalTxCount = peer.GetMetrics().LedgerTransactionApply.Count
+
+            if (float (finalTxCount - startingTxCount)) / (float context.numTxs) < 0.95 then
+                failwith "Loadgen failed!"
+
             peer.WaitForMaxTxSize 50000)
