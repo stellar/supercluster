@@ -179,6 +179,7 @@ type StellarCoreCfg =
         t.Add("DATABASE", self.database.ToString()) |> ignore
         t.Add("EXPERIMENTAL_BUCKETLIST_DB", self.enableBucketListDB) |> ignore
         t.Add("EXPERIMENTAL_BUCKETLIST_DB_PERSIST_INDEX", false) |> ignore
+        t.Add("METADATA_DEBUG_LEDGERS", 0) |> ignore
 
         match self.containerType with
         // REVERTME: temporarily use same nonzero port for both container types.
