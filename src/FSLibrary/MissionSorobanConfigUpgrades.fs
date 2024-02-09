@@ -13,6 +13,8 @@ open StellarCoreHTTP
 open StellarCorePeer
 open StellarDataDump
 
+let LastVersionBeforeSoroban = 19;
+
 let sorobanConfigUpgrades (context: MissionContext) =
 
     let quorumSet = CoreSetQuorum(CoreSetName("core"))
@@ -40,9 +42,9 @@ let sorobanConfigUpgrades (context: MissionContext) =
             formation.WaitUntilSynced [ coreSet ]
             let peer = formation.NetworkCfg.GetPeer coreSet 0
 
-            // Upgrade to previous protocol
+            // Upgrade to protocol before Soroban
             let latestVersion = peer.GetSupportedProtocolVersion()
-            formation.UpgradeProtocol [ coreSet ] (latestVersion - 1)
+            formation.UpgradeProtocol [ coreSet ] LastVersionBeforeSoroban
             formation.UpgradeMaxTxSetSize [ coreSet ] 100000
             formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
 
