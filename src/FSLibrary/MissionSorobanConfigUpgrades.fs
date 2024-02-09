@@ -13,7 +13,7 @@ open StellarCoreHTTP
 open StellarCorePeer
 open StellarDataDump
 
-let LastVersionBeforeSoroban = 19;
+let LastVersionBeforeSoroban = 19
 
 let sorobanConfigUpgrades (context: MissionContext) =
 
