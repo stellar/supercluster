@@ -97,7 +97,7 @@ let simulatePubnetTier1Perf (context: MissionContext) =
                                   maxfeerate = None
                                   skiplowfeetxs = false }
 
-                        formation.RunMultiLoadgen tier1 loadGen
+                        formation.RunMultiFractionalLoadgen tier1 loadGen
                         formation.CheckNoErrorsAndPairwiseConsistency()
                         formation.EnsureAllNodesInSync allNodes
 
