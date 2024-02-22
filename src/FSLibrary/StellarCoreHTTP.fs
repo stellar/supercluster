@@ -212,22 +212,30 @@ type LoadGen =
     static member GetSorobanPhase1Upgrade() =
         { LoadGen.GetDefault() with
               mode = CreateSorobanUpgrade
-              ledgerMaxTxCount = Some(30)
-              txMaxInstructions = Some(100_000_000L)
-              txMaxReadBytes = Some(133_120) // 130 KB
-              txMaxWriteBytes = Some(66_560) // 65 KB
-              txMaxReadLedgerEntries = Some(30)
-              txMaxWriteLedgerEntries = Some(20)
-              txMemoryLimit = Some(41_943_040L) // 40 MB
-              txMaxSizeBytes = Some(71_680) // 70 KB
-              txMaxContractEventsSizeBytes = Some(8192) // 8 KB
               maxContractSizeBytes = Some(65_536) // 64 KB
-              maxContractDataEntrySizeBytes = Some(65_536) // 64 KB
+
               ledgerMaxInstructions = Some(100_000_000L)
+              txMaxInstructions = Some(100_000_000L)
+              txMemoryLimit = Some(41_943_040) // 40 MB
+
+              ledgerMaxReadLedgerEntries = Some(40)
               ledgerMaxReadBytes = Some(133_120) // 130 KB
+              ledgerMaxWriteLedgerEntries = Some(25)
               ledgerMaxWriteBytes = Some(66_560) // 65 KB
-              ledgerMaxReadLedgerEntries = Some(30)
-              ledgerMaxWriteLedgerEntries = Some(20) }
+              txMaxReadLedgerEntries = Some(40)
+              txMaxReadBytes = Some(133_120) // 130 KB
+              txMaxWriteLedgerEntries = Some(25)
+              txMaxWriteBytes = Some(66_560) // 65 KB
+
+              txMaxContractEventsSizeBytes = Some(8192) // 8 KB
+
+              ledgerMaxTransactionsSizeBytes = Some(71_680) // 70 KB
+              txMaxSizeBytes = Some(71_680) // 70 KB
+
+              maxContractDataEntrySizeBytes = Some(65_536) // 64 KB
+              maxContractDataKeySizeBytes = Some(200)
+
+              ledgerMaxTxCount = Some(100) }
 
 type MissionContext with
 
@@ -429,6 +437,8 @@ type Peer with
     member self.GetLedgerReadEntries() : int = self.GetSorobanInfo().Ledger.MaxReadLedgerEntries
 
     member self.GetLedgerWriteEntries() : int = self.GetSorobanInfo().Ledger.MaxWriteLedgerEntries
+
+    member self.GetLedgerMaxTransactionCount() : int = self.GetSorobanInfo().Ledger.MaxTxCount
 
     member self.GetLedgerMaxTransactionsSizeBytes() : int = self.GetSorobanInfo().Ledger.MaxTxSizeBytes
 

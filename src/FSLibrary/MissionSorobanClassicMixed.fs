@@ -5,6 +5,7 @@
 module MissionSorobanClassicMixed
 
 open StellarCoreSet
+open StellarCorePeer
 open StellarMissionContext
 open StellarFormation
 open StellarStatefulSets
@@ -17,89 +18,65 @@ let sorobanClassicMixed (context: MissionContext) =
     let context =
         { context with
               numAccounts = 2000
-              numTxs = 10000
-              coreResources = SimulatePubnetResources context.networkSizeLimit
-              installNetworkDelay = Some(context.installNetworkDelay |> Option.defaultValue true)
-
-              // This spike configuration was derived from some pubnet data.
-              // Most ledgers are expected to have roughly 60 * 5 = 300 ops,
-              // and 1 in 13 ledgers are expected to have roughly 60 * 5 + 700 = 1000 txs.
-              // We expect that a transaction contains 1.65 ops on average.
-              // * txRate = (60 op / s) / (1.65 op / tx) = 36 tx / s.
-              // * spikeSize = 700 op / (1.65 op / tx) = 424 tx.
-              txRate = 36
-              spikeSize = 424
-              spikeInterval = 65
+              numTxs = 2000
+              txRate = 20
               skipLowFeeTxs = true }
 
-    let fullCoreSet = FullPubnetCoreSets context true true
+    let sorobanCoreSet =
+        MakeLiveCoreSet
+            "soroban"
+            { CoreSetOptions.GetDefault context.image with
+                  invariantChecks = AllInvariantsExceptBucketConsistencyChecks
+                  dumpDatabase = false }
 
-    let sdf =
-        List.find (fun (cs: CoreSet) -> cs.name.StringName = "stellar" || cs.name.StringName = "sdf") fullCoreSet
+    let classicCoreSet =
+        MakeLiveCoreSet
+            "classic"
+            { CoreSetOptions.GetDefault context.image with
+                  invariantChecks = AllInvariantsExceptBucketConsistencyChecks
+                  dumpDatabase = false }
 
-    let tier1 = List.filter (fun (cs: CoreSet) -> cs.options.tier1 = Some true) fullCoreSet
+    let allNodes = [ sorobanCoreSet; classicCoreSet ]
 
     context.Execute
-        fullCoreSet
+        allNodes
         None
         (fun (formation: StellarFormation) ->
-            // Setup overlay connections first before manually closing
-            // ledger, which kick off consensus
-            formation.WaitUntilConnected fullCoreSet
-            formation.ManualClose tier1
-
             // Wait until the whole network is synced before proceeding,
             // to fail asap in case of a misconfiguration
-            formation.WaitUntilSynced fullCoreSet
-            formation.UpgradeProtocolToLatest tier1
-            formation.UpgradeMaxTxSetSize tier1 1000000
+            formation.WaitUntilSynced allNodes
+            formation.UpgradeProtocolToLatest allNodes
+            formation.UpgradeMaxTxSetSize allNodes 1000000
 
-            formation.RunLoadgen sdf { context.GenerateAccountCreationLoad with accounts = context.numAccounts * 2 }
+            formation.RunLoadgen
+                sorobanCoreSet
+                { context.GenerateAccountCreationLoad with accounts = context.numAccounts * 2 }
 
             // Upgrade to Phase 1 limits
-            formation.SetupUpgradeContract sdf
+            formation.SetupUpgradeContract sorobanCoreSet
 
-            formation.DeployUpgradeEntriesAndArm
-                sdf
-                fullCoreSet
-                (LoadGen.GetSorobanPhase1Upgrade())
-                (System.DateTime.UtcNow.AddSeconds(20.0))
+            let limits = LoadGen.GetSorobanPhase1Upgrade()
+            formation.DeployUpgradeEntriesAndArm allNodes limits (System.DateTime.UtcNow)
 
-            formation.RunLoadgenWithPeer
-                0
-                sdf
-                { context.SetupSorobanInvoke with
-                      instances = Some(100)
-                      txrate = 1
-                      spikesize = 0
-                      spikeinterval = 0 }
+            // Wait until upgrade has been applied
+            let peer = formation.NetworkCfg.GetPeer sorobanCoreSet 0
+            peer.WaitForMaxTxSize limits.txMaxSizeBytes.Value
+
+            formation.RunLoadgen sorobanCoreSet { context.SetupSorobanInvoke with instances = Some(10); txrate = 1 }
 
             let sorobanLoad =
-                async {
-                    formation.RunLoadgenWithPeer
-                        0
-                        sdf
-                        { context.GenerateSorobanInvokeLoad with
-                              // Assume 1-2 large TXs per ledger, so each tx can have up to 1/2 ledger limits
-                              dataEntriesHigh = Some(20 / 2)
-                              ioKiloBytesHigh = Some(64 / 2)
-                              txSizeBytesHigh = Some(71_680 / 2)
-                              instructionsHigh = Some(100_000_000L / 2L)
-                              instances = Some(100)
-                              offset = context.numAccounts
-                              // Soroban is expected to receive less traffic, scale everything down
-                              txrate = 6
-                              txs = 100
-                              spikesize = 50 }
+                { context.GenerateSorobanInvokeLoad with
+                      // Assume 1-2 large TXs per ledger, so each tx can have up to 1/2 ledger limits
+                      dataEntriesHigh = Some(limits.txMaxWriteLedgerEntries.Value / 2)
+                      ioKiloBytesHigh = Some((limits.txMaxWriteBytes.Value / 1024) / 2)
+                      txSizeBytesHigh = Some(limits.txMaxSizeBytes.Value / 2)
+                      instructionsHigh = Some(limits.txMaxInstructions.Value / 2L)
+                      instances = Some(10)
+                      offset = context.numAccounts
+                      // Soroban is expected to receive less traffic, scale everything down
+                      txrate = context.txRate / 10
+                      txs = context.numTxs / 10 }
 
-                }
 
-            let classicLoad = async { formation.RunLoadgenWithPeer 1 sdf context.GeneratePaymentLoad }
-
-            // Generate soroban load from peer 0 and classic load from peer 1 in parallel
-            [ sorobanLoad; classicLoad ]
-            |> Async.Parallel
-            |> Async.RunSynchronously
-            |> ignore
-
-            formation.EnsureAllNodesInSync fullCoreSet)
+            formation.RunMultiLoadgen allNodes [ sorobanLoad; context.GeneratePaymentLoad ]
+            formation.EnsureAllNodesInSync allNodes)
