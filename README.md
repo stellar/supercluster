@@ -34,6 +34,14 @@ how to use it.
 See [doc/contributing.md](doc/contributing.md). Support for uses outside of SDF
 will be provided on a best-effort basis.
 
+## Supported Tests ("Missions")
+
+See [doc/missions.md](doc/missions.md) for a list of supported tests.
+
+## Measuring transaction throughput
+
+See [doc/measuring-transaction-throughput.md](doc/measuring-transaction-throughput.md) for instructions on load testing using supercluster. 
+
 ## License
 
 [Apache 2.0](COPYING)
