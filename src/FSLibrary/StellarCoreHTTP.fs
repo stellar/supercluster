@@ -214,14 +214,14 @@ type LoadGen =
               mode = CreateSorobanUpgrade
               maxContractSizeBytes = Some(65_536) // 64 KB
 
-              ledgerMaxInstructions = Some(100_000_000L)
+              ledgerMaxInstructions = Some(100_000_000L * 10)
               txMaxInstructions = Some(100_000_000L)
               txMemoryLimit = Some(41_943_040) // 40 MB
 
-              ledgerMaxReadLedgerEntries = Some(40)
-              ledgerMaxReadBytes = Some(133_120) // 130 KB
-              ledgerMaxWriteLedgerEntries = Some(25)
-              ledgerMaxWriteBytes = Some(66_560) // 65 KB
+              ledgerMaxReadLedgerEntries = Some(40 * 10)
+              ledgerMaxReadBytes = Some(133_120 * 10) // 130 KB
+              ledgerMaxWriteLedgerEntries = Some(25 * 10)
+              ledgerMaxWriteBytes = Some(71_680) // 70 KiB
               txMaxReadLedgerEntries = Some(40)
               txMaxReadBytes = Some(133_120) // 130 KB
               txMaxWriteLedgerEntries = Some(25)
@@ -229,13 +229,13 @@ type LoadGen =
 
               txMaxContractEventsSizeBytes = Some(8192) // 8 KB
 
-              ledgerMaxTransactionsSizeBytes = Some(71_680) // 70 KB
+              ledgerMaxTransactionsSizeBytes = Some(92_160) // 90 KiB
               txMaxSizeBytes = Some(71_680) // 70 KB
 
               maxContractDataEntrySizeBytes = Some(65_536) // 64 KB
               maxContractDataKeySizeBytes = Some(200)
 
-              ledgerMaxTxCount = Some(100) }
+              ledgerMaxTxCount = Some(100 * 2) }
 
 type MissionContext with
 
