@@ -473,16 +473,6 @@ let main argv =
                  let (kube, ns) = ConnectToCluster mission.KubeConfig mission.NamespaceProperty
                  let destination = Destination(mission.Destination)
 
-                 let heartbeatHandler _ =
-                     try
-                         let ranges = kube.ListNamespacedLimitRange(namespaceParameter = ns)
-                         if isNull ranges then failwith "Connection issue!" else DumpPodInfo kube ns
-                     with x ->
-                         LogError "Connection issue!"
-                         reraise ()
-
-                 // Poll cluster every minute to make sure we don't have any issues
-                 let timer = new System.Threading.Timer(TimerCallback(heartbeatHandler), null, 1000, 300000)
 
                  for m in mission.Missions do
                      LogInfo "-----------------------------------"
@@ -564,7 +554,6 @@ let main argv =
                      LogInfo "Finished mission: %s" m
                      LogInfo "-----------------------------------"
 
-                 timer.Dispose()
                  0)
 
         | _ -> 1
