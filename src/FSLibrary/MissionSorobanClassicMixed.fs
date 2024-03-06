@@ -18,8 +18,8 @@ let sorobanClassicMixed (context: MissionContext) =
     let context =
         { context with
               numAccounts = 2000
-              numTxs = 2000
-              txRate = 20
+              numTxs = 20000
+              txRate = 40
               skipLowFeeTxs = true }
 
     let sorobanCoreSet =
@@ -67,15 +67,15 @@ let sorobanClassicMixed (context: MissionContext) =
             let sorobanLoad =
                 { context.GenerateSorobanInvokeLoad with
                       // Assume 1-2 large TXs per ledger, so each tx can have up to 1/2 ledger limits
-                      dataEntriesHigh = Some(limits.txMaxWriteLedgerEntries.Value / 2)
-                      ioKiloBytesHigh = Some((limits.txMaxWriteBytes.Value / 1024) / 2)
-                      txSizeBytesHigh = Some(limits.txMaxSizeBytes.Value / 2)
-                      instructionsHigh = Some(limits.txMaxInstructions.Value / 2L)
+                      dataEntriesHigh = Some(limits.txMaxWriteLedgerEntries.Value)
+                      ioKiloBytesHigh = Some(limits.txMaxWriteBytes.Value)
+                      txSizeBytesHigh = Some(limits.txMaxSizeBytes.Value)
+                      instructionsHigh = Some(limits.txMaxInstructions.Value)
                       instances = Some(10)
                       offset = context.numAccounts
                       // Soroban is expected to receive less traffic, scale everything down
-                      txrate = context.txRate / 10
-                      txs = context.numTxs / 10 }
+                      txrate = 10
+                      txs = context.numTxs }
 
 
             formation.RunMultiLoadgen allNodes [ sorobanLoad; context.GeneratePaymentLoad ]
