@@ -214,7 +214,7 @@ type LoadGen =
               mode = CreateSorobanUpgrade
               maxContractSizeBytes = Some(65_536) // 64 KB
 
-              ledgerMaxInstructions = Some(100_000_000L * 10)
+              ledgerMaxInstructions = Some(100_000_000L * 10L)
               txMaxInstructions = Some(100_000_000L)
               txMemoryLimit = Some(41_943_040) // 40 MB
 
