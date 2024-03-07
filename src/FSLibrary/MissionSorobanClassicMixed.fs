@@ -68,7 +68,7 @@ let sorobanClassicMixed (context: MissionContext) =
                 { context.GenerateSorobanInvokeLoad with
                       // Assume 1-2 large TXs per ledger, so each tx can have up to 1/2 ledger limits
                       dataEntriesHigh = Some(limits.txMaxWriteLedgerEntries.Value / 2)
-                      ioKiloBytesHigh = Some(limits.txMaxWriteBytes / 2)
+                      ioKiloBytesHigh = Some(limits.txMaxWriteBytes.Value / 2 / 1024)
                       txSizeBytesHigh = Some(3)
                       instructionsHigh = Some(limits.txMaxInstructions.Value)
                       instances = Some(10)
