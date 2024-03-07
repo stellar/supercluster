@@ -67,14 +67,14 @@ let sorobanClassicMixed (context: MissionContext) =
             let sorobanLoad =
                 { context.GenerateSorobanInvokeLoad with
                       // Assume 1-2 large TXs per ledger, so each tx can have up to 1/2 ledger limits
-                      dataEntriesHigh = Some(limits.txMaxWriteLedgerEntries.Value)
-                      ioKiloBytesHigh = Some(limits.txMaxWriteBytes.Value / 1024)
-                      txSizeBytesHigh = Some(limits.txMaxSizeBytes.Value)
+                      dataEntriesHigh = Some(limits.txMaxWriteLedgerEntries.Value / 2)
+                      ioKiloBytesHigh = Some(2)
+                      txSizeBytesHigh = Some(3)
                       instructionsHigh = Some(limits.txMaxInstructions.Value)
                       instances = Some(10)
                       offset = context.numAccounts
                       // Soroban is expected to receive less traffic, scale everything down
-                      txrate = 5
+                      txrate = 6
                       txs = context.numTxs }
 
 
