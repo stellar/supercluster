@@ -443,7 +443,8 @@ let main argv =
                   networkSizeLimit = 0
                   pubnetParallelCatchupStartingLedger = 0
                   tag = None
-                  numRuns = None }
+                  numRuns = None
+                  enableTailLogging = true }
 
             let nCfg = MakeNetworkCfg ctx [] None
             use formation = kube.MakeEmptyFormation nCfg
@@ -548,7 +549,8 @@ let main argv =
                                randomSeed = mission.RandomSeed
                                pubnetParallelCatchupStartingLedger = mission.PubnetParallelCatchupStartingLedger
                                tag = mission.Tag
-                               numRuns = mission.NumRuns }
+                               numRuns = mission.NumRuns
+                               enableTailLogging = true }
 
                          allMissions.[m] missionContext
 

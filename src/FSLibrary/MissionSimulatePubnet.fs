@@ -58,7 +58,8 @@ let simulatePubnet (context: MissionContext) =
               // * spikeSize = 700 op / (1.65 op / tx) = 424 tx.
               txRate = 36
               spikeSize = 424
-              spikeInterval = 65 }
+              spikeInterval = 65
+              enableTailLogging = false }
 
     let fullCoreSet = FullPubnetCoreSets context true true
 

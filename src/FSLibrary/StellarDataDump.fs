@@ -30,68 +30,64 @@ let tailLogName (podOrJob: string) (cmd: string) : string = sprintf "%s-%s-tail.
 type StellarFormation with
 
     member self.LaunchLogTailingTask (podName: PodName) (containerName: string) =
-        let ns = self.NetworkCfg.NamespaceProperty
+        if self.NetworkCfg.missionContext.enableTailLogging then
+            let ns = self.NetworkCfg.NamespaceProperty
 
-        let task =
-            async {
-                try
-                    self.sleepUntilNextRateLimitedApiCallTime ()
+            let task =
+                async {
+                    try
+                        self.sleepUntilNextRateLimitedApiCallTime ()
 
-                    let! stream =
-                        self.Kube.ReadNamespacedPodLogAsync(
-                            name = podName.StringName,
-                            namespaceParameter = ns,
-                            container = containerName,
-                            follow = Nullable<bool>(true)
-                        )
-                        |> Async.AwaitTask
+                        let! stream =
+                            self.Kube.ReadNamespacedPodLogAsync(
+                                name = podName.StringName,
+                                namespaceParameter = ns,
+                                container = containerName,
+                                follow = Nullable<bool>(true)
+                            )
+                            |> Async.AwaitTask
 
-                    assert stream.CanRead
-                    let filename = tailLogName podName.StringName containerName
-                    do! self.Destination.WriteStreamAsync filename stream
-                    stream.Close()
-                with :? Microsoft.Rest.HttpOperationException as ex ->
-                    LogError "HTTP Operation exception: %s " (ex.Response.Content.ToString())
-            }
+                        assert stream.CanRead
+                        let filename = tailLogName podName.StringName containerName
+                        do! self.Destination.WriteStreamAsync filename stream
+                        stream.Close()
+                    with :? Microsoft.Rest.HttpOperationException as ex ->
+                        LogError "HTTP Operation exception: %s " (ex.Response.Content.ToString())
+                }
 
-        Async.Start task
+            Async.Start task
 
     member self.LaunchLogTailingTasksForPod(podName: PodName) =
-        self.sleepUntilNextRateLimitedApiCallTime ()
+        if self.NetworkCfg.missionContext.enableTailLogging then
+            self.sleepUntilNextRateLimitedApiCallTime ()
 
-        let pod =
-            self.Kube.ReadNamespacedPodStatus(
-                name = podName.StringName,
-                namespaceParameter = self.NetworkCfg.NamespaceProperty
-            )
+            let pod =
+                self.Kube.ReadNamespacedPodStatus(
+                    name = podName.StringName,
+                    namespaceParameter = self.NetworkCfg.NamespaceProperty
+                )
 
-        // NB: sometimes (for no clear reason) k8s returns an empty container-status list
-        // which gives us nothing to work with here. Possibly it's a startup race, but
-        // given that this is (a) rare and (b) only causes us to fail-to-tail a single
-        // container's logs when it happens, we just swallow the error rather than trying
-        // to compensate for it (eg. retrying). You don't get a tailed log in this case.
-        let containerNames =
-            if isNull pod.Status.ContainerStatuses then
-                []
-            else
-                List.filter
-                    (fun (c: V1ContainerStatus) -> c.Name = CfgVal.stellarCoreContainerName "run")
-                    (List.ofSeq pod.Status.ContainerStatuses)
-                |> List.map (fun (c: V1ContainerStatus) -> c.Name)
+            // NB: sometimes (for no clear reason) k8s returns an empty container-status list
+            // which gives us nothing to work with here. Possibly it's a startup race, but
+            // given that this is (a) rare and (b) only causes us to fail-to-tail a single
+            // container's logs when it happens, we just swallow the error rather than trying
+            // to compensate for it (eg. retrying). You don't get a tailed log in this case.
+            let containerNames =
+                if isNull pod.Status.ContainerStatuses then
+                    []
+                else
+                    List.filter
+                        (fun (c: V1ContainerStatus) -> c.Name = CfgVal.stellarCoreContainerName "run")
+                        (List.ofSeq pod.Status.ContainerStatuses)
+                    |> List.map (fun (c: V1ContainerStatus) -> c.Name)
 
-        for containerName in containerNames do
-            self.LaunchLogTailingTask podName containerName
+            for containerName in containerNames do
+                self.LaunchLogTailingTask podName containerName
 
     member self.LaunchLogTailingTasksForCoreSet(cs: CoreSet) =
         for i = 0 to (cs.CurrentCount - 1) do
             let podName = self.NetworkCfg.PodName cs i
             self.LaunchLogTailingTasksForPod podName
-
-    member self.LaunchLogTailingTasksForAllPeers() =
-        self.NetworkCfg.MapAllPeers
-            (fun (cs: CoreSet) (i: int) ->
-                let podName = self.NetworkCfg.PodName cs i
-                self.LaunchLogTailingTasksForPod podName)
 
     member self.DumpLogs (podName: PodName) (containerName: string) =
         let ns = self.NetworkCfg.NamespaceProperty
