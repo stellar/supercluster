@@ -24,7 +24,8 @@ let sorobanLoadGeneration (context: MissionContext) =
               numAccounts = 10000
               numTxs = rate * 2000
               skipLowFeeTxs = true
-              maxFeeRate = Some 100000000 }
+              maxFeeRate = Some 100000000
+              enableTailLogging = false }
 
     let fullCoreSet = FullPubnetCoreSets context true true
 
