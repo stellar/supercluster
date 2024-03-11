@@ -49,6 +49,7 @@ type StellarFormation with
             reraise ()
 
     member self.GetJobPods(j: V1Job) : V1PodList =
+        self.sleepUntilNextRateLimitedApiCallTime ()
         let ns = self.NetworkCfg.NamespaceProperty
         self.Kube.ListNamespacedPod(namespaceParameter = ns, labelSelector = "job-name=" + j.Metadata.Name)
 
