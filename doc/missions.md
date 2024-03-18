@@ -139,3 +139,7 @@ Run a network survey with mixed version images on a small network of nodes.
 ## MissionSlowNodesNetwork
 
 Run a network with a mix of fast and slow nodes. This mission allows to test interesting flooding and load shedding scenarios when some nodes are lagging behind.
+
+## MissionMaxTPSMixed
+
+Stress test a network of simulated Tier1 topology with a mix of classic and soroban traffic and report maximum achieved throughput.
