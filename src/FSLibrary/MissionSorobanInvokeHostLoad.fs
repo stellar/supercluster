@@ -10,7 +10,6 @@ open StellarFormation
 open StellarStatefulSets
 open StellarSupercluster
 open StellarCoreHTTP
-open StellarCorePeer
 
 let sorobanInvokeHostLoad (context: MissionContext) =
     let coreSet =
@@ -21,7 +20,7 @@ let sorobanInvokeHostLoad (context: MissionContext) =
                   emptyDirType = DiskBackedEmptyDir }
 
     let context =
-        { context with
+        { context.WithMediumLoadgenOptions with
               numAccounts = 100
               numTxs = 100
               txRate = 1

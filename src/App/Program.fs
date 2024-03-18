@@ -73,6 +73,20 @@ type MissionOptions
         flatQuorum: bool option,
         tier1Keys: string option,
         opCountDistribution: string option,
+        wasmBytesValues: seq<int>,
+        wasmBytesWeights: seq<int>,
+        dataEntriesValues: seq<int>,
+        dataEntriesWeights: seq<int>,
+        totalKiloBytesValues: seq<int>,
+        totalKilobytesWeights: seq<int>,
+        txSizeBytesValues: seq<int>,
+        txSizeBytesWeights: seq<int>,
+        instructionsValues: seq<int>,
+        instructionsWeights: seq<int>,
+        payWeight: int option,
+        sorobanUploadWeight: int option,
+        sorobanInvokeWeight: int option,
+        minSorobanPercentSuccess: int option,
         installNetworkDelay: bool option,
         flatNetworkDelay: int option,
         peerReadingCapacity: int option,
@@ -262,6 +276,76 @@ type MissionOptions
              Required = false)>]
     member self.OpCountDistribution = opCountDistribution
 
+    [<Option("wasm-bytes",
+             HelpText = "A space-separated list of sizes of wasm blobs for SOROBAN_UPLOAD and MIX_CLASSIC_SOROBAN loadgen modes (See LOADGEN_WASM_BYTES_FOR_TESTING)",
+             Required = false)>]
+    member self.WasmBytesValues = wasmBytesValues
+
+    [<Option("wasm-bytes-weights",
+             HelpText = "A space-separated indicating how often to select a certain size when generating wasms (See LOADGEN_WASM_BYTES_DISTRIBUTION_FOR_TESTING)",
+             Required = false)>]
+    member self.WasmBytesWeights = wasmBytesWeights
+
+    [<Option("data-entries",
+             HelpText = "A space-separated list of number of data entries for SOROBAN_INVOKE and MIX_CLASSIC_SOROBAN loadgen modes (See LOADGEN_NUM_DATA_ENTRIES_FOR_TESTING)",
+             Required = false)>]
+    member self.DataEntriesValues = dataEntriesValues
+
+    [<Option("data-entries-weights",
+             HelpText = "A space-separated indicating how often to select a certain number of data entries when generating invoke transactions (See LOADGEN_NUM_DATA_ENTRIES_DISTRIBUTION_FOR_TESTING)",
+             Required = false)>]
+    member self.DataEntriesWeights = dataEntriesWeights
+
+    [<Option("total-kilobytes",
+             HelpText = "A space-separated list of kilobytes of IO for SOROBAN_INVOKE and MIX_CLASSIC_SOROBAN loadgen modes (See LOADGEN_IO_KILOBYTES_FOR_TESTING)",
+             Required = false)>]
+    member self.TotalKiloBytesValues = totalKiloBytesValues
+
+    [<Option("total-kilobytes-weights",
+             HelpText = "A space-separated indicating how often to select a certain number of kilobytes of IO when generating invoke transactions (See LOADGEN_IO_KILOBYTES_DISTRIBUTION_FOR_TESTING)",
+             Required = false)>]
+    member self.TotalKiloBytesWeights = totalKilobytesWeights
+
+    [<Option("tx-size-bytes",
+             HelpText = "A space-separated list of transaction sizes for SOROBAN_INVOKE and MIX_CLASSIC_SOROBAN loadgen modes (See LOADGEN_TX_SIZE_BYTES_FOR_TESTING)",
+             Required = false)>]
+    member self.TxSizeBytesValues = txSizeBytesValues
+
+    [<Option("tx-size-bytes-weights",
+             HelpText = "A space-separated indicating how often to select a certain transaction size when generating invoke transactions (See LOADGEN_TX_SIZE_BYTES_DISTRIBUTION_FOR_TESTING)",
+             Required = false)>]
+    member self.TxSizeBytesWeights = txSizeBytesWeights
+
+    [<Option("instructions",
+             HelpText = "A space-separated list of instruction counts for SOROBAN_INVOKE and MIX_CLASSIC_SOROBAN loadgen modes (See LOADGEN_TX_SIZE_BYTES_FOR_TESTING)",
+             Required = false)>]
+    member self.InstructionsValues = instructionsValues
+
+    [<Option("instructions-weights",
+             HelpText = "A space-separated indicating how often to select a certain instruction count when generating invoke transactions (See LOADGEN_TX_SIZE_BYTES_DISTRIBUTION_FOR_TESTING)",
+             Required = false)>]
+    member self.InstructionsWeights = instructionsWeights
+
+    [<Option("pay-weight",
+             HelpText = "Weight for classic transactions in MIX_CLASSIC_SOROBAN loadgen mode",
+             Required = false)>]
+    member self.PayWeight = payWeight
+
+    [<Option("soroban-upload-weight",
+             HelpText = "Weight for SOROBAN_UPLOAD transactions in MIX_CLASSIC_SOROBAN loadgen mode",
+             Required = false)>]
+    member self.SorobanUploadWeight = sorobanUploadWeight
+
+    [<Option("soroban-invoke-weight",
+             HelpText = "Weight for SOROBAN_INVOKE transactions in MIX_CLASSIC_SOROBAN loadgen mode",
+             Required = false)>]
+    member self.SorobanInvokeWeight = sorobanInvokeWeight
+
+    [<Option("min-soroban-percent-success",
+             HelpText = "Minimum percentage of soroban transactions that must succeed at apply time in loadgen",
+             Required = false)>]
+    member self.MinSorobanPercentSuccess = minSorobanPercentSuccess
+
     [<Option("install-network-delay",
              HelpText = "Installs network delay estimated from node locations",
              Required = false)>]
@@ -426,6 +510,15 @@ let main argv =
                   flatQuorum = None
                   tier1Keys = None
                   opCountDistribution = None
+                  wasmBytesDistribution = []
+                  dataEntriesDistribution = []
+                  totalKiloBytesDistribution = []
+                  txSizeBytesDistribution = []
+                  instructionsDistribution = []
+                  payWeight = None
+                  sorobanUploadWeight = None
+                  sorobanInvokeWeight = None
+                  minSorobanPercentSuccess = None
                   installNetworkDelay = None
                   flatNetworkDelay = None
                   simulateApplyDuration = None
@@ -537,6 +630,28 @@ let main argv =
                                flatQuorum = mission.FlatQuorum
                                tier1Keys = mission.Tier1Keys
                                opCountDistribution = mission.OpCountDistribution
+                               wasmBytesDistribution =
+                                   List.zip (List.ofSeq mission.WasmBytesValues) (List.ofSeq mission.WasmBytesWeights)
+                               dataEntriesDistribution =
+                                   List.zip
+                                       (List.ofSeq mission.DataEntriesValues)
+                                       (List.ofSeq mission.DataEntriesWeights)
+                               totalKiloBytesDistribution =
+                                   List.zip
+                                       (List.ofSeq mission.TotalKiloBytesValues)
+                                       (List.ofSeq mission.TotalKiloBytesWeights)
+                               txSizeBytesDistribution =
+                                   List.zip
+                                       (List.ofSeq mission.TxSizeBytesValues)
+                                       (List.ofSeq mission.TxSizeBytesWeights)
+                               instructionsDistribution =
+                                   List.zip
+                                       (List.ofSeq mission.InstructionsValues)
+                                       (List.ofSeq mission.InstructionsWeights)
+                               payWeight = mission.PayWeight
+                               sorobanUploadWeight = mission.SorobanUploadWeight
+                               sorobanInvokeWeight = mission.SorobanInvokeWeight
+                               minSorobanPercentSuccess = mission.MinSorobanPercentSuccess
                                installNetworkDelay = mission.InstallNetworkDelay
                                flatNetworkDelay = mission.FlatNetworkDelay
                                simulateApplyDuration = processInputSeq mission.SimulateApplyDuration

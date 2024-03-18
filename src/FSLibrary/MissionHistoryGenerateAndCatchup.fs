@@ -15,7 +15,7 @@ open StellarSupercluster
 let sorobanProtocolVersion = 20
 
 let historyGenerateAndCatchup (context: MissionContext) =
-    let context = context.WithNominalLoad
+    let context = context.WithNominalLoad.WithSmallLoadgenOptions
     let image = context.image
     let catchupOptions = { generatorImage = image; catchupImage = image; versionImage = image }
     let catchupSets = MakeRecentCatchupSet catchupOptions
