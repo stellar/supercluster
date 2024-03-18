@@ -29,7 +29,7 @@ let sorobanConfigUpgrades (context: MissionContext) =
                   nodeCount = 5 }
 
     let context =
-        { context with
+        { context.WithSmallLoadgenOptions with
               numAccounts = 100
               numTxs = 100
               txRate = 1

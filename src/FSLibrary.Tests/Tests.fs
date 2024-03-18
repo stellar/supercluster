@@ -95,6 +95,15 @@ let ctx : MissionContext =
               __SOURCE_DIRECTORY__
               + "/../FSLibrary/csv-type-samples/sample-loadgen-op-count-distribution.csv"
           )
+      wasmBytesDistribution = []
+      dataEntriesDistribution = []
+      totalKiloBytesDistribution = []
+      txSizeBytesDistribution = []
+      instructionsDistribution = []
+      payWeight = None
+      sorobanUploadWeight = None
+      sorobanInvokeWeight = None
+      minSorobanPercentSuccess = None
       networkSizeLimit = 100
       tier1OrgsToAdd = 0
       nonTier1NodesToAdd = 0

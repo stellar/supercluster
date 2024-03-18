@@ -20,7 +20,7 @@ let loadGenerationWithTxSetLimit (context: MissionContext) =
                   dumpDatabase = false }
 
     let context =
-        { context with
+        { context.WithSmallLoadgenOptions with
               coreResources = MediumTestResources
               numAccounts = 20000
               numTxs = 50000

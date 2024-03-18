@@ -21,7 +21,7 @@ let protocolUpgradeWithLoad (context: MissionContext) =
                   dumpDatabase = false }
 
     let context =
-        { context with
+        { context.WithSmallLoadgenOptions with
               coreResources = UpgradeResources
               numAccounts = 20000
               numTxs = 50000

@@ -29,6 +29,7 @@
     <Compile Include="StellarStatefulSets.fs" />
     <Compile Include="StellarJobExec.fs" />
     <Compile Include="StellarSupercluster.fs" />
+    <Compile Include="MaxTPSTest.fs" />
     <Compile Include="MissionCatchupHelpers.fs" />
     <Compile Include="MissionBootAndSync.fs" />
     <Compile Include="MissionSimplePayment.fs" />
@@ -64,6 +65,7 @@
     <Compile Include="MissionProtocolUpgradeWithLoad.fs" />
     <Compile Include="MissionDatabaseInplaceUpgrade.fs" />
     <Compile Include="MissionAcceptanceUnitTests.fs" />
+    <Compile Include="MissionMaxTPSMixed.fs" />
     <Compile Include="StellarMission.fs" />
   </ItemGroup>
   <ItemGroup>
