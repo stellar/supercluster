@@ -15,7 +15,7 @@ open StellarSupercluster
 open MissionCatchupHelpers
 
 let historyPubnetParallelCatchup (context: MissionContext) =
-    let context = { context with coreResources = ParallelCatchupResources; apiRateLimit = 10 }
+    let context = { context with coreResources = ParallelCatchupResources; apiRateLimit = 5 }
 
     let checkpointsPerJob = 250
     let ledgersPerCheckpoint = 64
