@@ -270,7 +270,11 @@ type StellarFormation with
         peer.WaitForLoadGenComplete loadGen
 
     member self.SetupUpgradeContract(coreSet: CoreSet) =
-        let loadgen = { LoadGen.GetDefault() with mode = SetupSorobanUpgrade }
+        let loadgen =
+            { LoadGen.GetDefault() with
+                  mode = SetupSorobanUpgrade
+                  minSorobanPercentSuccess = Some 100 }
+
         self.RunLoadgen coreSet loadgen
 
     member self.DeployUpgradeEntriesAndArm

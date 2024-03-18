@@ -416,6 +416,8 @@ type Peer with
 
     member self.GetLedgerWriteEntries() : int = self.GetSorobanInfo().Ledger.MaxWriteLedgerEntries
 
+    member self.GetLedgerMaxTxCount() : int = self.GetSorobanInfo().Ledger.MaxTxCount
+
     member self.GetLedgerMaxTransactionsSizeBytes() : int = self.GetSorobanInfo().Ledger.MaxTxSizeBytes
 
     member self.GetTxMaxInstructions() : int64 = self.GetSorobanInfo().Tx.MaxInstructions
@@ -531,6 +533,11 @@ type Peer with
         RetryUntilTrue
             (fun _ -> self.GetLedgerMaxInstructions() = n)
             (fun _ -> LogInfo "Waiting for LedgerMaxInstructions=%d on %s" n self.ShortName.StringName)
+
+    member self.WaitForLedgerMaxTxCount(n: int) =
+        RetryUntilTrue
+            (fun _ -> self.GetLedgerMaxTxCount() = n)
+            (fun _ -> LogInfo "Waiting for LedgerMaxTxCount=%d on %s" n self.ShortName.StringName)
 
     member self.WaitForTxMaxInstructions(n: int64) =
         RetryUntilTrue
