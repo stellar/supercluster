@@ -133,9 +133,9 @@ let GetSimulatePubnetResources networkSize : V1ResourceRequirements =
     //
     // It increases the resource requirement in case the network size is big.
     let cpuReqMili = 25
-    let memReqMebi = 64
-    let cpuLimMili = 500
-    let memLimMebi = 400
+    let memReqMebi = 256
+    let cpuLimMili = 1000
+    let memLimMebi = 1024
     let k = if networkSize >= 200 then 2 else 1
     makeResourceRequirements (k * cpuReqMili) (k * memReqMebi) (k * cpuLimMili) (k * memLimMebi)
 

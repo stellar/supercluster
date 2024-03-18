@@ -45,6 +45,23 @@ let peerCountNonTier1 (random: System.Random) : int =
 // while scaling the pubnet.
 let tier1OrgSize = 3
 
+// Simulate apply default configs
+// Use the default values derived from observing the pubnet.
+// 9/10, 88/100, 3/1000 denote 9% => 10 usec, 88% => 100 usec, 3% => 1000 usec.
+let simulateApplyDurationDefault =
+    seq {
+        10
+        100
+        1000
+    }
+
+let simulateApplyWeightDefault =
+    seq {
+        9
+        88
+        3
+    }
+
 // A bunch of specific GeoLocs follow
 
 // Ashburn, suburb of Washington DC USA a.k.a. AWS us-east-1
@@ -246,7 +263,12 @@ let addEdges
 
     createAdjacencyMap (Set.toList edgeSet)
 
-let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMinConnectionCount: bool) : CoreSet list =
+let FullPubnetCoreSets
+    (context: MissionContext)
+    (manualclose: bool)
+    (enforceMinConnectionCount: bool)
+    (slowOrgDelay: int)
+    : CoreSet list =
 
     if context.pubnetData.IsNone then
         failwith "pubnet simulation requires --pubnet-data=<filename.json>"
@@ -538,8 +560,8 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
             miscNodes
 
     let orgCoreSets : CoreSet array =
-        Array.map
-            (fun (hdn: HomeDomainName, nodes: PubnetNode.Root array) ->
+        Array.mapi
+            (fun (i: int) (hdn: HomeDomainName, nodes: PubnetNode.Root array) ->
                 assert (nodes.Length <> 0)
                 let nodeList = List.ofArray nodes
                 let keys = Array.map (fun (n: PubnetNode.Root) -> getSimKey n.PublicKey) nodes
@@ -549,6 +571,8 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
                           nodeCount = Array.length nodes
                           quorumSet = ExplicitQuorum defaultQuorum
                           tier1 = Some(Set.contains nodes.[0].PublicKey tier1KeySet)
+                          // Always apply artificial delay to the first org
+                          addArtificalDelay = if i = 0 then Some(slowOrgDelay) else Some(0)
                           nodeLocs = Some(List.map getGeoLocOrDefault nodeList)
                           preferredPeersMap = Some(keysToPreferredPeersMap keys) }
 
