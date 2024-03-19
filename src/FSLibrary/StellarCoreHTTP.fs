@@ -77,8 +77,8 @@ type LoadGen =
       instances: int option
       dataEntriesLow: int option
       dataEntriesHigh: int option
-      kiloBytesPerDataEntryLow: int option
-      kiloBytesPerDataEntryHigh: int option
+      ioKiloBytesLow: int option
+      ioKiloBytesHigh: int option
       txSizeBytesLow: int option
       txSizeBytesHigh: int option
       instructionsLow: int64 option
@@ -129,8 +129,8 @@ type LoadGen =
               @ optionalParam "instances" self.instances
                 @ optionalParam "dataentrieslow" self.dataEntriesLow
                   @ optionalParam "dataentrieshigh" self.dataEntriesHigh
-                    @ optionalParam "kilobyteslow" self.kiloBytesPerDataEntryLow
-                      @ optionalParam "kilobyteshigh" self.kiloBytesPerDataEntryHigh
+                    @ optionalParam "kilobyteslow" self.ioKiloBytesLow
+                      @ optionalParam "kilobyteshigh" self.ioKiloBytesHigh
                         @ optionalParam "txsizelow" self.txSizeBytesLow
                           @ optionalParam "txsizehigh" self.txSizeBytesHigh
                             @ optionalParam "cpulow" self.instructionsLow
@@ -181,8 +181,8 @@ type LoadGen =
           instances = None
           dataEntriesLow = None
           dataEntriesHigh = None
-          kiloBytesPerDataEntryLow = None
-          kiloBytesPerDataEntryHigh = None
+          ioKiloBytesLow = None
+          ioKiloBytesHigh = None
           txSizeBytesLow = None
           txSizeBytesHigh = None
           instructionsLow = None
@@ -208,6 +208,34 @@ type LoadGen =
           bucketListSizeWindowSampleSize = None
           evictionScanSize = None
           startingEvictionScanLevel = None }
+
+    static member GetSorobanPhase1Upgrade() =
+        { LoadGen.GetDefault() with
+              mode = CreateSorobanUpgrade
+              maxContractSizeBytes = Some(65_536) // 64 KB
+
+              ledgerMaxInstructions = Some(100_000_000L)
+              txMaxInstructions = Some(100_000_000L)
+              txMemoryLimit = Some(41_943_040) // 40 MB
+
+              ledgerMaxReadLedgerEntries = Some(40)
+              ledgerMaxReadBytes = Some(133_120) // 130 KB
+              ledgerMaxWriteLedgerEntries = Some(25)
+              ledgerMaxWriteBytes = Some(66_560) // 65 KB
+              txMaxReadLedgerEntries = Some(40)
+              txMaxReadBytes = Some(133_120) // 130 KB
+              txMaxWriteLedgerEntries = Some(25)
+              txMaxWriteBytes = Some(66_560) // 65 KB
+
+              txMaxContractEventsSizeBytes = Some(8192) // 8 KB
+
+              ledgerMaxTransactionsSizeBytes = Some(71_680) // 70 KB
+              txMaxSizeBytes = Some(71_680) // 70 KB
+
+              maxContractDataEntrySizeBytes = Some(65_536) // 64 KB
+              maxContractDataKeySizeBytes = Some(200)
+
+              ledgerMaxTxCount = Some(100) }
 
 type MissionContext with
 
@@ -275,8 +303,8 @@ type MissionContext with
               skiplowfeetxs = self.skipLowFeeTxs
               dataEntriesLow = Some(0)
               dataEntriesHigh = Some(10)
-              kiloBytesPerDataEntryLow = Some(1)
-              kiloBytesPerDataEntryHigh = Some(5)
+              ioKiloBytesLow = Some(1)
+              ioKiloBytesHigh = Some(5)
               txSizeBytesLow = Some(0)
               txSizeBytesHigh = Some(1000)
               instructionsLow = Some(0L)
@@ -409,6 +437,8 @@ type Peer with
     member self.GetLedgerReadEntries() : int = self.GetSorobanInfo().Ledger.MaxReadLedgerEntries
 
     member self.GetLedgerWriteEntries() : int = self.GetSorobanInfo().Ledger.MaxWriteLedgerEntries
+
+    member self.GetLedgerMaxTransactionCount() : int = self.GetSorobanInfo().Ledger.MaxTxCount
 
     member self.GetLedgerMaxTransactionsSizeBytes() : int = self.GetSorobanInfo().Ledger.MaxTxSizeBytes
 

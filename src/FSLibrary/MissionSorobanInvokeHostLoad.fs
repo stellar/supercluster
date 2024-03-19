@@ -18,13 +18,14 @@ let sorobanInvokeHostLoad (context: MissionContext) =
             "core"
             { CoreSetOptions.GetDefault context.image with
                   invariantChecks = AllInvariantsExceptBucketConsistencyChecks
+                  dumpDatabase = false
                   emptyDirType = DiskBackedEmptyDir }
 
     let context =
         { context with
-              numAccounts = 100
-              numTxs = 100
-              txRate = 1
+              numAccounts = 1000
+              numTxs = 1000
+              txRate = 5
               coreResources = MediumTestResources }
 
     context.Execute
@@ -33,10 +34,26 @@ let sorobanInvokeHostLoad (context: MissionContext) =
         (fun (formation: StellarFormation) ->
             formation.WaitUntilSynced [ coreSet ]
             formation.UpgradeProtocolToLatest [ coreSet ]
-            formation.UpgradeMaxTxSetSize [ coreSet ] 100000
+
+            let maxTxSetSize = 10000000
+            formation.UpgradeMaxTxSetSize [ coreSet ] maxTxSetSize
 
             formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
-            formation.UpgradeSorobanLedgerLimitsWithMultiplier [ coreSet ] 1000
+            formation.UpgradeSorobanLedgerLimitsWithMultiplier [ coreSet ] 3000
             formation.UpgradeSorobanTxLimitsWithMultiplier [ coreSet ] 100
-            formation.RunLoadgen coreSet context.SetupSorobanInvoke
-            formation.RunLoadgen coreSet context.GenerateSorobanInvokeLoad)
+
+            // Have a unique instance per TX, assume 6 seconds per ledger for wiggle room
+            let txsPerLedger = context.txRate * 6
+            let peer = formation.NetworkCfg.GetPeer coreSet 0
+
+            formation.RunLoadgen coreSet { context.SetupSorobanInvoke with instances = Some(txsPerLedger) }
+
+            formation.RunLoadgen
+                coreSet
+                { context.GenerateSorobanInvokeLoad with
+                      instances = Some(txsPerLedger)
+                      // Generate TXs up to max resources
+                      dataEntriesHigh = Some(peer.GetTxWriteEntries())
+                      ioKiloBytesHigh = Some(peer.GetTxWriteBytes() / 1024)
+                      txSizeBytesHigh = Some(maxTxSetSize / txsPerLedger)
+                      instructionsHigh = Some(peer.GetTxMaxInstructions()) })
