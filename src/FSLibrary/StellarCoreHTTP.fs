@@ -105,8 +105,7 @@ type LoadGen =
       // Fields for BLEND_CLASSIC_SOROBAN mode
       payWeight: int option
       sorobanUploadWeight: int option
-      sorobanInvokeWeight: int option
-      }
+      sorobanInvokeWeight: int option }
 
     member self.ToQuery : (string * string) list =
         let mandatoryParams =
@@ -126,33 +125,37 @@ type LoadGen =
 
         let optionalParams =
             optionalParam "maxfeerate" self.maxfeerate
-          @ optionalParam "wasms" self.wasms
-          @ optionalParam "instances" self.instances
-          @ optionalParam "minpercentsuccess" self.minSorobanPercentSuccess
-          @ optionalParam "mxcntrctsz" self.maxContractSizeBytes
-          @ optionalParam "mxcntrctkeysz" self.maxContractDataKeySizeBytes
-          @ optionalParam "mxcntrctdatasz" self.maxContractDataEntrySizeBytes
-          @ optionalParam "ldgrmxinstrc" self.ledgerMaxInstructions
-          @ optionalParam "txmxinstrc" self.txMaxInstructions
-          @ optionalParam "txmemlim" self.txMemoryLimit
-          @ optionalParam "ldgrmxrdntry" self.ledgerMaxReadLedgerEntries
-          @ optionalParam "ldgrmxrdbyt" self.ledgerMaxReadBytes
-          @ optionalParam "ldgrmxwrntry" self.ledgerMaxWriteLedgerEntries
-          @ optionalParam "ldgrmxwrbyt" self.ledgerMaxWriteBytes
-          @ optionalParam "ldgrmxtxcnt" self.ledgerMaxTxCount
-          @ optionalParam "txmxrdntry" self.txMaxReadLedgerEntries
-          @ optionalParam "txmxrdbyt" self.txMaxReadBytes
-          @ optionalParam "txmxwrntry" self.txMaxWriteLedgerEntries
-          @ optionalParam "txmxwrbyt" self.txMaxWriteBytes
-          @ optionalParam "txmxevntsz" self.txMaxContractEventsSizeBytes
-          @ optionalParam "ldgrmxtxsz" self.ledgerMaxTransactionsSizeBytes
-          @ optionalParam "txmxsz" self.txMaxSizeBytes
-          @ optionalParam "wndowsz" self.bucketListSizeWindowSampleSize
-          @ optionalParam "evctsz" self.evictionScanSize
-          @ optionalParam "evctlvl" self.startingEvictionScanLevel
-          @ optionalParam "payweight" self.payWeight
-          @ optionalParam "sorobanuploadweight" self.sorobanUploadWeight
-          @ optionalParam "sorobaninvokeweight" self.sorobanInvokeWeight
+            @ optionalParam "wasms" self.wasms
+              @ optionalParam "instances" self.instances
+                @ optionalParam "minpercentsuccess" self.minSorobanPercentSuccess
+                  @ optionalParam "mxcntrctsz" self.maxContractSizeBytes
+                    @ optionalParam "mxcntrctkeysz" self.maxContractDataKeySizeBytes
+                      @ optionalParam "mxcntrctdatasz" self.maxContractDataEntrySizeBytes
+                        @ optionalParam "ldgrmxinstrc" self.ledgerMaxInstructions
+                          @ optionalParam "txmxinstrc" self.txMaxInstructions
+                            @ optionalParam "txmemlim" self.txMemoryLimit
+                              @ optionalParam "ldgrmxrdntry" self.ledgerMaxReadLedgerEntries
+                                @ optionalParam "ldgrmxrdbyt" self.ledgerMaxReadBytes
+                                  @ optionalParam "ldgrmxwrntry" self.ledgerMaxWriteLedgerEntries
+                                    @ optionalParam "ldgrmxwrbyt" self.ledgerMaxWriteBytes
+                                      @ optionalParam "ldgrmxtxcnt" self.ledgerMaxTxCount
+                                        @ optionalParam "txmxrdntry" self.txMaxReadLedgerEntries
+                                          @ optionalParam "txmxrdbyt" self.txMaxReadBytes
+                                            @ optionalParam "txmxwrntry" self.txMaxWriteLedgerEntries
+                                              @ optionalParam "txmxwrbyt" self.txMaxWriteBytes
+                                                @ optionalParam "txmxevntsz" self.txMaxContractEventsSizeBytes
+                                                  @ optionalParam "ldgrmxtxsz" self.ledgerMaxTransactionsSizeBytes
+                                                    @ optionalParam "txmxsz" self.txMaxSizeBytes
+                                                      @ optionalParam "wndowsz" self.bucketListSizeWindowSampleSize
+                                                        @ optionalParam "evctsz" self.evictionScanSize
+                                                          @ optionalParam "evctlvl" self.startingEvictionScanLevel
+                                                            @ optionalParam "payweight" self.payWeight
+                                                              @ optionalParam
+                                                                  "sorobanuploadweight"
+                                                                  self.sorobanUploadWeight
+                                                                @ optionalParam
+                                                                    "sorobaninvokeweight"
+                                                                    self.sorobanInvokeWeight
 
         mandatoryParams @ optionalParams
 
@@ -192,12 +195,11 @@ type LoadGen =
           startingEvictionScanLevel = None
           payWeight = None
           sorobanUploadWeight = None
-          sorobanInvokeWeight = None
-        }
+          sorobanInvokeWeight = None }
 
 // Takes a default value `v` and a list `l` and returns `v` if `l` is empty,
 // otherwise `l`.
-let defaultList (v : 'a list) (l : 'a list) =
+let defaultList (v: 'a list) (l: 'a list) =
     match l with
     | [] -> v
     | _ -> l
@@ -209,23 +211,21 @@ type MissionContext with
     // For loadgen missions that increase soroban ledger and transaction limits.
     member self.WithMediumLoadgenOptions : MissionContext =
         { self with
-              wasmBytesDistribution = [(30000, 1)]
-              dataEntriesDistribution = [(5, 1)]
-              totalKiloBytesDistribution = [(3, 1)]
-              txSizeBytesDistribution = [(512, 1)]
-              instructionsDistribution = [(25000000, 1)]
-        }
+              wasmBytesDistribution = [ (30000, 1) ]
+              dataEntriesDistribution = [ (5, 1) ]
+              totalKiloBytesDistribution = [ (3, 1) ]
+              txSizeBytesDistribution = [ (512, 1) ]
+              instructionsDistribution = [ (25000000, 1) ] }
 
     // For loadgen missions that do not increase both soroban ledger and
     // transaction limits. These are intended to fit within the default limits.
     member self.WithSmallLoadgenOptions : MissionContext =
         { self with
-              wasmBytesDistribution = [(1024, 1)]
-              dataEntriesDistribution = [(1, 1)]
-              totalKiloBytesDistribution = [(1, 1)]
-              txSizeBytesDistribution = [(64, 1)]
-              instructionsDistribution = [(1000000, 1)]
-        }
+              wasmBytesDistribution = [ (1024, 1) ]
+              dataEntriesDistribution = [ (1, 1) ]
+              totalKiloBytesDistribution = [ (1, 1) ]
+              txSizeBytesDistribution = [ (64, 1) ]
+              instructionsDistribution = [ (1000000, 1) ] }
 
     member self.GenerateAccountCreationLoad : LoadGen =
         { LoadGen.GetDefault() with

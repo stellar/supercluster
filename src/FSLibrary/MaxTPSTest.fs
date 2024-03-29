@@ -15,10 +15,12 @@ open StellarNetworkData
 open StellarStatefulSets
 open StellarSupercluster
 
-let maxTPSTest (context: MissionContext)
-               (baseLoadGen: LoadGen)
-               (setupCfg: LoadGen option)
-               (increaseSorobanLimits: bool) =
+let maxTPSTest
+    (context: MissionContext)
+    (baseLoadGen: LoadGen)
+    (setupCfg: LoadGen option)
+    (increaseSorobanLimits: bool)
+    =
     let allNodes =
         if context.pubnetData.IsSome then
             FullPubnetCoreSets context true false
@@ -93,8 +95,7 @@ let maxTPSTest (context: MissionContext)
                                   accounts = numAccounts
                                   // Roughly 15 min of load
                                   txs = middle * 1000
-                                  txrate = middle
-                            }
+                                  txrate = middle }
 
                         formation.RunMultiLoadgen tier1 loadGen
                         formation.CheckNoErrorsAndPairwiseConsistency()

@@ -21,33 +21,31 @@ let maxTPSMixed (baseContext: MissionContext) =
               simulateApplyWeight = Some(baseContext.simulateApplyWeight |> Option.defaultValue (seq { 100 }))
               enableTailLogging = false
               // Setup distributions based on testnet data
-              wasmBytesDistribution = [(8*1024, 132); (24*1024, 68); (40*1024, 92); (56*1024, 141)]
-              dataEntriesDistribution = [(3, 380); (9, 42); (15, 5); (21, 2)]
-              totalKiloBytesDistribution = [(1, 409); (3, 18); (5, 2)]
-              txSizeBytesDistribution = [(200, 37); (400, 6); (600, 1); (800, 4); (1000, 1)]
-              instructionsDistribution = [(12500000, 201); (37500000, 183); (62500000, 34); (87500000, 11)]
-        }
+              wasmBytesDistribution = [ (8 * 1024, 132); (24 * 1024, 68); (40 * 1024, 92); (56 * 1024, 141) ]
+              dataEntriesDistribution = [ (3, 380); (9, 42); (15, 5); (21, 2) ]
+              totalKiloBytesDistribution = [ (1, 409); (3, 18); (5, 2) ]
+              txSizeBytesDistribution = [ (200, 37); (400, 6); (600, 1); (800, 4); (1000, 1) ]
+              instructionsDistribution = [ (12500000, 201); (37500000, 183); (62500000, 34); (87500000, 11) ] }
 
     let baseLoadGen =
         { LoadGen.GetDefault() with
-                mode = MixedClassicSoroban
-                spikesize = context.spikeSize
-                spikeinterval = context.spikeInterval
-                offset = 0
-                maxfeerate = None
-                skiplowfeetxs = false
+              mode = MixedClassicSoroban
+              spikesize = context.spikeSize
+              spikeinterval = context.spikeInterval
+              offset = 0
+              maxfeerate = None
+              skiplowfeetxs = false
 
-                wasms = context.numWasms
-                instances = context.numInstances
+              wasms = context.numWasms
+              instances = context.numInstances
 
-                // Blend settings. 50% classic, 5% upload, 45% invoke by default
-                payWeight = Some (baseContext.payWeight |> Option.defaultValue 50)
-                sorobanUploadWeight = Some (baseContext.sorobanUploadWeight |> Option.defaultValue 5)
-                sorobanInvokeWeight = Some (baseContext.sorobanInvokeWeight |> Option.defaultValue 45)
+              // Blend settings. 50% classic, 5% upload, 45% invoke by default
+              payWeight = Some(baseContext.payWeight |> Option.defaultValue 50)
+              sorobanUploadWeight = Some(baseContext.sorobanUploadWeight |> Option.defaultValue 5)
+              sorobanInvokeWeight = Some(baseContext.sorobanInvokeWeight |> Option.defaultValue 45)
 
-                // Require 80% of Soroban transactions to successfully apply by
-                // default
-                minSorobanPercentSuccess = Some (baseContext.minSorobanPercentSuccess |> Option.defaultValue 80)
-        }
+              // Require 80% of Soroban transactions to successfully apply by
+              // default
+              minSorobanPercentSuccess = Some(baseContext.minSorobanPercentSuccess |> Option.defaultValue 80) }
 
     maxTPSTest context baseLoadGen (Some context.SetupSorobanInvoke) true

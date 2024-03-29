@@ -123,12 +123,12 @@ type Distribution =
     CsvProvider<"csv-type-samples/sample-loadgen-op-count-distribution.csv", HasHeaders=true, ResolutionFolder=cwd>
 
 // Add a loadgen distribution to a TOML table.
-let distributionToToml (d : (int * int) list) (name : string) (t : TomlTable) : unit =
+let distributionToToml (d: (int * int) list) (name: string) (t: TomlTable) : unit =
     match d with
     | [] -> ()
     | _ ->
         let values = List.map fst d
-        let weights= List.map snd d
+        let weights = List.map snd d
 
         t.Add("LOADGEN_" + name + "_FOR_TESTING", values) |> ignore
         t.Add("LOADGEN_" + name + "_DISTRIBUTION_FOR_TESTING", weights) |> ignore

@@ -326,13 +326,19 @@ type MissionOptions
              Required = false)>]
     member self.InstructionsWeights = instructionsWeights
 
-    [<Option("pay-weight", HelpText = "Weight for classic transactions in MIX_CLASSIC_SOROBAN loadgen mode", Required = false)>]
+    [<Option("pay-weight",
+             HelpText = "Weight for classic transactions in MIX_CLASSIC_SOROBAN loadgen mode",
+             Required = false)>]
     member self.PayWeight = payWeight
 
-    [<Option("soroban-upload-weight", HelpText = "Weight for SOROBAN_UPLOAD transactions in MIX_CLASSIC_SOROBAN loadgen mode", Required = false)>]
+    [<Option("soroban-upload-weight",
+             HelpText = "Weight for SOROBAN_UPLOAD transactions in MIX_CLASSIC_SOROBAN loadgen mode",
+             Required = false)>]
     member self.SorobanUploadWeight = sorobanUploadWeight
 
-    [<Option("soroban-invoke-weight", HelpText = "Weight for SOROBAN_INVOKE transactions in MIX_CLASSIC_SOROBAN loadgen mode", Required = false)>]
+    [<Option("soroban-invoke-weight",
+             HelpText = "Weight for SOROBAN_INVOKE transactions in MIX_CLASSIC_SOROBAN loadgen mode",
+             Required = false)>]
     member self.SorobanInvokeWeight = sorobanInvokeWeight
 
     [<Option("min-soroban-percent-success",
@@ -619,11 +625,24 @@ let main argv =
                                flatQuorum = mission.FlatQuorum
                                tier1Keys = mission.Tier1Keys
                                opCountDistribution = mission.OpCountDistribution
-                               wasmBytesDistribution = List.zip (List.ofSeq mission.WasmBytesValues) (List.ofSeq mission.WasmBytesWeights)
-                               dataEntriesDistribution = List.zip (List.ofSeq mission.DataEntriesValues) (List.ofSeq mission.DataEntriesWeights)
-                               totalKiloBytesDistribution = List.zip (List.ofSeq mission.TotalKiloBytesValues) (List.ofSeq mission.TotalKiloBytesWeights)
-                               txSizeBytesDistribution = List.zip (List.ofSeq mission.TxSizeBytesValues) (List.ofSeq mission.TxSizeBytesWeights)
-                               instructionsDistribution = List.zip (List.ofSeq mission.InstructionsValues) (List.ofSeq mission.InstructionsWeights)
+                               wasmBytesDistribution =
+                                   List.zip (List.ofSeq mission.WasmBytesValues) (List.ofSeq mission.WasmBytesWeights)
+                               dataEntriesDistribution =
+                                   List.zip
+                                       (List.ofSeq mission.DataEntriesValues)
+                                       (List.ofSeq mission.DataEntriesWeights)
+                               totalKiloBytesDistribution =
+                                   List.zip
+                                       (List.ofSeq mission.TotalKiloBytesValues)
+                                       (List.ofSeq mission.TotalKiloBytesWeights)
+                               txSizeBytesDistribution =
+                                   List.zip
+                                       (List.ofSeq mission.TxSizeBytesValues)
+                                       (List.ofSeq mission.TxSizeBytesWeights)
+                               instructionsDistribution =
+                                   List.zip
+                                       (List.ofSeq mission.InstructionsValues)
+                                       (List.ofSeq mission.InstructionsWeights)
                                payWeight = mission.PayWeight
                                sorobanUploadWeight = mission.SorobanUploadWeight
                                sorobanInvokeWeight = mission.SorobanInvokeWeight

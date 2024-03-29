@@ -23,11 +23,11 @@ let simulatePubnetTier1Perf (context: MissionContext) =
 
     let baseLoadGen =
         { LoadGen.GetDefault() with
-                mode = GeneratePaymentLoad
-                spikesize = context.spikeSize
-                spikeinterval = context.spikeInterval
-                offset = 0
-                maxfeerate = None
-                skiplowfeetxs = false }
+              mode = GeneratePaymentLoad
+              spikesize = context.spikeSize
+              spikeinterval = context.spikeInterval
+              offset = 0
+              maxfeerate = None
+              skiplowfeetxs = false }
 
     maxTPSTest context baseLoadGen None false

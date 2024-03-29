@@ -26,7 +26,11 @@ let runInMemoryMode (context: MissionContext) =
                   localHistory = false
                   quorumSet = CoreSetQuorum(CoreSetName "core") }
 
-    let context = { context.WithSmallLoadgenOptions with numAccounts = 100; numTxs = 100; txRate = 20 }
+    let context =
+        { context.WithSmallLoadgenOptions with
+              numAccounts = 100
+              numTxs = 100
+              txRate = 20 }
 
     context.Execute
         [ coreSet; coreSetWithCaptiveCore ]
