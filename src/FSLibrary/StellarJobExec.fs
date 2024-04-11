@@ -199,6 +199,8 @@ type StellarFormation with
             if now.Subtract(lastPodBuildupCheckTime).Minutes >= podBuildupCheckMinutes then
                 lastPodBuildupCheckTime <- now
                 let ns = self.NetworkCfg.NamespaceProperty
+
+                self.sleepUntilNextRateLimitedApiCallTime ()
                 LogInfo "Checking for pod buildup"
                 let pods = self.Kube.ListNamespacedPod(namespaceParameter = ns)
 
