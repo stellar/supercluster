@@ -179,6 +179,11 @@ type StellarFormation with
         : Map<string, bool> =
         let jst = new JobStatusTable()
         let mutable moreJobs = true
+
+        // We have seen sporadic http exceptions being thrown when calling ListNamespacedJob,
+        // so this is an attempt to see if we can just ignore the exceptions.
+        let mutable listNamespacedJobRequestErrorsAllowed = 5
+
         // We check to see if there are pods that have been in "Pending"
         // state for more than 120 minutes. This typically means the cluster
         // is low on fixed resources and isn't actually going to be able to
@@ -236,24 +241,34 @@ type StellarFormation with
             // check for completed and move to finished from running
             self.sleepUntilNextRateLimitedApiCallTime ()
 
-            let jobs =
-                self.Kube.ListNamespacedJob(namespaceParameter = self.NetworkCfg.NamespaceProperty)
+            let (jobs, success) =
+                try
+                    self.Kube.ListNamespacedJob(namespaceParameter = self.NetworkCfg.NamespaceProperty), true
+                with
+                | :? Net.Http.HttpRequestException when listNamespacedJobRequestErrorsAllowed = 0 ->
+                    LogError "Reraise http request exception"
+                    reraise ()
+                | :? Net.Http.HttpRequestException when listNamespacedJobRequestErrorsAllowed > 0 ->
+                    LogInfo "Swallowing http request exception"
+                    listNamespacedJobRequestErrorsAllowed <- listNamespacedJobRequestErrorsAllowed - 1
+                    V1JobList(), false
 
-            for job in jobs.Items do
-                if jst.IsRunning(job.Metadata.Name) then
-                    self.CheckJob job jst
-                    jobCount <- jobCount + 1
+            if success then
+                for job in jobs.Items do
+                    if jst.IsRunning(job.Metadata.Name) then
+                        self.CheckJob job jst
+                        jobCount <- jobCount + 1
 
-            // We remove from the running set before deleting the job, so the
-            // only way this condition can be true is if something other than
-            // supercluster deletes jobs started by this run
-            if jst.NumRunning() > jobCount then
-                failwith (
-                    sprintf "NumRunning (%d) is greater than number of jobs seen (%d)" (jst.NumRunning()) jobCount
-                )
+                // We remove from the running set before deleting the job, so the
+                // only way this condition can be true is if something other than
+                // supercluster deletes jobs started by this run
+                if jst.NumRunning() > jobCount then
+                    failwith (
+                        sprintf "NumRunning (%d) is greater than number of jobs seen (%d)" (jst.NumRunning()) jobCount
+                    )
 
-            while jst.NumRunning() < parallelism && moreJobs do
-                addJob ()
+                while jst.NumRunning() < parallelism && moreJobs do
+                    addJob ()
 
             // sleep for one minute
             Thread.Sleep(60000)
