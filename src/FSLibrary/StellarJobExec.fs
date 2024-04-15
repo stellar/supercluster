@@ -180,9 +180,9 @@ type StellarFormation with
         let jst = new JobStatusTable()
         let mutable moreJobs = true
 
-        // We have seen sporadic http exceptions being thrown when calling ListNamespacedJob,
+        // We have seen sporadic http exceptions being thrown in the while loop below,
         // so this is an attempt to see if we can just ignore the exceptions.
-        let mutable listNamespacedJobRequestErrorsAllowed = 5
+        let mutable httpRequestErrorsAllowed = 5
 
         // We check to see if there are pods that have been in "Pending"
         // state for more than 120 minutes. This typically means the cluster
@@ -237,25 +237,16 @@ type StellarFormation with
                 jst.NoteRunning j.Metadata.Name
                 LogInfo "Adding job %s (numRunning = %d)" j.Metadata.Name (jst.NumRunning())
 
-        while moreJobs || jst.NumRunning() > 0 do
-            checkPendingPodBuildup ()
-            let mutable jobCount = 0
-            // check for completed and move to finished from running
-            self.sleepUntilNextRateLimitedApiCallTime ()
+        while (moreJobs || jst.NumRunning() > 0) && httpRequestErrorsAllowed > 0 do
+            try
+                checkPendingPodBuildup ()
+                let mutable jobCount = 0
+                // check for completed and move to finished from running
+                self.sleepUntilNextRateLimitedApiCallTime ()
 
-            let (jobs, success) =
-                try
-                    self.Kube.ListNamespacedJob(namespaceParameter = self.NetworkCfg.NamespaceProperty), true
-                with
-                | :? Net.Http.HttpRequestException when listNamespacedJobRequestErrorsAllowed = 0 ->
-                    LogError "Reraise http request exception"
-                    reraise ()
-                | :? Net.Http.HttpRequestException when listNamespacedJobRequestErrorsAllowed > 0 ->
-                    LogInfo "Swallowing http request exception"
-                    listNamespacedJobRequestErrorsAllowed <- listNamespacedJobRequestErrorsAllowed - 1
-                    V1JobList(), false
+                let jobs =
+                    self.Kube.ListNamespacedJob(namespaceParameter = self.NetworkCfg.NamespaceProperty)
 
-            if success then
                 for job in jobs.Items do
                     if jst.IsRunning(job.Metadata.Name) then
                         self.CheckJob job jst
@@ -272,8 +263,18 @@ type StellarFormation with
                 while jst.NumRunning() < parallelism && moreJobs do
                     addJob ()
 
-            // sleep for one minute
-            Thread.Sleep(60000)
+                // sleep for one minute
+                Thread.Sleep(60000)
+            with
+            | :? Net.Http.HttpRequestException when httpRequestErrorsAllowed = 0 ->
+                LogError "Reraise http request exception"
+                reraise ()
+            | :? Net.Http.HttpRequestException when httpRequestErrorsAllowed > 0 ->
+                LogInfo "Swallowing http request exception"
+
+                // sleep for one minute
+                Thread.Sleep(60000)
+                httpRequestErrorsAllowed <- httpRequestErrorsAllowed - 1
 
         LogInfo "Finished parallel-job loop"
 
