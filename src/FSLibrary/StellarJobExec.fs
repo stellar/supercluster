@@ -182,7 +182,7 @@ type StellarFormation with
 
         // We have seen sporadic http exceptions being thrown in the while loop below,
         // so this is an attempt to see if we can just ignore the exceptions.
-        let mutable httpRequestErrorsAllowed = 5
+        let mutable numOfHttpRetriesAllowed = 5
 
         // We check to see if there are pods that have been in "Pending"
         // state for more than 120 minutes. This typically means the cluster
@@ -237,7 +237,7 @@ type StellarFormation with
                 jst.NoteRunning j.Metadata.Name
                 LogInfo "Adding job %s (numRunning = %d)" j.Metadata.Name (jst.NumRunning())
 
-        while (moreJobs || jst.NumRunning() > 0) && httpRequestErrorsAllowed > 0 do
+        while (moreJobs || jst.NumRunning() > 0) && numOfHttpRetriesAllowed > 0 do
             try
                 checkPendingPodBuildup ()
                 let mutable jobCount = 0
@@ -266,15 +266,15 @@ type StellarFormation with
                 // sleep for one minute
                 Thread.Sleep(60000)
             with
-            | :? Net.Http.HttpRequestException when httpRequestErrorsAllowed = 0 ->
+            | :? Net.Http.HttpRequestException when numOfHttpRetriesAllowed = 0 ->
                 LogError "Reraise http request exception"
                 reraise ()
-            | :? Net.Http.HttpRequestException when httpRequestErrorsAllowed > 0 ->
+            | :? Net.Http.HttpRequestException when numOfHttpRetriesAllowed > 0 ->
                 LogInfo "Swallowing http request exception"
 
                 // sleep for one minute
                 Thread.Sleep(60000)
-                httpRequestErrorsAllowed <- httpRequestErrorsAllowed - 1
+                numOfHttpRetriesAllowed <- numOfHttpRetriesAllowed - 1
 
         LogInfo "Finished parallel-job loop"
 
