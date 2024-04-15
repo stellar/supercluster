@@ -75,7 +75,8 @@ let PollCluster (kube: Kubernetes) (ns: string) =
     for p in pods.Items do
         LogInfo "Pod: ns=%s name=%s phase=%s IP=%s" ns p.Metadata.Name p.Status.Phase p.Status.PodIP
 
-let DumpPodInfo (kube: Kubernetes) (ns: string) =
+let DumpPodInfo (kube: Kubernetes) (apiRateLimit: int) (ns: string) =
+    ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (apiRateLimit)
     let pods = kube.ListNamespacedPod(namespaceParameter = ns)
 
     if pods <> null then

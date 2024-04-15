@@ -476,8 +476,13 @@ let main argv =
 
                  let heartbeatHandler _ =
                      try
+                         ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (mission.ApiRateLimit)
                          let ranges = kube.ListNamespacedLimitRange(namespaceParameter = ns)
-                         if isNull ranges then failwith "Connection issue!" else DumpPodInfo kube ns
+
+                         if isNull ranges then
+                             failwith "Connection issue!"
+                         else
+                             DumpPodInfo kube mission.ApiRateLimit ns
                      with x ->
                          LogError "Connection issue!"
                          reraise ()
