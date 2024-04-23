@@ -17,7 +17,7 @@ let sorobanLoadGeneration (context: MissionContext) =
     let rate = 5
 
     let context =
-        { context with
+        { context.WithSmallLoadgenOptions with
               coreResources = SimulatePubnetTier1PerfResources
               installNetworkDelay = Some(context.installNetworkDelay |> Option.defaultValue true)
               txRate = rate

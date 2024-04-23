@@ -63,6 +63,15 @@ type MissionContext =
       flatQuorum: bool option
       tier1Keys: string option
       opCountDistribution: string option
+      wasmBytesDistribution: ((int * int) list)
+      dataEntriesDistribution: ((int * int) list)
+      totalKiloBytesDistribution: ((int * int) list)
+      txSizeBytesDistribution: ((int * int) list)
+      instructionsDistribution: ((int * int) list)
+      payWeight: int option
+      sorobanUploadWeight: int option
+      sorobanInvokeWeight: int option
+      minSorobanPercentSuccess: int option
       installNetworkDelay: bool option
       flatNetworkDelay: int option
       simulateApplyDuration: seq<int> option

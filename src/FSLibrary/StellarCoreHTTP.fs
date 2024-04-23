@@ -49,6 +49,7 @@ type LoadGenMode =
     | CreateSorobanUpgrade
     | SorobanInvokeSetup
     | SorobanInvoke
+    | MixedClassicSoroban
 
     override self.ToString() =
         match self with
@@ -60,6 +61,7 @@ type LoadGenMode =
         | CreateSorobanUpgrade -> "create_upgrade"
         | SorobanInvokeSetup -> "soroban_invoke_setup"
         | SorobanInvoke -> "soroban_invoke"
+        | MixedClassicSoroban -> "mixed_classic_soroban"
 
 type LoadGen =
     { mode: LoadGenMode
@@ -71,18 +73,11 @@ type LoadGen =
       offset: int
       maxfeerate: int option
       skiplowfeetxs: bool
+      minSorobanPercentSuccess: int option
 
       // New fields for SOROBAN_INVOKE mode
       wasms: int option
       instances: int option
-      dataEntriesLow: int option
-      dataEntriesHigh: int option
-      kiloBytesPerDataEntryLow: int option
-      kiloBytesPerDataEntryHigh: int option
-      txSizeBytesLow: int option
-      txSizeBytesHigh: int option
-      instructionsLow: int64 option
-      instructionsHigh: int64 option
 
       // Fields for SOROBAN_CREATE_UPGRADE parameters
       maxContractSizeBytes: int option
@@ -105,7 +100,12 @@ type LoadGen =
       txMaxSizeBytes: int option
       bucketListSizeWindowSampleSize: int option
       evictionScanSize: int64 option
-      startingEvictionScanLevel: int option }
+      startingEvictionScanLevel: int option
+
+      // Fields for BLEND_CLASSIC_SOROBAN mode
+      payWeight: int option
+      sorobanUploadWeight: int option
+      sorobanInvokeWeight: int option }
 
     member self.ToQuery : (string * string) list =
         let mandatoryParams =
@@ -127,43 +127,35 @@ type LoadGen =
             optionalParam "maxfeerate" self.maxfeerate
             @ optionalParam "wasms" self.wasms
               @ optionalParam "instances" self.instances
-                @ optionalParam "dataentrieslow" self.dataEntriesLow
-                  @ optionalParam "dataentrieshigh" self.dataEntriesHigh
-                    @ optionalParam "kilobyteslow" self.kiloBytesPerDataEntryLow
-                      @ optionalParam "kilobyteshigh" self.kiloBytesPerDataEntryHigh
-                        @ optionalParam "txsizelow" self.txSizeBytesLow
-                          @ optionalParam "txsizehigh" self.txSizeBytesHigh
-                            @ optionalParam "cpulow" self.instructionsLow
-                              @ optionalParam "cpuhigh" self.instructionsHigh
-                                @ optionalParam "mxcntrctsz" self.maxContractSizeBytes
-                                  @ optionalParam "mxcntrctkeysz" self.maxContractDataKeySizeBytes
-                                    @ optionalParam "mxcntrctdatasz" self.maxContractDataEntrySizeBytes
-                                      @ optionalParam "ldgrmxinstrc" self.ledgerMaxInstructions
-                                        @ optionalParam "txmxinstrc" self.txMaxInstructions
-                                          @ optionalParam "txmemlim" self.txMemoryLimit
-                                            @ optionalParam "ldgrmxrdntry" self.ledgerMaxReadLedgerEntries
-                                              @ optionalParam "ldgrmxrdbyt" self.ledgerMaxReadBytes
-                                                @ optionalParam "ldgrmxwrntry" self.ledgerMaxWriteLedgerEntries
-                                                  @ optionalParam "ldgrmxwrbyt" self.ledgerMaxWriteBytes
-                                                    @ optionalParam "ldgrmxtxcnt" self.ledgerMaxTxCount
-                                                      @ optionalParam "txmxrdntry" self.txMaxReadLedgerEntries
-                                                        @ optionalParam "txmxrdbyt" self.txMaxReadBytes
-                                                          @ optionalParam "txmxwrntry" self.txMaxWriteLedgerEntries
-                                                            @ optionalParam "txmxwrbyt" self.txMaxWriteBytes
+                @ optionalParam "minpercentsuccess" self.minSorobanPercentSuccess
+                  @ optionalParam "mxcntrctsz" self.maxContractSizeBytes
+                    @ optionalParam "mxcntrctkeysz" self.maxContractDataKeySizeBytes
+                      @ optionalParam "mxcntrctdatasz" self.maxContractDataEntrySizeBytes
+                        @ optionalParam "ldgrmxinstrc" self.ledgerMaxInstructions
+                          @ optionalParam "txmxinstrc" self.txMaxInstructions
+                            @ optionalParam "txmemlim" self.txMemoryLimit
+                              @ optionalParam "ldgrmxrdntry" self.ledgerMaxReadLedgerEntries
+                                @ optionalParam "ldgrmxrdbyt" self.ledgerMaxReadBytes
+                                  @ optionalParam "ldgrmxwrntry" self.ledgerMaxWriteLedgerEntries
+                                    @ optionalParam "ldgrmxwrbyt" self.ledgerMaxWriteBytes
+                                      @ optionalParam "ldgrmxtxcnt" self.ledgerMaxTxCount
+                                        @ optionalParam "txmxrdntry" self.txMaxReadLedgerEntries
+                                          @ optionalParam "txmxrdbyt" self.txMaxReadBytes
+                                            @ optionalParam "txmxwrntry" self.txMaxWriteLedgerEntries
+                                              @ optionalParam "txmxwrbyt" self.txMaxWriteBytes
+                                                @ optionalParam "txmxevntsz" self.txMaxContractEventsSizeBytes
+                                                  @ optionalParam "ldgrmxtxsz" self.ledgerMaxTransactionsSizeBytes
+                                                    @ optionalParam "txmxsz" self.txMaxSizeBytes
+                                                      @ optionalParam "wndowsz" self.bucketListSizeWindowSampleSize
+                                                        @ optionalParam "evctsz" self.evictionScanSize
+                                                          @ optionalParam "evctlvl" self.startingEvictionScanLevel
+                                                            @ optionalParam "payweight" self.payWeight
                                                               @ optionalParam
-                                                                  "txmxevntsz"
-                                                                  self.txMaxContractEventsSizeBytes
+                                                                  "sorobanuploadweight"
+                                                                  self.sorobanUploadWeight
                                                                 @ optionalParam
-                                                                    "ldgrmxtxsz"
-                                                                    self.ledgerMaxTransactionsSizeBytes
-                                                                  @ optionalParam "txmxsz" self.txMaxSizeBytes
-                                                                    @ optionalParam
-                                                                        "wndowsz"
-                                                                        self.bucketListSizeWindowSampleSize
-                                                                      @ optionalParam "evctsz" self.evictionScanSize
-                                                                        @ optionalParam
-                                                                            "evctlvl"
-                                                                            self.startingEvictionScanLevel
+                                                                    "sorobaninvokeweight"
+                                                                    self.sorobanInvokeWeight
 
         mandatoryParams @ optionalParams
 
@@ -179,14 +171,7 @@ type LoadGen =
           skiplowfeetxs = false
           wasms = None
           instances = None
-          dataEntriesLow = None
-          dataEntriesHigh = None
-          kiloBytesPerDataEntryLow = None
-          kiloBytesPerDataEntryHigh = None
-          txSizeBytesLow = None
-          txSizeBytesHigh = None
-          instructionsLow = None
-          instructionsHigh = None
+          minSorobanPercentSuccess = None
           maxContractSizeBytes = None
           maxContractDataKeySizeBytes = None
           maxContractDataEntrySizeBytes = None
@@ -207,11 +192,40 @@ type LoadGen =
           txMaxSizeBytes = None
           bucketListSizeWindowSampleSize = None
           evictionScanSize = None
-          startingEvictionScanLevel = None }
+          startingEvictionScanLevel = None
+          payWeight = None
+          sorobanUploadWeight = None
+          sorobanInvokeWeight = None }
+
+// Takes a default value `v` and a list `l` and returns `v` if `l` is empty,
+// otherwise `l`.
+let defaultList (v: 'a list) (l: 'a list) =
+    match l with
+    | [] -> v
+    | _ -> l
 
 type MissionContext with
 
     member self.WithNominalLoad : MissionContext = { self with numTxs = 100; numAccounts = 100 }
+
+    // For loadgen missions that increase soroban ledger and transaction limits.
+    member self.WithMediumLoadgenOptions : MissionContext =
+        { self with
+              wasmBytesDistribution = [ (30000, 1) ]
+              dataEntriesDistribution = [ (5, 1) ]
+              totalKiloBytesDistribution = [ (3, 1) ]
+              txSizeBytesDistribution = [ (512, 1) ]
+              instructionsDistribution = [ (25000000, 1) ] }
+
+    // For loadgen missions that do not increase both soroban ledger and
+    // transaction limits. These are intended to fit within the default limits.
+    member self.WithSmallLoadgenOptions : MissionContext =
+        { self with
+              wasmBytesDistribution = [ (1024, 1) ]
+              dataEntriesDistribution = [ (1, 1) ]
+              totalKiloBytesDistribution = [ (1, 1) ]
+              txSizeBytesDistribution = [ (64, 1) ]
+              instructionsDistribution = [ (1000000, 1) ] }
 
     member self.GenerateAccountCreationLoad : LoadGen =
         { LoadGen.GetDefault() with
@@ -272,15 +286,7 @@ type MissionContext with
               spikeinterval = self.spikeInterval
               offset = 0
               maxfeerate = self.maxFeeRate
-              skiplowfeetxs = self.skipLowFeeTxs
-              dataEntriesLow = Some(0)
-              dataEntriesHigh = Some(10)
-              kiloBytesPerDataEntryLow = Some(1)
-              kiloBytesPerDataEntryHigh = Some(5)
-              txSizeBytesLow = Some(0)
-              txSizeBytesHigh = Some(1000)
-              instructionsLow = Some(0L)
-              instructionsHigh = Some(5000000L) }
+              skiplowfeetxs = self.skipLowFeeTxs }
 
     member self.SetupSorobanInvoke : LoadGen =
         { LoadGen.GetDefault() with

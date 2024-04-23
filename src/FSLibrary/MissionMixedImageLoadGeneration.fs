@@ -59,7 +59,7 @@ let mixedImageLoadGeneration (oldImageNodeCount: int) (context: MissionContext) 
                   quorumSet = qSet }
 
     let context =
-        { context with
+        { context.WithSmallLoadgenOptions with
               coreResources = MediumTestResources
               numAccounts = 20000
               numTxs = 50000

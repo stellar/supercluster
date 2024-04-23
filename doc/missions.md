@@ -114,7 +114,7 @@ Simulate Public Network topology and throughput based on user-supplied distribut
 
 ## MissionSimulatePubnetTier1Perf
 
-Stress test a network of simulated Tier1 topology and report maximum achieved throughput.
+Stress test a network of simulated Tier1 topology with classic traffic and report maximum achieved throughput.
 
 ## MissionSorobanLoadGeneration
 

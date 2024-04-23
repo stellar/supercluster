@@ -33,7 +33,7 @@ let sorobanCatchupWithPrevAndCurr (context: MissionContext) =
                   catchupMode = CatchupComplete }
 
     let context =
-        { context with
+        { context.WithMediumLoadgenOptions with
               numAccounts = 100
               numTxs = 100
               txRate = 1

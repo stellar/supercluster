@@ -122,6 +122,17 @@ let cwd = __SOURCE_DIRECTORY__
 type Distribution =
     CsvProvider<"csv-type-samples/sample-loadgen-op-count-distribution.csv", HasHeaders=true, ResolutionFolder=cwd>
 
+// Add a loadgen distribution to a TOML table.
+let distributionToToml (d: (int * int) list) (name: string) (t: TomlTable) : unit =
+    match d with
+    | [] -> ()
+    | _ ->
+        let values = List.map fst d
+        let weights = List.map snd d
+
+        t.Add("LOADGEN_" + name + "_FOR_TESTING", values) |> ignore
+        t.Add("LOADGEN_" + name + "_DISTRIBUTION_FOR_TESTING", weights) |> ignore
+
 // Represents the contents of a stellar-core.cfg file, along with method to
 // write it out to TOML.
 type StellarCoreCfg =
@@ -274,6 +285,12 @@ type StellarCoreCfg =
 
             t.Add("LOADGEN_OP_COUNT_DISTRIBUTION_FOR_TESTING", distribution |> Seq.map snd)
             |> ignore
+
+        distributionToToml self.network.missionContext.wasmBytesDistribution "WASM_BYTES" t
+        distributionToToml self.network.missionContext.dataEntriesDistribution "NUM_DATA_ENTRIES" t
+        distributionToToml self.network.missionContext.totalKiloBytesDistribution "IO_KILOBYTES" t
+        distributionToToml self.network.missionContext.txSizeBytesDistribution "TX_SIZE_BYTES" t
+        distributionToToml self.network.missionContext.instructionsDistribution "INSTRUCTIONS" t
 
         t.Add("TARGET_PEER_CONNECTIONS", self.targetPeerConnections) |> ignore
 
