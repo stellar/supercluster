@@ -94,9 +94,9 @@ let mixedImageLoadGeneration (oldImageNodeCount: int) (context: MissionContext) 
 
                 if majorityPeer.GetLedgerProtocolVersion() >= 20 then
                     formation.UpgradeSorobanLedgerLimitsWithMultiplier coreSets 100)
-                    // FIXME: Uncomment the `RunLoadgen` call below once the old
-                    // image supports the new loadgen API
-                    // formation.RunLoadgen loadgenCoreSet { context.GenerateSorobanUploadLoad with txrate = 1; txs = 200 })
+// FIXME: Uncomment the `RunLoadgen` call below once the old
+// image supports the new loadgen API
+//                  formation.RunLoadgen loadgenCoreSet { context.GenerateSorobanUploadLoad with txrate = 1; txs = 200 })
 
 let mixedImageLoadGenerationWithOldImageMajority (context: MissionContext) = mixedImageLoadGeneration 2 context
 
