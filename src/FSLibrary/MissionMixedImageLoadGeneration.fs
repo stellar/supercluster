@@ -58,8 +58,9 @@ let mixedImageLoadGeneration (oldImageNodeCount: int) (context: MissionContext) 
                   dumpDatabase = false
                   quorumSet = qSet }
 
+    // FIXME: Apply small loadgen options to context once the old image supports the new loadgen API
     let context =
-        { context.WithSmallLoadgenOptions with
+        { context with
               coreResources = MediumTestResources
               numAccounts = 20000
               numTxs = 50000
@@ -92,8 +93,10 @@ let mixedImageLoadGeneration (oldImageNodeCount: int) (context: MissionContext) 
                 let majorityPeer = formation.NetworkCfg.GetPeer loadgenCoreSet 0
 
                 if majorityPeer.GetLedgerProtocolVersion() >= 20 then
-                    formation.UpgradeSorobanLedgerLimitsWithMultiplier coreSets 100
-                    formation.RunLoadgen loadgenCoreSet { context.GenerateSorobanUploadLoad with txrate = 1; txs = 200 })
+                    formation.UpgradeSorobanLedgerLimitsWithMultiplier coreSets 100)
+                    // FIXME: Uncomment the `RunLoadgen` call below once the old
+                    // image supports the new loadgen API
+                    // formation.RunLoadgen loadgenCoreSet { context.GenerateSorobanUploadLoad with txrate = 1; txs = 200 })
 
 let mixedImageLoadGenerationWithOldImageMajority (context: MissionContext) = mixedImageLoadGeneration 2 context
 
