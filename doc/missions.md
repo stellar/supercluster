@@ -131,3 +131,7 @@ Test resource-intensive InvokeHostFunction operations on a small network of node
 ## MissionSorobanCatchupWithPrevAndCurr
 
 Test catchup to ledger state that spans multiple protocols supporting Soroban.
+
+## MissionMixedImageNetworkSurvey
+
+Run a network survey with mixed version images on a small network of nodes.

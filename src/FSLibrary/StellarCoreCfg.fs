@@ -163,6 +163,7 @@ type StellarCoreCfg =
       maxBatchWriteCount: int
       inMemoryMode: bool
       enableBucketListDB: bool
+      surveyPhaseDuration: int option
       containerType: CoreContainerType }
 
     member self.ToTOML() : TomlTable =
@@ -309,6 +310,10 @@ type StellarCoreCfg =
         t.Add("INVARIANT_CHECKS", invList) |> ignore
         t.Add("UNSAFE_QUORUM", self.unsafeQuorum) |> ignore
         t.Add("FAILURE_SAFETY", self.failureSafety) |> ignore
+
+        match self.surveyPhaseDuration with
+        | None -> ()
+        | Some duration -> t.Add("ARTIFICIALLY_SET_SURVEY_PHASE_DURATION_FOR_TESTING", duration) |> ignore
 
         // Add tables (and subtables, recursively) for qsets.
         let rec addQsetAt (label: string) (qs: QuorumSet) =
@@ -483,6 +488,7 @@ type NetworkCfg with
           maxBatchWriteCount = opts.maxBatchWriteCount
           inMemoryMode = opts.inMemoryMode
           enableBucketListDB = opts.enableBucketListDB
+          surveyPhaseDuration = opts.surveyPhaseDuration
           containerType = MainCoreContainer }
 
     member self.StellarCoreCfg(c: CoreSet, i: int, ctype: CoreContainerType) : StellarCoreCfg =
@@ -519,4 +525,5 @@ type NetworkCfg with
           maxBatchWriteCount = c.options.maxBatchWriteCount
           inMemoryMode = c.options.inMemoryMode
           enableBucketListDB = c.options.enableBucketListDB
+          surveyPhaseDuration = c.options.surveyPhaseDuration
           containerType = ctype }
