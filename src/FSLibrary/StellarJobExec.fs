@@ -182,7 +182,7 @@ type StellarFormation with
 
         // We have seen sporadic http exceptions being thrown in the while loop below,
         // so this is an attempt to see if we can just ignore the exceptions.
-        let mutable numOfHttpRetriesAllowed = 5
+        let mutable numOfHttpRetriesAllowed = 20
 
         // We check to see if there are pods that have been in "Pending"
         // state for more than 120 minutes. This typically means the cluster
