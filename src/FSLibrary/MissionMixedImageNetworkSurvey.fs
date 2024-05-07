@@ -37,11 +37,6 @@ let mixedImageNetworkSurvey (context: MissionContext) =
     let oldSurveyedKeys = KeyPair.Random()
     let newSurveyedKeys = KeyPair.Random()
 
-    // Allow 2/3 nodes consensus, so that one image version could fork the
-    // network in case of bugs.
-    let qSet =
-        CoreSetQuorumListWithThreshold(([ CoreSetName oldName; CoreSetName newName ], 51))
-
     let oldCoreSet =
         { name = CoreSetName oldName
           keys = [| oldSurveyedKeys |]
@@ -50,8 +45,7 @@ let mixedImageNetworkSurvey (context: MissionContext) =
               { CoreSetOptions.GetDefault oldImage with
                     nodeCount = oldNodeCount
                     accelerateTime = false
-                    surveyPhaseDuration = None
-                    quorumSet = qSet } }
+                    surveyPhaseDuration = None } }
 
     let newCoreSet =
         { name = CoreSetName newName
@@ -61,8 +55,7 @@ let mixedImageNetworkSurvey (context: MissionContext) =
               { CoreSetOptions.GetDefault newImage with
                     nodeCount = newNodeCount
                     accelerateTime = false
-                    surveyPhaseDuration = Some surveyPhaseDurationMinutes
-                    quorumSet = qSet } }
+                    surveyPhaseDuration = Some surveyPhaseDurationMinutes } }
 
     let coreSets = [ newCoreSet; oldCoreSet ]
 
