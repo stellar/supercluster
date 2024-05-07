@@ -667,13 +667,13 @@ type Peer with
             (fun _ ->
                 Http.RequestString(httpMethod = "GET", url = self.URL("stopsurveycollecting"), headers = self.Headers))
 
-    member self.SurveyTimeSliceData (node: string) (inboundPeersIndex: int) (outboundPeersIndex: int) =
+    member self.SurveyTopologyTimeSliced (node: string) (inboundPeersIndex: int) (outboundPeersIndex: int) =
         WebExceptionRetry
             DefaultRetry
             (fun _ ->
                 Http.RequestString(
                     httpMethod = "GET",
-                    url = self.URL("surveytimeslicedata"),
+                    url = self.URL("surveytopologytimesliced"),
                     headers = self.Headers,
                     query =
                         [ ("node", node)

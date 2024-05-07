@@ -87,8 +87,8 @@ let mixedImageNetworkSurvey (context: MissionContext) =
 
             let stopSurveyCollecting () = LogInfo "stopSurveyCollecting: %s" (surveyor.StopSurveyCollecting())
 
-            let surveyTimeSliceData (node: KeyPair) =
-                LogInfo "surveyTimeSliceData: %s" (surveyor.SurveyTimeSliceData node.AccountId 0 0)
+            let surveyTopologyTimeSliced (node: KeyPair) =
+                LogInfo "surveyTopologyTimeSliced: %s" (surveyor.SurveyTopologyTimeSliced node.AccountId 0 0)
 
             let getSurveyResult () = LogInfo "getSurveyResult: %s" (surveyor.GetSurveyResult())
 
@@ -109,8 +109,8 @@ let mixedImageNetworkSurvey (context: MissionContext) =
             waitSeconds 30
 
             // Request results from peers
-            surveyTimeSliceData oldSurveyedKeys
-            surveyTimeSliceData newSurveyedKeys
+            surveyTopologyTimeSliced oldSurveyedKeys
+            surveyTopologyTimeSliced newSurveyedKeys
 
             // Give time to propagate and respond
             waitSeconds 60
