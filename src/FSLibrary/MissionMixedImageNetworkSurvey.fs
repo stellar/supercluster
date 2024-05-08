@@ -5,9 +5,10 @@
 module MissionMixedImageNetworkSurvey
 
 // This test runs a survey with 1 old node and 2 new nodes. One of the new nodes
-// runs the survey. The test checks that no nodes crash. It does not check the
-// correctness of survey results (that is done in the tests built into
-// stellar-core).
+// runs the survey. The test primarily checks that no nodes crash. It also
+// checks that HTTP endpoint responses indicate success, but it does not check
+// the content of those responses for correctness (for example, it does not
+// check the contents of the JSON response to the `getsurveyresult` command).
 
 open stellar_dotnet_sdk
 
@@ -74,16 +75,40 @@ let mixedImageNetworkSurvey (context: MissionContext) =
             let surveyor = formation.NetworkCfg.GetPeer newCoreSet 0
 
             // Helper functions to run survey commands from `surveyor`
+
+            // Log a response to a survey command `commandName` and check that
+            // it satisfies `predicate`
+            let logAndCheckResponse (commandName: string) (response: string) (predicate: string -> bool) =
+                LogInfo "%s: %s" commandName response
+
+                if not (predicate response) then
+                    failwithf "Survey failed. Unexpected response from '%s': %s" commandName response
+
             let startSurveyCollecting () =
                 let nonce = 42
-                LogInfo "startSurveyCollecting: %s" (surveyor.StartSurveyCollecting nonce)
+                let expected = "Requested network to start survey collecting."
+                logAndCheckResponse "startSurveyCollecting" (surveyor.StartSurveyCollecting nonce) ((=) expected)
 
-            let stopSurveyCollecting () = LogInfo "stopSurveyCollecting: %s" (surveyor.StopSurveyCollecting())
+            let stopSurveyCollecting () =
+                let expected = "Requested network to stop survey collecting."
+                logAndCheckResponse "stopSurveyCollecting" (surveyor.StopSurveyCollecting()) ((=) expected)
 
             let surveyTopologyTimeSliced (node: KeyPair) =
-                LogInfo "surveyTopologyTimeSliced: %s" (surveyor.SurveyTopologyTimeSliced node.AccountId 0 0)
+                // `surveyTopologyTimeSliced` responds differently based on
+                // whether this is the first call to it or a subsequent call.
+                // However, the response starts with "Adding node." on success.
+                let start = "Adding node."
 
-            let getSurveyResult () = LogInfo "getSurveyResult: %s" (surveyor.GetSurveyResult())
+                logAndCheckResponse
+                    "surveyTopologyTimeSliced"
+                    (surveyor.SurveyTopologyTimeSliced node.AccountId 0 0)
+                    (fun s -> s.StartsWith start)
+
+            let getSurveyResult () =
+                // This just checks that the survey result starts with `{`,
+                // indicating that it returned a JSON object. `getsurveyresult`
+                // returns a string (not starting with `{`) on failure.
+                logAndCheckResponse "getSurveyResult" (surveyor.GetSurveyResult()) (fun s -> s.StartsWith '{')
 
             let waitSeconds (seconds: int) =
                 LogInfo "Waiting %i seconds" seconds
