@@ -93,7 +93,7 @@ let maxTPSTest
                         let loadGen =
                             { baseLoadGen with
                                   accounts = numAccounts
-                                  txs = middle * 1000 / 5
+                                  txs = middle * 1000
                                   txrate = middle }
 
                         formation.RunMultiLoadgen tier1 loadGen
