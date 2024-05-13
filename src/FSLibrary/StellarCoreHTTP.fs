@@ -650,6 +650,42 @@ type Peer with
 
         TestAcc.Parse(if s.Trim().StartsWith("null") then "{}" else s)
 
+    member self.StartSurveyCollecting(nonce: int) =
+        WebExceptionRetry
+            DefaultRetry
+            (fun _ ->
+                Http.RequestString(
+                    httpMethod = "GET",
+                    url = self.URL("startsurveycollecting"),
+                    headers = self.Headers,
+                    query = [ ("nonce", nonce.ToString()) ]
+                ))
+
+    member self.StopSurveyCollecting() =
+        WebExceptionRetry
+            DefaultRetry
+            (fun _ ->
+                Http.RequestString(httpMethod = "GET", url = self.URL("stopsurveycollecting"), headers = self.Headers))
+
+    member self.SurveyTopologyTimeSliced (node: string) (inboundPeersIndex: int) (outboundPeersIndex: int) =
+        WebExceptionRetry
+            DefaultRetry
+            (fun _ ->
+                Http.RequestString(
+                    httpMethod = "GET",
+                    url = self.URL("surveytopologytimesliced"),
+                    headers = self.Headers,
+                    query =
+                        [ ("node", node)
+                          ("inboundpeerindex", inboundPeersIndex.ToString())
+                          ("outboundpeerindex", outboundPeersIndex.ToString()) ]
+                ))
+
+    member self.GetSurveyResult() =
+        WebExceptionRetry
+            DefaultRetry
+            (fun _ -> Http.RequestString(httpMethod = "GET", url = self.URL("getsurveyresult"), headers = self.Headers))
+
     member self.GetTestAccBalance(accName: string) : int64 =
         RetryUntilSome
             (fun _ -> self.GetTestAcc(accName).Balance)

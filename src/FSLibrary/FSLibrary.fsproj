@@ -52,6 +52,7 @@
     <Compile Include="MissionHistoryTestnetParallelCatchup.fs" />
     <Compile Include="MissionHistoryTestnetPerformance.fs" />
     <Compile Include="MissionMixedImageLoadGeneration.fs" />
+    <Compile Include="MissionMixedImageNetworkSurvey.fs" />
     <Compile Include="MissionVersionMixConsensus.fs" />
     <Compile Include="MissionSorobanLoadGeneration.fs" />
     <Compile Include="MissionSorobanConfigUpgrades.fs" />

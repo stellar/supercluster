@@ -170,7 +170,8 @@ type CoreSetOptions =
       maxSlotsToRemember: int
       maxBatchWriteCount: int
       inMemoryMode: bool
-      enableBucketListDB: bool }
+      enableBucketListDB: bool
+      surveyPhaseDuration: int option }
 
     member self.WithWaitForConsensus(w: bool) =
         { self with initialization = { self.initialization with waitForConsensus = w } }
@@ -202,7 +203,8 @@ type CoreSetOptions =
           maxSlotsToRemember = 12
           maxBatchWriteCount = 1024
           inMemoryMode = false
-          enableBucketListDB = false }
+          enableBucketListDB = false
+          surveyPhaseDuration = None }
 
 type CoreSet =
     { name: CoreSetName
