@@ -8,6 +8,7 @@ module MissionMaxTPSMixed
 // It uses the MaxTPSTest module to perform a binary search for the max TPS.
 
 open MaxTPSTest
+open MissionSimulatePubnet
 open StellarMissionContext
 open StellarCoreHTTP
 
@@ -16,9 +17,10 @@ let maxTPSMixed (baseContext: MissionContext) =
         { baseContext with
               coreResources = SimulatePubnetTier1PerfResources
               installNetworkDelay = Some(baseContext.installNetworkDelay |> Option.defaultValue true)
-              // No additional DB overhead unless specified (this will measure the in-memory SQLite DB only)
-              simulateApplyDuration = Some(baseContext.simulateApplyDuration |> Option.defaultValue (seq { 0 }))
-              simulateApplyWeight = Some(baseContext.simulateApplyWeight |> Option.defaultValue (seq { 100 }))
+              // Simulate apply duration using same distribution as
+              // `MissionSimulatePubnet`
+              simulateApplyDuration = Some(baseContext.simulateApplyDuration |> Option.defaultValue pubnetApplyDuration)
+              simulateApplyWeight = Some(baseContext.simulateApplyWeight |> Option.defaultValue pubnetApplyWeight)
               enableTailLogging = false
               // Setup distributions based on testnet data
               wasmBytesDistribution = [ (8 * 1024, 132); (24 * 1024, 68); (40 * 1024, 92); (56 * 1024, 141) ]
@@ -53,9 +55,14 @@ let maxTPSMixed (baseContext: MissionContext) =
               sorobanUploadWeight = Some(baseContext.sorobanUploadWeight |> Option.defaultValue 5)
               sorobanInvokeWeight = Some(baseContext.sorobanInvokeWeight |> Option.defaultValue 45)
 
-              // Require 80% of Soroban transactions to successfully apply by
-              // default
-              minSorobanPercentSuccess = Some(baseContext.minSorobanPercentSuccess |> Option.defaultValue 80) }
+              // This mission does not put any requirements on Soroban
+              // transaction success rates. This is because loadgen is not able
+              // to preflight Soroban transactions, and the estimates built in
+              // to loadgen struggle to accurately set transaction resources
+              // when the distributions are wide like this. The test accounts
+              // for potentially lower load during apply time by setting
+              // `simulateApplyDuration` to values observed on pubnet.
+              minSorobanPercentSuccess = Some(baseContext.minSorobanPercentSuccess |> Option.defaultValue 0) }
 
     let invokeSetupCfg = { baseLoadGen with mode = SorobanInvokeSetup }
 
