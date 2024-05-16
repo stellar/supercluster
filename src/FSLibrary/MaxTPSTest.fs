@@ -135,7 +135,11 @@ let maxTPSTest
 
             // Perform setup (if requested)
             match setupCfg with
-            | Some cfg -> formation.RunLoadgen sdf cfg
+            | Some cfg ->
+                // Run setup on nodes one at a time. Doing too many at once with
+                // `RunMultiLoadgen` can cause them to fail.
+                for cs in tier1 do
+                    formation.RunLoadgen cs { cfg with accounts = numAccounts }
             | None -> ()
 
             let wait () = System.Threading.Thread.Sleep(5 * 60 * 1000)
