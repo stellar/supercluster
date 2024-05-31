@@ -170,6 +170,7 @@ type CoreSetOptions =
       maxSlotsToRemember: int
       maxBatchWriteCount: int
       inMemoryMode: bool
+      addArtificialDelayUsec: int option
       enableBucketListDB: bool
       surveyPhaseDuration: int option }
 
@@ -203,6 +204,7 @@ type CoreSetOptions =
           maxSlotsToRemember = 12
           maxBatchWriteCount = 1024
           inMemoryMode = false
+          addArtificialDelayUsec = None
           enableBucketListDB = false
           surveyPhaseDuration = None }
 

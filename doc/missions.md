@@ -135,3 +135,7 @@ Test catchup to ledger state that spans multiple protocols supporting Soroban.
 ## MissionMixedImageNetworkSurvey
 
 Run a network survey with mixed version images on a small network of nodes.
+
+## MissionSlowNodesNetwork
+
+Run a network with a mix of fast and slow nodes. This mission allows to test interesting flooding and load shedding scenarios when some nodes are lagging behind.
