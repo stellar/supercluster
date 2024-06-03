@@ -115,8 +115,18 @@ let maxTPSTest
             let numAccounts = 30000
 
             let upgradeMaxTxSetSize (coreSets: CoreSet list) (rate: int) =
-                // Set max tx size to 10x the rate -- at 5x we overflow the transaction queue too often.
-                formation.UpgradeMaxTxSetSize coreSets (10 * rate)
+                if increaseSorobanLimits
+                then
+                    // Upgrade max tx sizes to avoid overflowing the transaction
+                    // queue. When soroban transactions are involved limits need
+                    // to be even higher than when only classic transactions are
+                    // used.
+                    formation.UpgradeMaxTxSetSize coreSets (20 * rate)
+                    formation.UpgradeSorobanMaxTxSetSize coreSets (40 * rate)
+                else
+                    // Set max tx size to 10x the rate -- at 5x we overflow the
+                    // transaction queue too often.
+                    formation.UpgradeMaxTxSetSize coreSets (10 * rate)
 
             // Setup overlay connections first before manually closing
             // ledger, which kick off consensus
