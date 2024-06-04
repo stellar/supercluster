@@ -162,6 +162,7 @@ type StellarCoreCfg =
       maxSlotsToRemember: int
       maxBatchWriteCount: int
       inMemoryMode: bool
+      addArtificialDelayUsec: int option // optional delay for testing in microseconds
       enableBucketListDB: bool
       surveyPhaseDuration: int option
       containerType: CoreContainerType }
@@ -219,8 +220,13 @@ type StellarCoreCfg =
                     "PEER_FLOOD_READING_CAPACITY and PEER_READING_CAPACITY must be defined together"
             )
 
-        match self.network.missionContext.sleepMainThread with
-        | None -> ()
+        let maybeAddGlobalDelay () =
+            match self.network.missionContext.sleepMainThread with
+            | None -> ()
+            | Some sleep -> t.Add("ARTIFICIALLY_SLEEP_MAIN_THREAD_FOR_TESTING", sleep) |> ignore
+
+        match self.addArtificialDelayUsec with
+        | None -> maybeAddGlobalDelay ()
         | Some sleep -> t.Add("ARTIFICIALLY_SLEEP_MAIN_THREAD_FOR_TESTING", sleep) |> ignore
 
         match self.network.missionContext.flowControlSendMoreBatchSize with
@@ -487,6 +493,7 @@ type NetworkCfg with
           maxSlotsToRemember = opts.maxSlotsToRemember
           maxBatchWriteCount = opts.maxBatchWriteCount
           inMemoryMode = opts.inMemoryMode
+          addArtificialDelayUsec = opts.addArtificialDelayUsec
           enableBucketListDB = opts.enableBucketListDB
           surveyPhaseDuration = opts.surveyPhaseDuration
           containerType = MainCoreContainer }
@@ -524,6 +531,7 @@ type NetworkCfg with
           maxSlotsToRemember = c.options.maxSlotsToRemember
           maxBatchWriteCount = c.options.maxBatchWriteCount
           inMemoryMode = c.options.inMemoryMode
+          addArtificialDelayUsec = c.options.addArtificialDelayUsec
           enableBucketListDB = c.options.enableBucketListDB
           surveyPhaseDuration = c.options.surveyPhaseDuration
           containerType = ctype }
