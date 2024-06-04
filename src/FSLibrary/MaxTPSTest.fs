@@ -115,8 +115,7 @@ let maxTPSTest
             let numAccounts = 30000
 
             let upgradeMaxTxSetSize (coreSets: CoreSet list) (rate: int) =
-                if increaseSorobanLimits
-                then
+                if increaseSorobanLimits then
                     // Upgrade max tx sizes to avoid overflowing the transaction
                     // queue. When soroban transactions are involved limits need
                     // to be even higher than when only classic transactions are
