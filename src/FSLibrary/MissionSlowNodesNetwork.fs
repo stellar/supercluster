@@ -18,7 +18,7 @@ let slowNodesNetwork (context: MissionContext) =
         { context.WithNominalLoad with
               installNetworkDelay = Some(true)
               flatNetworkDelay = Some(100)
-              numAccounts = 5000
+              numAccounts = 20000
               numTxs = 40000
               coreResources = MediumTestResources }
 
