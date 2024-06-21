@@ -154,10 +154,7 @@ let maxTPSTest
                 // Run setup on nodes one at a time. Doing too many at once with
                 // `RunMultiLoadgen` can cause them to fail.
                 for cs in tier1 do
-                    formation.RunLoadgen cs { cfg with
-                                               accounts = numAccounts
-                                               minSorobanPercentSuccess = Some 100
-                                            }
+                    formation.RunLoadgen cs { cfg with accounts = numAccounts; minSorobanPercentSuccess = Some 100 }
             | None -> ()
 
             let wait () = System.Threading.Thread.Sleep(5 * 60 * 1000)
