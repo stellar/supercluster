@@ -43,11 +43,16 @@ let private upgradeSorobanTxLimits (context: MissionContext) (formation: Stellar
               txMaxSizeBytes = Some(max txSizeBytes wasmBytes)
               maxContractSizeBytes = Some(maxDistributionValue context.wasmBytesDistribution * multiplier)
               // Memory limit must be reasonably high
-              txMemoryLimit = Some 200000000 }
+              txMemoryLimit = Some 200000000
+              minSorobanPercentSuccess = Some 100 }
         (System.DateTime.UtcNow)
 
     let peer = formation.NetworkCfg.GetPeer coreSetList.Head 0
     peer.WaitForTxMaxInstructions instructions |> ignore
+
+// Multiplier to use when increasing ledger limits for mixed mode. Expected
+// ledger close time (5 seconds) multiplied by some factor to add headroom (20x)
+let private mixedMultiplier = 5 * 20
 
 let private upgradeSorobanLedgerLimits
     (context: MissionContext)
@@ -58,8 +63,8 @@ let private upgradeSorobanLedgerLimits
     formation.SetupUpgradeContract coreSetList.Head
 
     // Multiply txrate by expected ledger close time (5 seconds), then by some
-    // factor to add some headroom (4x) to get multiplier for ledger limits
-    let multiplier = txrate * 5 * 4
+    // factor to add some headroom (10x) to get multiplier for ledger limits
+    let multiplier = txrate * mixedMultiplier
 
     let instructions =
         (int64 (maxDistributionValue context.instructionsDistribution))
@@ -120,8 +125,9 @@ let maxTPSTest
                     // queue. When soroban transactions are involved limits need
                     // to be even higher than when only classic transactions are
                     // used.
-                    formation.UpgradeMaxTxSetSize coreSets (20 * rate)
-                    formation.UpgradeSorobanMaxTxSetSize coreSets (40 * rate)
+                    let size = rate * mixedMultiplier
+                    formation.UpgradeMaxTxSetSize coreSets size
+                    formation.UpgradeSorobanMaxTxSetSize coreSets size
                 else
                     // Set max tx size to 10x the rate -- at 5x we overflow the
                     // transaction queue too often.
@@ -148,7 +154,10 @@ let maxTPSTest
                 // Run setup on nodes one at a time. Doing too many at once with
                 // `RunMultiLoadgen` can cause them to fail.
                 for cs in tier1 do
-                    formation.RunLoadgen cs { cfg with accounts = numAccounts }
+                    formation.RunLoadgen cs { cfg with
+                                               accounts = numAccounts
+                                               minSorobanPercentSuccess = Some 100
+                                            }
             | None -> ()
 
             let wait () = System.Threading.Thread.Sleep(5 * 60 * 1000)
@@ -197,8 +206,8 @@ let maxTPSTest
                         LogInfo "Run succeeded at tx rate %i" middle
                         shouldWait <- false
 
-                    with _ ->
-                        LogInfo "Run failed at tx rate %i" middle
+                    with e ->
+                        LogInfo "Run failed at tx rate %i: %s" middle e.Message
                         upperBound <- middle
                         shouldWait <- true
 
