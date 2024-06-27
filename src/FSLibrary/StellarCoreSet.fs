@@ -171,7 +171,7 @@ type CoreSetOptions =
       maxBatchWriteCount: int
       inMemoryMode: bool
       addArtificialDelayUsec: int option
-      enableBucketListDB: bool
+      deprecatedSQLState: bool
       surveyPhaseDuration: int option }
 
     member self.WithWaitForConsensus(w: bool) =
@@ -205,7 +205,7 @@ type CoreSetOptions =
           maxBatchWriteCount = 1024
           inMemoryMode = false
           addArtificialDelayUsec = None
-          enableBucketListDB = false
+          deprecatedSQLState = false
           surveyPhaseDuration = None }
 
 type CoreSet =
