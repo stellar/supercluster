@@ -24,7 +24,8 @@ let runInMemoryMode (context: MissionContext) =
                   inMemoryMode = true
                   validate = false
                   localHistory = false
-                  quorumSet = CoreSetQuorum(CoreSetName "core") }
+                  quorumSet = CoreSetQuorum(CoreSetName "core")
+                  deprecatedSQLState = true }
 
     let context =
         { context.WithSmallLoadgenOptions with

@@ -37,8 +37,7 @@ let historyPubnetParallelCatchupExtrawide (context: MissionContext) =
         { PubnetCoreSetOptions context.image with
               localHistory = false
               invariantChecks = AllInvariantsExceptBucketConsistencyChecks
-              initialization = CoreSetInitialization.OnlyNewDb
-              enableBucketListDB = true }
+              initialization = CoreSetInitialization.OnlyNewDb }
 
     context.ExecuteJobs
         (Some(opts))

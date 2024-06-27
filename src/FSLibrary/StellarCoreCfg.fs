@@ -163,7 +163,7 @@ type StellarCoreCfg =
       maxBatchWriteCount: int
       inMemoryMode: bool
       addArtificialDelayUsec: int option // optional delay for testing in microseconds
-      enableBucketListDB: bool
+      deprecatedSQLState: bool
       surveyPhaseDuration: int option
       containerType: CoreContainerType }
 
@@ -190,8 +190,7 @@ type StellarCoreCfg =
         let preferredPeers = List.map (fun (x: PeerDnsName) -> x.StringName) self.preferredPeers
 
         t.Add("DATABASE", self.database.ToString()) |> ignore
-        t.Add("EXPERIMENTAL_BUCKETLIST_DB", self.enableBucketListDB) |> ignore
-        t.Add("EXPERIMENTAL_BUCKETLIST_DB_PERSIST_INDEX", false) |> ignore
+        t.Add("DEPRECATED_SQL_LEDGER_STATE", self.deprecatedSQLState) |> ignore
         t.Add("METADATA_DEBUG_LEDGERS", 0) |> ignore
 
         match self.containerType with
@@ -494,7 +493,7 @@ type NetworkCfg with
           maxBatchWriteCount = opts.maxBatchWriteCount
           inMemoryMode = opts.inMemoryMode
           addArtificialDelayUsec = opts.addArtificialDelayUsec
-          enableBucketListDB = opts.enableBucketListDB
+          deprecatedSQLState = opts.deprecatedSQLState
           surveyPhaseDuration = opts.surveyPhaseDuration
           containerType = MainCoreContainer }
 
@@ -532,6 +531,6 @@ type NetworkCfg with
           maxBatchWriteCount = c.options.maxBatchWriteCount
           inMemoryMode = c.options.inMemoryMode
           addArtificialDelayUsec = c.options.addArtificialDelayUsec
-          enableBucketListDB = c.options.enableBucketListDB
+          deprecatedSQLState = c.options.deprecatedSQLState
           surveyPhaseDuration = c.options.surveyPhaseDuration
           containerType = ctype }
