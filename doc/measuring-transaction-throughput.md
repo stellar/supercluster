@@ -26,6 +26,6 @@ Supercluster supports running missions with artificially generated network topol
 
 To run a mission with an artificial topology, pass `--pubnet-data` option with the generated topology JSON. Your command would roughly look like this:
 
-`dotnet run --project src/App/App.fsproj --configuration Release mission SimulatePubnetTier1Perf --image <stellar-core-docker-image> --pubnet-data generated-overlay-topology.json`
+`dotnet run --project src/App/App.fsproj --configuration Release mission MaxTPSClassic --image <stellar-core-docker-image> --pubnet-data generated-overlay-topology.json`
 
-SimulatePubnetTier1Perf runs a binary search trying to find the maximum tx/s rate the network can sustain. It can do so several times (as configured in `--num-runs`, default is 3) and average the results. Look for logs like “Final tx rate averaged to 1000 over 3 runs for image …”.
+MaxTPSClassic runs a binary search trying to find the maximum tx/s rate the network can sustain. It can do so several times (as configured in `--num-runs`, default is 3) and average the results. Look for logs like “Final tx rate averaged to 1000 over 3 runs for image …”.

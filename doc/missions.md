@@ -112,7 +112,7 @@ Run stellar-core acceptance tests that take a long time.
 
 Simulate Public Network topology and throughput based on user-supplied distributions derived from network stats.
 
-## MissionSimulatePubnetTier1Perf
+## MissionMaxTPSClassic
 
 Stress test a network of simulated Tier1 topology with classic traffic and report maximum achieved throughput.
 

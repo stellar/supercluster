@@ -42,7 +42,7 @@
     <Compile Include="MissionHistoryPubnetMinimumCatchup.fs" />
     <Compile Include="MissionSimulatePubnet.fs" />
     <Compile Include="MissionSlowNodesNetwork.fs" />
-    <Compile Include="MissionSimulatePubnetTier1Perf.fs" />
+    <Compile Include="MissionMaxTPSClassic.fs" />
     <Compile Include="MissionHistoryPubnetRecentCatchup.fs" />
     <Compile Include="MissionHistoryPubnetParallelCatchup.fs" />
     <Compile Include="MissionHistoryPubnetCompleteCatchup.fs" />

@@ -2,7 +2,7 @@
 // under the Apache License, Version 2.0. See the COPYING file at the root
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
-module MissionSimulatePubnetTier1Perf
+module MissionMaxTPSClassic
 
 // The point of this mission is to simulate the tier1 group of pubnet
 // for purposes of repeatable / comparable performance evaluation.
@@ -11,7 +11,7 @@ open MaxTPSTest
 open StellarMissionContext
 open StellarCoreHTTP
 
-let simulatePubnetTier1Perf (context: MissionContext) =
+let maxTPSClassic (context: MissionContext) =
     let context =
         { context with
               coreResources = SimulatePubnetTier1PerfResources
