@@ -8,9 +8,14 @@ module MissionMaxTPSMixed
 // It uses the MaxTPSTest module to perform a binary search for the max TPS.
 
 open MaxTPSTest
-open MissionSimulatePubnet
 open StellarMissionContext
 open StellarCoreHTTP
+
+// If `list` is empty, return `value`. Otherwise, return `list`.
+let private defaultListValue value list =
+    match list with
+    | [] -> value
+    | _ -> list
 
 let maxTPSMixed (baseContext: MissionContext) =
     let context =
@@ -19,11 +24,14 @@ let maxTPSMixed (baseContext: MissionContext) =
               installNetworkDelay = Some(baseContext.installNetworkDelay |> Option.defaultValue true)
               // Simulate apply duration using same distribution as
               // `MissionSimulatePubnet`
-              simulateApplyDuration = Some(baseContext.simulateApplyDuration |> Option.defaultValue pubnetApplyDuration)
-              simulateApplyWeight = Some(baseContext.simulateApplyWeight |> Option.defaultValue pubnetApplyWeight)
+              simulateApplyDuration = Some(baseContext.simulateApplyDuration |> Option.defaultValue (seq { 0 }))
+              simulateApplyWeight = Some(baseContext.simulateApplyWeight |> Option.defaultValue (seq { 100 }))
               enableTailLogging = false
               // Setup distributions based on testnet data
-              wasmBytesDistribution = [ (8 * 1024, 132); (24 * 1024, 68); (40 * 1024, 92); (56 * 1024, 141) ]
+              wasmBytesDistribution =
+                  defaultListValue
+                      [ (8 * 1024, 132); (24 * 1024, 68); (40 * 1024, 92); (56 * 1024, 141) ]
+                      baseContext.wasmBytesDistribution
 
               // NOTE: `dataEntriesDistribution` and
               // `totalKiloBytesDistribution` are skewed a bit so that in most
@@ -32,11 +40,18 @@ let maxTPSMixed (baseContext: MissionContext) =
               // data entry up (from 0kb to 1kb) and underestimates the
               // resources required for the write. This will be fixed as part of
               // stellar-core issue #4231.
-              dataEntriesDistribution = [ (2, 380); (9, 42); (15, 5); (21, 2) ]
-              totalKiloBytesDistribution = [ (3, 427); (5, 2) ]
+              dataEntriesDistribution =
+                  defaultListValue [ (2, 380); (9, 42); (15, 5); (21, 2) ] baseContext.dataEntriesDistribution
+              totalKiloBytesDistribution = defaultListValue [ (3, 427); (5, 2) ] baseContext.totalKiloBytesDistribution
 
-              txSizeBytesDistribution = [ (200, 37); (400, 6); (600, 1); (800, 4); (1000, 1) ]
-              instructionsDistribution = [ (12500000, 201); (37500000, 183); (62500000, 34); (87500000, 11) ] }
+              txSizeBytesDistribution =
+                  defaultListValue
+                      [ (200, 37); (400, 6); (600, 1); (800, 4); (1000, 1) ]
+                      baseContext.txSizeBytesDistribution
+              instructionsDistribution =
+                  defaultListValue
+                      [ (12500000, 201); (37500000, 183); (62500000, 34); (87500000, 11) ]
+                      baseContext.instructionsDistribution }
 
     let baseLoadGen =
         { LoadGen.GetDefault() with
@@ -55,14 +70,8 @@ let maxTPSMixed (baseContext: MissionContext) =
               sorobanUploadWeight = Some(baseContext.sorobanUploadWeight |> Option.defaultValue 5)
               sorobanInvokeWeight = Some(baseContext.sorobanInvokeWeight |> Option.defaultValue 45)
 
-              // This mission does not put any requirements on Soroban
-              // transaction success rates. This is because loadgen is not able
-              // to preflight Soroban transactions, and the estimates built in
-              // to loadgen struggle to accurately set transaction resources
-              // when the distributions are wide like this. The test accounts
-              // for potentially lower load during apply time by setting
-              // `simulateApplyDuration` to values observed on pubnet.
-              minSorobanPercentSuccess = Some(baseContext.minSorobanPercentSuccess |> Option.defaultValue 0) }
+              // Require a majority of Soroban transactions to succeed.
+              minSorobanPercentSuccess = Some(baseContext.minSorobanPercentSuccess |> Option.defaultValue 60) }
 
     let invokeSetupCfg = { baseLoadGen with mode = SorobanInvokeSetup }
 
