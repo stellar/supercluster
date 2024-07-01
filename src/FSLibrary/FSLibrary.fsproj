@@ -29,6 +29,7 @@
     <Compile Include="StellarStatefulSets.fs" />
     <Compile Include="StellarJobExec.fs" />
     <Compile Include="StellarSupercluster.fs" />
+    <Compile Include="MaxTPSTest.fs" />
     <Compile Include="MissionCatchupHelpers.fs" />
     <Compile Include="MissionBootAndSync.fs" />
     <Compile Include="MissionSimplePayment.fs" />
@@ -41,7 +42,7 @@
     <Compile Include="MissionHistoryPubnetMinimumCatchup.fs" />
     <Compile Include="MissionSimulatePubnet.fs" />
     <Compile Include="MissionSlowNodesNetwork.fs" />
-    <Compile Include="MissionSimulatePubnetTier1Perf.fs" />
+    <Compile Include="MissionMaxTPSClassic.fs" />
     <Compile Include="MissionHistoryPubnetRecentCatchup.fs" />
     <Compile Include="MissionHistoryPubnetParallelCatchup.fs" />
     <Compile Include="MissionHistoryPubnetCompleteCatchup.fs" />
@@ -66,6 +67,7 @@
     <Compile Include="MissionProtocolUpgradeWithLoad.fs" />
     <Compile Include="MissionDatabaseInplaceUpgrade.fs" />
     <Compile Include="MissionAcceptanceUnitTests.fs" />
+    <Compile Include="MissionMaxTPSMixed.fs" />
     <Compile Include="StellarMission.fs" />
   </ItemGroup>
   <ItemGroup>
