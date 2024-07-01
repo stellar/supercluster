@@ -10,7 +10,7 @@ The missions perform the binary search a configurable number of times, then aver
 
 ## Docker images with performance tests enabled
 
-To run these missions, you'll need a stellar-core docker image with performance tests enabled. The simplest way to get one is to use an image from the [Dockerhub stellar/unsafe-stellar-core repo](https://hub.docker.com/r/stellar/unsafe-stellar-core/tags) with `perftests` in the name. Note that `unsafe` in this case means "unsafe to use in production", as these are development builds that haven't necessarily undergone the same testing procedure as release builds.
+To run these missions, you'll need a stellar-core docker image with performance tests enabled. The simplest way to get one is to use an image from the [Dockerhub stellar/unsafe-stellar-core repo](https://hub.docker.com/r/stellar/unsafe-stellar-core/tags) with `perftests` in the name. Note that `unsafe` in this case means "unsafe to use in production", as these are development builds that haven't necessarily undergone the same testing procedure as release builds. Additionally, `perftests` builds contain test-only features (such as artificial load generation) that are incompatible with the production environment. **Do not run `perftest` builds in production. Running any `perftests` build in the production environment could corrupt your local node state.**
 
 ## Parameters
 
