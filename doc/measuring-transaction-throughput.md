@@ -22,14 +22,11 @@ Additionally, parameter settings have a large impact on the run time of the miss
 
 These parameters affect both `MaxTPSClassic` and `MaxTPSMixed` missions:
 
-* `--image`: The stellar-core docker image to test (see [Docker images with performance tests enabled](#docker-images-with-performance-tests-enabled)).
-* `--destination`: Directory to store logs and metrics generated during the mission run in. Defaults to `destination`.
 * `--tx-rate`: Binary search lower bound. If a run fails to achieve at least this value it will fail with an error and you should rerun the mission with a lower value.
 * `--max-tx-rate`: Binary search upper bound. If a run succeeds at this value you should rerun the mission with a higher value.
 * `--num-runs`: Number of max TPS runs to average to get a final TPS value. Defaults to 3.
 * `--pubnet-data`: Network topology to use. Defaults to a topology of tier 1 validators. See [Specifying network topologies](#specifying-network-topologies) for details on how to specify a custom topology.
-* `--ingress-internal-domain`: Cluster-internal DNS domain in which to configure ingress. You may need to set this for supercluster to communicate with the stellar-core nodes. Defaults to `local`.
-* `--netdelay-image`: Helper image containing various networking utilities for supercluster to use. SDF provides a public image on dockerhub at `stellar/sdf-netdelay`.
+* `--netdelay-image`: Helper image providing simulated network delay for latency simulation. SDF provides a public image on dockerhub at `stellar/sdf-netdelay`.
 
 ### Additional options for mixed soroban and classic traffic
 
