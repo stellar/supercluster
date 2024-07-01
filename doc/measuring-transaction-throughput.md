@@ -1,7 +1,7 @@
 # Running maximum transaction per second test
 
 Supercluster provides two missions that measure the maximum number of Transactions Per Second (TPS) stellar-core can support under some set of parameters:
-* `SimulatePubnetTier1Perf` measures maximum TPS using exclusively classic payments
+* `MaxTPSClassic` measures maximum TPS using exclusively classic payments
 * `MaxTPSMixed` measures maximum TPS using a configurable mix of soroban invoke, soroban upload, and classic pay transactions.
 
 Other than the type of load generated, these two missions are identical. They both spin up a configurable network of stellar-core nodes, then measure the maximum TPS of the network using a binary search over a configurable range of TPS values. For each tested TPS value, the missions generate roughly 15 minutes of load, then check whether all nodes remained in sync for the duration of the test. If all nodes remained in sync, the missions consider the run successful and try again with a higher target TPS value. Otherwise, the missions consider the run a failure and retry with a lower target TPS value.
@@ -20,7 +20,7 @@ Additionally, parameter settings have a large impact on the run time of the miss
 
 ### Shared parameters
 
-These parameters affect both `SimulatePubnetTier1Perf` and `MaxTPSMixed` missions:
+These parameters affect both `MaxTPSClassic` and `MaxTPSMixed` missions:
 
 * `--image`: The stellar-core docker image to test (see [Docker images with performance tests enabled](#docker-images-with-performance-tests-enabled)).
 * `--destination`: Directory to store logs and metrics generated during the mission run in. Defaults to `destination`.
@@ -93,5 +93,5 @@ Supercluster supports running missions with artificially generated network topol
 
 To run a mission with a custom topology that searches for a max TPS between 500 and 1500, your command would look roughly like:
 ```bash
-dotnet run --project src/App/App.fsproj --configuration Release -- mission SimulatePubnetTier1Perf --image=stellar/unsafe-stellar-core:<stellar-core-perftest-build> --netdelay-image=stellar/sdf-netdelay:latest --pubnet-data=generated-overlay-topology.json --tx-rate=500 --max-tx-rate=1500
+dotnet run --project src/App/App.fsproj --configuration Release -- mission MaxTPSClassic --image=stellar/unsafe-stellar-core:<stellar-core-perftest-build> --netdelay-image=stellar/sdf-netdelay:latest --pubnet-data=generated-overlay-topology.json --tx-rate=500 --max-tx-rate=1500
 ```
