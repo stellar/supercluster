@@ -14,7 +14,7 @@ open Logging
 type HistoryArchiveState = JsonProvider<"json-type-samples/sample-stellar-history.json", ResolutionFolder=cwd>
 
 let PubnetLatestHistoryArchiveState =
-    "http://history-cache-poc.stellar-ops.com:8080/prd/core-live/core_live_001/.well-known/stellar-history.json"
+    "http://history.stellar.org/prd/core-live/core_live_001/.well-known/stellar-history.json"
 
 let TestnetLatestHistoryArchiveState =
     "http://history.stellar.org/prd/core-testnet/core_testnet_001/.well-known/stellar-history.json"
@@ -571,12 +571,9 @@ let GetLatestTestnetLedgerNumber _ : int =
     has.CurrentLedger
 
 let PubnetGetCommands =
-    [ PeerShortName "core_live_001",
-      "curl -sf http://history-cache-poc.stellar-ops.com:8080/prd/core-live/core_live_001/{0} -o {1}"
-      PeerShortName "core_live_002",
-      "curl -sf http://history-cache-poc.stellar-ops.com:8080/prd/core-live/core_live_002/{0} -o {1}"
-      PeerShortName "core_live_003",
-      "curl -sf http://history-cache-poc.stellar-ops.com:8080/prd/core-live/core_live_003/{0} -o {1}" ]
+    [ PeerShortName "core_live_001", "curl -sf http://history.stellar.org/prd/core-live/core_live_001/{0} -o {1}"
+      PeerShortName "core_live_002", "curl -sf http://history.stellar.org/prd/core-live/core_live_002/{0} -o {1}"
+      PeerShortName "core_live_003", "curl -sf http://history.stellar.org/prd/core-live/core_live_003/{0} -o {1}" ]
     |> Map.ofList
 
 let PubnetQuorum : QuorumSet =
