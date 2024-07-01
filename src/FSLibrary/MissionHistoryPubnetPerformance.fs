@@ -20,6 +20,8 @@ let historyPubnetPerformance (context: MissionContext) =
               invariantChecks = AllInvariantsExceptBucketConsistencyChecks
               initialization = CoreSetInitialization.OnlyNewDb }
 
+    let context = { context with coreResources = MediumTestResources }
+
     context.ExecuteJobs
         (Some(opts))
         (Some(SDFMainNet))
