@@ -5,11 +5,11 @@
 module StellarNetworkData
 
 open FSharp.Data
-open stellar_dotnet_sdk
 open StellarCoreSet
 open StellarCoreCfg
 open StellarMissionContext
 open Logging
+open StellarDotnetSdk.Accounts
 
 type HistoryArchiveState = JsonProvider<"json-type-samples/sample-stellar-history.json", ResolutionFolder=cwd>
 

@@ -5,7 +5,6 @@
 module StellarCoreHTTP
 
 open FSharp.Data
-open stellar_dotnet_sdk
 open StellarCoreSet
 open PollRetry
 open Logging
@@ -13,7 +12,8 @@ open StellarMissionContext
 open StellarNetworkCfg
 open StellarCorePeer
 open System.Threading
-
+open StellarDotnetSdk.Transactions
+open StellarDotnetSdk.Responses.Results
 
 // Note to curious reader: these are "type providers" whereby the compiler's
 // type definition facility is extended by plugins that are themselves
@@ -751,7 +751,7 @@ type Peer with
             match res.Error with
             | None -> ()
             | Some (r) ->
-                let txr = responses.TransactionResult.FromXdr(r)
+                let txr = TransactionResult.FromXdrBase64(r)
                 LogError "Result details: %O" txr
 
             raise (TransactionRejectedException tx)

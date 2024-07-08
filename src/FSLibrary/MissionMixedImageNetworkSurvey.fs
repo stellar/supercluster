@@ -10,8 +10,6 @@ module MissionMixedImageNetworkSurvey
 // the content of those responses for correctness (for example, it does not
 // check the contents of the JSON response to the `getsurveyresult` command).
 
-open stellar_dotnet_sdk
-
 open Logging
 open StellarCoreSet
 open StellarMissionContext
@@ -20,6 +18,7 @@ open StellarStatefulSets
 open StellarSupercluster
 open StellarCoreHTTP
 open StellarCorePeer
+open StellarDotnetSdk.Accounts
 
 let mixedImageNetworkSurvey (context: MissionContext) =
     let oldNodeCount = 1

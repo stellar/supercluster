@@ -561,7 +561,7 @@ let main argv =
                 (LogInfo "-----------------------------------"
                  LogInfo "Supercluster command line: %s" (System.String.Join(" ", argv))
                  LogInfo "-----------------------------------"
-                 LogInfo "Connecting to Kubernetes cluster"
+                 LogInfo "Connecting to Kubernetes cluster: %s" mission.Destination
                  LogInfo "-----------------------------------"
 
                  let (kube, ns) = ConnectToCluster mission.KubeConfig mission.NamespaceProperty

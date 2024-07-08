@@ -4,7 +4,7 @@
 
 module StellarCoreSet
 
-open stellar_dotnet_sdk
+open StellarDotnetSdk.Accounts
 
 // A PodName followed by the (nonce-qualified) service DNS suffix for a
 // given network, such as

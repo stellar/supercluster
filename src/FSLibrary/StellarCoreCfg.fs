@@ -5,12 +5,12 @@
 module StellarCoreCfg
 
 open FSharp.Data
-open stellar_dotnet_sdk
 open Nett
 open System.Text.RegularExpressions
 open StellarCoreSet
 open StellarNetworkCfg
 open StellarShellCmd
+open StellarDotnetSdk.Accounts
 
 // Submodule of short fixed (or lightly parametrized) config values: names,
 // paths, labels, etc.

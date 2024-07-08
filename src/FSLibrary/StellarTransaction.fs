@@ -1,10 +1,13 @@
 module StellarTransaction
 
-open stellar_dotnet_sdk
-
 open StellarNetworkCfg
 open StellarCorePeer
 open StellarCoreHTTP
+open StellarDotnetSdk.Accounts
+open StellarDotnetSdk
+open StellarDotnetSdk.Transactions
+open StellarDotnetSdk.Assets
+open StellarDotnetSdk.Operations
 
 type Username =
 
@@ -82,7 +85,7 @@ type Peer with
     member self.TxCreateAccount(u: Username) : Transaction =
         let root = self.RootAccount
         let newKey = self.GetKeypair u
-        let trb = Transaction.Builder(root)
+        let trb = TransactionBuilder(root);
         let tx = trb.AddOperation(CreateAccountOperation(newKey, "10000")).Build()
         tx.Sign(signer = self.RootKeypair, network = self.GetNetwork())
         tx
@@ -92,14 +95,11 @@ type Peer with
         let recv = self.GetKeypair recipient
         let asset = AssetTypeNative()
         let amount = "100"
-        let trb = Transaction.Builder(send)
+        let trb = TransactionBuilder(send)
 
         let tx =
             trb
-                .AddOperation(PaymentOperation
-                    .Builder(recv, asset, amount)
-                    .SetSourceAccount(send.KeyPair)
-                    .Build())
+                .AddOperation(PaymentOperation(recv, asset, amount, send.KeyPair))
                 .Build()
 
         tx.Sign(signer = (self.GetKeypair sender), network = self.GetNetwork())
