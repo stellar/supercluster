@@ -74,7 +74,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Rest.ClientRuntime" Version="2.3.24" />
     <PackageReference Include="FSharp.Data" Version="4.1.1" />
-    <PackageReference Include="KubernetesClient" Version="9.0.38" />
+    <PackageReference Include="KubernetesClient" Version="14.0.2" />
     <PackageReference Include="Nett" Version="0.15.0" />
     <PackageReference Include="Serilog" Version="2.10.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="3.1.1" />
