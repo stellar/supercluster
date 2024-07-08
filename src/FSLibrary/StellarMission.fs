@@ -34,13 +34,14 @@ open MissionDatabaseInplaceUpgrade
 open MissionAcceptanceUnitTests
 open MissionSimulatePubnet
 open MissionSlowNodesNetwork
-open MissionSimulatePubnetTier1Perf
+open MissionMaxTPSClassic
 open StellarMissionContext
 open MissionSorobanLoadGeneration
 open MissionSorobanConfigUpgrades
 open MissionSorobanInvokeHostLoad
 open MissionSorobanCatchupWithPrevAndCurr
 open MissionMixedImageNetworkSurvey
+open MissionMaxTPSMixed
 
 type Mission = (MissionContext -> unit)
 
@@ -77,9 +78,10 @@ let allMissions : Map<string, Mission> =
                  ("AcceptanceUnitTests", acceptanceUnitTests)
                  ("SimulatePubnet", simulatePubnet)
                  ("SlowNodesNetwork", slowNodesNetwork)
-                 ("SimulatePubnetTier1Perf", simulatePubnetTier1Perf)
+                 ("MaxTPSClassic", maxTPSClassic)
                  ("SorobanLoadGeneration", sorobanLoadGeneration)
                  ("SorobanConfigUpgrades", sorobanConfigUpgrades)
                  ("SorobanInvokeHostLoad", sorobanInvokeHostLoad)
                  ("SorobanCatchupWithPrevAndCurr", sorobanCatchupWithPrevAndCurr)
-                 ("MixedImageNetworkSurvey", mixedImageNetworkSurvey) |]
+                 ("MixedImageNetworkSurvey", mixedImageNetworkSurvey)
+                 ("MaxTPSMixed", maxTPSMixed) |]
