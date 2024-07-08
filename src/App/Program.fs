@@ -580,7 +580,7 @@ let main argv =
                          LogError "Connection issue!"
                          reraise ()
 
-                 // Poll cluster every minute to make sure we don't have any issues
+                 // Poll cluster every 5 minutes to make sure we don't have any issues
                  let timer = new System.Threading.Timer(TimerCallback(heartbeatHandler), null, 1000, 300000)
 
                  for m in mission.Missions do
