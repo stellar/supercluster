@@ -1,0 +1,40 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: preload-redis
+spec:
+  template:
+    spec:
+      containers:
+      - name: preload
+        image: redis:latest
+        command: ["/bin/sh", "/scripts/uniform_range_generator.sh"]
+        env:
+        - name: LEDGERS_PER_JOB
+          value: "{{ .Values.range_generator.LEDGERS_PER_JOB }}"
+        - name: OVERLAP_LEDGERS
+          value: "{{ .Values.range_generator.OVERLAP_LEDGERS }}"
+        - name: STARTING_LEDGER
+          value: "{{ .Values.range_generator.STARTING_LEDGER }}"
+        - name: LATEST_LEDGER_NUM
+          value: "{{ .Values.range_generator.LATEST_LEDGER_NUM }}"
+        volumeMounts:
+        - name: script
+          mountPath: /scripts
+      initContainers:
+      - name: wait-for-redis
+        image: redis:latest
+        command: ['sh', '-c', "until redis-cli -h redis -p 6379 ping; do echo waiting for redis; sleep 2; done;"]
+      restartPolicy: OnFailure
+      volumes:
+      - name: script
+        configMap:
+          name: generator-script
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: generator-script
+data:
+  uniform_range_generator.sh: |-
+    {{- (.Files.Get "files/uniform_range_generator.sh") | nindent 4 }}

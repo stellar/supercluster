@@ -1,0 +1,77 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: job-monitor-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: private
+  rules:
+  - host: ssc-job-monitor.services.stellar-ops.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: job-monitor
+            port:
+              number: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: job-monitor
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+  selector:
+    app: job-monitor
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: job-monitor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: job-monitor
+  template:
+    metadata:
+      labels:
+        app: job-monitor
+    spec:
+      containers:
+      - name: job-monitor
+        image: jayz22/job-monitor:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: JOB_QUEUE
+          value: "{{ .Values.redis.job_queue }}"
+        - name: SUCCESS_QUEUE
+          value: "{{ .Values.redis.success_queue }}"
+        - name: FAILED_QUEUE
+          value: "{{ .Values.redis.failed_queue }}"
+        - name: PROGRESS_QUEUE
+          value: "{{ .Values.redis.progress_queue }}"
+        - name: WORKER_PREFIX
+          value: "stellar-core"
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: WORKER_COUNT
+          value: "{{ .Values.worker.replicas }}"
+        - name: LOGGING_INTERVAL_SECONDS
+          value: "{{ .Values.monitor.logging_interval_seconds}}"
+      initContainers:
+      - name: wait-for-redis
+        image: redis:latest
+        command: ['sh', '-c', 'until redis-cli -h redis -p 6379 ping; do echo waiting for redis; sleep 2; done; echo redis server ready']
+      - name: wait-for-preload
+        image: redis:latest
+        command: ['sh', '-c', 'until [ $(redis-cli -h redis -p 6379 LLEN {{ .Values.redis.job_queue }}) -gt 0 ]; do echo waiting for preload; sleep 2; done; echo preload started']

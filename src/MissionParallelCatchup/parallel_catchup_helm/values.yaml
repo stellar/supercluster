@@ -1,0 +1,18 @@
+redis:
+  job_queue: "ranges"
+  success_queue: "succeeded"
+  failed_queue: "failed"
+  progress_queue: "in_progress"
+
+worker:
+  stellar_core_image: "stellar/stellar-core:latest"
+  replicas: 5 # number of workers running in the StatefulSet
+
+monitor:
+  logging_interval_seconds: 10
+
+range_generator:
+  LEDGERS_PER_JOB: 1600
+  OVERLAP_LEDGERS: 0
+  STARTING_LEDGER: 0
+  LATEST_LEDGER_NUM: 10000
