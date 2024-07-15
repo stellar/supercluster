@@ -6,6 +6,7 @@ module MissionHistoryPubnetParallelCatchupV2
 
 open Logging
 open StellarMissionContext
+open StellarNetworkData
 
 open System
 open System.Diagnostics
@@ -24,7 +25,8 @@ open System.Threading
 let helmReleaseName = "parallel-catchup"
 let helmChartPath = "../MissionParallelCatchup/parallel_catchup_helm"
 let valuesFilePath = helmChartPath + "/values.yaml"
-
+let jobMonitorStatusCheckIntervalSecs = 30
+let jobMonitorStatusCheckTimeOutSecs = 300
 let mutable cleanupCalled = false
 
 let runCommand (command: string []) =
@@ -52,7 +54,7 @@ let runCommand (command: string []) =
         LogError "Command execution failed: %s" ex.Message
         None
 
-let installProject (image: string, workerReplicas: int) =
+let installProject (context: MissionContext) =
     LogInfo "Installing Helm chart..."
 
     let deserializer =
@@ -73,12 +75,22 @@ let installProject (image: string, workerReplicas: int) =
             if dict.TryGetValue(box "worker", &workerObj) then
                 match workerObj with
                 | :? Dictionary<obj, obj> as workerDict ->
-                    workerDict.[(box "stellar_core_image")] <- (box image)
-                    workerDict.[(box "replicas")] <- (box workerReplicas)
+                    workerDict.[(box "stellar_core_image")] <- (box context.image)
+                    workerDict.[(box "replicas")] <- (box context.pubnetParallelCatchupNumWorkers)
                     dict.[(box "worker")] <- box workerDict
                 | _ -> failwith "Unexpected YAML structure"
             else
                 failwith "Unexpected YAML structure"
+
+            let mutable rangeObj = null
+
+            if dict.TryGetValue(box "range_generator", &rangeObj) then
+                match rangeObj with
+                | :? Dictionary<obj, obj> as rangeDict ->
+                    rangeDict.[(box "starting_ledger")] <- (box context.pubnetParallelCatchupStartingLedger)
+                    rangeDict.[(box "latest_ledger_num")] <- (box (GetLatestPubnetLedgerNumber()))
+                    dict.[(box "range_generator")] <- box rangeDict
+                | _ -> failwith "Unexpected YAML structure"
 
             dict
         | _ ->
@@ -135,6 +147,7 @@ let getJobMonitorStatus () =
                 )
                 .Result
 
+        LogInfo "job monitor response: %s" response
         let json = JObject.Parse(response)
         Some(json)
     with ex ->
@@ -144,17 +157,18 @@ let getJobMonitorStatus () =
 let historyPubnetParallelCatchupV2 (context: MissionContext) =
     LogInfo "Running parallel catchup v2 ..."
 
-    installProject (context.image, context.pubnetParallelCatchupNumWorkers)
+    installProject (context)
 
     let mutable jobFinished = false
+    let mutable timeoutLeft = jobMonitorStatusCheckTimeOutSecs
 
     while not jobFinished do
-        Thread.Sleep 10000
+        Thread.Sleep(jobMonitorStatusCheckIntervalSecs * 1000)
         let statusOpt = getJobMonitorStatus ()
 
         match statusOpt with
         | Some status ->
-            LogInfo "status: %s" (status.ToString())
+            timeoutLeft <- jobMonitorStatusCheckTimeOutSecs
             let remainSize = status.Value<int>("jobs_remain")
             let progressSize = status.Value<int>("jobs_in_progress")
 
@@ -165,6 +179,9 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
             if allWorkersDown && remainSize = 0 && progressSize = 0 then
                 LogInfo "No job left and all workers are down."
                 jobFinished <- true
-        | None -> LogError "no status"
+        | None ->
+            LogError "no status"
+            timeoutLeft <- timeoutLeft - jobMonitorStatusCheckIntervalSecs
+            if timeoutLeft <= 0 then failwith "job monitor not reachable"
 
     cleanup ()

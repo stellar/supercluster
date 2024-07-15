@@ -33,13 +33,13 @@ spec:
         # resource specs copied from the old supercluster mission
         resources:
           requests:
-            cpu: "250m"
-            memory: "1200Mi"
-            ephemeral-storage: "35Gi"
+            cpu: "{{ .Values.worker.request_cpu}}"
+            memory: "{{ .Values.worker.request_memory}}"
+            ephemeral-storage: "{{ .Values.worker.request_ephemeral_storage}}"
           limits:
-            cpu: "2000m"
-            memory: "6000Mi"
-            ephemeral-storage: "40Gi"
+            cpu: "{{ .Values.worker.limit_cpu}}"
+            memory: "{{ .Values.worker.limit_memory}}"
+            ephemeral-storage: "{{ .Values.worker.limit_ephemeral_storage}}"
         command: ["/bin/sh", "/scripts/worker.sh"]
         ports:
         - containerPort: 11626

@@ -2,8 +2,8 @@
 
 ledgersPerJob=$LEDGERS_PER_JOB
 overlapLedgers=$OVERLAP_LEDGERS
-startingLedger=$STARTING_LEDGER
-endRange=$LATEST_LEDGER_NUM
+startingLedger=$(echo "$STARTING_LEDGER" | awk '{printf "%d", $1}')
+endRange=$(echo "$LATEST_LEDGER_NUM" | awk '{printf "%d", $1}')
 
 echo "Generating uniform ledger ranges from parameters ledgersPerJob=$ledgersPerJob, overlapLedgers=$overlapLedgers, startingLedger=$startingLedger, endRange=$endRange"
 

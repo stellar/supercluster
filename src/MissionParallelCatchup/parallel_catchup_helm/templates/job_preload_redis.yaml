@@ -11,13 +11,13 @@ spec:
         command: ["/bin/sh", "/scripts/uniform_range_generator.sh"]
         env:
         - name: LEDGERS_PER_JOB
-          value: "{{ .Values.range_generator.LEDGERS_PER_JOB }}"
+          value: "{{ .Values.range_generator.ledgers_per_job }}"
         - name: OVERLAP_LEDGERS
-          value: "{{ .Values.range_generator.OVERLAP_LEDGERS }}"
+          value: "{{ .Values.range_generator.overlap_ledgers }}"
         - name: STARTING_LEDGER
-          value: "{{ .Values.range_generator.STARTING_LEDGER }}"
+          value: "{{ .Values.range_generator.starting_ledger }}"
         - name: LATEST_LEDGER_NUM
-          value: "{{ .Values.range_generator.LATEST_LEDGER_NUM }}"
+          value: "{{ .Values.range_generator.latest_ledger_num }}"
         volumeMounts:
         - name: script
           mountPath: /scripts

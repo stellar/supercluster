@@ -49,6 +49,10 @@ spec:
         image: jayz22/job-monitor:latest
         ports:
         - containerPort: 8080
+        resources:
+          requests:
+            cpu: "{{ .Values.monitor.request_cpu}}"
+            memory: "{{ .Values.monitor.request_memory}}"
         env:
         - name: JOB_QUEUE
           value: "{{ .Values.redis.job_queue }}"
