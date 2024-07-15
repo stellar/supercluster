@@ -79,6 +79,8 @@ let private upgradeSorobanTxLimits (context: MissionContext) (formation: Stellar
 // ledger close time (5 seconds) multiplied by some factor to add headroom (2x)
 let private limitMultiplier = 5 * 2
 
+let private smallNetworkSize = 10
+
 let private upgradeSorobanLedgerLimits
     (context: MissionContext)
     (formation: StellarFormation)
@@ -200,7 +202,9 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
                                   txs = middle * 1000
                                   txrate = middle }
 
-                        formation.RunMultiLoadgen tier1 loadGen
+                        // On smaller networks, run loadgen on all nodes to better balance the overhead of load generation
+                        let loadGenNodes = if List.length allNodes > smallNetworkSize then tier1 else allNodes
+                        formation.RunMultiLoadgen loadGenNodes loadGen
                         formation.CheckNoErrorsAndPairwiseConsistency()
                         formation.EnsureAllNodesInSync allNodes
 
