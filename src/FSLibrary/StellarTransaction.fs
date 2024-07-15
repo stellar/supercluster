@@ -85,7 +85,7 @@ type Peer with
     member self.TxCreateAccount(u: Username) : Transaction =
         let root = self.RootAccount
         let newKey = self.GetKeypair u
-        let trb = TransactionBuilder(root);
+        let trb = TransactionBuilder(root)
         let tx = trb.AddOperation(CreateAccountOperation(newKey, "10000")).Build()
         tx.Sign(signer = self.RootKeypair, network = self.GetNetwork())
         tx
@@ -97,10 +97,7 @@ type Peer with
         let amount = "100"
         let trb = TransactionBuilder(send)
 
-        let tx =
-            trb
-                .AddOperation(PaymentOperation(recv, asset, amount, send.KeyPair))
-                .Build()
+        let tx = trb.AddOperation(PaymentOperation(recv, asset, amount, send.KeyPair)).Build()
 
         tx.Sign(signer = (self.GetKeypair sender), network = self.GetNetwork())
         tx
