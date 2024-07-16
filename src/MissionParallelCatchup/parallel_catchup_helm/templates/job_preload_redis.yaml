@@ -8,16 +8,31 @@ spec:
       containers:
       - name: preload
         image: redis:latest
-        command: ["/bin/sh", "/scripts/uniform_range_generator.sh"]
+        command: ["/bin/sh", "-c"]
+        args: 
+         - |-
+           if [ \"$STRATEGY\" = \"uniform\" ]; then 
+             /bin/sh /scripts/uniform_range_generator.sh
+           elif [ \"$STRATEGY\" = \"logarithmic\" ]; then 
+             /bin/sh /scripts/logarithmic_range_generator.sh
+           else 
+             echo 'Error: Unknown strategy' && exit 1
+           fi
         env:
-        - name: LEDGERS_PER_JOB
-          value: "{{ .Values.range_generator.ledgers_per_job }}"
-        - name: OVERLAP_LEDGERS
-          value: "{{ .Values.range_generator.overlap_ledgers }}"
+        - name: STRATEGY
+          value: "{{ .Values.range_generator.strategy }}"
         - name: STARTING_LEDGER
-          value: "{{ .Values.range_generator.starting_ledger }}"
+          value: "{{ .Values.range_generator.params.starting_ledger }}"
         - name: LATEST_LEDGER_NUM
-          value: "{{ .Values.range_generator.latest_ledger_num }}"
+          value: "{{ .Values.range_generator.params.latest_ledger_num }}"
+        - name: OVERLAP_LEDGERS
+          value: "{{ .Values.range_generator.params.overlap_ledgers }}"
+        - name: LEDGERS_PER_JOB
+          value: "{{ .Values.range_generator.params.uniform_ledgers_per_job }}"
+        - name: LOGARITHMIC_FLOOR_LEDGERS
+          value: "{{ .Values.range_generator.params.logarithmic_floor_ledgers }}"
+        - name: NUM_PARALLELISM
+          value: "128"
         volumeMounts:
         - name: script
           mountPath: /scripts
@@ -38,3 +53,5 @@ metadata:
 data:
   uniform_range_generator.sh: |-
     {{- (.Files.Get "files/uniform_range_generator.sh") | nindent 4 }}
+  logarithmic_range_generator.sh: |-
+    {{- (.Files.Get "files/logarithmic_range_generator.sh") | nindent 4 }}

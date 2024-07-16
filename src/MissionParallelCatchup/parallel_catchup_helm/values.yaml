@@ -10,10 +10,10 @@ worker:
   stellar_core_image: "stellar/stellar-core:latest"
   replicas: 5
   request_cpu: "1250m"
-  request_memory: "12Gi"
+  request_memory: "24Gi"
   request_ephemeral_storage: "35Gi"
   limit_cpu: "8"
-  limit_memory: "24Gi"
+  limit_memory: "48Gi"
   limit_ephemeral_storage: "40Gi"
 
 monitor:
@@ -22,7 +22,10 @@ monitor:
   request_memory: "100Mi"
 
 range_generator:
-  ledgers_per_job: 16000
-  overlap_ledgers: 320
-  starting_ledger: 0
-  latest_ledger_num: 100000
+  strategy: "logarithmic" # "uniform" or "logarithmic"
+  params:
+    starting_ledger: 0
+    latest_ledger_num: 100000
+    overlap_ledgers: 320
+    uniform_ledgers_per_job: 16000 # only for strategy="uniform"
+    logarithmic_floor_ledgers: 16000 # only for strategy="logarithmic"

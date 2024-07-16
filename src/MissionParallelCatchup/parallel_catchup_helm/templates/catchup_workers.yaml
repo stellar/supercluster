@@ -63,13 +63,17 @@ spec:
           mountPath: /config
         - name: script
           mountPath: /scripts
+      initContainers:
+      - name: wait-for-preload
+        image: redis:latest
+        command: ['sh', '-c', 'until [ $(redis-cli -h redis -p 6379 LLEN {{ .Values.redis.job_queue }}) -gt 0 ]; do echo waiting for preload; sleep 2; done; echo job available']
       volumes:
       - name: config
         configMap:
           name: stellar-core-config
       - name: script
         configMap:
-          name: worker-script          
+          name: worker-script
 ---
 apiVersion: v1
 kind: ConfigMap

@@ -87,8 +87,16 @@ let installProject (context: MissionContext) =
             if dict.TryGetValue(box "range_generator", &rangeObj) then
                 match rangeObj with
                 | :? Dictionary<obj, obj> as rangeDict ->
-                    rangeDict.[(box "starting_ledger")] <- (box context.pubnetParallelCatchupStartingLedger)
-                    rangeDict.[(box "latest_ledger_num")] <- (box (GetLatestPubnetLedgerNumber()))
+                    let mutable dictObj = null
+
+                    if rangeDict.TryGetValue(box "params", &dictObj) then
+                        match dictObj with
+                        | :? Dictionary<obj, obj> as paramsDict ->
+                            paramsDict.[(box "starting_ledger")] <- (box context.pubnetParallelCatchupStartingLedger)
+                            paramsDict.[(box "latest_ledger_num")] <- (box (GetLatestPubnetLedgerNumber()))
+                            rangeDict.[(box "params")] <- box paramsDict
+                        | _ -> failwith "Unexpected YAML structure"
+
                     dict.[(box "range_generator")] <- box rangeDict
                 | _ -> failwith "Unexpected YAML structure"
 
