@@ -31,3 +31,7 @@ spec:
         ports:
         - containerPort: 6379
         command: ["redis-server"]
+        resources:
+          requests:
+            cpu: "{{ .Values.redis.request_cpu}}"
+            memory: "{{ .Values.redis.request_memory}}"

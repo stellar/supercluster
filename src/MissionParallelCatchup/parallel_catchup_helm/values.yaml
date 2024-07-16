@@ -3,20 +3,22 @@ redis:
   success_queue: "succeeded"
   failed_queue: "failed"
   progress_queue: "in_progress"
+  request_cpu: "100m"
+  request_memory: "100Mi"
 
 worker:
   stellar_core_image: "stellar/stellar-core:latest"
   replicas: 5
-  request_cpu: "1000m"
-  request_memory: "6000Mi"
+  request_cpu: "1250m"
+  request_memory: "12Gi"
   request_ephemeral_storage: "35Gi"
-  limit_cpu: "4000m"
-  limit_memory: "12000Mi"
+  limit_cpu: "8"
+  limit_memory: "24Gi"
   limit_ephemeral_storage: "40Gi"
 
 monitor:
   logging_interval_seconds: 10
-  request_cpu: "200m"
+  request_cpu: "100m"
   request_memory: "100Mi"
 
 range_generator:
