@@ -19,11 +19,16 @@ generate_uniform () {
     ss="$3"
     echo "generating uniform ranges from parameters: startLedger=$sl, endLedger=$el, segSize=$ss"
     while [ "$el" -gt "$sl" ]; do
-        ledgersToApply=$((ss + overlapLedgers));
+        # clamp the segment size to the num of remaining ledgers to avoid doing redundant work
+        ledgersPerJob=$((el - sl))
+        if [ "$ledgersPerJob" -gt "$ss" ]; then
+            ledgersPerJob=$ss
+        fi
+        ledgersToApply=$((ledgersPerJob + overlapLedgers));
         echo "${el}/${ledgersToApply}";
         # our queue assumes push-left-pop-right, but since we are generating the ranges in reverse order, here we push right
         redis-cli -h redis -p 6379 RPUSH ranges "${el}/${ledgersToApply}";
-        el=$(( el - ledgersToApply ));
+        el=$(( el - ledgersPerJob ));
         # sleep for a short duration to avoid overloading the redis-cli connection
         sleep 0.5
     done
