@@ -20,9 +20,9 @@ Before running the script, please follow
 
 ### AWS Quotas
 
-In order to run the theoretical max TPS test with the recommended parameters,
-you'll need a quota of at least 160 vCPUs for on-demand M instance types in the
-region you plan to run the test in.
+In order to run the [theoretical max TPS test](theoretical-max-tps.md) with the
+recommended parameters, you'll need a quota of at least 160 vCPUs for on-demand
+M instance types in the region you plan to run the test in.
 
 ## Running the Script
 
@@ -115,7 +115,11 @@ run supercluster.
 
 At this point you should see a message stating "Your cluster is ready!". Below
 that message are a set of flags you must add to any supercluster runs you wish
-to perform.
+to perform. Some useful documents on running supercluster missions include:
+
+* [Running a theoretical max TPS test](theoretical-max-tps.md)
+* [Measuring transaction throughput](measuring-transaction-throughput.md)
+* [List of supercluster missions](missions.md)
 
 ### Shutting Down
 

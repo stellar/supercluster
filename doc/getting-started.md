@@ -1,6 +1,7 @@
 # Getting started
 
   - Find or make a Kubernetes cluster. The easiest approach currently is probably [k3s](k3s.md) on an ubuntu system, but it should work on a variety of other kubernetes distributions.
+    - If you'd prefer to run Supercluster on AWS, the easiest way is to follow our [guide to creating a cluster on EKS](eks.md).
 
   - Make sure you have enabled at least the `dns` and `ingress` components on the Kubernetes cluster, and that the `ingress` controller is [nginx-ingress](https://kubernetes.github.io/ingress-nginx/).
 
