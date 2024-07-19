@@ -27,7 +27,7 @@ spec:
     spec:
       containers:
       - name: redis
-        image: redis:latest
+        image: redis:7
         ports:
         - containerPort: 6379
         command: ["redis-server"]

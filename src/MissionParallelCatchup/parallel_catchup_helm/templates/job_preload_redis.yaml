@@ -7,7 +7,7 @@ spec:
     spec:
       containers:
       - name: preload
-        image: redis:latest
+        image: redis:7
         command: ["/bin/sh", "-c"]
         args: 
          - |-
@@ -38,7 +38,7 @@ spec:
           mountPath: /scripts
       initContainers:
       - name: wait-for-redis
-        image: redis:latest
+        image: redis:7
         command: ['sh', '-c', "until redis-cli -h redis -p 6379 ping; do echo waiting for redis; sleep 2; done;"]
       restartPolicy: OnFailure
       volumes:
