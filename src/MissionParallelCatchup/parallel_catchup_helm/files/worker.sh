@@ -4,40 +4,33 @@ SLEEP_INTERVAL=10
 LOG_DIR="/data"
 REDIS_HOST="redis"
 REDIS_PORT=6379
-JOB_QUEUE=$JOB_QUEUE
-SUCCESS_QUEUE=$SUCCESS_QUEUE
-FAILED_QUEUE=$FAILED_QUEUE
-PROGRESS_QUEUE=$PROGRESS_QUEUE
-POD_NAME=$POD_NAME
-RELEASE_NAME=$RELEASE_NAME
 
-# First install redis-cli. Ideally this should be handled in the image itself but we don't want to bloat the core dependencies. 
-apt-get update && apt-get install -y redis-tools
-if [ $? -ne 0 ]; then
-echo "Faild to install redis-tools"
-exit 1
+# ensure redis-cli is available
+if [ ! "$(redis-cli --version)" ]; then
+    echo "redis-cli not found, please ensure running with a supported stellar-core version"
+    exit 1
 fi
 
 while true; do
 # Fetch the next job key from the Redis queue. 
 # The queue operation is always push left pop right. 
-JOB_KEY=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT LMOVE $JOB_QUEUE $PROGRESS_QUEUE RIGHT LEFT)
+JOB_KEY=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT LMOVE "$JOB_QUEUE" "$PROGRESS_QUEUE" RIGHT LEFT)
+
 
 if [ -n "$JOB_KEY" ]; then
     # Start timer
     START_TIME=$(date +%s)  
     echo "Processing job: $JOB_KEY"
 
-    /usr/bin/stellar-core --conf /config/stellar-core.cfg new-db
-    /usr/bin/stellar-core --conf /config/stellar-core.cfg catchup $JOB_KEY --metric 'ledger.transaction.apply'
-    if [ $? -ne 0 ]; then
+    if [ ! "$(/usr/bin/stellar-core --conf /config/stellar-core.cfg new-db &&
+    /usr/bin/stellar-core --conf /config/stellar-core.cfg catchup "$JOB_KEY" --metric 'ledger.transaction.apply')" ]; then
     echo "Error processing job: $JOB_KEY"
-    redis-cli -h $REDIS_HOST -p $REDIS_PORT LPUSH $FAILED_QUEUE $JOB_KEY
+    redis-cli -h $REDIS_HOST -p $REDIS_PORT LPUSH "$FAILED_QUEUE" "$JOB_KEY"
     else
     echo "Successfully processed job: $JOB_KEY"
-    redis-cli -h $REDIS_HOST -p $REDIS_PORT LPUSH $SUCCESS_QUEUE $JOB_KEY
+    redis-cli -h $REDIS_HOST -p $REDIS_PORT LPUSH "$SUCCESS_QUEUE" "$JOB_KEY"
     fi
-    redis-cli -h $REDIS_HOST -p $REDIS_PORT LREM $PROGRESS_QUEUE -1 $JOB_KEY
+    redis-cli -h $REDIS_HOST -p $REDIS_PORT LREM "$PROGRESS_QUEUE" -1 "$JOB_KEY"
 
     # Parse and extract the metrics from the log file
     LOG_FILE=$(ls -t $LOG_DIR/stellar-core-*.log | head -n 1)

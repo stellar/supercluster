@@ -73,9 +73,14 @@ spec:
         - name: LOGGING_INTERVAL_SECONDS
           value: "{{ .Values.monitor.logging_interval_seconds}}"
       initContainers:
-      - name: wait-for-redis
-        image: redis:latest
-        command: ['sh', '-c', 'until redis-cli -h redis -p 6379 ping; do echo waiting for redis; sleep 2; done; echo redis server ready']
       - name: wait-for-preload
-        image: redis:latest
-        command: ['sh', '-c', 'until [ $(redis-cli -h redis -p 6379 LLEN {{ .Values.redis.job_queue }}) -gt 0 ]; do echo waiting for preload; sleep 2; done; echo preload started']
+        image: redis:7
+        command: ['/bin/sh', '-c']
+        args:
+        - |-
+          # Wait until the job queue has items
+          until [ $(redis-cli -h redis -p 6379 LLEN {{ .Values.redis.job_queue }}) -gt 0 ]; do
+            echo waiting for preload
+            sleep 2
+          done
+          echo job available

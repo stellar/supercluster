@@ -29,7 +29,8 @@ spec:
     spec:
       containers:
       - name: stellar-core
-        image: jayz22/core-worker
+        image: {{ .Values.worker.stellar_core_image }}
+        imagePullPolicy: Always
         # resource specs copied from the old supercluster mission
         resources:
           requests:
@@ -63,10 +64,6 @@ spec:
           mountPath: /config
         - name: script
           mountPath: /scripts
-      initContainers:
-      - name: wait-for-preload
-        image: redis:latest
-        command: ['sh', '-c', 'until [ $(redis-cli -h redis -p 6379 LLEN {{ .Values.redis.job_queue }}) -gt 0 ]; do echo waiting for preload; sleep 2; done; echo job available']
       volumes:
       - name: config
         configMap:
