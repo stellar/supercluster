@@ -42,6 +42,10 @@ See [doc/missions.md](doc/missions.md) for a list of supported tests.
 
 See [doc/measuring-transaction-throughput.md](doc/measuring-transaction-throughput.md) for instructions on load testing using supercluster. 
 
+## Theoretical max TPS
+
+See [doc/theoretical-max-tps.md](doc/theoretical-max-tps.md) for a table of our theoretical max TPS results by release, as well as instructions on how to reproduce those numbers.
+
 ## License
 
 [Apache 2.0](COPYING)
