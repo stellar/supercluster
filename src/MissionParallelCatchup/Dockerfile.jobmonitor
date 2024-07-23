@@ -1,20 +1,21 @@
-# Use an official Python runtime as a parent image
-FROM --platform=linux/amd64 python:3.12-slim as build
+FROM --platform=linux/amd64 ubuntu:22.04
 
 VOLUME /data
 
-# Set the working directory
 WORKDIR /app
+
+RUN apt-get update && \
+    apt-get install -y \
+    python3 \
+    python3-pip && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
 COPY ./job_monitor.py /app
 
-# Install optional tools for troubleshooting
-RUN apt-get update && apt-get install -y dnsutils net-tools iputils-ping
+RUN python3 -m pip install --upgrade pip && \
+    python3 -m pip install --no-cache-dir redis requests
 
-# Install any needed packages specified in requirements.txt
-RUN pip install --no-cache-dir redis requests
-
-# Make port 8080 available to the world outside this container
 EXPOSE 8080
 
-# Run job_monitor.py when the container launches
-CMD ["python", "job_monitor.py"]
+CMD ["/usr/bin/python3", "job_monitor.py"]

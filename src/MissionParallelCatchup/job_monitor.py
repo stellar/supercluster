@@ -7,7 +7,7 @@ import logging
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 
 # Configuration
 REDIS_HOST = 'redis'
@@ -25,7 +25,7 @@ LOGGING_INTERVAL_SECONDS = int(os.getenv('LOGGING_INTERVAL_SECONDS', 10))
 redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
 # Configure logging
-log_file_name = f"job_monitor_{datetime.now(UTC).strftime('%Y-%m-%d_%H-%M-%S')}.log"
+log_file_name = f"job_monitor_{datetime.now(timezone.utc).strftime('%Y-%m-%d_%H-%M-%S')}.log"
 log_file_path = os.path.join('/data', log_file_name)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', handlers=[
     logging.StreamHandler(sys.stdout),
