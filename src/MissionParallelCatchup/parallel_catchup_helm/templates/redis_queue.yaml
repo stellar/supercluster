@@ -33,5 +33,5 @@ spec:
         command: ["redis-server"]
         resources:
           requests:
-            cpu: "{{ .Values.redis.request_cpu}}"
-            memory: "{{ .Values.redis.request_memory}}"
+            cpu: "{{ .Values.redis.resources.requests.cpu}}"
+            memory: "{{ .Values.redis.resources.requests.memory}}"

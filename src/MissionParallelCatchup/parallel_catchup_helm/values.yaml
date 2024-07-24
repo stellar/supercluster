@@ -3,26 +3,33 @@ redis:
   success_queue: "succeeded"
   failed_queue: "failed"
   progress_queue: "in_progress"
-  request_cpu: "100m"
-  request_memory: "100Mi"
+  resources:
+    requests: 
+      cpu: "100m"
+      memory: "100Mi"
 
 worker:
   stellar_core_image: "stellar/stellar-core:latest"
   replicas: 5
-  request_cpu: "1"
-  request_memory: "10Gi"
-  request_ephemeral_storage: "35Gi"
-  limit_cpu: "4"
-  limit_memory: "30Gi"
-  limit_ephemeral_storage: "40Gi"
+  resources:
+    requests: 
+      cpu: "1"
+      memory: "10Gi"
+      ephemeral_storage: "35Gi"
+    limits:
+      cpu: "4"
+      memory: "30Gi"
+      ephemeral_storage: "40Gi"
 
 monitor:
   logging_interval_seconds: 10
-  request_cpu: "100m"
-  request_memory: "100Mi"
+  resources:
+    requests: 
+      cpu: "100m"
+      memory: "100Mi"
 
 range_generator:
-  strategy: "logarithmic" # "uniform" or "logarithmic"
+  strategy: "uniform" # "uniform" or "logarithmic"
   params:
     starting_ledger: 0
     latest_ledger_num: 100000

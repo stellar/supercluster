@@ -34,13 +34,13 @@ spec:
         # resource specs copied from the old supercluster mission
         resources:
           requests:
-            cpu: "{{ .Values.worker.request_cpu}}"
-            memory: "{{ .Values.worker.request_memory}}"
-            ephemeral-storage: "{{ .Values.worker.request_ephemeral_storage}}"
+            cpu: "{{ .Values.worker.resources.requests.cpu}}"
+            memory: "{{ .Values.worker.resources.requests.memory}}"
+            ephemeral-storage: "{{ .Values.worker.resources.requests.ephemeral_storage}}"
           limits:
-            cpu: "{{ .Values.worker.limit_cpu}}"
-            memory: "{{ .Values.worker.limit_memory}}"
-            ephemeral-storage: "{{ .Values.worker.limit_ephemeral_storage}}"
+            cpu: "{{ .Values.worker.resources.limits.cpu}}"
+            memory: "{{ .Values.worker.resources.limits.memory}}"
+            ephemeral-storage: "{{ .Values.worker.resources.limits.ephemeral_storage}}"
         command: ["/bin/sh", "/scripts/worker.sh"]
         ports:
         - containerPort: 11626
