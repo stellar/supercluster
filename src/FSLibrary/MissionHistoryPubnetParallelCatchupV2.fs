@@ -27,7 +27,7 @@ let helmChartPath = "../MissionParallelCatchup/parallel_catchup_helm"
 let valuesFilePath = helmChartPath + "/values.yaml"
 let jobMonitorStatusCheckIntervalSecs = 30
 let jobMonitorStatusCheckTimeOutSecs = 300
-let mutable cleanupCalled = false
+let mutable toPerformCleanup = true
 
 let runCommand (command: string []) =
     try
@@ -57,79 +57,30 @@ let runCommand (command: string []) =
 let installProject (context: MissionContext) =
     LogInfo "Installing Helm chart..."
 
-    let deserializer =
-        DeserializerBuilder()
-            .WithNamingConvention(CamelCaseNamingConvention.Instance)
-            .Build()
-
-    let values =
-        use reader = new StreamReader(valuesFilePath)
-        deserializer.Deserialize<obj>(reader)
-
-    // Update the replicas value
-    let updatedValues =
-        match values with
-        | :? Dictionary<obj, obj> as dict ->
-            let mutable workerObj = null
-
-            if dict.TryGetValue(box "worker", &workerObj) then
-                match workerObj with
-                | :? Dictionary<obj, obj> as workerDict ->
-                    workerDict.[(box "stellar_core_image")] <- (box context.image)
-                    workerDict.[(box "replicas")] <- (box context.pubnetParallelCatchupNumWorkers)
-                    dict.[(box "worker")] <- box workerDict
-                | _ -> failwith "Unexpected YAML structure"
-            else
-                failwith "Unexpected YAML structure"
-
-            let mutable rangeObj = null
-
-            if dict.TryGetValue(box "range_generator", &rangeObj) then
-                match rangeObj with
-                | :? Dictionary<obj, obj> as rangeDict ->
-                    let mutable dictObj = null
-
-                    if rangeDict.TryGetValue(box "params", &dictObj) then
-                        match dictObj with
-                        | :? Dictionary<obj, obj> as paramsDict ->
-                            paramsDict.[(box "starting_ledger")] <- (box context.pubnetParallelCatchupStartingLedger)
-                            paramsDict.[(box "latest_ledger_num")] <- (box (GetLatestPubnetLedgerNumber()))
-                            rangeDict.[(box "params")] <- box paramsDict
-                        | _ -> failwith "Unexpected YAML structure"
-
-                    dict.[(box "range_generator")] <- box rangeDict
-                | _ -> failwith "Unexpected YAML structure"
-
-            dict
-        | _ ->
-            LogError "%s" (values.ToString())
-            failwith "Unexpected YAML structure"
-
-    // Serialize the updated values to a temporary file
-    let serializer =
-        SerializerBuilder()
-            .WithNamingConvention(CamelCaseNamingConvention.Instance)
-            .Build()
-
-    let tempFile = Path.GetTempFileName()
-    use writer = new StreamWriter(tempFile)
-    serializer.Serialize(writer, updatedValues)
-    writer.Flush()
-    // install the project, then delete the temporary helm values file
+    // install the project with default values from the file and overridden values from the commandline
+    let setOptions = ResizeArray<string>()
+    setOptions.Add(sprintf "worker.stellar_core_image=%s" context.image)
+    setOptions.Add(sprintf "worker.replicas=%d" context.pubnetParallelCatchupNumWorkers)
+    setOptions.Add(sprintf "range_generator.params.starting_ledger=%d" context.pubnetParallelCatchupStartingLedger)
+    setOptions.Add(sprintf "range_generator.params.latest_ledger_num=%d" (GetLatestPubnetLedgerNumber()))    
     runCommand [| "helm"
                   "install"
                   helmReleaseName
                   helmChartPath
                   "--values"
-                  tempFile |]
+                  valuesFilePath
+                  "--set"
+                  String.Join(",", setOptions) |]
     |> ignore
 
-    File.Delete(tempFile)
+    match runCommand [| "helm"; "get";  "values"; helmReleaseName|] with
+    | Some valuesOutput -> LogInfo "%s" valuesOutput
+    | _ -> ()
 
 // Cleanup on exit
 let cleanup () =
-    if not cleanupCalled then
-        cleanupCalled <- true
+    if toPerformCleanup then
+        toPerformCleanup <- false
         LogInfo "Cleaning up resources..."
 
         runCommand [| "helm"
