@@ -17,5 +17,5 @@ while [ "$endRange" -gt "$startingLedger" ]; do
     redis-cli -h redis -p 6379 RPUSH ranges "${endRange}/${ledgersToApply}";
     endRange=$(( endRange - ledgersPerJob ));
     # sleep for a short duration to avoid overloading the redis-cli connection
-    sleep 0.5
+    sleep 1
 done
