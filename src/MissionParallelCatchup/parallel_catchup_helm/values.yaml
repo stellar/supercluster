@@ -24,6 +24,7 @@ worker:
       ephemeral_storage: "40Gi"
 
 monitor:
+  hostname: "ssc-job-monitor.services.stellar-ops.com"
   logging_interval_seconds: 10
   resources:
     requests: 

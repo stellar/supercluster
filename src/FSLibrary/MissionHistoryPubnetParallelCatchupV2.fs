@@ -25,6 +25,8 @@ open System.Threading
 let helmReleaseName = "parallel-catchup"
 let helmChartPath = "../MissionParallelCatchup/parallel_catchup_helm"
 let valuesFilePath = helmChartPath + "/values.yaml"
+let jobMonitorHostName = "ssc-job-monitor.services.stellar-ops.com"
+let jobMonitorEndPoint = "/status"
 let jobMonitorStatusCheckIntervalSecs = 30
 let jobMonitorStatusCheckTimeOutSecs = 300
 let mutable toPerformCleanup = true
@@ -63,6 +65,7 @@ let installProject (context: MissionContext) =
     setOptions.Add(sprintf "worker.replicas=%d" context.pubnetParallelCatchupNumWorkers)
     setOptions.Add(sprintf "range_generator.params.starting_ledger=%d" context.pubnetParallelCatchupStartingLedger)
     setOptions.Add(sprintf "range_generator.params.latest_ledger_num=%d" (GetLatestPubnetLedgerNumber()))    
+    setOptions.Add(sprintf "monitor.hostname=%s" jobMonitorHostName)
     runCommand [| "helm"
                   "install"
                   helmReleaseName
@@ -102,7 +105,7 @@ let getJobMonitorStatus () =
         let response =
             client
                 .GetStringAsync(
-                    "http://ssc-job-monitor.services.stellar-ops.com/status"
+                     "http://" + jobMonitorHostName + jobMonitorEndPoint
                 )
                 .Result
 
