@@ -1,4 +1,6 @@
 redis:
+  hostname: "redis"
+  port: 6379
   job_queue: "ranges"
   success_queue: "succeeded"
   failed_queue: "failed"

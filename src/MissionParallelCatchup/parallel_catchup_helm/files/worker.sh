@@ -2,8 +2,6 @@
 
 SLEEP_INTERVAL=10
 LOG_DIR="/data"
-REDIS_HOST="redis"
-REDIS_PORT=6379
 
 # ensure redis-cli is available
 if [ ! "$(redis-cli --version)" ]; then

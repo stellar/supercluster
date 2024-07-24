@@ -54,24 +54,13 @@ spec:
             cpu: "{{ .Values.monitor.resources.requests.cpu}}"
             memory: "{{ .Values.monitor.resources.requests.memory}}"
         env:
-        - name: JOB_QUEUE
-          value: "{{ .Values.redis.job_queue }}"
-        - name: SUCCESS_QUEUE
-          value: "{{ .Values.redis.success_queue }}"
-        - name: FAILED_QUEUE
-          value: "{{ .Values.redis.failed_queue }}"
-        - name: PROGRESS_QUEUE
-          value: "{{ .Values.redis.progress_queue }}"
-        - name: WORKER_PREFIX
-          value: "stellar-core"
         - name: NAMESPACE
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        - name: WORKER_COUNT
-          value: "{{ .Values.worker.replicas }}"
-        - name: LOGGING_INTERVAL_SECONDS
-          value: "{{ .Values.monitor.logging_interval_seconds}}"
+        envFrom:
+        - configMapRef:
+            name: job-monitor-config
       initContainers:
       - name: wait-for-preload
         image: redis:7
@@ -79,8 +68,23 @@ spec:
         args:
         - |-
           # Wait until the job queue has items
-          until [ $(redis-cli -h redis -p 6379 LLEN {{ .Values.redis.job_queue }}) -gt 0 ]; do
+          until [ $(redis-cli -h {{ .Values.redis.hostname}} -p  {{ .Values.redis.port}} LLEN {{ .Values.redis.job_queue }}) -gt 0 ]; do
             echo waiting for preload
             sleep 2
           done
           echo job available
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: job-monitor-config
+data:
+  REDIS_HOST: "{{ .Values.redis.hostname}}"
+  REDIS_PORT: "{{ .Values.redis.port}}"
+  JOB_QUEUE: "{{ .Values.redis.job_queue }}"
+  SUCCESS_QUEUE: "{{ .Values.redis.success_queue }}"
+  FAILED_QUEUE: "{{ .Values.redis.failed_queue }}"
+  PROGRESS_QUEUE: "{{ .Values.redis.progress_queue }}"
+  WORKER_PREFIX: "stellar-core"
+  WORKER_COUNT: "{{ .Values.worker.replicas }}"
+  LOGGING_INTERVAL_SECONDS: "{{ .Values.monitor.logging_interval_seconds}}"

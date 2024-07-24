@@ -27,7 +27,7 @@ generate_uniform () {
         ledgersToApply=$((ledgersPerJob + overlapLedgers));
         echo "${el}/${ledgersToApply}";
         # our queue assumes push-left-pop-right, but since we are generating the ranges in reverse order, here we push right
-        redis-cli -h redis -p 6379 RPUSH ranges "${el}/${ledgersToApply}";
+        redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" RPUSH ranges "${el}/${ledgersToApply}";
         el=$(( el - ledgersPerJob ));
         # sleep for a short duration to avoid overloading the redis-cli connection
         sleep 1

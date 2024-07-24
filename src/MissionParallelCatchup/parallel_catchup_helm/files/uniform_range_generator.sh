@@ -14,7 +14,7 @@ endRange=$endRange"
 while [ "$endRange" -gt "$startingLedger" ]; do
     ledgersToApply=$((ledgersPerJob + overlapLedgers));
     echo "${endRange}/${ledgersToApply}";
-    redis-cli -h redis -p 6379 RPUSH ranges "${endRange}/${ledgersToApply}";
+    redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" RPUSH ranges "${endRange}/${ledgersToApply}";
     endRange=$(( endRange - ledgersPerJob ));
     # sleep for a short duration to avoid overloading the redis-cli connection
     sleep 1

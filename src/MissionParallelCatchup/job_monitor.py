@@ -10,8 +10,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from datetime import datetime, timezone
 
 # Configuration
-REDIS_HOST = 'redis'
-REDIS_PORT = 6379
+REDIS_HOST = os.getenv('REDIS_HOST', 'redis')
+REDIS_PORT = int(os.getenv('REDIS_PORT', '6379'))
 JOB_QUEUE = os.getenv('JOB_QUEUE', 'ranges')
 SUCCESS_QUEUE = os.getenv('SUCCESS_QUEUE', 'succeeded')
 FAILED_QUEUE = os.getenv('FAILED_QUEUE', 'failed')

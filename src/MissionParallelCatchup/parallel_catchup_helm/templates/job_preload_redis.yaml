@@ -31,7 +31,7 @@ spec:
       initContainers:
       - name: wait-for-redis
         image: redis:7
-        command: ['sh', '-c', "until redis-cli -h redis -p 6379 ping; do echo waiting for redis; sleep 2; done;"]
+        command: ['sh', '-c', "until redis-cli -h {{ .Values.redis.hostname}} -p  {{ .Values.redis.port}} ping; do echo waiting for redis; sleep 2; done;"]
       restartPolicy: OnFailure
       volumes:
       - name: script
@@ -60,3 +60,5 @@ data:
   LEDGERS_PER_JOB: "{{ .Values.range_generator.params.uniform_ledgers_per_job }}"
   LOGARITHMIC_FLOOR_LEDGERS: "{{ .Values.range_generator.params.logarithmic_floor_ledgers }}"
   NUM_PARALLELISM: "128"
+  REDIS_HOST: "{{ .Values.redis.hostname}}"
+  REDIS_PORT: "{{ .Values.redis.port}}"

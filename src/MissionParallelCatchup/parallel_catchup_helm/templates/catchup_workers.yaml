@@ -45,20 +45,13 @@ spec:
         ports:
         - containerPort: 11626
         env:
-        - name: JOB_QUEUE
-          value: "{{ .Values.redis.job_queue }}"
-        - name: SUCCESS_QUEUE
-          value: "{{ .Values.redis.success_queue }}"
-        - name: FAILED_QUEUE
-          value: "{{ .Values.redis.failed_queue }}"
-        - name: PROGRESS_QUEUE
-          value: "{{ .Values.redis.progress_queue }}"
         - name: POD_NAME
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
-        - name: RELEASE_NAME
-          value: "{{ .Release.Name }}"
+        envFrom:
+        - configMapRef:
+            name: worker-config
         volumeMounts:
         - name: config
           mountPath: /config
@@ -87,3 +80,16 @@ metadata:
 data:
   stellar-core.cfg: |-
     {{- (.Files.Get "files/stellar-core.cfg") | nindent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: worker-config
+data:
+  REDIS_HOST: "{{ .Values.redis.hostname}}"
+  REDIS_PORT: "{{ .Values.redis.port}}"
+  JOB_QUEUE: "{{ .Values.redis.job_queue }}"
+  SUCCESS_QUEUE: "{{ .Values.redis.success_queue }}"
+  FAILED_QUEUE: "{{ .Values.redis.failed_queue }}"
+  PROGRESS_QUEUE: "{{ .Values.redis.progress_queue }}"
+  RELEASE_NAME: "{{ .Release.Name }}"
