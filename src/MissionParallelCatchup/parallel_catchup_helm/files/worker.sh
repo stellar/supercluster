@@ -1,13 +1,23 @@
 #!/bin/sh
 
-SLEEP_INTERVAL=10
-LOG_DIR="/data"
+# Check if required environment variables are set
+if [ -z "$REDIS_HOST" ]; then echo "REDIS_HOST not set"; exit 1; fi
+if [ -z "$REDIS_PORT" ]; then echo "REDIS_PORT not set"; exit 1; fi
+if [ -z "$JOB_QUEUE" ]; then echo "JOB_QUEUE not set"; exit 1; fi
+if [ -z "$PROGRESS_QUEUE" ]; then echo "PROGRESS_QUEUE not set"; exit 1; fi
+if [ -z "$FAILED_QUEUE" ]; then echo "FAILED_QUEUE not set"; exit 1; fi
+if [ -z "$SUCCESS_QUEUE" ]; then echo "SUCCESS_QUEUE not set"; exit 1; fi
+if [ -z "$RELEASE_NAME" ]; then echo "RELEASE_NAME not set"; exit 1; fi
+if [ -z "$POD_NAME" ]; then echo "POD_NAME not set"; exit 1; fi
 
 # ensure redis-cli is available
 if [ ! "$(redis-cli --version)" ]; then
     echo "redis-cli not found, please ensure running with a supported stellar-core version"
     exit 1
 fi
+
+SLEEP_INTERVAL=10
+LOG_DIR="/data"
 
 while true; do
 # Fetch the next job key from the Redis queue. 
