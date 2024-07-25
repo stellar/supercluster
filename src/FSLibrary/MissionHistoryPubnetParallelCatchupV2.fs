@@ -66,6 +66,7 @@ let installProject (context: MissionContext) =
     setOptions.Add(sprintf "range_generator.params.starting_ledger=%d" context.pubnetParallelCatchupStartingLedger)
     setOptions.Add(sprintf "range_generator.params.latest_ledger_num=%d" (GetLatestPubnetLedgerNumber()))
     setOptions.Add(sprintf "monitor.hostname=%s" jobMonitorHostName)
+
     runCommand [| "helm"
                   "install"
                   helmReleaseName
@@ -76,7 +77,10 @@ let installProject (context: MissionContext) =
                   String.Join(",", setOptions) |]
     |> ignore
 
-    match runCommand [| "helm"; "get";  "values"; helmReleaseName|] with
+    match runCommand [| "helm"
+                        "get"
+                        "values"
+                        helmReleaseName |] with
     | Some valuesOutput -> LogInfo "%s" valuesOutput
     | _ -> ()
 
@@ -105,7 +109,7 @@ let getJobMonitorStatus () =
         let response =
             client
                 .GetStringAsync(
-                     "http://" + jobMonitorHostName + jobMonitorEndPoint
+                    "http://" + jobMonitorHostName + jobMonitorEndPoint
                 )
                 .Result
 
