@@ -64,7 +64,7 @@ let installProject (context: MissionContext) =
     setOptions.Add(sprintf "worker.stellar_core_image=%s" context.image)
     setOptions.Add(sprintf "worker.replicas=%d" context.pubnetParallelCatchupNumWorkers)
     setOptions.Add(sprintf "range_generator.params.starting_ledger=%d" context.pubnetParallelCatchupStartingLedger)
-    setOptions.Add(sprintf "range_generator.params.latest_ledger_num=%d" (GetLatestPubnetLedgerNumber()))    
+    setOptions.Add(sprintf "range_generator.params.latest_ledger_num=%d" (GetLatestPubnetLedgerNumber()))
     setOptions.Add(sprintf "monitor.hostname=%s" jobMonitorHostName)
     runCommand [| "helm"
                   "install"

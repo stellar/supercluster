@@ -31,7 +31,7 @@ if [ -n "$JOB_KEY" ]; then
     redis-cli -h $REDIS_HOST -p $REDIS_PORT LREM "$PROGRESS_QUEUE" -1 "$JOB_KEY"
 
     # Parse and extract the metrics from the log file
-    LOG_FILE=$(ls -t $LOG_DIR/stellar-core-*.log | head -n 1)
+    LOG_FILE=$(ls -t $LOG_DIR/stellar-core*.log | head -n 1)
     if [ -z "$LOG_FILE" ]; then
     echo "No log file found."
     exit 1
