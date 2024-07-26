@@ -46,7 +46,7 @@ spec:
     spec:
       containers:
       - name: job-monitor
-        image: jayz22/job-monitor:latest
+        image: stellar/ssc-job-monitor:latest
         ports:
         - containerPort: 8080
         resources:
