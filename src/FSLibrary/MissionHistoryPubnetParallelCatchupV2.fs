@@ -10,16 +10,13 @@ open StellarNetworkData
 
 open System
 open System.Diagnostics
-open System.IO
 open System.Net.Http
-open System.Text
-open System.Collections.Generic
 
 open Newtonsoft.Json.Linq
-open YamlDotNet.Serialization
-open YamlDotNet.Serialization.NamingConventions
 open Microsoft.FSharp.Control
 open System.Threading
+
+open k8s
 
 // Constants
 let helmReleaseName = "parallel-catchup"
@@ -120,34 +117,65 @@ let getJobMonitorStatus () =
         LogError "Error querying job monitor: %s" ex.Message
         None
 
+
+let dumpLogs (context: MissionContext, podName: String) =
+    let stream =
+        context.kube.ReadNamespacedPodLog(
+            name = podName,
+            namespaceParameter = context.namespaceProperty,
+            container = "stellar-core",
+            tailLines = Nullable<int> 10000
+        )
+
+    let filename = sprintf "%s.log" podName
+    context.destination.WriteStream filename stream
+    stream.Close()
+
 let historyPubnetParallelCatchupV2 (context: MissionContext) =
     LogInfo "Running parallel catchup v2 ..."
 
     installProject (context)
 
-    let mutable jobFinished = false
+    let mutable allJobsFinished = false
     let mutable timeoutLeft = jobMonitorStatusCheckTimeOutSecs
 
-    while not jobFinished do
+    while not allJobsFinished do
         Thread.Sleep(jobMonitorStatusCheckIntervalSecs * 1000)
         let statusOpt = getJobMonitorStatus ()
 
-        match statusOpt with
-        | Some status ->
-            timeoutLeft <- jobMonitorStatusCheckTimeOutSecs
-            let remainSize = status.Value<int>("jobs_remain")
-            let progressSize = status.Value<int>("jobs_in_progress")
+        try
+            match statusOpt with
+            | Some status ->
+                timeoutLeft <- jobMonitorStatusCheckTimeOutSecs
+                let remainSize = status.Value<int>("num_remain")
+                let jobsFailed = status.["jobs_failed"] :?> JArray
+                let JobsInProgress = status.["jobs_in_progress"] :?> JArray
 
-            let allWorkersDown =
-                let workers = status.["workers"] :?> JArray
-                workers |> Seq.forall (fun w -> (w :?> JObject).["status"].ToString() = "down")
+                if jobsFailed.Count <> 0 then
+                    for job in jobsFailed do
+                        let podName = job.ToString().Split('|').[1]
+                        dumpLogs (context, podName)
 
-            if allWorkersDown && remainSize = 0 && progressSize = 0 then
-                LogInfo "No job left and all workers are down."
-                jobFinished <- true
-        | None ->
-            LogError "no status"
-            timeoutLeft <- timeoutLeft - jobMonitorStatusCheckIntervalSecs
-            if timeoutLeft <= 0 then failwith "job monitor not reachable"
+                    let res = jobsFailed |> Seq.map string |> String.concat ","
+                    failwith (sprintf "Catch up failed on these ranges: %s" res)
+
+                if remainSize = 0 && JobsInProgress.Count = 0 then
+                    // check all workers are down
+                    let allWorkersDown =
+                        status.["workers"] :?> JArray
+                        |> Seq.forall (fun w -> (w :?> JObject).["status"].ToString() = "down")
+
+                    if not allWorkersDown then
+                        failwith "No jobs left but some workers are still running."
+
+                    LogInfo "No job left and all workers are down."
+                    allJobsFinished <- true
+            | None ->
+                LogError "no status"
+                timeoutLeft <- timeoutLeft - jobMonitorStatusCheckIntervalSecs
+                if timeoutLeft <= 0 then failwith "job monitor not reachable"
+        with ex ->
+            cleanup ()
+            raise ex
 
     cleanup ()

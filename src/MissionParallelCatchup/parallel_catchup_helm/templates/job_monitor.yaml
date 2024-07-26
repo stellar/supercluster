@@ -88,3 +88,4 @@ data:
   WORKER_PREFIX: "stellar-core"
   WORKER_COUNT: "{{ .Values.worker.replicas }}"
   LOGGING_INTERVAL_SECONDS: "{{ .Values.monitor.logging_interval_seconds}}"
+  LOGGING_LEVEL: "{{ .Values.monitor.logging_level}}"
