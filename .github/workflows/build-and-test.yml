@@ -21,10 +21,10 @@ jobs:
       run: |
         kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.5.1/deploy/static/provider/cloud/deploy.yaml
         kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=120s
-    - name: Setup .NET SDK 5
+    - name: Setup .NET SDK 8
       uses: actions/setup-dotnet@v1
       with:
-        dotnet-version: '5.0.x'
+        dotnet-version: '8.0.x'
     - name: Install dependencies
       run: dotnet restore
     - name: Install tool dependencies

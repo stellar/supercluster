@@ -1,0 +1,64 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: preload-redis
+spec:
+  template:
+    spec:
+      containers:
+      - name: preload
+        image: redis:7
+        command: ["/bin/sh", "-c"]
+        args: 
+         - |-
+           case "$STRATEGY" in
+             "uniform")
+               /bin/sh /scripts/uniform_range_generator.sh
+               ;;
+             "logarithmic")
+               /bin/sh /scripts/logarithmic_range_generator.sh
+               ;;
+             *)
+               echo 'Error: Unknown strategy' && exit 1
+               ;;
+           esac
+        envFrom:
+        - configMapRef:
+            name: range-generator-config
+        volumeMounts:
+        - name: script
+          mountPath: /scripts
+      initContainers:
+      - name: wait-for-redis
+        image: redis:7
+        command: ['sh', '-c', "until redis-cli -h {{ .Values.redis.hostname}} -p  {{ .Values.redis.port}} ping; do echo waiting for redis; sleep 2; done;"]
+      restartPolicy: OnFailure
+      volumes:
+      - name: script
+        configMap:
+          name: generator-script
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: generator-script
+data:
+  uniform_range_generator.sh: |-
+    {{- (.Files.Get "files/uniform_range_generator.sh") | nindent 4 }}
+  logarithmic_range_generator.sh: |-
+    {{- (.Files.Get "files/logarithmic_range_generator.sh") | nindent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: range-generator-config
+data:
+  STRATEGY: "{{ .Values.range_generator.strategy }}"
+  STARTING_LEDGER: "{{ .Values.range_generator.params.starting_ledger }}"
+  LATEST_LEDGER_NUM: "{{ .Values.range_generator.params.latest_ledger_num }}"
+  OVERLAP_LEDGERS: "{{ .Values.range_generator.params.overlap_ledgers }}"
+  LEDGERS_PER_JOB: "{{ .Values.range_generator.params.uniform_ledgers_per_job }}"
+  LOGARITHMIC_FLOOR_LEDGERS: "{{ .Values.range_generator.params.logarithmic_floor_ledgers }}"
+  NUM_PARALLELISM: "128"
+  REDIS_HOST: "{{ .Values.redis.hostname}}"
+  REDIS_PORT: "{{ .Values.redis.port}}"

@@ -1,0 +1,21 @@
+FROM --platform=linux/amd64 ubuntu:22.04
+
+VOLUME /data
+
+WORKDIR /app
+
+RUN apt-get update && \
+    apt-get install -y \
+    python3 \
+    python3-pip && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY ./job_monitor.py /app
+
+RUN python3 -m pip install --upgrade pip && \
+    python3 -m pip install --no-cache-dir redis requests
+
+EXPOSE 8080
+
+CMD ["/usr/bin/python3", "job_monitor.py"]

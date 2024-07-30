@@ -103,6 +103,7 @@ type MissionOptions
         nonTier1NodesToAdd: int,
         randomSeed: int,
         pubnetParallelCatchupStartingLedger: int,
+        pubnetParallelCatchupNumWorkers: int,
         tag: string option,
         numRuns: int option
     ) =
@@ -422,6 +423,12 @@ type MissionOptions
              Default = 0)>]
     member self.PubnetParallelCatchupStartingLedger = pubnetParallelCatchupStartingLedger
 
+    [<Option("pubnet-parallel-catchup-num-workers",
+             HelpText = "number of workers to run parallel catchup with (only supported for V2)",
+             Required = false,
+             Default = 128)>]
+    member self.PubnetParallelCatchupNumWorkers = pubnetParallelCatchupNumWorkers
+
     [<Option("tag", HelpText = "optional name to tag the run with", Required = false)>]
     member self.Tag = tag
 
@@ -535,6 +542,7 @@ let main argv =
                   randomSeed = 0
                   networkSizeLimit = 0
                   pubnetParallelCatchupStartingLedger = 0
+                  pubnetParallelCatchupNumWorkers = 128
                   tag = None
                   numRuns = None
                   enableTailLogging = true }
@@ -561,7 +569,7 @@ let main argv =
                 (LogInfo "-----------------------------------"
                  LogInfo "Supercluster command line: %s" (System.String.Join(" ", argv))
                  LogInfo "-----------------------------------"
-                 LogInfo "Connecting to Kubernetes cluster"
+                 LogInfo "Connecting to Kubernetes cluster: %s" mission.Destination
                  LogInfo "-----------------------------------"
 
                  let (kube, ns) = ConnectToCluster mission.KubeConfig mission.NamespaceProperty
@@ -580,7 +588,7 @@ let main argv =
                          LogError "Connection issue!"
                          reraise ()
 
-                 // Poll cluster every minute to make sure we don't have any issues
+                 // Poll cluster every 5 minutes to make sure we don't have any issues
                  let timer = new System.Threading.Timer(TimerCallback(heartbeatHandler), null, 1000, 300000)
 
                  for m in mission.Missions do
@@ -668,6 +676,7 @@ let main argv =
                                networkSizeLimit = mission.NetworkSizeLimit
                                randomSeed = mission.RandomSeed
                                pubnetParallelCatchupStartingLedger = mission.PubnetParallelCatchupStartingLedger
+                               pubnetParallelCatchupNumWorkers = mission.PubnetParallelCatchupNumWorkers
                                tag = mission.Tag
                                numRuns = mission.NumRuns
                                enableTailLogging = true }

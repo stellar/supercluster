@@ -109,6 +109,7 @@ let ctx : MissionContext =
       nonTier1NodesToAdd = 0
       randomSeed = 0
       pubnetParallelCatchupStartingLedger = 0
+      pubnetParallelCatchupNumWorkers = 128
       tag = None
       numRuns = None
       enableTailLogging = true }

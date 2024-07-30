@@ -52,6 +52,9 @@ Perform full catchup to Public Network, but in parallel to improve performance. 
 
 Perform full parallel catchup to Public Network, but with increased parallelism.
 
+## MissionHistoryPubnetParallelCatchupV2
+Perform full catchup to Public Network in parallel, leverging Kubernetes for improved performance and robustness.
+
 ## MissionHistoryPubnetPerformance
 
 Perform recent catchup to a fixed ledger and time bucket application and ledger replay portions of catchup.
