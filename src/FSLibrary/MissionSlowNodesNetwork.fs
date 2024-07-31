@@ -56,4 +56,4 @@ let slowNodesNetwork (context: MissionContext) =
             formation.UpgradeMaxTxSetSize [ coreSet; slowCoreSet ] 100000
 
             formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
-            formation.RunLoadgen coreSet { context.GeneratePaymentLoad with txrate = 200 })
+            formation.RunLoadgen coreSet { context.GeneratePaymentLoad with txrate = 100 })
