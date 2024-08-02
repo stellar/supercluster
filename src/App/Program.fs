@@ -480,6 +480,7 @@ let main argv =
 
             let ctx =
                 { kube = kube
+                  kubeCfg = clean.KubeConfig
                   destination = Destination("destination")
                   image = "stellar/stellar-core"
                   oldImage = None
@@ -601,6 +602,7 @@ let main argv =
                      try
                          let missionContext =
                              { MissionContext.kube = kube
+                               kubeCfg = mission.KubeConfig
                                destination = destination
                                image = mission.Image
                                oldImage = mission.OldImage

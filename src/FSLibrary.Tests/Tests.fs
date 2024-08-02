@@ -31,6 +31,7 @@ let passOpt : NetworkPassphrase option = None
 
 let ctx : MissionContext =
     { kube = null
+      kubeCfg = ""
       destination = Destination(System.IO.Path.GetTempPath())
       image = "stellar/stellar-core"
       oldImage = None
