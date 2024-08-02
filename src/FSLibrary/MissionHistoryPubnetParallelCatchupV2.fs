@@ -20,7 +20,7 @@ open k8s
 
 // Constants
 let helmReleaseName = "parallel-catchup"
-let helmChartPath = "../MissionParallelCatchup/parallel_catchup_helm"
+let helmChartPath = "/supercluster/src/MissionParallelCatchup/parallel_catchup_helm"
 let valuesFilePath = helmChartPath + "/values.yaml"
 let jobMonitorHostName = "ssc-job-monitor.services.stellar-ops.com"
 let jobMonitorEndPoint = "/status"
