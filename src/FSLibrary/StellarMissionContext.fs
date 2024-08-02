@@ -26,6 +26,7 @@ type CoreResources =
 
 type MissionContext =
     { kube: Kubernetes
+      kubeCfg: string
       destination: Destination
       image: string
       oldImage: string option

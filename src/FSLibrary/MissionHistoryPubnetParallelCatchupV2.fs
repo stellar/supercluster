@@ -15,6 +15,7 @@ open System.Net.Http
 open Newtonsoft.Json.Linq
 open Microsoft.FSharp.Control
 open System.Threading
+open System
 
 open k8s
 
@@ -63,6 +64,8 @@ let installProject (context: MissionContext) =
     setOptions.Add(sprintf "range_generator.params.starting_ledger=%d" context.pubnetParallelCatchupStartingLedger)
     setOptions.Add(sprintf "range_generator.params.latest_ledger_num=%d" (GetLatestPubnetLedgerNumber()))
     setOptions.Add(sprintf "monitor.hostname=%s" jobMonitorHostName)
+
+    Environment.SetEnvironmentVariable("KUBECONFIG", context.kubeCfg)
 
     runCommand [| "helm"
                   "install"
