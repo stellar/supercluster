@@ -5,10 +5,11 @@ redis:
   success_queue: "succeeded"
   failed_queue: "failed"
   progress_queue: "in_progress"
-  resources:
-    requests: 
-      cpu: "100m"
-      memory: "100Mi"
+  metrics: "metrics"
+  # resources:
+  #   requests: 
+  #     cpu: "100m"
+  #     memory: "100Mi"
 
 worker:
   stellar_core_image: "stellar/stellar-core:latest"
@@ -26,12 +27,12 @@ worker:
 monitor:
   ingress_class_name: "private"
   hostname: "ssc-job-monitor.services.stellar-ops.com"
-  logging_interval_seconds: 10
+  logging_interval_seconds: 30
   logging_level: "INFO" # 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'
-  resources:
-    requests: 
-      cpu: "100m"
-      memory: "100Mi"
+  # resources:
+  #   requests: 
+  #     cpu: "100m"
+  #     memory: "100Mi"
 
 range_generator:
   strategy: "uniform" # "uniform" or "logarithmic"

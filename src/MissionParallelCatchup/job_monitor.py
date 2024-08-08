@@ -16,6 +16,7 @@ JOB_QUEUE = os.getenv('JOB_QUEUE', 'ranges')
 SUCCESS_QUEUE = os.getenv('SUCCESS_QUEUE', 'succeeded')
 FAILED_QUEUE = os.getenv('FAILED_QUEUE', 'failed')
 PROGRESS_QUEUE = os.getenv('PROGRESS_QUEUE', 'in_progress')
+METRICS = os.getenv('METRICS', 'metrics')
 WORKER_PREFIX = os.getenv('WORKER_PREFIX', 'stellar-core')
 NAMESPACE = os.getenv('NAMESPACE', 'default')
 WORKER_COUNT = int(os.getenv('WORKER_COUNT', 3))
@@ -57,6 +58,11 @@ status = {
 }
 status_lock = threading.Lock()
 
+metrics = {
+    'metrics': []
+}
+metrics_lock = threading.Lock()
+
 class RequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/status':
@@ -64,7 +70,13 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_header('Content-type', 'application/json')
             self.end_headers()
             with status_lock:
-                self.wfile.write(json.dumps(status).encode())                
+                self.wfile.write(json.dumps(status).encode())
+        elif self.path == '/metrics':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            with metrics_lock:
+                self.wfile.write(json.dumps(metrics).encode())
         else:
             self.send_response(404)
             self.end_headers()
@@ -74,7 +86,7 @@ def retry_jobs_in_progress():
         job = redis_client.lmove(PROGRESS_QUEUE, JOB_QUEUE, "RIGHT", "LEFT")
         logger.info("moved job %s from %s to %s", job, PROGRESS_QUEUE, JOB_QUEUE)
 
-def update_status():
+def update_status_and_metrics():
     global status
     while True:
         try:
@@ -115,6 +127,14 @@ def update_status():
                     'workers': worker_statuses
                 }
             logger.info("Status: %s", json.dumps(status))
+
+            # update the metrics
+            new_metrics = redis_client.spop(METRICS, 1000)
+            if len(new_metrics) > 0:
+                with metrics_lock:
+                    metrics['metrics'].extend(new_metrics)
+            logger.info("Metrics: %s", json.dumps(metrics))
+
         except Exception as e:
             logger.error("Error while getting status: %s", str(e))
 
@@ -127,8 +147,8 @@ def run(server_class=HTTPServer, handler_class=RequestHandler):
     httpd.serve_forever()
 
 if __name__ == '__main__':
-    log_thread = threading.Thread(target=update_status)
+    log_thread = threading.Thread(target=update_status_and_metrics)
     log_thread.daemon = True
-    log_thread.start()    
+    log_thread.start()
 
     run()
