@@ -57,7 +57,8 @@ if [ -n "$JOB_KEY" ]; then
     echo "Finish processing job: $JOB_KEY, duration: $DURATION"
 
     # push metrics
-    redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" SADD "$METRICS" "$JOB_KEY|$tx_apply_ms|$DURATION"
+    core_id=$(echo "$POD_NAME" | grep -o '[0-9]\+')
+    redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" SADD "$METRICS" "$JOB_KEY|$core_id|$tx_apply_ms|$DURATION"
 else
     echo "No more jobs in the queue. Sleeping for $SLEEP_INTERVAL seconds..."
     sleep $SLEEP_INTERVAL
