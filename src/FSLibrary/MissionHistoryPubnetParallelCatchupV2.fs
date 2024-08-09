@@ -24,9 +24,11 @@ let helmReleaseName = "parallel-catchup"
 let helmChartPath = "/supercluster/src/MissionParallelCatchup/parallel_catchup_helm"
 let valuesFilePath = helmChartPath + "/values.yaml"
 let jobMonitorHostName = "ssc-job-monitor.services.stellar-ops.com"
-let jobMonitorEndPoint = "/status"
-let jobMonitorStatusCheckIntervalSecs = 30
-let jobMonitorStatusCheckTimeOutSecs = 300
+let jobMonitorStatusEndPoint = "/status"
+let jobMonitorMetricsEndPoint = "/metrics"
+let jobMonitorStatusCheckIntervalSecs = 60
+let jobMonitorMetricsCheckIntervalSecs = 300
+let jobMonitorStatusCheckTimeOutSecs = 600
 let mutable toPerformCleanup = true
 
 let runCommand (command: string []) =
@@ -62,9 +64,16 @@ let installProject (context: MissionContext) =
     setOptions.Add(sprintf "worker.stellar_core_image=%s" context.image)
     setOptions.Add(sprintf "worker.replicas=%d" context.pubnetParallelCatchupNumWorkers)
     setOptions.Add(sprintf "range_generator.params.starting_ledger=%d" context.pubnetParallelCatchupStartingLedger)
-    setOptions.Add(sprintf "range_generator.params.latest_ledger_num=%d" (GetLatestPubnetLedgerNumber()))
+
+    let endLedger =
+        match context.pubnetParallelCatchupEndLedger with
+        | Some value -> value
+        | None -> GetLatestPubnetLedgerNumber()
+
+    setOptions.Add(sprintf "range_generator.params.latest_ledger_num=%d" endLedger)
     setOptions.Add(sprintf "monitor.hostname=%s" jobMonitorHostName)
 
+    // comment out the line below when doing local testing
     Environment.SetEnvironmentVariable("KUBECONFIG", context.kubeCfg)
 
     runCommand [| "helm"
@@ -102,22 +111,17 @@ Console.CancelKeyPress.Add
         cleanup ()
         Environment.Exit(0))
 
-let getJobMonitorStatus () =
+let getJobMonitorStatus (endPoint: String) =
     try
         use client = new HttpClient()
 
-        let response =
-            client
-                .GetStringAsync(
-                    "http://" + jobMonitorHostName + jobMonitorEndPoint
-                )
-                .Result
+        let response = client.GetStringAsync("http://" + jobMonitorHostName + endPoint).Result
 
-        LogInfo "job monitor response: %s" response
+        LogInfo "job monitor '%s': %s" endPoint response
         let json = JObject.Parse(response)
         Some(json)
     with ex ->
-        LogError "Error querying job monitor: %s" ex.Message
+        LogError "Error querying job monitor '%s': %s" endPoint ex.Message
         None
 
 
@@ -141,10 +145,11 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
 
     let mutable allJobsFinished = false
     let mutable timeoutLeft = jobMonitorStatusCheckTimeOutSecs
+    let mutable timeBeforeNextMetricsCheck = jobMonitorMetricsCheckIntervalSecs
 
     while not allJobsFinished do
         Thread.Sleep(jobMonitorStatusCheckIntervalSecs * 1000)
-        let statusOpt = getJobMonitorStatus ()
+        let statusOpt = getJobMonitorStatus (jobMonitorStatusEndPoint)
 
         try
             match statusOpt with
@@ -163,6 +168,9 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
                     failwith (sprintf "Catch up failed on these ranges: %s" res)
 
                 if remainSize = 0 && JobsInProgress.Count = 0 then
+                    // perform a final get for the metrics
+                    getJobMonitorStatus (jobMonitorMetricsEndPoint) |> ignore
+
                     // check all workers are down
                     let allWorkersDown =
                         status.["workers"] :?> JArray
@@ -173,6 +181,14 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
 
                     LogInfo "No job left and all workers are down."
                     allJobsFinished <- true
+
+                // check the metrics
+                timeBeforeNextMetricsCheck <- timeBeforeNextMetricsCheck - jobMonitorStatusCheckIntervalSecs
+
+                if timeBeforeNextMetricsCheck <= 0 then
+                    getJobMonitorStatus (jobMonitorMetricsEndPoint) |> ignore
+                    timeBeforeNextMetricsCheck <- jobMonitorMetricsCheckIntervalSecs
+
             | None ->
                 LogError "no status"
                 timeoutLeft <- timeoutLeft - jobMonitorStatusCheckIntervalSecs

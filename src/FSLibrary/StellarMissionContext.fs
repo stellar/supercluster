@@ -91,6 +91,7 @@ type MissionContext =
       numRuns: int option
       networkSizeLimit: int
       pubnetParallelCatchupStartingLedger: int
+      pubnetParallelCatchupEndLedger: int option
       pubnetParallelCatchupNumWorkers: int
 
       // Tail logging can cause the pubnet simulation missions like SorobanLoadGeneration

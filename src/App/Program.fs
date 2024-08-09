@@ -103,6 +103,7 @@ type MissionOptions
         nonTier1NodesToAdd: int,
         randomSeed: int,
         pubnetParallelCatchupStartingLedger: int,
+        pubnetParallelCatchupEndLedger: int option,
         pubnetParallelCatchupNumWorkers: int,
         tag: string option,
         numRuns: int option
@@ -423,6 +424,9 @@ type MissionOptions
              Default = 0)>]
     member self.PubnetParallelCatchupStartingLedger = pubnetParallelCatchupStartingLedger
 
+    [<Option("pubnet-parallel-catchup-end-ledger", HelpText = "end ledger to run parallel catchup on", Required = false)>]
+    member self.PubnetParallelCatchupEndLedger = pubnetParallelCatchupEndLedger
+
     [<Option("pubnet-parallel-catchup-num-workers",
              HelpText = "number of workers to run parallel catchup with (only supported for V2)",
              Required = false,
@@ -543,6 +547,7 @@ let main argv =
                   randomSeed = 0
                   networkSizeLimit = 0
                   pubnetParallelCatchupStartingLedger = 0
+                  pubnetParallelCatchupEndLedger = None
                   pubnetParallelCatchupNumWorkers = 128
                   tag = None
                   numRuns = None
@@ -678,6 +683,7 @@ let main argv =
                                networkSizeLimit = mission.NetworkSizeLimit
                                randomSeed = mission.RandomSeed
                                pubnetParallelCatchupStartingLedger = mission.PubnetParallelCatchupStartingLedger
+                               pubnetParallelCatchupEndLedger = mission.PubnetParallelCatchupEndLedger
                                pubnetParallelCatchupNumWorkers = mission.PubnetParallelCatchupNumWorkers
                                tag = mission.Tag
                                numRuns = mission.NumRuns
