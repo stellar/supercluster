@@ -6,16 +6,16 @@ redis:
   failed_queue: "failed"
   progress_queue: "in_progress"
   metrics: "metrics"
-  # resources:
-  #   requests: 
-  #     cpu: "100m"
-  #     memory: "100Mi"
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "100Mi"
 
 worker:
   stellar_core_image: "stellar/stellar-core:latest"
   replicas: 5
   resources:
-    requests: 
+    requests:
       cpu: "1"
       memory: "10Gi"
       ephemeral_storage: "35Gi"
@@ -29,10 +29,10 @@ monitor:
   hostname: "ssc-job-monitor.services.stellar-ops.com"
   logging_interval_seconds: 30
   logging_level: "INFO" # 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'
-  # resources:
-  #   requests: 
-  #     cpu: "100m"
-  #     memory: "100Mi"
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "100Mi"
 
 range_generator:
   strategy: "uniform" # "uniform" or "logarithmic"

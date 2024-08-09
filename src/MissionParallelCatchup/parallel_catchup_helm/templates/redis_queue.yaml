@@ -31,7 +31,7 @@ spec:
         ports:
         - containerPort: 6379
         command: ["redis-server"]
-        {{- if (.Values.redis).resources }}
         resources:
-        {{ toYaml .Values.redis.resources | indent 6 }}
-        {{- end }}
+          requests:
+            cpu: "{{ .Values.redis.resources.requests.cpu}}"
+            memory: "{{ .Values.redis.resources.requests.memory}}"

@@ -50,10 +50,10 @@ spec:
         imagePullPolicy: Always
         ports:
         - containerPort: 8080
-        {{- if (.Values.monitor).resources }}
         resources:
-        {{ toYaml .Values.monitor.resources | indent 6 }}
-        {{- end }}
+          requests:
+            cpu: "{{ .Values.monitor.resources.requests.cpu}}"
+            memory: "{{ .Values.monitor.resources.requests.memory}}"
         env:
         - name: NAMESPACE
           valueFrom:

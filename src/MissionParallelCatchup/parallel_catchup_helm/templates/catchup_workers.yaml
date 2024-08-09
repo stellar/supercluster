@@ -31,10 +31,15 @@ spec:
       - name: stellar-core
         image: {{ .Values.worker.stellar_core_image }}
         imagePullPolicy: Always
-        {{- if (.Values.worker).resources }}
         resources:
-        {{ toYaml .Values.worker.resources | indent 6 }}
-        {{- end }}
+          requests:
+            cpu: "{{ .Values.worker.resources.requests.cpu}}"
+            memory: "{{ .Values.worker.resources.requests.memory}}"
+            ephemeral-storage: "{{ .Values.worker.resources.requests.ephemeral_storage}}"
+          limits:
+            cpu: "{{ .Values.worker.resources.limits.cpu}}"
+            memory: "{{ .Values.worker.resources.limits.memory}}"
+            ephemeral-storage: "{{ .Values.worker.resources.limits.ephemeral_storage}}"
         command: ["/bin/sh", "/scripts/worker.sh"]
         ports:
         - containerPort: 11626
