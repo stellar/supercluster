@@ -33,7 +33,7 @@ spec:
         imagePullPolicy: Always
         {{- if (.Values.worker).resources }}
         resources:
-        {{ toYaml .Values.worker.resources | indent 10 }}
+        {{ toYaml .Values.worker.resources | indent 6 }}
         {{- end }}
         command: ["/bin/sh", "/scripts/worker.sh"]
         ports:

@@ -33,5 +33,5 @@ spec:
         command: ["redis-server"]
         {{- if (.Values.redis).resources }}
         resources:
-        {{ toYaml .Values.redis.resources | indent 10 }}
+        {{ toYaml .Values.redis.resources | indent 6 }}
         {{- end }}

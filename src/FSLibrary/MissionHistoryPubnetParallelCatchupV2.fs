@@ -73,6 +73,7 @@ let installProject (context: MissionContext) =
     setOptions.Add(sprintf "range_generator.params.latest_ledger_num=%d" endLedger)
     setOptions.Add(sprintf "monitor.hostname=%s" jobMonitorHostName)
 
+    // comment out the line below when doing local testing
     Environment.SetEnvironmentVariable("KUBECONFIG", context.kubeCfg)
 
     runCommand [| "helm"
