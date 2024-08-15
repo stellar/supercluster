@@ -590,8 +590,7 @@ let main argv =
                              LogError "Heartbeat did not return any data."
                          else
                              DumpPodInfo kube mission.ApiRateLimit ns
-                     with x ->
-                         LogError "Connection issue! Api call failed."
+                     with x -> LogError "Connection issue! Api call failed."
 
                  let timer = new System.Threading.Timer(TimerCallback(podLogger), null, 1000, 300000)
 
