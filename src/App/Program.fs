@@ -14,6 +14,7 @@ open StellarNetworkCfg
 open StellarMission
 open StellarMissionContext
 open StellarSupercluster
+open MissionHistoryPubnetParallelCatchupV2
 
 open System.Threading
 
@@ -441,6 +442,8 @@ type MissionOptions
              Required = false)>]
     member self.NumRuns = numRuns
 
+let localCleanup () = cleanupParallelCatchupV2 ()
+
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' with
     | [| x |] -> (x, None)
@@ -556,6 +559,7 @@ let main argv =
             let nCfg = MakeNetworkCfg ctx [] None
             use formation = kube.MakeEmptyFormation nCfg
             formation.CleanNamespace()
+            localCleanup ()
             0
 
         | :? MissionOptions as mission ->
