@@ -585,21 +585,18 @@ let main argv =
                  let (kube, ns) = ConnectToCluster mission.KubeConfig mission.NamespaceProperty
                  let destination = Destination(mission.Destination)
 
-                 let heartbeatHandler _ =
+                 let podLogger _ =
                      try
                          ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (mission.ApiRateLimit)
                          let ranges = kube.ListNamespacedLimitRange(namespaceParameter = ns)
 
                          if isNull ranges then
-                             failwith "Connection issue!"
+                             LogError "Heartbeat did not return any data."
                          else
                              DumpPodInfo kube mission.ApiRateLimit ns
-                     with x ->
-                         LogError "Connection issue!"
-                         reraise ()
+                     with x -> LogError "Connection issue! Api call failed."
 
-                 // Poll cluster every 5 minutes to make sure we don't have any issues
-                 let timer = new System.Threading.Timer(TimerCallback(heartbeatHandler), null, 1000, 300000)
+                 let timer = new System.Threading.Timer(TimerCallback(podLogger), null, 1000, 300000)
 
                  for m in mission.Missions do
                      LogInfo "-----------------------------------"
