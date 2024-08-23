@@ -27,7 +27,7 @@ worker:
 monitor:
   ingress_class_name: "private"
   hostname: "ssc-job-monitor.services.stellar-ops.com"
-  logging_interval_seconds: 30
+  logging_interval_seconds: 300
   logging_level: "INFO" # 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'
   resources:
     requests:
