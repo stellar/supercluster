@@ -26,8 +26,8 @@ let valuesFilePath = helmChartPath + "/values.yaml"
 let jobMonitorHostName = "ssc-job-monitor.services.stellar-ops.com"
 let jobMonitorStatusEndPoint = "/status"
 let jobMonitorMetricsEndPoint = "/metrics"
-let jobMonitorStatusCheckIntervalSecs = 600
-let jobMonitorMetricsCheckIntervalSecs = 600
+let jobMonitorStatusCheckIntervalSecs = 300
+let jobMonitorMetricsCheckIntervalSecs = 300
 let jobMonitorStatusCheckTimeOutSecs = 600
 let mutable toPerformCleanup = true
 
