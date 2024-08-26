@@ -23,5 +23,5 @@ let acceptanceUnitTests (context: MissionContext) =
         (Some(opts))
         None
         (fun formation ->
-            formation.RunSingleJob [| "test"; "[acceptance]~[.]" |] context.image false
+            formation.RunSingleJob [| "test"; "[acceptance]~[.]"; "--abort" |] context.image false
             |> formation.CheckAllJobsSucceeded)
