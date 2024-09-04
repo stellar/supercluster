@@ -24,7 +24,8 @@ let ``Network nonce looks reasonable`` () =
 
 let coreSetOptions =
     { CoreSetOptions.GetDefault "stellar/stellar-core" with
-          syncStartupDelay = None }
+          syncStartupDelay = None
+          homeDomain = None }
 
 let coreSet = MakeLiveCoreSet "test" coreSetOptions
 let passOpt : NetworkPassphrase option = None

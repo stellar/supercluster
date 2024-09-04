@@ -19,7 +19,11 @@ let protocolUpgradeWithLoad (context: MissionContext) =
             { CoreSetOptions.GetDefault context.image with
                   invariantChecks = AllInvariantsExceptBucketConsistencyChecksAndEvents
                   dumpDatabase = false
-                  updateSorobanCosts = Some(true) }
+                  updateSorobanCosts = Some(true)
+                  // Set `requireAutoQset` to `true` as an extra check that this
+                  // mission uses the application-specific nomination leader
+                  // election protocol.
+                  requireAutoQset = true }
 
     let context =
         { context.WithSmallLoadgenOptions with

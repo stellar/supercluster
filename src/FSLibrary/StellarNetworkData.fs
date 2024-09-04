@@ -518,7 +518,7 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
     // This contains all tier-1 nodes with
     // * 3f + 1 for cross organization thresholds (top level).
     // * 2f + 1 for thresholds within each organization.
-    let defaultQuorum : QuorumSet =
+    let defaultQuorum : ExplicitQuorumSet =
         let tier1NodesGroupedByHomeDomain : (string array) array =
             allPubnetNodes
             |> Array.filter
@@ -527,7 +527,7 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
             |> Array.map
                 (fun (_, nodes: PubnetNode.Root []) -> Array.map (fun (n: PubnetNode.Root) -> n.PublicKey) nodes)
 
-        let orgToQSet (org: string array) : QuorumSet =
+        let orgToQSet (org: string array) : ExplicitQuorumSet =
             { thresholdPercent = Some(51) // Simple majority
               validators = pubKeysToValidators org
               innerQuorumSets = Array.empty }
@@ -684,7 +684,7 @@ let PubnetGetCommands =
       PeerShortName "core_live_003", "curl -sf http://history.stellar.org/prd/core-live/core_live_003/{0} -o {1}" ]
     |> Map.ofList
 
-let PubnetQuorum : QuorumSet =
+let PubnetQuorum : ExplicitQuorumSet =
     { thresholdPercent = None
       validators =
           [ PeerShortName "core_live_001",
@@ -720,7 +720,7 @@ let TestnetGetCommands =
       "curl -sf http://history.stellar.org/prd/core-testnet/core_testnet_003/{0} -o {1}" ]
     |> Map.ofList
 
-let TestnetQuorum : QuorumSet =
+let TestnetQuorum : ExplicitQuorumSet =
     { thresholdPercent = None
       validators =
           [ PeerShortName "core_testnet_001",
