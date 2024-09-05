@@ -18,11 +18,11 @@ worker:
     requests:
       cpu: "250m"
       memory: "1200Mi"
-      ephemeral_storage: "35Gi"
+      ephemeral_storage: "20Gi"
     limits:
       cpu: "2"
       memory: "6Gi"
-      ephemeral_storage: "40Gi"
+      ephemeral_storage: "25Gi"
 
 monitor:
   ingress_class_name: "private"
