@@ -273,7 +273,7 @@ type StellarFormation with
         let loadgen =
             { LoadGen.GetDefault() with
                   mode = SetupSorobanUpgrade
-                  minSorobanPercentSuccess = Some 0 }
+                  minSorobanPercentSuccess = Some 100 }
 
         self.RunLoadgen coreSet loadgen
 
