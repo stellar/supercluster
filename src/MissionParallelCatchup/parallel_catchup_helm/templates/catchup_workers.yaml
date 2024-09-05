@@ -27,6 +27,17 @@ spec:
       labels:
         app: stellar-core
     spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
+              - key: purpose
+                operator: NotIn
+                values:
+                - ssc
       containers:
       - name: stellar-core
         image: {{ .Values.worker.stellar_core_image }}
@@ -63,6 +74,13 @@ spec:
       - name: script
         configMap:
           name: worker-script
+      topologySpreadConstraints:
+      - labelSelector:
+          matchLabels:
+            app: stellar-core
+        maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
 ---
 apiVersion: v1
 kind: ConfigMap
