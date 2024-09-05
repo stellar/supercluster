@@ -22,8 +22,8 @@ LOG_DIR="/data"
 
 while true; do
 # Fetch the next job key from the Redis queue. 
-# The queue operation is always push left pop right. 
-JOB_KEY=$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" LMOVE "$JOB_QUEUE" "$PROGRESS_QUEUE" RIGHT LEFT)
+# The queue operation is always push left pop left. 
+JOB_KEY=$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" LMOVE "$JOB_QUEUE" "$PROGRESS_QUEUE" LEFT LEFT)
 
 if [ -n "$JOB_KEY" ]; then
     # Start timer
