@@ -67,6 +67,8 @@ spec:
           mountPath: /config
         - name: script
           mountPath: /scripts
+        - name: data-volume
+          mountPath: /data
       volumes:
       - name: config
         configMap:
@@ -74,6 +76,8 @@ spec:
       - name: script
         configMap:
           name: worker-script
+      - emptyDir: {}
+        name: data-volume
       topologySpreadConstraints:
       - labelSelector:
           matchLabels:
