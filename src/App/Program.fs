@@ -415,7 +415,7 @@ type MissionOptions
     [<Option("network-size-limit",
              HelpText = "The number of nodes to run in SimulatePubnet",
              Required = false,
-             Default = 100)>]
+             Default = 600)>]
     member self.NetworkSizeLimit = networkSizeLimit
 
     [<Option("pubnet-parallel-catchup-starting-ledger",
