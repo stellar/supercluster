@@ -120,7 +120,7 @@ let NetworkDelayScriptResourceRequirements : V1ResourceRequirements =
 let GetSimulatePubnetResources networkSize : V1ResourceRequirements =
     // Running simulate-pubnet _needs_ a ways over 200MB RSS per node, and
     // depending on queue backups it can spike over 300MB; we have 64GB limit
-    // for quota so to be generous we give each node 400MB limit and run only
+    // for quota so to be generous we give each node 600MB limit and run only
     // 100 nodes (despite survey showing many more).
     //
     // We also have a 100vCPU quota but only really 72 cores to play with, so
@@ -128,16 +128,15 @@ let GetSimulatePubnetResources networkSize : V1ResourceRequirements =
     // want to stay under 50vCPU, again divided 100 ways across our simulated
     // nodes.
     //
-    // So we allocate a 64MB RAM request and 400MB RAM limit to each, and a
+    // So we allocate a 64MB RAM request and 600MB RAM limit to each, and a
     // 0.025vCPU request and 0.5vCPU limit to each.
     //
     // It increases the resource requirement in case the network size is big.
     let cpuReqMili = 25
     let memReqMebi = 64
     let cpuLimMili = 500
-    let memLimMebi = 400
-    let k = if networkSize >= 200 then 2 else 1
-    makeResourceRequirements (k * cpuReqMili) (k * memReqMebi) (k * cpuLimMili) (k * memLimMebi)
+    let memLimMebi = 600
+    makeResourceRequirements cpuReqMili memReqMebi cpuLimMili memLimMebi
 
 let SimulatePubnetTier1PerfCoreResourceRequirements : V1ResourceRequirements =
     // Tier1 perf simulation is interested in "how fast can we go in practice"
@@ -808,7 +807,7 @@ type NetworkCfg with
             V1StatefulSetSpec(
                 selector = V1LabelSelector(matchLabels = CfgVal.labels),
                 serviceName = self.ServiceName,
-                podManagementPolicy = "OrderedReady",
+                podManagementPolicy = "Parallel",
                 template = self.ToPodTemplateSpec coreSet,
                 replicas = System.Nullable<int>(coreSet.CurrentCount)
             )
