@@ -116,7 +116,7 @@ let ctx : MissionContext =
       numRuns = None
       enableTailLogging = true }
 
-let netdata = __SOURCE_DIRECTORY__ + "/../../../data/public-network-data-2021-01-05.json"
+let netdata = __SOURCE_DIRECTORY__ + "/../../../data/public-network-data-2024-08-01.json"
 let pubkeys = __SOURCE_DIRECTORY__ + "/../../../data/tier1keys.json"
 let pubnetctx = { ctx with pubnetData = Some netdata; tier1Keys = Some pubkeys }
 
@@ -245,9 +245,10 @@ type Tests(output: ITestOutputHelper) =
              Assert.Matches(Regex("VALIDATORS.*blockdaemon-0"), toml)
              Assert.Matches(Regex("VALIDATORS.*stellar-0"), toml)
              Assert.Matches(Regex("VALIDATORS.*publicnode-0"), toml)
-             Assert.Matches(Regex("VALIDATORS.*coinqvest-0"), toml)
+             Assert.Matches(Regex("VALIDATORS.*whalestack-0"), toml)
              Assert.Matches(Regex("VALIDATORS.*satoshipay-0"), toml)
-             Assert.Matches(Regex("VALIDATORS.*lobstr-0"), toml))
+             Assert.Matches(Regex("VALIDATORS.*lobstr-0"), toml)
+             Assert.Matches(Regex("VALIDATORS.*franklintempleton-0"), toml))
 
     [<Fact>]
     member __.``Geographic calculations are reasonable``() =
