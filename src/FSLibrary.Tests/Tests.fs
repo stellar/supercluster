@@ -70,6 +70,7 @@ let ctx : MissionContext =
       tier1Keys = None
       peerReadingCapacity = None
       peerFloodCapacity = None
+      enableBackggroundOverlay = false
       peerFloodCapacityBytes = None
       outboundByteLimit = None
       sleepMainThread = None

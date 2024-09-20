@@ -78,6 +78,7 @@ type MissionContext =
       simulateApplyDuration: seq<int> option
       simulateApplyWeight: seq<int> option
       peerReadingCapacity: int option
+      enableBackggroundOverlay: bool
       peerFloodCapacity: int option
       peerFloodCapacityBytes: int option
       sleepMainThread: int option
