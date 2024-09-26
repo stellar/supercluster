@@ -151,7 +151,7 @@ type MissionOptions
     [<Option("export-to-prometheus", HelpText = "Whether to export core metrics to prometheus")>]
     member self.ExportToPrometheus : bool = exportToPrometheus
 
-    [<Option("probe-timeout", HelpText = "Timeout for liveness probe", Required = false, Default = 5)>]
+    [<Option("probe-timeout", HelpText = "Timeout for liveness probe", Required = false, Default = 30)>]
     member self.ProbeTimeout = probeTimeout
 
     [<Value(0, Required = true)>]
@@ -514,7 +514,7 @@ let main argv =
                   ingressExternalHost = None
                   ingressExternalPort = 80
                   exportToPrometheus = false
-                  probeTimeout = 5
+                  probeTimeout = 30
                   coreResources = SmallTestResources
                   keepData = false
                   unevenSched = true

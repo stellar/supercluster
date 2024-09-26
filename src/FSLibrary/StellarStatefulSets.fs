@@ -320,21 +320,14 @@ type StellarFormation with
             let peerSpecificLoadgen = { loadGen with offset = offset }
             LogInfo "Loadgen: %s with offset %d" (peer.GenerateLoad peerSpecificLoadgen) offset
 
-        while not (
-            List.fold
-                (fun (all: bool) (peer: Peer) ->
-                    (peer.IsLoadGenComplete() = Success || peer.IsLoadGenComplete() = Failure)
-                    && all)
-                true
-                loadGenPeers
-        ) do
+        while List.exists
+                  (fun (peer: Peer) -> not (peer.IsLoadGenComplete() = Success || peer.IsLoadGenComplete() = Failure))
+                  loadGenPeers do
             Thread.Sleep(millisecondsTimeout = 3000)
 
             for (i, peer) in (List.indexed loadGenPeers) do
                 peer.LogLoadGenProgressTowards(fractionalLoadGen i)
 
-        if (List.fold
-                (fun (anyFailed: bool) (peer: Peer) -> (peer.IsLoadGenComplete() = Failure || anyFailed))
-                false
-                loadGenPeers) then
-            failwith "Loadgen failed!"
+            // Check if any loadGen has failed
+            if List.exists (fun (peer: Peer) -> peer.IsLoadGenComplete() = Failure) loadGenPeers then
+                failwith "Loadgen failed!"
