@@ -113,8 +113,8 @@ let PrometheusExporterSidecarResourceRequirements : V1ResourceRequirements =
     makeResourceRequirements 10 64 50 64
 
 let NetworkDelayScriptResourceRequirements : V1ResourceRequirements =
-    // The network delay script needs 0.05 vCPU and 32MB RAM
-    makeResourceRequirements 10 32 50 32
+    // The network delay script needs 0.1 vCPU and 32MB RAM
+    makeResourceRequirements 20 32 100 32
 
 
 let GetSimulatePubnetResources networkSize : V1ResourceRequirements =
@@ -174,6 +174,14 @@ let AcceptanceTestCoreResourceRequirements : V1ResourceRequirements =
     // amount of memory because these tests are memory-intensive. 4 vCPU and 4GB
     // RAM required.
     makeResourceRequirements 4000 4096 4000 4096
+
+let SimulatePubnetMixedLoadResourceRequirements : V1ResourceRequirements =
+    // Guarantee all pods 0.7 vCPUs, which is about as high as we can guarantee
+    // with ~600 nodes. However, allow them to burst up to 4 vCPUs. This is
+    // helpful because validators experience heavy CPU and wind up throttled if
+    // limited to 0.7 vCPUs. However, 0.7 is enough for the vast majority of
+    // watchers.
+    makeResourceRequirements 700 1500 4000 1500
 
 let PgContainerVolumeMounts : V1VolumeMount array =
     [| V1VolumeMount(name = CfgVal.dataVolumeName, mountPath = CfgVal.dataVolumePath) |]
@@ -333,6 +341,7 @@ let CoreContainerForCommand
         | ParallelCatchupResources -> ParallelCatchupCoreResourceRequirements
         | NonParallelCatchupResources -> NonParallelCatchupCoreResourceRequirements
         | UpgradeResources -> UpgradeCoreResourceRequirements
+        | SimulatePubnetMixedLoadResources -> SimulatePubnetMixedLoadResourceRequirements
 
     V1Container(
         name = containerName,

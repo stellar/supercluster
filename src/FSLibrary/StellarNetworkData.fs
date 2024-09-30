@@ -7,6 +7,7 @@ module StellarNetworkData
 open FSharp.Data
 open StellarCoreSet
 open StellarCoreCfg
+open StellarDotnetSdk
 open StellarMissionContext
 open Logging
 open StellarDotnetSdk.Accounts
@@ -22,18 +23,23 @@ let TestnetLatestHistoryArchiveState =
 type PubnetNode = JsonProvider<"json-type-samples/sample-network-data.json", SampleIsList=false, ResolutionFolder=cwd>
 type Tier1PublicKey = JsonProvider<"json-type-samples/sample-keys.json", SampleIsList=false, ResolutionFolder=cwd>
 
+// Adjacency map for peers
+type PeerMap = Map<string, Set<string>>
+
 // When scaling the network, we need to pick
 // the degree of each new node.
 // The following numbers are added here based on pubnet observations/educated guesses.
-let minPeerCountTier1 = 25
+let minPeerCountTier1 = 27
 
-let maxPeerCountTier1 = 81
+let maxPeerCountTier1 = 64
 
 let peerCountTier1 (random: System.Random) : int = random.Next(minPeerCountTier1, maxPeerCountTier1)
 
 let minPeerCountNonTier1 = 1
 
-let maxPeerCountNonTier1 = 71
+// Capped at 65 because we don't want to have too many connections, even though
+// some non-tier1 nodes have more in practice.
+let maxPeerCountNonTier1 = 65
 
 let peerCountNonTier1 (random: System.Random) : int =
     if random.Next(2) = 0 then
@@ -152,18 +158,49 @@ let extractEdges (graph: PubnetNode.Root array) : (string * string) array =
 // Given `edgeSet` containing edges (each edge is represented as a pair of strings),
 // create a map whose key is a pubkey and the corresponding value is the list of
 // nodes it's connected to.
-let createAdjacencyMap (edgeList: (string * string) list) : Map<string, string list> =
+let createAdjacencyMap (edgeList: (string * string) list) : PeerMap =
     // So far, each edge connecting a and b is represented by the tuple (a, b) or (b, a).
     // When creating the adjacency list for the given graph,
     // we would like to add b to a's list, and a to b's list.
     // Therefore, for each edge, we swap the vertices and append it to the edge list.
-    let adjacencyList : (string * (string list)) list =
+    let adjacencyList : (string * Set<string>) list =
         edgeList
         |> List.append (List.map (fun (x, y) -> (y, x)) edgeList)
         |> List.groupBy fst
-        |> List.map (fun (x, y) -> (x, List.map snd y))
+        |> List.map (fun (x, y) -> (x, Set.ofList (List.map snd y)))
 
     Map.ofList adjacencyList
+
+// Get the number of peers a given node has.
+let private numPeers (map: PeerMap) (node: string) = Set.count (Map.find node map)
+
+// Prune the adjacency map to ensure that no node has more than `maxConnections`
+// connections.
+let private pruneAdjacencyMap (maxConnections: int) (m: PeerMap) : PeerMap =
+    let pruneConnections (acc: PeerMap) (node: string) : PeerMap =
+        let peers = Map.find node acc
+
+        if Set.count peers > maxConnections then
+            // Order peers by the number of connections they have
+            let sortedPeers = peers |> Set.toList |> List.sortBy (numPeers acc)
+
+            // Drop better connected peers. Keep the worst connected peers so as
+            // to not make them even worse connected.
+            let keep, drop = List.splitAt maxConnections sortedPeers
+
+            LogInfo "Pruning connections for %s: %d -> %d" node (Set.count peers) (List.length keep)
+
+            // Remove self from dropped peers' sets
+            let acc' =
+                List.fold (fun cur p -> Map.add p (Set.remove node (Map.find p cur)) cur) acc drop
+
+            // Modify map entry for `node` to point to the `keep` list
+            Map.add node (Set.ofList keep) acc'
+        else
+            acc
+
+    Seq.fold pruneConnections m (Map.keys m)
+
 
 // Add edges for `newNodes` and return a new adjacency map.
 // The degree of each new node is determined by
@@ -181,7 +218,7 @@ let addEdges
     (newNodes: string array)
     (tier1KeySet: Set<string>)
     (random: System.Random)
-    : Map<string, string list> =
+    : PeerMap =
 
     // Note that each edge is represented by a pair (a, b) with a < b.
     // This ensures that each edge appears exactly once in edgeArray.
@@ -319,6 +356,12 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
     // and cause an issue to the scaling algorithm.
     let adjacencyMap =
         addEdges allPubnetNodes (Array.map (fun (n: PubnetNode.Root) -> n.PublicKey) newNodes) tier1KeySet random
+        |> match context.maxConnections with
+           | Some maxConnections ->
+               // Prune map to ensure that no node has more than `maxConnections`
+               // connections.
+               pruneAdjacencyMap maxConnections
+           | None -> id
 
     // First, we will remove all nodes with <= 4 connections because those nodes
     // seem to fail to stay in sync with the network.
@@ -330,7 +373,7 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
 
     let orgNodes, miscNodes =
         allPubnetNodes
-        |> Array.filter (fun (n: PubnetNode.Root) -> minAllowedConnectionCount <= Array.length n.Peers)
+        |> Array.filter (fun (n: PubnetNode.Root) -> minAllowedConnectionCount <= numPeers adjacencyMap n.PublicKey)
         |> Array.partition (fun (n: PubnetNode.Root) -> n.SbHomeDomain.IsSome)
 
     // We then trim down the set of misc nodes so that they fit within simulation
@@ -372,7 +415,19 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
                     else if domain.Contains('.') then ((Array.rev (domain.Split('.'))).[1])
                     else domain
 
-                let lowercase = cleanOrgName.ToLower()
+                // Some orgs have both tier1 and non-tier1 nodes in them (such
+                // as Public Node). To avoid marking all of those nodes as tier1
+                // or not tier 1, we split them into separate orgs by appending
+                // "-non-tier1" to the home domain of any non-tier1 node in an
+                // org.
+                let withTierInfo =
+                    if not (Set.contains n.PublicKey tier1KeySet) then
+                        cleanOrgName + "-non-tier1"
+                    else
+                        cleanOrgName
+
+
+                let lowercase = withTierInfo.ToLower()
                 HomeDomainName lowercase)
             orgNodes
 
@@ -477,16 +532,22 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
     // If the given node has geolocation info, use it.
     // Otherwise, pseudo-randomly select one from the list of geolocations that we are aware of.
     // As mentioned above, this assignment is weighted. (i.e., A common geolocation is more likely to be selected.)
-    // Since the assignment depends on the Random object with a fixed seed,
-    // this assignment is persistent across different runs.
+    // The assignment is deterministic as it depends on the public key of the
+    // node. This ensures that geolocations persist across runs, even if the
+    // total number of nodes changes via the *-orgs-to-add flags.
     let getGeoLocOrDefault (n: PubnetNode.Root) : GeoLoc =
         match n.SbGeoData with
         | Some geoData -> { lat = float geoData.Latitude; lon = float geoData.Longitude }
         | None ->
+            let hash = Util.Hash(System.Text.Encoding.UTF8.GetBytes(n.PublicKey))
+            // Get index by taking first 4 bytes of hash and converting to an
+            // 32-bit unsigned int
+            let idx = System.BitConverter.ToUInt32(hash, 0)
+
             if Array.length geoLocations <> 0 then
-                geoLocations.[random.Next(0, Array.length geoLocations)]
+                geoLocations.[Checked.int (idx % (Checked.uint32 (Array.length geoLocations)))]
             else
-                locations.[random.Next(0, Array.length locations)]
+                locations.[Checked.int (idx % (Checked.uint32 (Array.length locations)))]
 
     let makeCoreSetWithExplicitKeys (hdn: HomeDomainName) (options: CoreSetOptions) (keys: KeyPair array) =
         { name = CoreSetName(hdn.StringName)
@@ -507,8 +568,9 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
                     |>
                     // This filtering is necessary since we intentionally remove some nodes
                     // using networkSizeLimit.
-                    List.filter (fun (k: string) -> Set.contains k allPubnetNodeKeys)
-                    |> List.map getSimPubKey
+                    Set.filter (fun (k: string) -> Set.contains k allPubnetNodeKeys)
+                    |> Set.map getSimPubKey
+                    |> Set.toList
 
                 (key, peers))
         |> Map.ofArray
