@@ -2,8 +2,8 @@
 
 The theoretical max TPS test is a configuration of the `MaxTPSClassic` mission
 that searches for a maximum transaction-per-second rate that stellar-core can
-support under ideal circumstances. It uses a 7 node network with 3 validators.
-We provide this topology in
+support under ideal circumstances. It uses a network of 7 stellar-core nodes, of
+which 3 are validators.  We provide this topology in
 [`/topologies/theoretical-max-tps.json`](../topologies/theoretical-max-tps.json).
 
 To run the test, first [set up an EKS cluster](eks.md). Then, run a
@@ -26,6 +26,6 @@ Finally, don't forget to shut down your EKS cluster.
 This table contains the theoretical max TPS stellar-core achieved, ordered by
 stellar-core release.
 
-| Core Version | Core Image | EC2 Instance Type | Number of Instances | Max TPS |
-|--------------|------------|-------------------|---------------------|---------|
-| 21.1.0 | `stellar/unsafe-stellar-core:21.0.1-1917.52a449ff3.focal-testing-asan-disabled-perftests` | m5d.4xlarge | 10 | 1137 |
+| Core Version | Core Image | Topology (total # of stellar-core nodes / # of validators) | EC2 Instance Type | Number of EC2 Instances | Max TPS |
+|--------------|------------|------------------------------------------------------------|-------------------|-------------------------|---------|
+| 21.1.0 | `stellar/unsafe-stellar-core:21.0.1-1917.52a449ff3.focal-testing-asan-disabled-perftests` | 7 / 3 | m5d.4xlarge | 10 | 1137 |
