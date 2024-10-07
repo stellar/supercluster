@@ -434,7 +434,7 @@ type MissionOptions
     [<Option("pubnet-parallel-catchup-num-workers",
              HelpText = "number of workers to run parallel catchup with (only supported for V2)",
              Required = false,
-             Default = 128)>]
+             Default = 160)>]
     member self.PubnetParallelCatchupNumWorkers = pubnetParallelCatchupNumWorkers
 
     [<Option("tag", HelpText = "optional name to tag the run with", Required = false)>]
