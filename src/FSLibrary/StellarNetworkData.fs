@@ -454,8 +454,6 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
               // sync before all the nodes are online.
               syncStartupDelay = Some(30)
               invariantChecks = AllInvariantsExceptBucketConsistencyChecks
-              // Disable BucketListDB to use in-memory SQL instead
-              deprecatedSQLState = true
               dumpDatabase = false }
 
     // Sorted list of known geolocations.
@@ -701,8 +699,6 @@ let StableApproximateTier1CoreSets (image: string) (flatQuorum: bool) : CoreSet 
                   tier1 = Some(true)
                   initialization = CoreSetInitialization.OnlyNewDb
                   invariantChecks = InvariantChecksSpec.NoInvariants
-                  // Disable BucketListDB to use in-memory SQL instead
-                  deprecatedSQLState = true
                   dumpDatabase = false }
 
         { name = CoreSetName(org)
