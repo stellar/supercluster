@@ -5,7 +5,10 @@
 module StellarCoreCfg
 
 open FSharp.Data
+open Logging
 open Nett
+open System
+open System.Collections
 open System.Text.RegularExpressions
 open StellarCoreSet
 open StellarNetworkCfg
@@ -141,6 +144,7 @@ type StellarCoreCfg =
       networkPassphrase: NetworkPassphrase
       nodeSeed: KeyPair
       nodeIsValidator: bool
+      homeDomain: string option
       runStandalone: bool
       image: string
       preferredPeers: PeerDnsName list
@@ -156,6 +160,7 @@ type StellarCoreCfg =
       unsafeQuorum: bool
       failureSafety: int
       quorumSet: QuorumSet
+      forceOldStyleLeaderElection: bool
       historyNodes: Map<PeerShortName, PeerDnsName>
       historyGetCommands: Map<PeerShortName, string>
       localHistory: bool
@@ -209,6 +214,10 @@ type StellarCoreCfg =
         t.Add("CATCHUP_COMPLETE", self.catchupMode = CatchupComplete) |> ignore
         if self.network.missionContext.enableBackggroundOverlay then
             t.Add("EXPERIMENTAL_BACKGROUND_OVERLAY_PROCESSING", true) |> ignore
+
+        match self.homeDomain with
+        | None -> ()
+        | Some hd -> t.Add("NODE_HOME_DOMAIN", hd) |> ignore
 
         match self.network.missionContext.peerReadingCapacity, self.network.missionContext.peerFloodCapacity with
         | None, None -> ()
@@ -308,6 +317,9 @@ type StellarCoreCfg =
         t.Add("QUORUM_INTERSECTION_CHECKER", false) |> ignore
         t.Add("MANUAL_CLOSE", self.manualClose) |> ignore
 
+        if self.forceOldStyleLeaderElection then
+            t.Add("FORCE_OLD_STYLE_LEADER_ELECTION", true) |> ignore
+
         let invList =
             match self.invariantChecks with
             | AllInvariants -> [ ".*" ]
@@ -323,7 +335,7 @@ type StellarCoreCfg =
         | Some duration -> t.Add("ARTIFICIALLY_SET_SURVEY_PHASE_DURATION_FOR_TESTING", duration) |> ignore
 
         // Add tables (and subtables, recursively) for qsets.
-        let rec addQsetAt (label: string) (qs: QuorumSet) =
+        let rec addExplicitQsetAt (label: string) (qs: ExplicitQuorumSet) =
             let validators : string array =
                 Map.toArray qs.validators
                 |> Array.map (fun (n: PeerShortName, k: KeyPair) -> sprintf "%s %s" k.Address n.StringName)
@@ -335,11 +347,54 @@ type StellarCoreCfg =
             | None -> ()
             | Some (pct) -> innerTab.Add("THRESHOLD_PERCENT", pct) |> ignore
 
-            Array.iteri (fun (i: int) (qs: QuorumSet) -> addQsetAt (sprintf "%s.sub%d" label i) qs) qs.innerQuorumSets
+            Array.iteri
+                (fun (i: int) (qs: ExplicitQuorumSet) -> addExplicitQsetAt (sprintf "%s.sub%d" label i) qs)
+                qs.innerQuorumSets
 
-        addQsetAt "QUORUM_SET" self.quorumSet
+        let homeDomainToTable (homeDomain: HomeDomain) =
+            let ret = Toml.Create()
+            ret.Add("HOME_DOMAIN", homeDomain.name) |> ignore
+
+            ret.Add("QUALITY", homeDomain.quality.ToString() |> String.map Char.ToUpper)
+            |> ignore
+
+            ret
+
+        let autoValidatorToTable (autoValidator: AutoValidator) =
+            let ret = Toml.Create()
+            ret.Add("NAME", autoValidator.name.StringName) |> ignore
+            ret.Add("HOME_DOMAIN", autoValidator.homeDomain) |> ignore
+            ret.Add("PUBLIC_KEY", autoValidator.keys.Address) |> ignore
+
+            match Map.tryFind autoValidator.name self.historyGetCommands with
+            | Some cmd -> ret.Add("HISTORY", cmd) |> ignore
+            | None ->
+                match Map.tryFind autoValidator.name self.historyNodes with
+                | Some dnsName -> ret.Add("HISTORY", Map.find "get" (remoteHist dnsName)) |> ignore
+                | None -> ()
+
+            ret
 
         let localTab = t.Add("HISTORY", Toml.Create(), TomlObjectFactory.RequireTomlObject()).Added
+
+        match self.quorumSet with
+        | ExplicitQuorumSet qs ->
+            addExplicitQsetAt "QUORUM_SET" qs
+
+            for historyNode in self.historyNodes do
+                localTab.Add(historyNode.Key.StringName, remoteHist historyNode.Value) |> ignore
+
+            for historyGetCommand in self.historyGetCommands do
+                localTab.Add(historyGetCommand.Key.StringName, getHist historyGetCommand.Value)
+                |> ignore
+        | AutoQuorumSet qs ->
+            let homeDomainsTab = t.Add("HOME_DOMAINS", ([]: IDictionary list)).Added
+            List.iter (fun hd -> homeDomainsTab.Add(homeDomainToTable hd) |> ignore) qs.homeDomains
+            let validatorsTab = t.Add("VALIDATORS", ([]: IDictionary list)).Added
+            // Filter out local node
+            let validators = List.filter (fun (v: AutoValidator) -> v.keys <> self.nodeSeed) qs.validators
+            List.iter (fun v -> validatorsTab.Add(autoValidatorToTable v) |> ignore) validators
+
         // When simulateApplyWeight = Some _, stellar-core sets MODE_STORES_HISTORY
         // which is used for simulations that only test consensus.
         // In such cases, we should not pass put and mkdir commands.
@@ -353,12 +408,6 @@ type StellarCoreCfg =
             )
             |> ignore
 
-        for historyNode in self.historyNodes do
-            localTab.Add(historyNode.Key.StringName, remoteHist historyNode.Value) |> ignore
-
-        for historyGetCommand in self.historyGetCommands do
-            localTab.Add(historyGetCommand.Key.StringName, getHist historyGetCommand.Value)
-            |> ignore
 
         t
 
@@ -427,17 +476,60 @@ type NetworkCfg with
         self.CoreSetList |> List.map processCoreSet |> List.concat |> Map.ofList
 
     member self.QuorumSet(o: CoreSetOptions) : QuorumSet =
-        let ofNameKeyList (nks: (PeerShortName * KeyPair) array) (threshold: int option) : QuorumSet =
-            { thresholdPercent = threshold
-              validators = Map.ofArray nks
-              innerQuorumSets = [||] }
+        let toExplicitQSet (nks: (PeerShortName * KeyPair) array) (threshold: int option) : QuorumSet =
+            LogInfo "Using explicit quorum set configuration"
+
+            ExplicitQuorumSet
+                { thresholdPercent = threshold
+                  validators = Map.ofArray nks
+                  innerQuorumSets = [||] }
+
+        let toAutoQSet (nks: (PeerShortName * KeyPair) list) (homeDomain: string) =
+            LogInfo "Using auto quorum set configuration"
+            let homeDomains = [ { name = homeDomain; quality = High } ]
+
+            let validators =
+                List.map (fun (n: PeerShortName, k) -> { name = n; homeDomain = homeDomain; keys = k }) nks
+
+            AutoQuorumSet { homeDomains = homeDomains; validators = validators }
+
+        // Generate a QuorumSet from an array of (PeerShortName, KeyPair) pairs.
+        // Produces a simple flat qset of nodes. Uses auto quorum set
+        // configuration if possible.
+        let simpleQuorum (nks: (PeerShortName * KeyPair) array) =
+            match o.homeDomain with
+            | Some hd ->
+                if nks.Length >= 3 then
+                    // There are enough validators to use auto quorum set config
+                    toAutoQSet (List.ofArray nks) hd
+                else if o.requireAutoQset then
+                    failwith "Auto quorum set configuration requires at least 3 validators"
+                else
+                    // Fall back on manual quorum set configuration
+                    toExplicitQSet nks None
+            | None ->
+                if o.requireAutoQset then
+                    failwith "Auto quorum set configuration requires a home domain"
+                else
+                    toExplicitQSet nks None
+
+        let checkAutoQSetIncompatability (mode: string) =
+            if o.requireAutoQset then
+                failwithf "Auto quorum set configuration is incompatible with %s" mode
+            else
+                ()
 
         match o.quorumSet with
-        | AllPeersQuorum -> ofNameKeyList (self.GetNameKeyListAll()) None
-        | CoreSetQuorum (ns) -> ofNameKeyList (self.GetNameKeyList [ ns ]) None
-        | CoreSetQuorumList (q) -> ofNameKeyList (self.GetNameKeyList q) None
-        | CoreSetQuorumListWithThreshold (q, t) -> ofNameKeyList (self.GetNameKeyList q) (Some(t))
-        | ExplicitQuorum (e) -> e
+        | AllPeersQuorum -> simpleQuorum (self.GetNameKeyListAll())
+        | CoreSetQuorum (ns) -> simpleQuorum (self.GetNameKeyList [ ns ])
+        | CoreSetQuorumList (q) -> simpleQuorum (self.GetNameKeyList q)
+        | CoreSetQuorumListWithThreshold (q, t) ->
+            checkAutoQSetIncompatability "CoreSetQuorumListWithThreshold"
+            toExplicitQSet (self.GetNameKeyList q) (Some(t))
+        | ExplicitQuorum (e) ->
+            checkAutoQSetIncompatability "ExplicitQuorum"
+            ExplicitQuorumSet e
+        | AutoQuorum q -> AutoQuorumSet q
 
     member self.HistoryNodes(o: CoreSetOptions) : Map<PeerShortName, PeerDnsName> =
         match o.historyNodes, o.quorumSet with
@@ -473,6 +565,7 @@ type NetworkCfg with
           networkPassphrase = self.networkPassphrase
           nodeSeed = KeyPair.Random()
           nodeIsValidator = false
+          homeDomain = None
           runStandalone = false
           image = opts.image
           preferredPeers = self.PreferredPeers opts
@@ -488,6 +581,7 @@ type NetworkCfg with
           unsafeQuorum = opts.unsafeQuorum
           failureSafety = 0
           quorumSet = self.QuorumSet opts
+          forceOldStyleLeaderElection = opts.forceOldStyleLeaderElection
           historyNodes = self.HistoryNodes opts
           historyGetCommands = opts.historyGetCommands
           localHistory = opts.localHistory
@@ -505,6 +599,7 @@ type NetworkCfg with
           networkPassphrase = self.networkPassphrase
           nodeSeed = c.keys.[i]
           nodeIsValidator = c.options.validate
+          homeDomain = c.options.homeDomain
           runStandalone = false
           image = c.options.image
           preferredPeers =
@@ -526,6 +621,7 @@ type NetworkCfg with
           unsafeQuorum = c.options.unsafeQuorum
           failureSafety = 0
           quorumSet = self.QuorumSet c.options
+          forceOldStyleLeaderElection = c.options.forceOldStyleLeaderElection
           historyNodes = self.HistoryNodes c.options
           historyGetCommands = c.options.historyGetCommands
           localHistory = c.options.localHistory
