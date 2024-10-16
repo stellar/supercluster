@@ -13,7 +13,7 @@ DEFAULT_REGION = "us-west-2"
 # topology plus 3 to cover the ingress controller and two coredns instances.
 DEFAULT_NUM_NODES = 10
 DEFAULT_NODE_TYPE = "m5d.4xlarge"
-KUBERNETES_VERSION = "1.28"
+KUBERNETES_VERSION = "1.29"
 SSH_USERNAME = "ec2-user"
 NVME_MOUNT_SCRIPT = "https://raw.githubusercontent.com/awslabs/amazon-eks-ami/86105105a83fdc80e682b850aac6f626119a6951/templates/shared/runtime/bin/setup-local-disks"
 DNS_RETRY_INTERVAL_SECONDS = 60
