@@ -3,14 +3,15 @@ kind: Ingress
 metadata:
   name: job-monitor-ingress
   annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$1
 spec:
   ingressClassName: "{{ .Values.monitor.ingress_class_name}}"
   rules:
   - host: "{{ .Values.monitor.hostname}}"
     http:
       paths:
-      - path: /
+      - path: "{{ .Values.monitor.path}}"
         pathType: Prefix
         backend:
           service:
