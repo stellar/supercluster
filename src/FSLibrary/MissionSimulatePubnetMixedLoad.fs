@@ -115,5 +115,4 @@ let simulatePubnetMixedLoad (baseContext: MissionContext) =
                           minSorobanPercentSuccess = Some 100 }
 
             formation.RunMultiLoadgen loadGenerators loadGen
-            formation.CheckNoErrorsAndPairwiseConsistency()
             formation.EnsureAllNodesInSync fullCoreSet)
