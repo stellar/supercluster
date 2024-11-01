@@ -33,7 +33,7 @@ let private maxOption (x: int option) (y: int option) =
 
 // Upgrade max tx size to 2x the maximum possible from the distributions in
 // `context`
-let private upgradeSorobanTxLimits (context: MissionContext) (formation: StellarFormation) (coreSetList: CoreSet list) =
+let upgradeSorobanTxLimits (context: MissionContext) (formation: StellarFormation) (coreSetList: CoreSet list) =
     formation.SetupUpgradeContract coreSetList.Head
 
     let multiplier = 2
@@ -81,7 +81,7 @@ let private limitMultiplier = 5 * 2
 
 let private smallNetworkSize = 10
 
-let private upgradeSorobanLedgerLimits
+let upgradeSorobanLedgerLimits
     (context: MissionContext)
     (formation: StellarFormation)
     (coreSetList: CoreSet list)

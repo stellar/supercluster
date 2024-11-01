@@ -12,6 +12,13 @@ let GetOrDefault optional def =
     | Some (x) -> x
     | _ -> def
 
+// If `list` is empty, return `value`. Otherwise, return `list`.
+let defaultListValue value list =
+    match list with
+    | [] -> value
+    | _ -> list
+
+
 type LogLevels = { LogDebugPartitions: string list; LogTracePartitions: string list }
 
 type CoreResources =
@@ -23,6 +30,7 @@ type CoreResources =
     | ParallelCatchupResources
     | NonParallelCatchupResources
     | UpgradeResources
+    | SimulatePubnetMixedLoadResources
 
 type MissionContext =
     { kube: Kubernetes
@@ -63,6 +71,7 @@ type MissionContext =
       pubnetData: string option
       flatQuorum: bool option
       tier1Keys: string option
+      maxConnections: int option
       opCountDistribution: string option
       wasmBytesDistribution: ((int * int) list)
       dataEntriesDistribution: ((int * int) list)
