@@ -59,6 +59,6 @@ data:
   OVERLAP_LEDGERS: "{{ .Values.range_generator.params.overlap_ledgers }}"
   LEDGERS_PER_JOB: "{{ .Values.range_generator.params.uniform_ledgers_per_job }}"
   LOGARITHMIC_FLOOR_LEDGERS: "{{ .Values.range_generator.params.logarithmic_floor_ledgers }}"
-  NUM_PARALLELISM: "160"
+  NUM_PARALLELISM: "192"
   REDIS_HOST: "{{ .Values.redis.hostname}}"
   REDIS_PORT: "{{ .Values.redis.port}}"
