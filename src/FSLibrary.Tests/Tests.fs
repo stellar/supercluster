@@ -14,6 +14,7 @@ open StellarNetworkData
 open StellarNetworkDelays
 open MissionCatchupHelpers
 open Xunit.Abstractions
+open Nett
 
 
 [<Fact>]
@@ -115,7 +116,8 @@ let ctx : MissionContext =
       pubnetParallelCatchupNumWorkers = 128
       tag = None
       numRuns = None
-      enableTailLogging = true }
+      enableTailLogging = true
+      tomlOverrides = None }
 
 let netdata = __SOURCE_DIRECTORY__ + "/../../../data/public-network-data-2024-08-01.json"
 let pubkeys = __SOURCE_DIRECTORY__ + "/../../../data/tier1keys.json"
@@ -124,6 +126,17 @@ let pubnetctx = { ctx with pubnetData = Some netdata; tier1Keys = Some pubkeys }
 let nCfg = MakeNetworkCfg ctx [ coreSet ] passOpt
 
 type Tests(output: ITestOutputHelper) =
+    [<Fact>]
+    member __.``TOML overrides``() =
+        let cfg = nCfg.StellarCoreCfg(coreSet, 1, MainCoreContainer)
+        cfg.tomlOverrides <- "DATABASE = \"some-other-value\" \n CATCHUP_SKIP_KNOWN_RESULTS = true"
+        let toml = cfg.ToTOML()
+        let mutable dbValue = null
+        let mutable catchtupValue = null
+        Assert.True(toml.TryGetValue("DATABASE", &dbValue))
+        Assert.True(toml.TryGetValue("CATCHUP_SKIP_KNOWN_RESULTS", &catchtupValue))
+        Assert.Equal(dbValue.ToString(), "some-other-value")
+        Assert.True((catchtupValue :?> TomlValue<bool>).Value)
 
     [<Fact>]
     member __.``TOML Config looks reasonable``() =

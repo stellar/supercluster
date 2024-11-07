@@ -99,4 +99,5 @@ type MissionContext =
       // and SimulatePubnet to fail on the heartbeat handler due to what looks like a
       // server disconnection. Our solution for now is to just disable tail logging on
       // those missions.
-      enableTailLogging: bool }
+      enableTailLogging: bool
+      tomlOverrides: string option }

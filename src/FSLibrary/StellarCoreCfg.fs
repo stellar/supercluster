@@ -133,6 +133,12 @@ let distributionToToml (d: (int * int) list) (name: string) (t: TomlTable) : uni
         t.Add("LOADGEN_" + name + "_FOR_TESTING", values) |> ignore
         t.Add("LOADGEN_" + name + "_DISTRIBUTION_FOR_TESTING", weights) |> ignore
 
+// Parse a string containing toml key value pairs and inline tables, and add it to the TOML table.
+let addTomlStringToTable (tomlString: string) (t: TomlTable) : TomlTable =
+    let toml = Toml.ReadString(tomlString)
+    let combinedTable = TomlTable.Combine(fun op -> op.Overwrite(t).With(toml).ForAllSourceRows())
+    combinedTable
+
 // Represents the contents of a stellar-core.cfg file, along with method to
 // write it out to TOML.
 type StellarCoreCfg =
@@ -165,7 +171,8 @@ type StellarCoreCfg =
       addArtificialDelayUsec: int option // optional delay for testing in microseconds
       deprecatedSQLState: bool
       surveyPhaseDuration: int option
-      containerType: CoreContainerType }
+      containerType: CoreContainerType
+      mutable tomlOverrides: string }
 
     member self.ToTOML() : TomlTable =
         let t = Toml.Create()
@@ -361,7 +368,7 @@ type StellarCoreCfg =
             localTab.Add(historyGetCommand.Key.StringName, getHist historyGetCommand.Value)
             |> ignore
 
-        t
+        addTomlStringToTable self.tomlOverrides t
 
     override self.ToString() : string =
         // Unfortunately Nett mis-quotes dotted keys -- it'll write out keys
@@ -498,7 +505,8 @@ type NetworkCfg with
           addArtificialDelayUsec = opts.addArtificialDelayUsec
           deprecatedSQLState = opts.deprecatedSQLState
           surveyPhaseDuration = opts.surveyPhaseDuration
-          containerType = MainCoreContainer }
+          containerType = MainCoreContainer
+          tomlOverrides = "" }
 
     member self.StellarCoreCfg(c: CoreSet, i: int, ctype: CoreContainerType) : StellarCoreCfg =
         { network = self
@@ -536,4 +544,5 @@ type NetworkCfg with
           addArtificialDelayUsec = c.options.addArtificialDelayUsec
           deprecatedSQLState = c.options.deprecatedSQLState
           surveyPhaseDuration = c.options.surveyPhaseDuration
-          containerType = ctype }
+          containerType = ctype
+          tomlOverrides = "" }
