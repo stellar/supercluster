@@ -26,8 +26,9 @@ let valuesFilePath = helmChartPath + "/values.yaml"
 let jobMonitorHostName = "ssc-job-monitor.services.stellar-ops.com"
 let jobMonitorStatusEndPoint = "/status"
 let jobMonitorMetricsEndPoint = "/metrics"
-let jobMonitorStatusCheckIntervalSecs = 300
-let jobMonitorMetricsCheckIntervalSecs = 300
+let jobMonitorLoggingIntervalSecs = 300 // frequency of job monitor's internal information gathering (querying core endpoint and redis metrics) and logging
+let jobMonitorStatusCheckIntervalSecs = 300 // frequency of us querying job monitor's `/status` end point
+let jobMonitorMetricsCheckIntervalSecs = 300 // frequency of us querying job monitor's `/metrics` end point
 let jobMonitorStatusCheckTimeOutSecs = 600
 let mutable toPerformCleanup = true
 
@@ -72,6 +73,8 @@ let installProject (context: MissionContext) =
 
     setOptions.Add(sprintf "range_generator.params.latest_ledger_num=%d" endLedger)
     setOptions.Add(sprintf "monitor.hostname=%s" jobMonitorHostName)
+    setOptions.Add(sprintf "monitor.path=/%s/(.*)" context.namespaceProperty)
+    setOptions.Add(sprintf "monitor.logging_interval_seconds=%d" jobMonitorLoggingIntervalSecs)
 
     // comment out the line below when doing local testing
     Environment.SetEnvironmentVariable("KUBECONFIG", context.kubeCfg)
@@ -111,13 +114,13 @@ Console.CancelKeyPress.Add
         cleanup ()
         Environment.Exit(0))
 
-let getJobMonitorStatus (endPoint: String) =
+let queryJobMonitor (path: String, endPoint: String) =
     try
         use client = new HttpClient()
+        let url = "http://" + jobMonitorHostName + path + endPoint
+        let response = client.GetStringAsync(url).Result
 
-        let response = client.GetStringAsync("http://" + jobMonitorHostName + endPoint).Result
-
-        LogInfo "job monitor '%s': %s" endPoint response
+        LogInfo "job monitor query '%s', got response: %s" url response
         let json = JObject.Parse(response)
         Some(json)
     with ex ->
@@ -146,10 +149,11 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
     let mutable allJobsFinished = false
     let mutable timeoutLeft = jobMonitorStatusCheckTimeOutSecs
     let mutable timeBeforeNextMetricsCheck = jobMonitorMetricsCheckIntervalSecs
+    let jobMonitorPath = "/" + context.namespaceProperty
 
     while not allJobsFinished do
         Thread.Sleep(jobMonitorStatusCheckIntervalSecs * 1000)
-        let statusOpt = getJobMonitorStatus (jobMonitorStatusEndPoint)
+        let statusOpt = queryJobMonitor (jobMonitorPath, jobMonitorStatusEndPoint)
 
         try
             match statusOpt with
@@ -169,7 +173,7 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
 
                 if remainSize = 0 && JobsInProgress.Count = 0 then
                     // perform a final get for the metrics
-                    getJobMonitorStatus (jobMonitorMetricsEndPoint) |> ignore
+                    queryJobMonitor (jobMonitorPath, jobMonitorMetricsEndPoint) |> ignore
 
                     // check all workers are down
                     let allWorkersDown =
@@ -186,7 +190,7 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
                 timeBeforeNextMetricsCheck <- timeBeforeNextMetricsCheck - jobMonitorStatusCheckIntervalSecs
 
                 if timeBeforeNextMetricsCheck <= 0 then
-                    getJobMonitorStatus (jobMonitorMetricsEndPoint) |> ignore
+                    queryJobMonitor (jobMonitorPath, jobMonitorMetricsEndPoint) |> ignore
                     timeBeforeNextMetricsCheck <- jobMonitorMetricsCheckIntervalSecs
 
             | None ->
