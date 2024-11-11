@@ -19,7 +19,7 @@ open System.Threading
 
 
 type KubeOption(kubeConfig: string, namespaceProperty: string option) =
-    [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
+    [<Option('k', "kubeconfig", HelpText = "HELLO FROM ACCEPT TOML BRANCH Kubernetes config file", Required = false, Default = "~/.kube/config")>]
     member self.KubeConfig = kubeConfig
 
     [<Option("namespace", HelpText = "Namespace to use, overriding kubeconfig.", Required = false)>]
