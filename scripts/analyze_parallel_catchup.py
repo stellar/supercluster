@@ -24,7 +24,7 @@ def extract_metrics(file_path):
     # Find the line containing "job monitor '/metrics'"
     for line in lines:
         line_str = line.decode('utf-8')
-        if "job monitor '/metrics'" in line_str:
+        if "job monitor query 'http://ssc-job-monitor.services.stellar-ops.com/stellar-supercluster/metrics'" in line_str:
             match = re.search(r':\s*(\{.*\})$', line_str)
             if match:
                 metrics_data = json.loads(match.group(1))
@@ -126,6 +126,6 @@ def main(file_path, save_path):
         print("No metrics found in the file.")
 
 # Example usage
-file_path = '../src/App/logs/stellar-supercluster.log'
-save_path = '../src/App/logs'
+file_path = './stellar-supercluster.log'
+save_path = './'
 main(file_path, save_path)
