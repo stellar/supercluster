@@ -45,3 +45,8 @@ type Destination(path: string) =
         let fullPath = Path.Combine [| path; name |]
         LogInfo "Writing data to %s" fullPath
         File.WriteAllText(fullPath, content)
+
+    member public self.WriteLines (name: string) (content: string array) : unit =
+        let fullPath = Path.Combine [| path; name |]
+        LogInfo "Writing data to %s" fullPath
+        File.WriteAllLines(fullPath, content)

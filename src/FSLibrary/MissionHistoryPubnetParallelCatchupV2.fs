@@ -26,11 +26,13 @@ let valuesFilePath = helmChartPath + "/values.yaml"
 let jobMonitorHostName = "ssc-job-monitor.services.stellar-ops.com"
 let jobMonitorStatusEndPoint = "/status"
 let jobMonitorMetricsEndPoint = "/metrics"
-let jobMonitorLoggingIntervalSecs = 300 // frequency of job monitor's internal information gathering (querying core endpoint and redis metrics) and logging
-let jobMonitorStatusCheckIntervalSecs = 300 // frequency of us querying job monitor's `/status` end point
-let jobMonitorMetricsCheckIntervalSecs = 300 // frequency of us querying job monitor's `/metrics` end point
+let jobMonitorLoggingIntervalSecs = 30 // frequency of job monitor's internal information gathering (querying core endpoint and redis metrics) and logging
+let jobMonitorStatusCheckIntervalSecs = 60 // frequency of us querying job monitor's `/status` end point
+let jobMonitorMetricsCheckIntervalSecs = 60 // frequency of us querying job monitor's `/metrics` end point
 let jobMonitorStatusCheckTimeOutSecs = 600
 let mutable toPerformCleanup = true
+let failedJobLogFileLineCount = 10000
+let failedJobLogStreamLineCount = 1000
 
 let runCommand (command: string []) =
     try
@@ -134,11 +136,22 @@ let dumpLogs (context: MissionContext, podName: String) =
             name = podName,
             namespaceParameter = context.namespaceProperty,
             container = "stellar-core",
-            tailLines = Nullable<int> 10000
+            tailLines = Nullable<int> failedJobLogFileLineCount // lines to log to the file
         )
+    // log the last few lines to the concole
+    use reader = new System.IO.StreamReader(stream)
+    let logLines = ResizeArray<string>()
+
+    while not reader.EndOfStream do
+        logLines.Add(reader.ReadLine())
+
+    let lineStart = max 0 (logLines.Count - failedJobLogStreamLineCount)
+
+    for i in lineStart .. logLines.Count - 1 do
+        LogInfo "%s" logLines.[i]
 
     let filename = sprintf "%s.log" podName
-    context.destination.WriteStream filename stream
+    context.destination.WriteLines filename (logLines.ToArray())
     stream.Close()
 
 let historyPubnetParallelCatchupV2 (context: MissionContext) =
@@ -164,12 +177,17 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
                 let JobsInProgress = status.["jobs_in_progress"] :?> JArray
 
                 if jobsFailed.Count <> 0 then
-                    for job in jobsFailed do
-                        let podName = job.ToString().Split('|').[1]
-                        dumpLogs (context, podName)
+                    LogInfo "One or more jobs have failed:"
 
-                    let res = jobsFailed |> Seq.map string |> String.concat ","
-                    failwith (sprintf "Catch up failed on these ranges: %s" res)
+                    for job in jobsFailed do
+                        let ident = job.ToString().Split('|')
+                        let key = ident.[0]
+                        let podName = ident.[1]
+                        LogInfo "%s, logs >>> " (job.ToString())
+                        dumpLogs (context, podName)
+                        LogInfo "<<<"
+
+                    failwith "Catch up failed, check logs for more info"
 
                 if remainSize = 0 && JobsInProgress.Count = 0 then
                     // perform a final get for the metrics

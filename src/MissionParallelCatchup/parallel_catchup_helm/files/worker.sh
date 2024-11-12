@@ -30,8 +30,8 @@ if [ -n "$JOB_KEY" ]; then
     START_TIME=$(date +%s)  
     echo "Processing job: $JOB_KEY"
 
-    if [ ! "$(/usr/bin/stellar-core --conf /config/stellar-core.cfg new-db&&
-    /usr/bin/stellar-core --conf /config/stellar-core.cfg catchup "$JOB_KEY" --metric 'ledger.transaction.apply')" ]; then
+    if [ ! "$(/usr/bin/stellar-core --conf /config/stellar-core.cfg new-db --console&&
+    /usr/bin/stellar-core --conf /config/stellar-core.cfg catchup "$JOB_KEY" --metric 'ledger.transaction.apply' --console)" ]; then
     echo "Error processing job: $JOB_KEY"
     redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" LPUSH "$FAILED_QUEUE" "$JOB_KEY|$POD_NAME" # enhance the entry with pod name for tracking
     else
