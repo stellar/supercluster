@@ -100,4 +100,4 @@ type MissionContext =
       // server disconnection. Our solution for now is to just disable tail logging on
       // those missions.
       enableTailLogging: bool
-      tomlOverrides: string option }
+      mutable tomlOverrides: string }

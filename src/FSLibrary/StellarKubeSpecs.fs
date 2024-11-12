@@ -461,7 +461,9 @@ type NetworkCfg with
     member self.JobConfigMap(opts: CoreSetOptions) : V1ConfigMap =
         let cfgmapname = self.JobCfgMapName
         let filename = CfgVal.jobCfgFileName
-        let filedata = (self.StellarCoreCfgForJob opts).ToString()
+        let coreCfg = self.StellarCoreCfgForJob opts
+        coreCfg.tomlOverrides <- self.missionContext.tomlOverrides
+        let filedata = (coreCfg).ToString()
         V1ConfigMap(metadata = self.NamespacedMeta cfgmapname, data = Map.empty.Add(filename, filedata))
 
     // Returns an array of ConfigMaps, which is either a single Job ConfigMap if

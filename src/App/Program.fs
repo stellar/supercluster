@@ -19,7 +19,7 @@ open System.Threading
 
 
 type KubeOption(kubeConfig: string, namespaceProperty: string option) =
-    [<Option('k', "kubeconfig", HelpText = "HELLO FROM ACCEPT TOML BRANCH Kubernetes config file", Required = false, Default = "~/.kube/config")>]
+    [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
     member self.KubeConfig = kubeConfig
 
     [<Option("namespace", HelpText = "Namespace to use, overriding kubeconfig.", Required = false)>]
@@ -108,7 +108,7 @@ type MissionOptions
         pubnetParallelCatchupNumWorkers: int,
         tag: string option,
         numRuns: int option,
-        tomlOverrides: string option
+        tomlOverrides: string
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -449,7 +449,7 @@ type MissionOptions
     [<Option("toml-overrides",
              HelpText = "TOML key-value or inline table overrides for stellar-core config",
              Required = false)>]
-    member self.TomlOverrides = tomlOverrides
+    member self.tomlOverrides = tomlOverrides
 
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' with
@@ -563,7 +563,7 @@ let main argv =
                   tag = None
                   numRuns = None
                   enableTailLogging = true
-                  tomlOverrides = None }
+                  tomlOverrides = "" }
 
             let nCfg = MakeNetworkCfg ctx [] None
             use formation = kube.MakeEmptyFormation nCfg
@@ -698,7 +698,7 @@ let main argv =
                                tag = mission.Tag
                                numRuns = mission.NumRuns
                                enableTailLogging = true
-                               tomlOverrides = mission.TomlOverrides }
+                               tomlOverrides = mission.tomlOverrides }
 
                          allMissions.[m] missionContext
 
