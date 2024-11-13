@@ -214,6 +214,7 @@ type StellarCoreCfg =
         t.Add("PREFERRED_PEERS_ONLY", self.preferredPeersOnly) |> ignore
         t.Add("COMMANDS", logLevelCommands) |> ignore
         t.Add("CATCHUP_COMPLETE", self.catchupMode = CatchupComplete) |> ignore
+        t.Add("CATCHUP_SKIP_KNOWN_RESULTS", true) |> ignore
 
         if self.network.missionContext.enableBackggroundOverlay then
             t.Add("EXPERIMENTAL_BACKGROUND_OVERLAY_PROCESSING", true) |> ignore
