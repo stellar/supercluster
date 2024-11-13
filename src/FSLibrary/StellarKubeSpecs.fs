@@ -465,7 +465,7 @@ type NetworkCfg with
         coreCfg.tomlOverrides <- self.missionContext.tomlOverrides
         let filedata = (coreCfg).ToString()
         LogInfo "Job Config Map filedata:"
-        LogInfo "--- %s ---" filedata 
+        LogInfo "--- %s ---" filedata
         LogInfo "end JobConfigMap filedata"
         V1ConfigMap(metadata = self.NamespacedMeta cfgmapname, data = Map.empty.Add(filename, filedata))
 

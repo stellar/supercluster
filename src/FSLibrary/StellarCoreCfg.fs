@@ -371,7 +371,7 @@ type StellarCoreCfg =
             |> ignore
 
         t
-        // addTomlStringToTable self.tomlOverrides t
+    // addTomlStringToTable self.tomlOverrides t
 
     override self.ToString() : string =
         // Unfortunately Nett mis-quotes dotted keys -- it'll write out keys
