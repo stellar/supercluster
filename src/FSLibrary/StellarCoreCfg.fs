@@ -11,6 +11,7 @@ open StellarCoreSet
 open StellarNetworkCfg
 open StellarShellCmd
 open StellarDotnetSdk.Accounts
+open Logging
 
 // Submodule of short fixed (or lightly parametrized) config values: names,
 // paths, labels, etc.
@@ -369,13 +370,15 @@ type StellarCoreCfg =
             localTab.Add(historyGetCommand.Key.StringName, getHist historyGetCommand.Value)
             |> ignore
 
-        addTomlStringToTable self.tomlOverrides t
+        t
+        // addTomlStringToTable self.tomlOverrides t
 
     override self.ToString() : string =
         // Unfortunately Nett mis-quotes dotted keys -- it'll write out keys
         // like ['QUORUM_SET.sub1'] which should be ['QUORUM_SET'.'sub1'] or
         // just [QUORUM_SET.sub1] -- so we manually unquote these here. Sigh.
         let nettStr = self.ToTOML().ToString()
+        LogInfo "StellarCoreCfg: %s" nettStr
         Regex.Replace(nettStr, @"^\['([a-zA-Z0-9_\-\.]+)'\]$", "[$1]", RegexOptions.Multiline)
 
 // Extension to the NetworkCfg type to make StellarCoreCfg objects
