@@ -264,7 +264,8 @@ type NetworkCfg with
             (self.MapAllPeers(fun cs i -> if cs.keys.[i].PublicKey = k then self.LocAndDnsName cs i else None))
 
     member self.NeedNetworkDelayScript : bool =
-        if self.missionContext.installNetworkDelay.IsSome then
+        match self.missionContext.installNetworkDelay with
+        | Some true ->
             let atLeastOneLocation = Map.exists (fun _ cs -> cs.options.nodeLocs.IsSome) self.coreSets
 
             if atLeastOneLocation then
@@ -274,8 +275,7 @@ type NetworkCfg with
                 // However, if there's _no_ geo info, we can't really do anything.
                 // Don't install network delay if your topology has no geo info.
                 failwith "Network delays can't be installed if no geo info provided."
-        else
-            false
+        | _ -> false
 
     member self.NetworkDelayScript (cs: CoreSet) (i: int) : ShCmd =
         match cs.options.nodeLocs with

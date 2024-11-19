@@ -73,6 +73,7 @@ type MissionOptions
         flatQuorum: bool option,
         tier1Keys: string option,
         maxConnections: int option,
+        fullyConnectTier1: bool,
         opCountDistribution: string option,
         wasmBytesValues: seq<int>,
         wasmBytesWeights: seq<int>,
@@ -279,6 +280,12 @@ type MissionOptions
              HelpText = "Maximum number of connections to allow any node in pubnet data to have. When enabled, this option will prune connections for any node with more than this number of connections. (default: no limit)",
              Required = false)>]
     member self.MaxConnections = maxConnections
+
+    [<Option("fully-connect-tier1",
+             HelpText = "When using pubnet data, connect every tier 1 node to every other tier 1 node.",
+             Required = false,
+             Default = false)>]
+    member self.FullyConnectTier1 = fullyConnectTier1
 
     [<Option("op-count-distribution",
              HelpText = "Operation count distribution for SimulatePubnet. See csv-type-samples/sample-loadgen-op-count-distribution.csv for the format",
@@ -532,6 +539,7 @@ let main argv =
                   flatQuorum = None
                   tier1Keys = None
                   maxConnections = None
+                  fullyConnectTier1 = false
                   opCountDistribution = None
                   wasmBytesDistribution = []
                   dataEntriesDistribution = []
@@ -654,6 +662,7 @@ let main argv =
                                flatQuorum = mission.FlatQuorum
                                tier1Keys = mission.Tier1Keys
                                maxConnections = mission.MaxConnections
+                               fullyConnectTier1 = mission.FullyConnectTier1
                                opCountDistribution = mission.OpCountDistribution
                                wasmBytesDistribution =
                                    List.zip (List.ofSeq mission.WasmBytesValues) (List.ofSeq mission.WasmBytesWeights)

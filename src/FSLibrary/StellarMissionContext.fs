@@ -72,6 +72,7 @@ type MissionContext =
       flatQuorum: bool option
       tier1Keys: string option
       maxConnections: int option
+      fullyConnectTier1: bool
       opCountDistribution: string option
       wasmBytesDistribution: ((int * int) list)
       dataEntriesDistribution: ((int * int) list)

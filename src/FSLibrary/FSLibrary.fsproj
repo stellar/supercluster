@@ -17,11 +17,11 @@
     <Compile Include="StellarMissionContext.fs" />
     <Compile Include="StellarNetworkCfg.fs" />
     <Compile Include="StellarCoreCfg.fs" />
-    <Compile Include="StellarNetworkData.fs" />
     <Compile Include="StellarCorePeer.fs" />
     <Compile Include="StellarCoreHTTP.fs" />
     <Compile Include="StellarTransaction.fs" />
     <Compile Include="StellarNetworkDelays.fs" />
+    <Compile Include="StellarNetworkData.fs" />
     <Compile Include="StellarKubeSpecs.fs" />
     <Compile Include="StellarNamespaceContent.fs" />
     <Compile Include="StellarFormation.fs" />

@@ -69,6 +69,7 @@ let ctx : MissionContext =
       flatQuorum = None
       tier1Keys = None
       maxConnections = None
+      fullyConnectTier1 = false
       peerReadingCapacity = None
       peerFloodCapacity = None
       enableBackggroundOverlay = false

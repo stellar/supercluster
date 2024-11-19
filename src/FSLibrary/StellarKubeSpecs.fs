@@ -176,12 +176,12 @@ let AcceptanceTestCoreResourceRequirements : V1ResourceRequirements =
     makeResourceRequirements 4000 4096 4000 4096
 
 let SimulatePubnetMixedLoadResourceRequirements : V1ResourceRequirements =
-    // Guarantee all pods 0.7 vCPUs, which is about as high as we can guarantee
+    // Guarantee all pods 0.65 vCPUs, which is about as high as we can guarantee
     // with ~600 nodes. However, allow them to burst up to 4 vCPUs. This is
     // helpful because validators experience heavy CPU and wind up throttled if
-    // limited to 0.7 vCPUs. However, 0.7 is enough for the vast majority of
-    // watchers.
-    makeResourceRequirements 700 1500 4000 1500
+    // limited to 0.65 vCPUs. However, 0.65 is sufficient for the vast majority
+    // of watchers.
+    makeResourceRequirements 650 1500 4000 1500
 
 let PgContainerVolumeMounts : V1VolumeMount array =
     [| V1VolumeMount(name = CfgVal.dataVolumeName, mountPath = CfgVal.dataVolumePath) |]

@@ -174,28 +174,74 @@ let createAdjacencyMap (edgeList: (string * string) list) : PeerMap =
 // Get the number of peers a given node has.
 let private numPeers (map: PeerMap) (node: string) = Set.count (Map.find node map)
 
+// Return an updated version of `m` with all nodes in `tier1` connected to each
+// other.
+let private fullyConnectTier1 (tier1: Set<string>) (m: PeerMap) : PeerMap =
+    // Given a peer map and a node, add connections from `node` to all nodes in
+    // `tier1`. Note that this function does not add connections in the other
+    // direction. It should be called with all tier1 nodes to fully connect them
+    // symmetrically.
+    let connectAllPeers (acc: PeerMap) (node: string) : PeerMap =
+        let peers = Map.find node acc
+
+        // Remove `node` from `tier1` to avoid connecting it to itself
+        let otherTier1 = Set.remove node tier1
+
+        let newPeers = Set.union peers otherTier1
+        LogDebug "Fully connecting %s: %d peers -> %d peers" node (Set.count peers) (Set.count newPeers)
+        Map.add node newPeers acc
+
+    Set.fold connectAllPeers m tier1
+
+
 // Prune the adjacency map to ensure that no node has more than `maxConnections`
-// connections.
-let private pruneAdjacencyMap (maxConnections: int) (m: PeerMap) : PeerMap =
+// connections. Do not prune any connections where nodes on both sides of the
+// connection are in `noPrune`.
+let private pruneAdjacencyMap (maxConnections: int) (noPrune: Set<string>) (m: PeerMap) : PeerMap =
     let pruneConnections (acc: PeerMap) (node: string) : PeerMap =
         let peers = Map.find node acc
 
         if Set.count peers > maxConnections then
-            // Order peers by the number of connections they have
-            let sortedPeers = peers |> Set.toList |> List.sortBy (numPeers acc)
+            // Split the peers into two sets: `mustKeepPeers` and
+            // `droppablePeers`. `mustKeepPeers` consists of peers that are in
+            // `noPrune`, provided this node is in `noPrune`. `droppablePeers`
+            // consists of the rest of the peers.
+            let mustKeepPeers, droppablePeers =
+                if Set.contains node noPrune then
+                    Set.partition (fun x -> Set.contains x noPrune) peers
+                else
+                    Set.empty, peers
+
+            // Order droppable peers by the number of connections they have
+            let sortedDroppablePeers = droppablePeers |> Set.toList |> List.sortBy (numPeers acc)
+
+            // After keeping `mustKeepPeers`, this is the number of connections
+            // that must remain.
+            let connectionsRemaining = maxConnections - Set.count mustKeepPeers
+
+            if connectionsRemaining < 0 then
+                failwithf
+                    "Cannot limit connections to %d while fully connecting tier 1. Either increase --max-connections or remove --fully-connect-tier1"
+                    maxConnections
 
             // Drop better connected peers. Keep the worst connected peers so as
             // to not make them even worse connected.
-            let keep, drop = List.splitAt maxConnections sortedPeers
+            let keepDroppable, drop = List.splitAt connectionsRemaining sortedDroppablePeers
 
-            LogInfo "Pruning connections for %s: %d -> %d" node (Set.count peers) (List.length keep)
+            // Kept peers are the union of `mustKeepPeers` and `keepDroppable`
+            let keep = Set.union mustKeepPeers (Set.ofList keepDroppable)
+
+            // Should have the exact max number of connections at this point
+            assert (Set.count keep = maxConnections)
+
+            LogInfo "Pruning connections for %s: %d -> %d" node (Set.count peers) (Set.count keep)
 
             // Remove self from dropped peers' sets
             let acc' =
                 List.fold (fun cur p -> Map.add p (Set.remove node (Map.find p cur)) cur) acc drop
 
             // Modify map entry for `node` to point to the `keep` list
-            Map.add node (Set.ofList keep) acc'
+            Map.add node keep acc'
         else
             acc
 
@@ -356,11 +402,12 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
     // and cause an issue to the scaling algorithm.
     let adjacencyMap =
         addEdges allPubnetNodes (Array.map (fun (n: PubnetNode.Root) -> n.PublicKey) newNodes) tier1KeySet random
+        |> if context.fullyConnectTier1 then fullyConnectTier1 tier1KeySet else id
         |> match context.maxConnections with
            | Some maxConnections ->
-               // Prune map to ensure that no node has more than `maxConnections`
-               // connections.
-               pruneAdjacencyMap maxConnections
+               // Prune map to ensure that no node has more than
+               // `maxConnections` connections.
+               pruneAdjacencyMap maxConnections (if context.fullyConnectTier1 then tier1KeySet else Set.empty)
            | None -> id
 
     // First, we will remove all nodes with <= 4 connections because those nodes
