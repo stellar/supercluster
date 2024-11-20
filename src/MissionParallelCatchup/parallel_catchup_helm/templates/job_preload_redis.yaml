@@ -15,8 +15,8 @@ spec:
              "uniform")
                /bin/sh /scripts/uniform_range_generator.sh
                ;;
-             "logarithmic")
-               /bin/sh /scripts/logarithmic_range_generator.sh
+             "hybrid")
+               /bin/sh /scripts/hybrid_range_generator.sh
                ;;
              *)
                echo 'Error: Unknown strategy' && exit 1
