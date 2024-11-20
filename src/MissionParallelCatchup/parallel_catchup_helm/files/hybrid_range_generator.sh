@@ -5,7 +5,7 @@ if [ -z "$LEDGERS_PER_JOB" ]; then echo "LEDGERS_PER_JOB not set"; exit 1; fi
 if [ -z "$REDIS_HOST" ]; then echo "REDIS_HOST not set"; exit 1; fi
 if [ -z "$REDIS_PORT" ]; then echo "REDIS_PORT not set"; exit 1; fi
 
-file="ranges.dat"
+file="/scripts/ranges.dat"
 endRange=0
 ledgersToApply=0
 
@@ -16,7 +16,7 @@ tail -n +2 "$file" | while IFS='/' read -r endRange ledgersToApply; do
     sleep 1
 done
 
-line=$(tail -n1 ranges.dat)
+line=$(tail -n1 $file)
 endRange=${line%/*}
 
 if [ "$endRange" -lt "$LATEST_LEDGER_NUM" ]; then
@@ -27,6 +27,5 @@ if [ "$endRange" -lt "$LATEST_LEDGER_NUM" ]; then
     export REDIS_HOST="$REDIS_HOST"
     export REDIS_PORT="$REDIS_PORT"
 
-    chmod +x ./uniform_range_generator.sh
-    ./uniform_range_generator.sh
+    /bin/sh /scripts/uniform_range_generator.sh
 fi

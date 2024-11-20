@@ -41,4 +41,4 @@ range_generator:
     starting_ledger: 0
     latest_ledger_num: 100000
     overlap_ledgers: 320
-    ledgers_per_job: 3000 # for "uniform", this is the number of ledgers uniformly distributed between `starting_ledger` and `latest_ledger_num`; for "hybrid", this is the number of ledgers per range distributed between the residual ledgers not covered in the data file
+    ledgers_per_job: 5000 # for "uniform", this is the number of ledgers uniformly distributed between `starting_ledger` and `latest_ledger_num`; for "hybrid", this is the number of ledgers per range distributed between the residual ledgers not covered in the data file

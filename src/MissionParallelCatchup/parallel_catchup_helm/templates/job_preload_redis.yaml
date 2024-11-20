@@ -45,8 +45,10 @@ metadata:
 data:
   uniform_range_generator.sh: |-
     {{- (.Files.Get "files/uniform_range_generator.sh") | nindent 4 }}
-  logarithmic_range_generator.sh: |-
-    {{- (.Files.Get "files/logarithmic_range_generator.sh") | nindent 4 }}
+  hybrid_range_generator.sh: |-
+    {{- (.Files.Get "files/hybrid_range_generator.sh") | nindent 4 }}
+  ranges.dat: |-
+    {{- (.Files.Get "files/ranges.dat") | nindent 4 }}
 ---
 apiVersion: v1
 kind: ConfigMap
