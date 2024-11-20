@@ -23,6 +23,8 @@ LOG_DIR="/data"
 while true; do
 # Fetch the next job key from the Redis queue. 
 # Our ranges are generated in the order we want to run them from left to right, so we always pull from the left
+# - for strategy="uniform", the left contains the higher ledger ranges
+# - for strategy="hybrid", the left contains the pre-computed ranges, followed by higher uniform ranges.
 JOB_KEY=$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" LMOVE "$JOB_QUEUE" "$PROGRESS_QUEUE" LEFT LEFT)
 
 if [ -n "$JOB_KEY" ]; then
