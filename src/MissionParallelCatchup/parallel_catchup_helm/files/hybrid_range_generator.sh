@@ -1,7 +1,7 @@
 #!/bin/sh
 if [ -z "$LATEST_LEDGER_NUM" ]; then echo "LATEST_LEDGER_NUM not set"; exit 1; fi
 if [ -z "$OVERLAP_LEDGERS" ]; then echo "OVERLAP_LEDGERS not set"; exit 1; fi
-if [ -z "$UNIFORM_LEDGERS_PER_JOB" ]; then echo "UNIFORM_LEDGERS_PER_JOB not set"; exit 1; fi
+if [ -z "$LEDGERS_PER_JOB" ]; then echo "LEDGERS_PER_JOB not set"; exit 1; fi
 if [ -z "$REDIS_HOST" ]; then echo "REDIS_HOST not set"; exit 1; fi
 if [ -z "$REDIS_PORT" ]; then echo "REDIS_PORT not set"; exit 1; fi
 
@@ -23,7 +23,7 @@ if [ "$endRange" -lt "$LATEST_LEDGER_NUM" ]; then
     export LATEST_LEDGER_NUM="$LATEST_LEDGER_NUM"
     export OVERLAP_LEDGERS="$OVERLAP_LEDGERS"
     export STARTING_LEDGER="$endRange"
-    export LEDGERS_PER_JOB="$UNIFORM_LEDGERS_PER_JOB"
+    export LEDGERS_PER_JOB="$LEDGERS_PER_JOB"
     export REDIS_HOST="$REDIS_HOST"
     export REDIS_PORT="$REDIS_PORT"
 

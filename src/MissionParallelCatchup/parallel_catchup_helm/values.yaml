@@ -36,10 +36,9 @@ monitor:
       memory: "100Mi"
 
 range_generator:
-  strategy: "uniform" # "uniform" or "logarithmic"
+  strategy: "hybrid" # "hybrid" or "uniform"
   params:
     starting_ledger: 0
     latest_ledger_num: 100000
     overlap_ledgers: 320
-    uniform_ledgers_per_job: 16000 # only for strategy="uniform"
-    logarithmic_floor_ledgers: 16000 # only for strategy="logarithmic"
+    ledgers_per_job: 3000 # for "uniform", this is the number of ledgers uniformly distributed between `starting_ledger` and `latest_ledger_num`; for "hybrid", this is the number of ledgers per range distributed between the residual ledgers not covered in the data file
