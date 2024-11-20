@@ -3,6 +3,8 @@
 *.swp
 **/.vscode/*
 /.vs
+**/venv/*
+**/logs/*
 
 # build artifacts
 /src/**/obj
