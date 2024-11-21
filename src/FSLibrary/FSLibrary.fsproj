@@ -7,6 +7,7 @@
     <DebugSymbols>true</DebugSymbols>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="PubnetData.fs" />
     <Compile Include="Logging.fs" />
     <Compile Include="ApiRateLimit.fs" />
     <Compile Include="PollRetry.fs" />
@@ -16,11 +17,11 @@
     <Compile Include="StellarMissionContext.fs" />
     <Compile Include="StellarNetworkCfg.fs" />
     <Compile Include="StellarCoreCfg.fs" />
-    <Compile Include="StellarNetworkData.fs" />
     <Compile Include="StellarCorePeer.fs" />
     <Compile Include="StellarCoreHTTP.fs" />
     <Compile Include="StellarTransaction.fs" />
     <Compile Include="StellarNetworkDelays.fs" />
+    <Compile Include="StellarNetworkData.fs" />
     <Compile Include="StellarKubeSpecs.fs" />
     <Compile Include="StellarNamespaceContent.fs" />
     <Compile Include="StellarFormation.fs" />
@@ -41,6 +42,7 @@
     <Compile Include="MissionHistoryGenerateAndCatchup.fs" />
     <Compile Include="MissionHistoryPubnetMinimumCatchup.fs" />
     <Compile Include="MissionSimulatePubnet.fs" />
+    <Compile Include="MissionSimulatePubnetMixedLoad.fs" />
     <Compile Include="MissionSlowNodesNetwork.fs" />
     <Compile Include="MissionMaxTPSClassic.fs" />
     <Compile Include="MissionHistoryPubnetRecentCatchup.fs" />
