@@ -22,8 +22,8 @@ module PubnetData
 // distributions. We do not trim the transaction size or wasm size distributions
 // so that the overlay remains realistically stressed.
 
-// Use the `histogram-generator.py` script in the `scripts` directory to
-// generate histograms from Hubble data.
+// Use the `histogram-generator.py` script in the `scripts` directory of the
+// `stellar-core` repo to generate histograms from Hubble data.
 
 let pubnetApplyDuration =
     seq {
