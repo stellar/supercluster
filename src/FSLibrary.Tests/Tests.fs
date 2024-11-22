@@ -238,7 +238,7 @@ type Tests(output: ITestOutputHelper) =
              Assert.Contains(coreSets, (fun cs -> cs.name = sdfCoreSetName))
              // Ensure that 'validator.stellar.expert' got a different name from
              // 'www.stellar.org'.
-             Assert.Contains(coreSets, (fun cs -> cs.name = (CoreSetName "expert")))
+             Assert.Contains(coreSets, (fun cs -> cs.name = (CoreSetName "expert-non-tier1")))
              let sdfCoreSet = List.find (fun cs -> cs.name = sdfCoreSetName) coreSets
              Assert.Equal(3, sdfCoreSet.options.nodeCount)
              let cfg = nCfg.StellarCoreCfg(sdfCoreSet, 0, MainCoreContainer)
