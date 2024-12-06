@@ -102,6 +102,10 @@ metadata:
   name: stellar-core-config
 data:
   stellar-core.cfg: |-
+    {{- if .Values.worker.catchup_skip_known_results_for_testing }}
+    {{ "\n" }}
+    CATCHUP_SKIP_KNOWN_RESULTS_FOR_TESTING = true
+    {{- end }}
     {{- (.Files.Get "files/stellar-core.cfg") | nindent 4 }}
 ---
 apiVersion: v1
