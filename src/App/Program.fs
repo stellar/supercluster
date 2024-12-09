@@ -109,7 +109,8 @@ type MissionOptions
         pubnetParallelCatchupEndLedger: int option,
         pubnetParallelCatchupNumWorkers: int,
         tag: string option,
-        numRuns: int option
+        numRuns: int option,
+        catchupSkipKnownResultsForTesting: bool
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -458,6 +459,12 @@ type MissionOptions
              Required = false)>]
     member self.NumRuns = numRuns
 
+    [<Option("catchup-skip-known-results-for-testing",
+             HelpText = "when this flag is provided, pubnet parallel catchup workers will run with CATCHUP_SKIP_KNOWN_RESULTS_FOR_TESTING = true, resulting in skipping application of failed transaction and signature verification",
+             Required = false,
+             Default = true)>]
+    member self.CatchupSkipKnownResultsForTesting = catchupSkipKnownResultsForTesting
+
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' with
     | [| x |] -> (x, None)
@@ -571,7 +578,8 @@ let main argv =
                   pubnetParallelCatchupNumWorkers = 128
                   tag = None
                   numRuns = None
-                  enableTailLogging = true }
+                  enableTailLogging = true
+                  catchupSkipKnownResultsForTesting = true }
 
             let nCfg = MakeNetworkCfg ctx [] None
             use formation = kube.MakeEmptyFormation nCfg
@@ -707,7 +715,8 @@ let main argv =
                                pubnetParallelCatchupNumWorkers = mission.PubnetParallelCatchupNumWorkers
                                tag = mission.Tag
                                numRuns = mission.NumRuns
-                               enableTailLogging = true }
+                               enableTailLogging = true
+                               catchupSkipKnownResultsForTesting = mission.CatchupSkipKnownResultsForTesting }
 
                          allMissions.[m] missionContext
 
