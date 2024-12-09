@@ -26,11 +26,13 @@ Finally, don't forget to shut down your EKS cluster.
 This table contains the theoretical max TPS stellar-core achieved, ordered by
 stellar-core release.
 
-| Core Version | Core Image | Database Backend | Topology (total # of stellar-core nodes / # of validators) | EC2 Instance Type | Number of EC2 Instances | Max TPS |
-|--------------|------------|------------------|------------------------------------------------------------|-------------------|-------------------------|---------|
-| 22.0.0rc2 | `stellar/unsafe-stellar-core:22.0.0-2095.rc2.1bccbc921.focal-perftests` | BucketListDB | 7 / 3 | md5.4xlarge | 10 | 958 |
-| 21.3.1 | `stellar/unsafe-stellar-core:21.3.1-2007.4ede19620.focal-perftests` | BucketListDB | 7 / 3 | m5d.4xlarge | 10 | 1110 |
-| 21.3.1 | `stellar/unsafe-stellar-core:21.3.1-2007.4ede19620.focal-perftests` | SQLite in-memory | 7 / 3 | m5d.4xlarge | 10 | 1170 |
-| 21.2.0 | `stellar/unsafe-stellar-core:21.2.0-1953.d78f48eac.focal-perftests` | BucketListDB | 7 / 3 | m5d.4xlarge | 10 | 1059 |
-| 21.2.0 | `stellar/unsafe-stellar-core:21.2.0-1953.d78f48eac.focal-perftests` | SQLite in-memory | 7 / 3 | m5d.4xlarge | 10 | 1053 |
-| 21.1.0 | `stellar/unsafe-stellar-core:21.0.1-1917.52a449ff3.focal-testing-asan-disabled-perftests` | SQLite in-memory | 7 / 3 | m5d.4xlarge | 10 | 1137 |
+| Core Version | Core Image | Database Backend | Topology (total # of stellar-core nodes / # of validators) | EC2 Instance Type | Number of EC2 Instances | Max TPS | Notes |
+|--------------|------------|------------------|------------------------------------------------------------|-------------------|-------------------------|---------|-------|
+| 22.1.0rc1 | `stellar/unsafe-stellar-core:22.1.0-2189.rc1.fdd833d57.focal-perftests` | BucketListDB | 7 / 3 | m5d.4xlarge | 10 | 989 | Performance improvement due to [networking changes](https://github.com/stellar/stellar-core/pull/4544) |
+| 22.0.0 | `stellar/unsafe-stellar-core:22.0.0-2138.721fd0a65.focal-perftests` | BucketListDB | 7 / 3 | m5d.4xlarge | 10 | 902 | |
+| 22.0.0rc2 | `stellar/unsafe-stellar-core:22.0.0-2095.rc2.1bccbc921.focal-perftests` | BucketListDB | 7 / 3 | m5d.4xlarge | 10 | 958 | First version with mandatory BucketListDB backend |
+| 21.3.1 | `stellar/unsafe-stellar-core:21.3.1-2007.4ede19620.focal-perftests` | BucketListDB | 7 / 3 | m5d.4xlarge | 10 | 1110 | |
+| 21.3.1 | `stellar/unsafe-stellar-core:21.3.1-2007.4ede19620.focal-perftests` | SQLite in-memory | 7 / 3 | m5d.4xlarge | 10 | 1170 | |
+| 21.2.0 | `stellar/unsafe-stellar-core:21.2.0-1953.d78f48eac.focal-perftests` | BucketListDB | 7 / 3 | m5d.4xlarge | 10 | 1059 | |
+| 21.2.0 | `stellar/unsafe-stellar-core:21.2.0-1953.d78f48eac.focal-perftests` | SQLite in-memory | 7 / 3 | m5d.4xlarge | 10 | 1053 | |
+| 21.1.0 | `stellar/unsafe-stellar-core:21.0.1-1917.52a449ff3.focal-testing-asan-disabled-perftests` | SQLite in-memory | 7 / 3 | m5d.4xlarge | 10 | 1137 | |
