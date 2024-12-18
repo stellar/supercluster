@@ -50,6 +50,7 @@ type LoadGenMode =
     | SorobanInvokeSetup
     | SorobanInvoke
     | MixedClassicSoroban
+    | StopRun
 
     override self.ToString() =
         match self with
@@ -62,6 +63,7 @@ type LoadGenMode =
         | SorobanInvokeSetup -> "soroban_invoke_setup"
         | SorobanInvoke -> "soroban_invoke"
         | MixedClassicSoroban -> "mixed_classic_soroban"
+        | StopRun -> "stop"
 
 type LoadGen =
     { mode: LoadGenMode
@@ -713,6 +715,8 @@ type Peer with
                     url = self.URL "generateload",
                     query = loadGen.ToQuery
                 ))
+
+    member self.StopLoadGen() : string = self.GenerateLoad { LoadGen.GetDefault() with mode = StopRun }
 
     member self.ManualClose() =
         WebExceptionRetry
