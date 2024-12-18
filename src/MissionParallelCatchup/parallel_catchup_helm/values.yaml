@@ -25,7 +25,7 @@ worker:
       ephemeral_storage: "40Gi"
 
 monitor:
-  ingress_class_name: "private"
+  ingress_class_name: "ingress-private"
   hostname: "ssc-job-monitor.services.stellar-ops.com"
   path: "/default/(.*)"
   logging_interval_seconds: 300

@@ -52,7 +52,7 @@ let ctx : MissionContext =
       numNodes = 100
       namespaceProperty = "stellar-supercluster"
       logLevels = { LogDebugPartitions = []; LogTracePartitions = [] }
-      ingressClass = "private"
+      ingressClass = "ingress-private"
       ingressInternalDomain = "local"
       ingressExternalHost = None
       ingressExternalPort = 80
