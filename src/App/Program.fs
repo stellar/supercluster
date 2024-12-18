@@ -131,7 +131,7 @@ type MissionOptions
     [<Option("ingress-class",
              HelpText = "Value for kubernetes.io/ingress.class, on ingress",
              Required = false,
-             Default = "private")>]
+             Default = "ingress-private")>]
     member self.IngressClass = ingressClass
 
     [<Option("ingress-internal-domain",
@@ -529,7 +529,7 @@ let main argv =
                   numNodes = 3
                   namespaceProperty = ns
                   logLevels = ll
-                  ingressClass = "private"
+                  ingressClass = "ingress-private"
                   ingressInternalDomain = "local"
                   ingressExternalHost = None
                   ingressExternalPort = 80
