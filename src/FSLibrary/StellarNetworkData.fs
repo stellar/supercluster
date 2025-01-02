@@ -556,7 +556,8 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
               // sync before all the nodes are online.
               syncStartupDelay = Some(30)
               invariantChecks = AllInvariantsExceptBucketConsistencyChecks
-              dumpDatabase = false }
+              dumpDatabase = false
+              updateSorobanCosts = context.updateSorobanCosts }
 
     // Sorted list of known geolocations.
     // We can choose an arbitrary geolocation such that the distribution follows that of the given data

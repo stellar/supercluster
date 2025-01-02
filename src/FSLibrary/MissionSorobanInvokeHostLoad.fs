@@ -17,7 +17,8 @@ let sorobanInvokeHostLoad (context: MissionContext) =
             "core"
             { CoreSetOptions.GetDefault context.image with
                   invariantChecks = AllInvariantsExceptBucketConsistencyChecks
-                  emptyDirType = DiskBackedEmptyDir }
+                  emptyDirType = DiskBackedEmptyDir
+                  updateSorobanCosts = Some(true) }
 
     let context =
         { context.WithMediumLoadgenOptions with

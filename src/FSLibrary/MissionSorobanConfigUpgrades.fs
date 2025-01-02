@@ -26,6 +26,7 @@ let sorobanConfigUpgrades (context: MissionContext) =
                   invariantChecks = AllInvariantsExceptBucketConsistencyChecks
                   emptyDirType = DiskBackedEmptyDir
                   quorumSet = quorumSet
+                  updateSorobanCosts = Some(true)
                   nodeCount = 5 }
 
     let context =

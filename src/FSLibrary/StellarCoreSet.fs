@@ -172,7 +172,8 @@ type CoreSetOptions =
       inMemoryMode: bool
       addArtificialDelayUsec: int option
       deprecatedSQLState: bool
-      surveyPhaseDuration: int option }
+      surveyPhaseDuration: int option
+      updateSorobanCosts: bool option }
 
     member self.WithWaitForConsensus(w: bool) =
         { self with initialization = { self.initialization with waitForConsensus = w } }
@@ -206,7 +207,8 @@ type CoreSetOptions =
           inMemoryMode = false
           addArtificialDelayUsec = None
           deprecatedSQLState = false
-          surveyPhaseDuration = None }
+          surveyPhaseDuration = None
+          updateSorobanCosts = None }
 
 type CoreSet =
     { name: CoreSetName

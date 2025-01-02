@@ -19,7 +19,8 @@ let sorobanCatchupWithPrevAndCurr (context: MissionContext) =
             "core"
             { CoreSetOptions.GetDefault context.image with
                   invariantChecks = AllInvariantsExceptBucketConsistencyChecks
-                  emptyDirType = DiskBackedEmptyDir }
+                  emptyDirType = DiskBackedEmptyDir
+                  updateSorobanCosts = Some(true) }
 
     let quorumSet = CoreSetQuorum(CoreSetName("core"))
 
@@ -30,7 +31,8 @@ let sorobanCatchupWithPrevAndCurr (context: MissionContext) =
             { CoreSetOptions.GetDefault context.image with
                   nodeCount = 1
                   quorumSet = quorumSet
-                  catchupMode = CatchupComplete }
+                  catchupMode = CatchupComplete
+                  updateSorobanCosts = Some(true) }
 
     let context =
         { context.WithMediumLoadgenOptions with
