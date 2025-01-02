@@ -151,6 +151,7 @@ type StellarCoreCfg =
       automaticMaintenanceCount: int
       accelerateTime: bool
       generateLoad: bool
+      updateSorobanCosts: bool option
       manualClose: bool
       invariantChecks: InvariantChecksSpec
       unsafeQuorum: bool
@@ -252,6 +253,10 @@ type StellarCoreCfg =
         t.Add("AUTOMATIC_MAINTENANCE_COUNT", self.automaticMaintenanceCount) |> ignore
         t.Add("ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING", self.accelerateTime) |> ignore
         t.Add("ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING", self.generateLoad) |> ignore
+
+        if self.updateSorobanCosts.IsSome then
+            t.Add("UPDATE_SOROBAN_COSTS_DURING_PROTOCOL_UPGRADE_FOR_TESTING", self.updateSorobanCosts.Value)
+            |> ignore
 
         if self.network.missionContext.peerFloodCapacityBytes.IsSome then
             t.Add("PEER_FLOOD_READING_CAPACITY_BYTES", self.network.missionContext.peerFloodCapacityBytes.Value)
@@ -484,6 +489,7 @@ type NetworkCfg with
           automaticMaintenanceCount = if opts.performMaintenance then 50000 else 0
           accelerateTime = opts.accelerateTime
           generateLoad = true
+          updateSorobanCosts = opts.updateSorobanCosts
           manualClose = false
           invariantChecks = opts.invariantChecks
           unsafeQuorum = opts.unsafeQuorum
@@ -522,6 +528,7 @@ type NetworkCfg with
           automaticMaintenanceCount = if c.options.performMaintenance then 50000 else 0
           accelerateTime = c.options.accelerateTime
           generateLoad = true
+          updateSorobanCosts = c.options.updateSorobanCosts
           manualClose = false
           invariantChecks = c.options.invariantChecks
           unsafeQuorum = c.options.unsafeQuorum

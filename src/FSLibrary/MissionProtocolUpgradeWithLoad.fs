@@ -18,7 +18,8 @@ let protocolUpgradeWithLoad (context: MissionContext) =
             "core"
             { CoreSetOptions.GetDefault context.image with
                   invariantChecks = AllInvariantsExceptBucketConsistencyChecks
-                  dumpDatabase = false }
+                  dumpDatabase = false
+                  updateSorobanCosts = Some(true) }
 
     let context =
         { context.WithSmallLoadgenOptions with

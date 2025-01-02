@@ -579,7 +579,8 @@ let main argv =
                   tag = None
                   numRuns = None
                   enableTailLogging = true
-                  catchupSkipKnownResultsForTesting = true }
+                  catchupSkipKnownResultsForTesting = true
+                  updateSorobanCosts = None }
 
             let nCfg = MakeNetworkCfg ctx [] None
             use formation = kube.MakeEmptyFormation nCfg
@@ -716,7 +717,8 @@ let main argv =
                                tag = mission.Tag
                                numRuns = mission.NumRuns
                                enableTailLogging = true
-                               catchupSkipKnownResultsForTesting = mission.CatchupSkipKnownResultsForTesting }
+                               catchupSkipKnownResultsForTesting = mission.CatchupSkipKnownResultsForTesting
+                               updateSorobanCosts = None }
 
                          allMissions.[m] missionContext
 
