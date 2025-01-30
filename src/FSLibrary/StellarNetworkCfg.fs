@@ -91,7 +91,7 @@ type NetworkCfg =
     member self.PeerShortName (cs: CoreSet) (n: int) : PeerShortName =
         PeerShortName(sprintf "%s-%d" cs.name.StringName n)
 
-    member self.ServiceName : string = sprintf "%s-stellar-core" self.Nonce
+    member self.ServiceName : string = sprintf "%s-sts-core" self.Nonce
 
     member self.IngressName : string = sprintf "%s-stellar-core-ingress" self.Nonce
 
