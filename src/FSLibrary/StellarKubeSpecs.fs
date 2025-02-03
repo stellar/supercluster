@@ -883,7 +883,7 @@ type NetworkCfg with
             let ingressPath = V1HTTPIngressPath()
             ingressPath.Backend <- coreBackend pn
             ingressPath.Path <- sprintf "/%s/core(/|$)(.*)" pn.StringName
-            ingressPath.PathType <- "Prefix"
+            ingressPath.PathType <- "ImplementationSpecific"
             ingressPath
 
         let historyPath (coreSet: CoreSet) (i: int) : V1HTTPIngressPath =
@@ -891,7 +891,7 @@ type NetworkCfg with
             let ingressPath = V1HTTPIngressPath()
             ingressPath.Backend <- historyBackend pn
             ingressPath.Path <- sprintf "/%s/history(/|$)(.*)" pn.StringName
-            ingressPath.PathType <- "Prefix"
+            ingressPath.PathType <- "ImplementationSpecific"
             ingressPath
 
         let corePaths = self.MapAllPeers corePath
@@ -905,6 +905,7 @@ type NetworkCfg with
 
         let annotation =
             Map.ofArray [| ("kubernetes.io/ingress.class", self.missionContext.ingressClass)
+                           ("nginx.ingress.kubernetes.io/use-regex", "true")
                            ("nginx.ingress.kubernetes.io/rewrite-target", "/$2") |]
 
         let meta =
