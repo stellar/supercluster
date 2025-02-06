@@ -176,7 +176,7 @@ type MissionOptions
     [<Option("netdelay-image",
              HelpText = "'Netdelay' utility image to use",
              Required = false,
-             Default = "stellar/netdelay:latest")>]
+             Default = "stellar/sdf-netdelay:latest")>]
     member self.netdelayImage = netdelayImage
 
     [<Option("postgres-image",
