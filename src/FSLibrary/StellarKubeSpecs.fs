@@ -161,13 +161,13 @@ let UpgradeCoreResourceRequirements : V1ResourceRequirements =
 
 let SmallTestCoreResourceRequirements : V1ResourceRequirements =
     // When running most missions, there are few core nodes, so each
-    // gets 0.1 vCPUs with bursting to 1vCPU and 256MB RAM guaranteed.
-    makeResourceRequirements 100 256 1000 256
+    // gets 0.1 vCPUs with bursting to 1vCPU and 1 GB RAM guaranteed.
+    makeResourceRequirements 100 1024 1000 2048
 
 let MediumTestCoreResourceRequirements : V1ResourceRequirements =
-    // About 2x more resources than for small tests, 0.2 vCPU/512 MB,
-    // bursting to 1 vCPU/1GB.
-    makeResourceRequirements 200 512 1000 1024
+    // About 2x more resources than for small tests, 0.2 vCPU/2 GB,
+    // bursting to 1 vCPU/4 GB.
+    makeResourceRequirements 200 2048 1000 4096
 
 let AcceptanceTestCoreResourceRequirements : V1ResourceRequirements =
     // When running acceptance tests we need to give a single core a very large
