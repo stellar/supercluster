@@ -2,7 +2,10 @@
 *~
 *.swp
 **/.vscode/*
+**/venv/**
+**/logs/**
 /.vs
+.DS_Store
 
 # build artifacts
 /src/**/obj
