@@ -5,6 +5,7 @@
 module MissionHistoryPubnetParallelCatchupV2
 
 open Logging
+open StellarKubeSpecs
 open StellarMissionContext
 open StellarNetworkData
 
@@ -22,6 +23,7 @@ open k8s
 // Constants
 let helmReleaseName = "parallel-catchup"
 let helmChartPath = "/supercluster/src/MissionParallelCatchup/parallel_catchup_helm"
+// let helmChartPath = "../MissionParallelCatchup/parallel_catchup_helm" // for local testing
 let valuesFilePath = helmChartPath + "/values.yaml"
 let jobMonitorHostName = "ssc-job-monitor.services.stellar-ops.com"
 let jobMonitorStatusEndPoint = "/status"
@@ -68,6 +70,37 @@ let installProject (context: MissionContext) =
     setOptions.Add(sprintf "worker.replicas=%d" context.pubnetParallelCatchupNumWorkers)
     setOptions.Add(sprintf "range_generator.params.starting_ledger=%d" context.pubnetParallelCatchupStartingLedger)
     setOptions.Add(sprintf "worker.catchup_skip_known_results_for_testing=%b" context.catchupSkipKnownResultsForTesting)
+
+    // read the resource requirements defined in StellarKubeSpecs.fs (where resource for various missions are centralized)
+    let resourceRequirements = ParallelCatchupCoreResourceRequirements
+    let cpuReqMili = resourceRequirements.Requests.["cpu"].ToString()
+    let memReqMebi = resourceRequirements.Requests.["memory"].ToString()
+    let cpuLimMili = resourceRequirements.Limits.["cpu"].ToString()
+    let memLimMebi = resourceRequirements.Limits.["memory"].ToString()
+    let storageReqGibi = resourceRequirements.Requests.["ephemeral-storage"].ToString()
+    let storageLimGibi = resourceRequirements.Limits.["ephemeral-storage"].ToString()
+
+    LogInfo
+        "Resource requirements from StellarKubeCfg:\n\
+             CPU request: %s\n\
+             CPU limit: %s\n\
+             Memory request: %s\n\
+             Memory limit: %s\n\
+             Storage request: %s\n\
+             Storage limit: %s"
+        cpuReqMili
+        cpuLimMili
+        memReqMebi
+        memLimMebi
+        storageReqGibi
+        storageLimGibi
+
+    setOptions.Add(sprintf "worker.resources.requests.cpu=%s" cpuReqMili)
+    setOptions.Add(sprintf "worker.resources.requests.memory=%s" memReqMebi)
+    setOptions.Add(sprintf "worker.resources.limits.cpu=%s" cpuLimMili)
+    setOptions.Add(sprintf "worker.resources.limits.memory=%s" memLimMebi)
+    setOptions.Add(sprintf "worker.resources.requests.ephemeral_storage=%s" storageReqGibi)
+    setOptions.Add(sprintf "worker.resources.limits.ephemeral_storage=%s" storageLimGibi)
 
     let endLedger =
         match context.pubnetParallelCatchupEndLedger with

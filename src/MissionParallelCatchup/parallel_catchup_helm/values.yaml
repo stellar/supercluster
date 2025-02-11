@@ -16,13 +16,13 @@ worker:
   replicas: 5
   resources:
     requests:
-      cpu: "250m"
-      memory: "1200Mi"
-      ephemeral_storage: "35Gi"
+      cpu: ""
+      memory: ""
+      ephemeral_storage: ""
     limits:
-      cpu: "2"
-      memory: "6Gi"
-      ephemeral_storage: "40Gi"
+      cpu: ""
+      memory: ""
+      ephemeral_storage: ""
 
 monitor:
   ingress_class_name: "ingress-private"
