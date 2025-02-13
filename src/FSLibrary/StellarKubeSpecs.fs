@@ -806,7 +806,7 @@ type NetworkCfg with
     // requires that you install the DNS server component on your k8s cluster.
     member self.ToService() : V1Service =
         let serviceSpec = V1ServiceSpec(clusterIP = "None", selector = CfgVal.labels)
-        V1Service(spec = serviceSpec, metadata = self.NamespacedMeta self.ServiceName)
+        V1Service(spec = serviceSpec, metadata = self.NamespacedMeta self.HeadlessServiceName)
 
 
     // Returns a StatefulSet object that will build stellar-core Pods named
@@ -815,7 +815,7 @@ type NetworkCfg with
         let statefulSetSpec =
             V1StatefulSetSpec(
                 selector = V1LabelSelector(matchLabels = CfgVal.labels),
-                serviceName = self.ServiceName,
+                serviceName = self.HeadlessServiceName,
                 podManagementPolicy = "Parallel",
                 template = self.ToPodTemplateSpec coreSet,
                 replicas = System.Nullable<int>(coreSet.CurrentCount)

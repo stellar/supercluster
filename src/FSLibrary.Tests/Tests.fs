@@ -137,7 +137,7 @@ type Tests(output: ITestOutputHelper) =
         let peer1DNS = (nCfg.PeerDnsName coreSet 1).StringName
         let peer2DNS = (nCfg.PeerDnsName coreSet 2).StringName
         let nonceStr = nCfg.networkNonce.ToString()
-        let domain = nonceStr + "-stellar-core." + ctx.namespaceProperty + ".svc.cluster.local"
+        let domain = nonceStr + "-sts-core." + ctx.namespaceProperty + ".svc.cluster.local"
         Assert.Equal(nonceStr + "-sts-test-0." + domain, peer0DNS)
         Assert.Equal(nonceStr + "-sts-test-1." + domain, peer1DNS)
         Assert.Equal(nonceStr + "-sts-test-2." + domain, peer2DNS)

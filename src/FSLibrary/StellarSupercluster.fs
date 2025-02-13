@@ -145,10 +145,10 @@ type Kubernetes with
 
             if not (List.isEmpty statefulSets) then
                 let ing = nCfg.ToIngress()
-                LogInfo "Creating Ingress %s" ing.Metadata.Name
+                LogInfo "Skipping creation of Ingress %s" ing.Metadata.Name
                 ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
-                let ingress = self.CreateNamespacedIngress(namespaceParameter = nsStr, body = ing)
-                namespaceContent.Add(ingress)
+                //let ingress = self.CreateNamespacedIngress(namespaceParameter = nsStr, body = ing)
+                //namespaceContent.Add(ingress)
 
             let formation =
                 new StellarFormation(

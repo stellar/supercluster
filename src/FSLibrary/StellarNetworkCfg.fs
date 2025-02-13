@@ -91,7 +91,9 @@ type NetworkCfg =
     member self.PeerShortName (cs: CoreSet) (n: int) : PeerShortName =
         PeerShortName(sprintf "%s-%d" cs.name.StringName n)
 
-    member self.ServiceName : string = sprintf "%s-stellar-core" self.Nonce
+    member self.HeadlessServiceName : string = sprintf "%s-stellar-core" self.Nonce
+
+    member self.ServiceName(cs: CoreSet) : string = self.StatefulSetName(cs).StringName
 
     member self.IngressName : string = sprintf "%s-stellar-core-ingress" self.Nonce
 
@@ -107,7 +109,7 @@ type NetworkCfg =
 
     member self.PeerDnsName (cs: CoreSet) (n: int) : PeerDnsName =
         let s =
-            sprintf "%s.%s.%s.svc.cluster.local" (self.PodName cs n).StringName self.ServiceName self.NamespaceProperty
+            sprintf "%s.%s.%s.svc.cluster.local" (self.PodName cs n).StringName (self.ServiceName cs) self.NamespaceProperty
 
         PeerDnsName s
 

@@ -128,6 +128,6 @@ type StellarFormation
     override self.Finalize() = self.Cleanup(false)
 
     override self.ToString() : string =
-        let name = networkCfg.ServiceName
+        let name = networkCfg.HeadlessServiceName
         let ns = networkCfg.NamespaceProperty
         sprintf "%s/%s" ns name
