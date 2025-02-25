@@ -115,10 +115,17 @@ type Kubernetes with
         let rps = nCfg.missionContext.apiRateLimit
 
         try
-            let svc = nCfg.ToService()
-            LogInfo "Creating Service %s" svc.Metadata.Name
-            ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
-            namespaceContent.Add(self.CreateNamespacedService(body = svc, namespaceParameter = nsStr))
+
+            let makePerStsServices coreSet = 
+                let svc = nCfg.ToService(coreSet)
+                LogInfo "Creating Service %s" svc.Metadata.Name
+                ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
+                self.CreateNamespacedService(body = svc, namespaceParameter = nsStr)
+            
+            let headlessSvcs = List.map makePerStsServices nCfg.CoreSetList
+
+            for svc in headlessSvcs do
+                namespaceContent.Add(svc)
 
             for cm in nCfg.ToConfigMaps() do
                 LogInfo "Creating ConfigMap %s" cm.Metadata.Name
