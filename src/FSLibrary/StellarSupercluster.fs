@@ -116,6 +116,9 @@ type Kubernetes with
 
         try
 
+            // NB: I *think* this is the correct change for the headless service name. 
+            // Previously it only creates a single service with a fixed name, despite potentially there are more than one coreSet.
+            // The headless service is needed to register local DNS names for each of the Pod names in the StatefulSet, which implies one-per-StatefulSEt.
             let makePerStsServices coreSet = 
                 let svc = nCfg.ToService(coreSet)
                 LogInfo "Creating Service %s" svc.Metadata.Name
