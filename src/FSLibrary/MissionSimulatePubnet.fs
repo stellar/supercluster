@@ -19,7 +19,7 @@ open StellarCoreHTTP
 let simulatePubnet (context: MissionContext) =
     let context =
         { context with
-              coreResources = SimulatePubnetResources context.networkSizeLimit
+              coreResources = SimulatePubnetResources
               // As the goal of `SimulatePubnet` is to simulate a pubnet,
               // network delays are, in general, indispensable.
               // Therefore, unless explicitly told otherwise, we will use

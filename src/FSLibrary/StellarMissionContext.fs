@@ -25,12 +25,11 @@ type CoreResources =
     | SmallTestResources
     | MediumTestResources
     | AcceptanceTestResources
-    | SimulatePubnetResources of int
+    | SimulatePubnetResources
     | SimulatePubnetTier1PerfResources
     | ParallelCatchupResources
     | NonParallelCatchupResources
     | UpgradeResources
-    | SimulatePubnetMixedLoadResources
 
 type MissionContext =
     { kube: Kubernetes

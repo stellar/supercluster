@@ -21,7 +21,7 @@ let simulatePubnetMixedLoad (baseContext: MissionContext) =
     let context =
         { baseContext with
               numAccounts = 30000
-              coreResources = SimulatePubnetMixedLoadResources
+              coreResources = SimulatePubnetResources
               // As the goal of `SimulatePubnet` is to simulate a pubnet,
               // network delays are, in general, indispensable.
               // Therefore, unless explicitly told otherwise, we will use
