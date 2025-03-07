@@ -69,7 +69,12 @@ let installProject (context: MissionContext) =
     setOptions.Add(sprintf "worker.stellar_core_image=%s" context.image)
     setOptions.Add(sprintf "worker.replicas=%d" context.pubnetParallelCatchupNumWorkers)
     setOptions.Add(sprintf "range_generator.params.starting_ledger=%d" context.pubnetParallelCatchupStartingLedger)
-    setOptions.Add(sprintf "worker.catchup_skip_known_results_for_testing=%b" context.catchupSkipKnownResultsForTesting)
+    // Skip known results by default
+    setOptions.Add(
+        sprintf
+            "worker.catchup_skip_known_results_for_testing=%b"
+            (Option.defaultValue true context.catchupSkipKnownResultsForTesting)
+    )
 
     // read the resource requirements defined in StellarKubeSpecs.fs (where resource for various missions are centralized)
     let resourceRequirements = ParallelCatchupCoreResourceRequirements
