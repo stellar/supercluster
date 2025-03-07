@@ -109,5 +109,5 @@ type MissionContext =
       // server disconnection. Our solution for now is to just disable tail logging on
       // those missions.
       enableTailLogging: bool
-      catchupSkipKnownResultsForTesting: bool
+      catchupSkipKnownResultsForTesting: bool option
       updateSorobanCosts: bool option }
