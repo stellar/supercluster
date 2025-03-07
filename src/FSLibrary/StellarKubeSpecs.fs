@@ -120,22 +120,16 @@ let NetworkDelayScriptResourceRequirements : V1ResourceRequirements =
 let GetSimulatePubnetResources networkSize : V1ResourceRequirements =
     // Running simulate-pubnet _needs_ a ways over 200MB RSS per node, and
     // depending on queue backups it can spike over 300MB; we have 64GB limit
-    // for quota so to be generous we give each node 600MB limit and run only
-    // 100 nodes (despite survey showing many more).
+    // for quota so to be generous we give each node 1500MB limit.
     //
-    // We also have a 100vCPU quota but only really 72 cores to play with, so
-    // to keep some spare room for other jobs without stressing the workers we
-    // want to stay under 50vCPU, again divided 100 ways across our simulated
-    // nodes.
-    //
-    // So we allocate a 64MB RAM request and 600MB RAM limit to each, and a
-    // 0.025vCPU request and 0.5vCPU limit to each.
+    // So we allocate a 64MB RAM request and 1500MB RAM limit to each, and a
+    // 0.025vCPU request and 4.0vCPU limit to each.
     //
     // It increases the resource requirement in case the network size is big.
     let cpuReqMili = 25
     let memReqMebi = 64
-    let cpuLimMili = 500
-    let memLimMebi = 600
+    let cpuLimMili = 4000
+    let memLimMebi = 1500
     makeResourceRequirements cpuReqMili memReqMebi cpuLimMili memLimMebi
 
 let SimulatePubnetTier1PerfCoreResourceRequirements : V1ResourceRequirements =
