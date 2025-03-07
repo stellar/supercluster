@@ -116,28 +116,6 @@ let NetworkDelayScriptResourceRequirements : V1ResourceRequirements =
     // The network delay script needs 0.1 vCPU and 32MB RAM
     makeResourceRequirements 20 32 100 32
 
-
-let GetSimulatePubnetResources networkSize : V1ResourceRequirements =
-    // Running simulate-pubnet _needs_ a ways over 200MB RSS per node, and
-    // depending on queue backups it can spike over 300MB; we have 64GB limit
-    // for quota so to be generous we give each node 600MB limit and run only
-    // 100 nodes (despite survey showing many more).
-    //
-    // We also have a 100vCPU quota but only really 72 cores to play with, so
-    // to keep some spare room for other jobs without stressing the workers we
-    // want to stay under 50vCPU, again divided 100 ways across our simulated
-    // nodes.
-    //
-    // So we allocate a 64MB RAM request and 600MB RAM limit to each, and a
-    // 0.025vCPU request and 0.5vCPU limit to each.
-    //
-    // It increases the resource requirement in case the network size is big.
-    let cpuReqMili = 25
-    let memReqMebi = 64
-    let cpuLimMili = 500
-    let memLimMebi = 600
-    makeResourceRequirements cpuReqMili memReqMebi cpuLimMili memLimMebi
-
 let SimulatePubnetTier1PerfCoreResourceRequirements : V1ResourceRequirements =
     // Tier1 perf simulation is interested in "how fast can we go in practice"
     // which means configuring the nodes like a real operator would: 1-4 vCPU
@@ -175,7 +153,7 @@ let AcceptanceTestCoreResourceRequirements : V1ResourceRequirements =
     // RAM required.
     makeResourceRequirements 4000 4096 4000 4096
 
-let SimulatePubnetMixedLoadResourceRequirements : V1ResourceRequirements =
+let SimulatePubnetResources : V1ResourceRequirements =
     // Guarantee all pods 0.65 vCPUs, which is about as high as we can guarantee
     // with ~600 nodes. However, allow them to burst up to 4 vCPUs. This is
     // helpful because validators experience heavy CPU and wind up throttled if
@@ -336,12 +314,11 @@ let CoreContainerForCommand
         | SmallTestResources -> SmallTestCoreResourceRequirements
         | MediumTestResources -> MediumTestCoreResourceRequirements
         | AcceptanceTestResources -> AcceptanceTestCoreResourceRequirements
-        | SimulatePubnetResources size -> GetSimulatePubnetResources size
+        | SimulatePubnetResources -> SimulatePubnetResources
         | SimulatePubnetTier1PerfResources -> SimulatePubnetTier1PerfCoreResourceRequirements
         | ParallelCatchupResources -> ParallelCatchupCoreResourceRequirements
         | NonParallelCatchupResources -> NonParallelCatchupCoreResourceRequirements
         | UpgradeResources -> UpgradeCoreResourceRequirements
-        | SimulatePubnetMixedLoadResources -> SimulatePubnetMixedLoadResourceRequirements
 
     V1Container(
         name = containerName,
