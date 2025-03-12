@@ -526,7 +526,8 @@ type NetworkCfg with
                        Some(
                            ShCmd.OfStrs [| "createdb"
                                            "test" + i.ToString() |]
-                       ) |]
+                       )
+                       |> ignoreError |]
             | _ -> [||]
 
         let waitForDB : ShCmd Option =
