@@ -42,7 +42,8 @@ let databaseInplaceUpgrade (context: MissionContext) =
                         newHist = false
                         initialCatchup = false
                         waitForConsensus = true
-                        fetchDBFromPeer = fetchFromPeer } }
+                        fetchDBFromPeer = fetchFromPeer
+                        pregenerateTxs = None } }
 
     context.Execute
         [ beforeUpgradeCoreSet; coreSet; afterUpgradeCoreSet ]

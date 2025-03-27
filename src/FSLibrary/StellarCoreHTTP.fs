@@ -51,6 +51,7 @@ type LoadGenMode =
     | SorobanInvoke
     | MixedClassicSoroban
     | StopRun
+    | PayPregenerated
 
     override self.ToString() =
         match self with
@@ -64,6 +65,7 @@ type LoadGenMode =
         | SorobanInvoke -> "soroban_invoke"
         | MixedClassicSoroban -> "mixed_classic_soroban"
         | StopRun -> "stop"
+        | PayPregenerated -> "pay_pregenerated"
 
 type LoadGen =
     { mode: LoadGenMode
