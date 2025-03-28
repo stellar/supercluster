@@ -7,7 +7,7 @@ module PollRetry
 open System.Threading
 open Logging
 
-let DefaultRetry = 200
+let DefaultRetry = 300
 
 let rec WebExceptionRetry (n: int) (f: unit -> 'a) : 'a =
     try
