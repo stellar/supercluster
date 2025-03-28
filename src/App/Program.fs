@@ -110,8 +110,6 @@ type MissionOptions
         pubnetParallelCatchupNumWorkers: int,
         tag: string option,
         numRuns: int option,
-        numPregeneratedTxs: int option,
-        genesisTestAccountCount: int option,
         catchupSkipKnownResultsForTesting: bool option
     ) =
 
@@ -461,16 +459,6 @@ type MissionOptions
              Required = false)>]
     member self.NumRuns = numRuns
 
-    [<Option("num-pregenerated-txs",
-             HelpText = "Number of transactions to pregenerate for max TPS tests",
-             Required = false)>]
-    member self.NumPregeneratedTxs = numPregeneratedTxs
-
-    [<Option("genesis-test-account-count",
-             HelpText = "Number of test accounts to create in genesis (See GENESIS_TEST_ACCOUNT_COUNT)",
-             Required = false)>]
-    member self.GenesisTestAccountCount = genesisTestAccountCount
-
     [<Option("catchup-skip-known-results-for-testing",
              HelpText = "when this flag is provided, pubnet parallel catchup workers will run with CATCHUP_SKIP_KNOWN_RESULTS_FOR_TESTING = true, resulting in skipping application of failed transaction and signature verification",
              Required = false)>]
@@ -589,8 +577,6 @@ let main argv =
                   pubnetParallelCatchupNumWorkers = 128
                   tag = None
                   numRuns = None
-                  numPregeneratedTxs = None
-                  genesisTestAccountCount = None
                   enableTailLogging = true
                   catchupSkipKnownResultsForTesting = None
                   updateSorobanCosts = None }
@@ -729,11 +715,9 @@ let main argv =
                                pubnetParallelCatchupNumWorkers = mission.PubnetParallelCatchupNumWorkers
                                tag = mission.Tag
                                numRuns = mission.NumRuns
-                               numPregeneratedTxs = mission.NumPregeneratedTxs
                                enableTailLogging = true
                                catchupSkipKnownResultsForTesting = mission.CatchupSkipKnownResultsForTesting
-                               updateSorobanCosts = None
-                               genesisTestAccountCount = mission.GenesisTestAccountCount }
+                               updateSorobanCosts = None }
 
                          allMissions.[m] missionContext
 

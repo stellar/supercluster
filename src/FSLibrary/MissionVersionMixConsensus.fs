@@ -40,8 +40,7 @@ let versionMixConsensus (context: MissionContext) =
                         newHist = true
                         initialCatchup = false
                         waitForConsensus = false
-                        fetchDBFromPeer = fetchFromPeer
-                        pregenerateTxs = None } }
+                        fetchDBFromPeer = fetchFromPeer } }
 
     let oldCoreSet =
         MakeDeferredCoreSet
@@ -55,8 +54,7 @@ let versionMixConsensus (context: MissionContext) =
                         newHist = true
                         initialCatchup = false
                         waitForConsensus = false
-                        fetchDBFromPeer = fetchFromPeer
-                        pregenerateTxs = None } }
+                        fetchDBFromPeer = fetchFromPeer } }
 
     context.Execute
         [ beforeSet; newCoreSet; oldCoreSet ]
