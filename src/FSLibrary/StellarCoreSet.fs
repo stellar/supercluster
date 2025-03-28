@@ -84,49 +84,42 @@ type CoreSetInitialization =
       newHist: bool
       initialCatchup: bool
       waitForConsensus: bool
-      fetchDBFromPeer: (CoreSetName * int) option
-      // (numTxs, numAccounts, offset)
-      pregenerateTxs: (int * int * int) option }
+      fetchDBFromPeer: (CoreSetName * int) option }
 
     static member Default =
         { newDb = true
           newHist = true
           initialCatchup = false
           waitForConsensus = false
-          fetchDBFromPeer = None
-          pregenerateTxs = None }
+          fetchDBFromPeer = None }
 
     static member DefaultNoForceSCP =
         { newDb = true
           newHist = true
           initialCatchup = false
           waitForConsensus = true
-          fetchDBFromPeer = None
-          pregenerateTxs = None }
+          fetchDBFromPeer = None }
 
     static member CatchupNoForceSCP =
         { newDb = true
           newHist = true
           initialCatchup = true
           waitForConsensus = true
-          fetchDBFromPeer = None
-          pregenerateTxs = None }
+          fetchDBFromPeer = None }
 
     static member OnlyNewDb =
         { newDb = true
           newHist = false
           initialCatchup = false
           waitForConsensus = true
-          fetchDBFromPeer = None
-          pregenerateTxs = None }
+          fetchDBFromPeer = None }
 
     static member NoInitCmds =
         { newDb = false
           newHist = false
           initialCatchup = false
           waitForConsensus = true
-          fetchDBFromPeer = None
-          pregenerateTxs = None }
+          fetchDBFromPeer = None }
 
 type GeoLoc = { lat: float; lon: float }
 

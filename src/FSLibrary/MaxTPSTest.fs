@@ -124,15 +124,6 @@ let upgradeSorobanLedgerLimits
 
 
 let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadGen option) =
-    let context =
-        { context with
-              genesisTestAccountCount = Some(context.genesisTestAccountCount |> Option.defaultValue 500000)
-              numPregeneratedTxs =
-                  if baseLoadGen.mode = PayPregenerated then
-                      Some(context.numPregeneratedTxs |> Option.defaultValue 2000000)
-                  else
-                      None }
-
     let allNodes =
         if context.pubnetData.IsSome then
             FullPubnetCoreSets context true false
@@ -146,48 +137,13 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
 
     let tier1 = List.filter (fun (cs: CoreSet) -> cs.options.tier1 = Some true) allNodes
 
-    // On smaller networks, run loadgen on all nodes to better balance the overhead of load generation
-    let loadGenNodes = if List.length allNodes > smallNetworkSize then tier1 else allNodes
-
-    let isLoadGenNode cs = List.exists (fun (cs': CoreSet) -> cs' = cs) loadGenNodes
-
-    // Assign pre-generated transaction information to each load generator node.
-    // Specifically, partition all availabe accounts evenly across nodes,
-    // and assign appropriate offsets to prevent conflicts.
-    let allNodes =
-        match context.numPregeneratedTxs, context.genesisTestAccountCount with
-        | Some txs, Some accounts ->
-            let loadGenCount = List.length loadGenNodes
-            let accountsPerNode = accounts / loadGenCount
-            let mutable j = 0
-
-            List.map
-                (fun (cs: CoreSet) ->
-                    if isLoadGenNode cs then
-                        let i = j
-                        j <- j + 1
-
-                        { cs with
-                              options =
-                                  { cs.options with
-                                        initialization =
-                                            { cs.options.initialization with
-                                                  pregenerateTxs = Some(txs, accountsPerNode, accountsPerNode * i) } } }
-                    else
-                        cs)
-                allNodes
-        | _ -> allNodes
-
     context.ExecuteWithOptionalConsistencyCheck
         allNodes
         None
         false
         (fun (formation: StellarFormation) ->
 
-            let numAccounts =
-                match context.genesisTestAccountCount with
-                | Some x -> x
-                | None -> failwith "genesisTestAccountCount is required for maxTPSTest"
+            let numAccounts = 30000
 
             let upgradeMaxTxSetSize (coreSets: CoreSet list) (rate: int) =
                 // Max tx size to avoid overflowing the transaction queue
@@ -203,6 +159,8 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
             // to fail asap in case of a misconfiguration
             formation.WaitUntilSynced allNodes
             formation.UpgradeProtocolToLatest allNodes
+            upgradeMaxTxSetSize allNodes 10000
+            formation.RunLoadgen sdf { context.GenerateAccountCreationLoad with accounts = numAccounts }
 
             // Perform setup (if requested)
             match setupCfg with
@@ -231,10 +189,8 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
 
                     formation.clearMetrics allNodes
                     upgradeMaxTxSetSize allNodes middle
-
-                    if baseLoadGen.mode <> PayPregenerated && baseLoadGen.mode <> GeneratePaymentLoad then
-                        upgradeSorobanLedgerLimits context formation allNodes middle
-                        upgradeSorobanTxLimits context formation allNodes
+                    upgradeSorobanLedgerLimits context formation allNodes middle
+                    upgradeSorobanTxLimits context formation allNodes
 
                     try
                         LogInfo "Run started at tx rate %i" middle
@@ -246,6 +202,8 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
                                   txs = middle * 1000
                                   txrate = middle }
 
+                        // On smaller networks, run loadgen on all nodes to better balance the overhead of load generation
+                        let loadGenNodes = if List.length allNodes > smallNetworkSize then tier1 else allNodes
                         formation.RunMultiLoadgen loadGenNodes loadGen
                         formation.CheckNoErrorsAndPairwiseConsistency()
                         formation.EnsureAllNodesInSync allNodes

@@ -194,10 +194,6 @@ type StellarCoreCfg =
         t.Add("DEPRECATED_SQL_LEDGER_STATE", self.deprecatedSQLState) |> ignore
         t.Add("METADATA_DEBUG_LEDGERS", 0) |> ignore
 
-        match self.network.missionContext.genesisTestAccountCount with
-        | Some count -> t.Add("GENESIS_TEST_ACCOUNT_COUNT", count) |> ignore
-        | None -> ()
-
         match self.containerType with
         // REVERTME: temporarily use same nonzero port for both container types.
         | _ -> t.Add("HTTP_PORT", int64 (CfgVal.httpPort)) |> ignore

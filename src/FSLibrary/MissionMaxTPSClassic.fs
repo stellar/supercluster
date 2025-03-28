@@ -20,7 +20,7 @@ let maxTPSClassic (context: MissionContext) =
 
     let baseLoadGen =
         { LoadGen.GetDefault() with
-              mode = PayPregenerated
+              mode = GeneratePaymentLoad
               spikesize = context.spikeSize
               spikeinterval = context.spikeInterval
               offset = 0

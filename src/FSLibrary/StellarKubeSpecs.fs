@@ -339,7 +339,6 @@ let WithProbes (container: V1Container) (probeTimeout: int) : V1Container =
             periodSeconds = System.Nullable<int>(1),
             failureThreshold = System.Nullable<int>(60),
             timeoutSeconds = System.Nullable<int>(probeTimeout),
-            initialDelaySeconds = System.Nullable<int>(180),
             httpGet = V1HTTPGetAction(path = "/info", port = httpPortStr)
         )
 
@@ -569,16 +568,6 @@ type NetworkCfg with
         // we want.
         let newHistIgnoreError = ignoreError newHist
 
-        let pregenerate =
-            match init.pregenerateTxs with
-            | None -> None
-            | Some (txs, accounts, offset) ->
-                runCoreIf
-                    true
-                    [| "pregenerate-loadgen-txs"
-                       "--count " + txs.ToString()
-                       "--accounts " + accounts.ToString()
-                       "--offset " + offset.ToString() |]
 
         let initialCatchup = runCoreIf init.initialCatchup [| "catchup"; "current/0" |]
 
@@ -591,7 +580,6 @@ type NetworkCfg with
                         setPgHost
                         waitForTime
                         newDb
-                        pregenerate
                         newHistIgnoreError
                         initialCatchup |])
                     createDbs)
