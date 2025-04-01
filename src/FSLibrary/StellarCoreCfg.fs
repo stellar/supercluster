@@ -193,6 +193,8 @@ type StellarCoreCfg =
         t.Add("DATABASE", self.database.ToString()) |> ignore
         t.Add("DEPRECATED_SQL_LEDGER_STATE", self.deprecatedSQLState) |> ignore
         t.Add("METADATA_DEBUG_LEDGERS", 0) |> ignore
+        t.Add("MAX_OUTBOUND_QUEUE_SIZE", 10000) |> ignore
+        t.Add("EXPERIMENTAL_PARALLEL_LEDGER_APPLY", true) |> ignore
 
         match self.network.missionContext.genesisTestAccountCount with
         | Some count -> t.Add("GENESIS_TEST_ACCOUNT_COUNT", count) |> ignore
@@ -327,6 +329,16 @@ type StellarCoreCfg =
         t.Add("INVARIANT_CHECKS", invList) |> ignore
         t.Add("UNSAFE_QUORUM", self.unsafeQuorum) |> ignore
         t.Add("FAILURE_SAFETY", self.failureSafety) |> ignore
+
+        // Only add TX_BATCH_MAX_SIZE to config if explicitly set in command line
+        match self.network.missionContext.txBatchMaxSize with
+        | Some batchSize -> t.Add("TX_BATCH_MAX_SIZE", batchSize) |> ignore
+        | None -> ()
+
+        // 1s to pull a tx
+        t.Add("FLOOD_DEMAND_BACKOFF_DELAY_MS", 1000) |> ignore
+        t.Add("BUCKETLIST_DB_INDEX_PAGE_SIZE_EXPONENT", 0) |> ignore
+        t.Add("BUCKETLIST_DB_PERSIST_INDEX", false) |> ignore
 
         match self.surveyPhaseDuration with
         | None -> ()

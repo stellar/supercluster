@@ -112,7 +112,8 @@ type MissionOptions
         numRuns: int option,
         numPregeneratedTxs: int option,
         genesisTestAccountCount: int option,
-        catchupSkipKnownResultsForTesting: bool option
+        catchupSkipKnownResultsForTesting: bool option,
+        txBatchMaxSize: int option
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -476,6 +477,11 @@ type MissionOptions
              Required = false)>]
     member self.CatchupSkipKnownResultsForTesting = catchupSkipKnownResultsForTesting
 
+    [<Option("tx-batch-max-size",
+             HelpText = "Maximum size of transaction batches for parallel processing",
+             Required = false)>]
+    member self.TxBatchMaxSize = txBatchMaxSize
+
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' with
     | [| x |] -> (x, None)
@@ -593,7 +599,8 @@ let main argv =
                   genesisTestAccountCount = None
                   enableTailLogging = true
                   catchupSkipKnownResultsForTesting = None
-                  updateSorobanCosts = None }
+                  updateSorobanCosts = None
+                  txBatchMaxSize = None }
 
             let nCfg = MakeNetworkCfg ctx [] None
             use formation = kube.MakeEmptyFormation nCfg
@@ -733,7 +740,8 @@ let main argv =
                                enableTailLogging = true
                                catchupSkipKnownResultsForTesting = mission.CatchupSkipKnownResultsForTesting
                                updateSorobanCosts = None
-                               genesisTestAccountCount = mission.GenesisTestAccountCount }
+                               genesisTestAccountCount = mission.GenesisTestAccountCount
+                               txBatchMaxSize = mission.TxBatchMaxSize }
 
                          allMissions.[m] missionContext
 
