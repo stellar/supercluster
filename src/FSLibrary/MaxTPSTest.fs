@@ -134,8 +134,11 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
 
     // PayPregenerated requires node restart between failed iterations to ensure validity of the pregenerated transactions
     // However, large-scale simulation restarts can be slow, so for now only use the new mode on small networks
-    let lgMode = if List.length allNodes > 30 then GeneratePaymentLoad else PayPregenerated
-    let baseLoadGen = { baseLoadGen with mode = lgMode }
+    let baseLoadGen =
+        if List.length allNodes <= 30 && baseLoadGen.mode = GeneratePaymentLoad then
+            { baseLoadGen with mode = PayPregenerated }
+        else
+            baseLoadGen
 
     let context =
         { context with
@@ -163,7 +166,7 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
     // Specifically, partition all availabe accounts evenly across nodes,
     // and assign appropriate offsets to prevent conflicts.
     let allNodes =
-        match context.numPregeneratedTxs, context.genesisTestAccountCount, lgMode with
+        match context.numPregeneratedTxs, context.genesisTestAccountCount, baseLoadGen.mode with
         | Some txs, Some accounts, PayPregenerated ->
             let loadGenCount = List.length loadGenNodes
             let accountsPerNode = accounts / loadGenCount
@@ -214,7 +217,7 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
                 formation.UpgradeProtocolToLatest coreSets
 
             let restartCoreSetsOrWait (coreSets: CoreSet list) =
-                if lgMode = PayPregenerated then
+                if baseLoadGen.mode = PayPregenerated then
                     // Stop all nodes in parallel
                     allNodes
                     |> List.map (fun set -> async { formation.Stop set.name })
@@ -233,7 +236,7 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
 
             setupCoreSets allNodes
 
-            if lgMode <> PayPregenerated then
+            if baseLoadGen.mode <> PayPregenerated then
                 upgradeMaxTxSetSize allNodes 10000
                 formation.RunLoadgen sdf { context.GenerateAccountCreationLoad with accounts = numAccounts }
 
