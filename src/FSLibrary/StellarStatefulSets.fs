@@ -332,7 +332,7 @@ type StellarFormation with
             if List.exists (fun (peer: Peer) -> peer.IsLoadGenComplete() = Failure) loadGenPeers then
                 // Stop all runs
                 for peer in loadGenPeers do
-                    LogInfo "Loadgen: %s" (peer.StopLoadGen())
+                    LogInfo "%s  loadgen: %s" (peer.ShortName.ToString()) (peer.StopLoadGen())
 
                 failwith "Loadgen failed!"
 
