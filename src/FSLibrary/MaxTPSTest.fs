@@ -149,7 +149,7 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
                       None
               numPregeneratedTxs =
                   if baseLoadGen.mode = PayPregenerated then
-                      Some(context.numPregeneratedTxs |> Option.defaultValue 500000)
+                      Some(context.numPregeneratedTxs |> Option.defaultValue 2500000)
                   else
                       None }
 
