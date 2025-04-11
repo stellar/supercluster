@@ -113,8 +113,6 @@ data:
     INVARIANT_CHECKS = [ "(?!BucketListIsConsistentWithDatabase).*" ]
     {{- else }}
     {{ "\n" }}
-    EMIT_CLASSIC_EVENTS = false
-    BACKFILL_STELLAR_ASSET_EVENTS = false
     INVARIANT_CHECKS = [ "(?!BucketListIsConsistentWithDatabase|EventsAreConsistentWithEntryDiffs).*" ]
     {{- end }}
     {{- (.Files.Get "files/stellar-core.cfg") | nindent 4 }}
