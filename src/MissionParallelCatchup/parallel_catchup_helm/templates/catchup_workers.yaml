@@ -106,6 +106,15 @@ data:
     {{ "\n" }}
     CATCHUP_SKIP_KNOWN_RESULTS_FOR_TESTING = true
     {{- end }}
+    {{- if .Values.worker.check_events_are_consistent_with_entry_diffs }}
+    {{ "\n" }}
+    EMIT_CLASSIC_EVENTS = true
+    BACKFILL_STELLAR_ASSET_EVENTS = true
+    INVARIANT_CHECKS = [ "(?!BucketListIsConsistentWithDatabase).*" ]
+    {{- else }}
+    {{ "\n" }}
+    INVARIANT_CHECKS = [ "(?!BucketListIsConsistentWithDatabase|EventsAreConsistentWithEntryDiffs).*" ]
+    {{- end }}
     {{- (.Files.Get "files/stellar-core.cfg") | nindent 4 }}
 ---
 apiVersion: v1
