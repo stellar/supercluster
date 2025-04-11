@@ -112,7 +112,8 @@ type MissionOptions
         numRuns: int option,
         numPregeneratedTxs: int option,
         genesisTestAccountCount: int option,
-        catchupSkipKnownResultsForTesting: bool option
+        catchupSkipKnownResultsForTesting: bool option,
+        checkEventsAreConsistentWithEntryDiffs: bool option
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -476,6 +477,11 @@ type MissionOptions
              Required = false)>]
     member self.CatchupSkipKnownResultsForTesting = catchupSkipKnownResultsForTesting
 
+    [<Option("check-events-are-consistent-with-entry-diffs",
+             HelpText = "when this flag is provided, pubnet parallel catchup workers will run with `EMIT_CLASSIC_EVENTS` and `BACKFILL_STELLAR_ASSET_EVENTS` set, and enables the `EventsAreConsistentWithEntryDiffs` invariant checking",
+             Required = false)>]
+    member self.CheckEventsAreConsistentWithEntryDiffs = checkEventsAreConsistentWithEntryDiffs
+
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' with
     | [| x |] -> (x, None)
@@ -593,6 +599,7 @@ let main argv =
                   genesisTestAccountCount = None
                   enableTailLogging = true
                   catchupSkipKnownResultsForTesting = None
+                  checkEventsAreConsistentWithEntryDiffs = None
                   updateSorobanCosts = None }
 
             let nCfg = MakeNetworkCfg ctx [] None
@@ -732,6 +739,7 @@ let main argv =
                                numPregeneratedTxs = mission.NumPregeneratedTxs
                                enableTailLogging = true
                                catchupSkipKnownResultsForTesting = mission.CatchupSkipKnownResultsForTesting
+                               checkEventsAreConsistentWithEntryDiffs = mission.CheckEventsAreConsistentWithEntryDiffs
                                updateSorobanCosts = None
                                genesisTestAccountCount = mission.GenesisTestAccountCount }
 

@@ -112,4 +112,5 @@ type MissionContext =
       // those missions.
       enableTailLogging: bool
       catchupSkipKnownResultsForTesting: bool option
+      checkEventsAreConsistentWithEntryDiffs: bool option
       updateSorobanCosts: bool option }

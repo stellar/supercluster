@@ -120,6 +120,7 @@ let ctx : MissionContext =
       numPregeneratedTxs = None
       enableTailLogging = true
       catchupSkipKnownResultsForTesting = None
+      checkEventsAreConsistentWithEntryDiffs = None
       updateSorobanCosts = None
       genesisTestAccountCount = None }
 
