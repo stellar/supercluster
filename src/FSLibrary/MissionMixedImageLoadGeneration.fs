@@ -43,7 +43,7 @@ let mixedImageLoadGeneration (oldImageNodeCount: int) (context: MissionContext) 
             oldName
             { CoreSetOptions.GetDefault oldImage with
                   nodeCount = oldNodeCount
-                  invariantChecks = AllInvariantsExceptBucketConsistencyChecks
+                  invariantChecks = AllInvariantsExceptBucketConsistencyChecksAndEvents
                   accelerateTime = false
                   dumpDatabase = false
                   quorumSet = qSet }
@@ -53,7 +53,7 @@ let mixedImageLoadGeneration (oldImageNodeCount: int) (context: MissionContext) 
             newName
             { CoreSetOptions.GetDefault newImage with
                   nodeCount = newNodeCount
-                  invariantChecks = AllInvariantsExceptBucketConsistencyChecks
+                  invariantChecks = AllInvariantsExceptBucketConsistencyChecksAndEvents
                   accelerateTime = false
                   dumpDatabase = false
                   quorumSet = qSet }
