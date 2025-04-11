@@ -478,7 +478,7 @@ type MissionOptions
     member self.CatchupSkipKnownResultsForTesting = catchupSkipKnownResultsForTesting
 
     [<Option("check-events-are-consistent-with-entry-diffs",
-             HelpText = "when this flag is provided, pubnet parallel catchup workers will run with `EMIT_CLASSIC_EVENTS` and `BACKFILL_STELLAR_ASSET_EVENTS` set, and enables the `EventsAreConsistentWithEntryDiffs` invariant checking",
+             HelpText = "when this flag is provided, pubnet parallel catchup workers will run with `EMIT_CLASSIC_EVENTS` and `BACKFILL_STELLAR_ASSET_EVENTS` set, and have the `EventsAreConsistentWithEntryDiffs` invariant check enabled",
              Required = false)>]
     member self.CheckEventsAreConsistentWithEntryDiffs = checkEventsAreConsistentWithEntryDiffs
 
