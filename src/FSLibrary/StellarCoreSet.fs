@@ -148,7 +148,7 @@ type QuorumSetSpec =
 
 // We don't enable the EventsAreConsistentWithEntryDiffs invariant on
 // any of the missions that use this spec because events would also need
-// to be enabled. We enable the events and the invariant for the 
+// to be enabled. We enable the events and the invariant for the
 // HistoryPubnetParallelCatchupV2 mission (which is configured
 // under MissionParallelCatchup/parallel_catchup_helm/files/stellar-core.cfg),
 // So we don't need it for the other missions.

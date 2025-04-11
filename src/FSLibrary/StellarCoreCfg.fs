@@ -321,7 +321,8 @@ type StellarCoreCfg =
         let invList =
             match self.invariantChecks with
             | AllInvariantsExceptEvents -> [ "(?!EventsAreConsistentWithEntryDiffs).*" ]
-            | AllInvariantsExceptBucketConsistencyChecksAndEvents -> [ "(?!BucketListIsConsistentWithDatabase|EventsAreConsistentWithEntryDiffs).*" ]
+            | AllInvariantsExceptBucketConsistencyChecksAndEvents ->
+                [ "(?!BucketListIsConsistentWithDatabase|EventsAreConsistentWithEntryDiffs).*" ]
             | NoInvariants -> []
 
         t.Add("INVARIANT_CHECKS", invList) |> ignore
