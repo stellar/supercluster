@@ -147,7 +147,7 @@ type QuorumSetSpec =
 // so we provide a special variant to allow disabling it.
 type InvariantChecksSpec =
     | AllInvariants
-    | AllInvariantsExceptBucketConsistencyChecks
+    | AllInvariantsExceptBucketConsistencyChecksAndEvents
     | NoInvariants
 
 type CoreSetOptions =

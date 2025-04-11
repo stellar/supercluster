@@ -23,7 +23,7 @@ let runInMemoryMode (context: MissionContext) =
         MakeLiveCoreSet
             "in-memory-mode"
             { CoreSetOptions.GetDefault context.image with
-                  invariantChecks = AllInvariantsExceptBucketConsistencyChecks
+                  invariantChecks = AllInvariantsExceptBucketConsistencyChecksAndEvents
                   nodeCount = 1
                   inMemoryMode = true
                   validate = false

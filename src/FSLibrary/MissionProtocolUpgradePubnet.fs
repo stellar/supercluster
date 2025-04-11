@@ -26,7 +26,7 @@ let protocolUpgradePubnet (context: MissionContext) =
               historyGetCommands = PubnetGetCommands
               catchupMode = CatchupRecent(0)
               initialization = { CoreSetInitialization.Default with initialCatchup = true }
-              invariantChecks = AllInvariantsExceptBucketConsistencyChecks }
+              invariantChecks = AllInvariantsExceptBucketConsistencyChecksAndEvents }
 
     let coreSet = MakeLiveCoreSet "core" set
 

@@ -18,7 +18,7 @@ let sorobanCatchupWithPrevAndCurr (context: MissionContext) =
         MakeLiveCoreSet
             "core"
             { CoreSetOptions.GetDefault context.image with
-                  invariantChecks = AllInvariantsExceptBucketConsistencyChecks
+                  invariantChecks = AllInvariantsExceptBucketConsistencyChecksAndEvents
                   emptyDirType = DiskBackedEmptyDir
                   updateSorobanCosts = Some(true) }
 

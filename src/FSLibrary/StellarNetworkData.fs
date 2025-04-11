@@ -555,7 +555,7 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
               // for networks as large as this, otherwise it loses
               // sync before all the nodes are online.
               syncStartupDelay = Some(30)
-              invariantChecks = AllInvariantsExceptBucketConsistencyChecks
+              invariantChecks = AllInvariantsExceptBucketConsistencyChecksAndEvents
               dumpDatabase = false
               updateSorobanCosts = context.updateSorobanCosts }
 

@@ -16,7 +16,7 @@ let historyPubnetCompleteCatchup (context: MissionContext) =
     let set =
         { PubnetCoreSetOptions context.image with
               nodeCount = 1
-              invariantChecks = AllInvariantsExceptBucketConsistencyChecks
+              invariantChecks = AllInvariantsExceptBucketConsistencyChecksAndEvents
               catchupMode = CatchupComplete }
 
     let coreSet = MakeLiveCoreSet "core" set
