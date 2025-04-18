@@ -535,9 +535,12 @@ type NetworkCfg with
             checkAutoQSetIncompatability "CoreSetQuorumListWithThreshold"
             toExplicitQSet (self.GetNameKeyList q) (Some(t))
         | ExplicitQuorum (e) ->
+            LogInfo "Using explicit quorum set configuration"
             checkAutoQSetIncompatability "ExplicitQuorum"
             ExplicitQuorumSet e
-        | AutoQuorum q -> AutoQuorumSet q
+        | AutoQuorum q ->
+            LogInfo "Using auto quorum set configuration"
+            AutoQuorumSet q
 
     member self.HistoryNodes(o: CoreSetOptions) : Map<PeerShortName, PeerDnsName> =
         match o.historyNodes, o.quorumSet with
