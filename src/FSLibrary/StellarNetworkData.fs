@@ -514,37 +514,48 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
         |> Array.map (fun k -> (peerShortNameForKey k, getSimKey k))
         |> Map.ofArray
 
+    let pubKeysToAutoValidators (pubKeys: string array) : AutoValidator list =
+        pubKeys
+        |> Array.map
+            (fun k ->
+                { name = peerShortNameForKey k
+                  homeDomain = (homeDomainNameForKey k).StringName
+                  keys = getSimKey k })
+        |> Array.toList
+
+
     // A full-tier-1 qset.
     // This contains all tier-1 nodes with
     // * 3f + 1 for cross organization thresholds (top level).
     // * 2f + 1 for thresholds within each organization.
-    let defaultQuorum : ExplicitQuorumSet =
-        let tier1NodesGroupedByHomeDomain : (string array) array =
+    let defaultQuorum : QuorumSetSpec =
+        let tier1Nodes =
             allPubnetNodes
             |> Array.filter
                 (fun (n: PubnetNode.Root) -> (Set.contains n.PublicKey tier1KeySet) && n.SbHomeDomain.IsSome)
+
+        let tier1NodesGroupedByHomeDomain : (string array) array =
+            tier1Nodes
             |> Array.groupBy (fun (n: PubnetNode.Root) -> n.SbHomeDomain.Value)
             |> Array.map
                 (fun (_, nodes: PubnetNode.Root []) -> Array.map (fun (n: PubnetNode.Root) -> n.PublicKey) nodes)
 
-        let orgToQSet (org: string array) : ExplicitQuorumSet =
-            { thresholdPercent = Some(51) // Simple majority
-              validators = pubKeysToValidators org
-              innerQuorumSets = Array.empty }
-
-        let nOrgs = Array.length tier1NodesGroupedByHomeDomain
+        let tier1Orgs =
+            tier1Nodes
+            |> Array.map
+                (fun (n: PubnetNode.Root) -> { name = (homeDomainNameForKey n.PublicKey).StringName; quality = Medium })
+            |> Set.ofArray
 
         let flatQset =
             { thresholdPercent = Some(100)
               validators = pubKeysToValidators (Set.fold (fun l se -> se :: l) [] tier1KeySet |> Array.ofList)
               innerQuorumSets = Array.empty }
 
-        let qset =
-            { thresholdPercent = Some(67) // 3f + 1
-              validators = Map.empty
-              innerQuorumSets = Array.map orgToQSet tier1NodesGroupedByHomeDomain }
-
-        if context.flatQuorum.IsSome && context.flatQuorum.Value then flatQset else qset
+        if context.flatQuorum.IsSome && context.flatQuorum.Value then
+            ExplicitQuorum flatQset
+        else
+            let validators = Array.map pubKeysToAutoValidators tier1NodesGroupedByHomeDomain |> Array.toList
+            AutoQuorum { homeDomains = Set.toList tier1Orgs; validators = List.fold (@) [] validators }
 
     let pubnetOpts =
         { CoreSetOptions.GetDefault context.image with
@@ -633,12 +644,15 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
             (fun (_: int) (n: PubnetNode.Root) ->
                 let hdn = homeDomainNameForKey n.PublicKey
                 let keys = [| getSimKey n.PublicKey |]
+                let tier1 = Set.contains n.PublicKey tier1KeySet
 
                 let coreSetOpts =
                     { pubnetOpts with
                           nodeCount = 1
-                          quorumSet = ExplicitQuorum defaultQuorum
-                          tier1 = Some(Set.contains n.PublicKey tier1KeySet)
+                          quorumSet = defaultQuorum
+                          tier1 = Some tier1
+                          validate = tier1
+                          homeDomain = if tier1 then Some hdn.StringName else None
                           nodeLocs = Some [ getGeoLocOrDefault n ]
                           preferredPeersMap = Some(keysToPreferredPeersMap keys) }
 
@@ -653,12 +667,15 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
                 assert (nodes.Length <> 0)
                 let nodeList = List.ofArray nodes
                 let keys = Array.map (fun (n: PubnetNode.Root) -> getSimKey n.PublicKey) nodes
+                let tier1 = Set.contains nodes.[0].PublicKey tier1KeySet
 
                 let coreSetOpts =
                     { pubnetOpts with
                           nodeCount = Array.length nodes
-                          quorumSet = ExplicitQuorum defaultQuorum
-                          tier1 = Some(Set.contains nodes.[0].PublicKey tier1KeySet)
+                          quorumSet = defaultQuorum
+                          tier1 = Some tier1
+                          validate = tier1
+                          homeDomain = if tier1 then Some hdn.StringName else None
                           nodeLocs = Some(List.map getGeoLocOrDefault nodeList)
                           preferredPeersMap = Some(keysToPreferredPeersMap keys) }
 
