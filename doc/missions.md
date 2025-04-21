@@ -150,3 +150,12 @@ Run a network with a mix of fast and slow nodes. This mission allows to test int
 ## MissionMaxTPSMixed
 
 Stress test a network of simulated Tier1 topology with a mix of classic and soroban traffic and report maximum achieved throughput.
+
+## MissionMixedNominationLeaderElectionWithOldMajority
+
+Run a network with a mix of nodes running the old and new nomination leader election algorithms. Contains a majority of nodes running the old algorithm.
+
+
+## MissionMixedNominationLeaderElectionWithNewMajority
+
+Run a network with a mix of nodes running the old and new nomination leader election algorithms. Contains a majority of nodes running the new algorithm.

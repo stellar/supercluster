@@ -130,16 +130,33 @@ type CoreSetInitialization =
 
 type GeoLoc = { lat: float; lon: float }
 
-type QuorumSet =
+type ExplicitQuorumSet =
     { thresholdPercent: int option
       validators: Map<PeerShortName, KeyPair>
-      innerQuorumSets: QuorumSet array }
+      innerQuorumSets: ExplicitQuorumSet array }
+
+type Quality =
+    | Critical
+    | High
+    | Medium
+    | Low
+
+type HomeDomain = { name: string; quality: Quality }
+
+type AutoValidator = { name: PeerShortName; homeDomain: string; keys: KeyPair }
+
+type AutoQuorumSet = { homeDomains: HomeDomain list; validators: AutoValidator list }
+
+type QuorumSet =
+    | ExplicitQuorumSet of ExplicitQuorumSet
+    | AutoQuorumSet of AutoQuorumSet
 
 type QuorumSetSpec =
     | CoreSetQuorum of CoreSetName
     | CoreSetQuorumList of CoreSetName list
     | CoreSetQuorumListWithThreshold of CoreSetName list * int
-    | ExplicitQuorum of QuorumSet
+    | ExplicitQuorum of ExplicitQuorumSet
+    | AutoQuorum of AutoQuorumSet
     | AllPeersQuorum
 
 // FIXME: see bug https://github.com/stellar/stellar-core/issues/2304
@@ -164,6 +181,12 @@ type CoreSetOptions =
       emptyDirType: EmptyDirType
       syncStartupDelay: int option
       quorumSet: QuorumSetSpec
+      // `requireAutoQset` checks and fails if the quorum set is not
+      // auto-generated. Setting this flag has no impact on whether the
+      // algorithm chooses to use auto quorum set generation, only on whether
+      // supercluster will fail if it is not used.
+      requireAutoQset: bool
+      forceOldStyleLeaderElection: bool
       historyNodes: CoreSetName list option
       preferredPeersMap: Map<byte [], byte [] list> option
       historyGetCommands: Map<PeerShortName, string>
@@ -175,6 +198,7 @@ type CoreSetOptions =
       unsafeQuorum: bool
       awaitSync: bool
       validate: bool
+      homeDomain: string option
       tier1: bool option
       catchupMode: CatchupMode
       image: string
@@ -199,6 +223,8 @@ type CoreSetOptions =
           emptyDirType = MemoryBackedEmptyDir
           syncStartupDelay = Some(5)
           quorumSet = AllPeersQuorum
+          forceOldStyleLeaderElection = false
+          requireAutoQset = false
           historyNodes = None
           preferredPeersMap = None
           historyGetCommands = Map.empty
@@ -210,6 +236,7 @@ type CoreSetOptions =
           unsafeQuorum = true
           awaitSync = true
           validate = true
+          homeDomain = Some "stellar.org"
           tier1 = None
           catchupMode = CatchupComplete
           image = image

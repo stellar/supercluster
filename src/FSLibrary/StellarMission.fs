@@ -44,6 +44,7 @@ open MissionSorobanCatchupWithPrevAndCurr
 open MissionMixedImageNetworkSurvey
 open MissionMaxTPSMixed
 open MissionSimulatePubnetMixedLoad
+open MissionMixedNominationLeaderElection
 
 type Mission = (MissionContext -> unit)
 
@@ -88,4 +89,6 @@ let allMissions : Map<string, Mission> =
                  ("SorobanCatchupWithPrevAndCurr", sorobanCatchupWithPrevAndCurr)
                  ("MixedImageNetworkSurvey", mixedImageNetworkSurvey)
                  ("MaxTPSMixed", maxTPSMixed)
-                 ("SimulatePubnetMixedLoad", simulatePubnetMixedLoad) |]
+                 ("SimulatePubnetMixedLoad", simulatePubnetMixedLoad)
+                 ("MixedNominationLeaderElectionWithOldMajority", mixedNominationLeaderElectionWithOldMajority)
+                 ("MixedNominationLeaderElectionWithNewMajority", mixedNominationLeaderElectionWithNewMajority) |]
