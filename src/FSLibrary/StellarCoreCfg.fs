@@ -497,7 +497,7 @@ type NetworkCfg with
 
         let toAutoQSet (nks: (PeerShortName * KeyPair) list) (homeDomain: string) =
             LogInfo "Using auto quorum set configuration"
-            let homeDomains = [ { name = homeDomain; quality = High } ]
+            let homeDomains = [ { name = homeDomain; quality = Medium } ]
 
             let validators =
                 List.map (fun (n: PeerShortName, k) -> { name = n; homeDomain = homeDomain; keys = k }) nks
@@ -509,15 +509,7 @@ type NetworkCfg with
         // configuration if possible.
         let simpleQuorum (nks: (PeerShortName * KeyPair) array) =
             match o.homeDomain with
-            | Some hd ->
-                if nks.Length >= 3 then
-                    // There are enough validators to use auto quorum set config
-                    toAutoQSet (List.ofArray nks) hd
-                else if o.requireAutoQset then
-                    failwith "Auto quorum set configuration requires at least 3 validators"
-                else
-                    // Fall back on manual quorum set configuration
-                    toExplicitQSet nks None
+            | Some hd -> toAutoQSet (List.ofArray nks) hd
             | None ->
                 if o.requireAutoQset then
                     failwith "Auto quorum set configuration requires a home domain"
