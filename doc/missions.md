@@ -52,6 +52,9 @@ Perform full catchup to Public Network, but in parallel to improve performance. 
 
 Perform full parallel catchup to Public Network, but with increased parallelism.
 
+## MissionHistoryPubnetParallelCatchupV2
+Perform full catchup to Public Network in parallel, leverging Kubernetes for improved performance and robustness.
+
 ## MissionHistoryPubnetPerformance
 
 Perform recent catchup to a fixed ledger and time bucket application and ledger replay portions of catchup.
@@ -112,6 +115,10 @@ Run stellar-core acceptance tests that take a long time.
 
 Simulate Public Network topology and throughput based on user-supplied distributions derived from network stats.
 
+## MissionSimulatePubnetMixedLoad
+
+Simulate Public Network topology and throughput based on user-supplied distributions derived from network stats under load with a mix of classic and soroban traffic.
+
 ## MissionMaxTPSClassic
 
 Stress test a network of simulated Tier1 topology with classic traffic and report maximum achieved throughput.
@@ -143,3 +150,12 @@ Run a network with a mix of fast and slow nodes. This mission allows to test int
 ## MissionMaxTPSMixed
 
 Stress test a network of simulated Tier1 topology with a mix of classic and soroban traffic and report maximum achieved throughput.
+
+## MissionMixedNominationLeaderElectionWithOldMajority
+
+Run a network with a mix of nodes running the old and new nomination leader election algorithms. Contains a majority of nodes running the old algorithm.
+
+
+## MissionMixedNominationLeaderElectionWithNewMajority
+
+Run a network with a mix of nodes running the old and new nomination leader election algorithms. Contains a majority of nodes running the new algorithm.

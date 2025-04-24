@@ -113,42 +113,19 @@ let PrometheusExporterSidecarResourceRequirements : V1ResourceRequirements =
     makeResourceRequirements 10 64 50 64
 
 let NetworkDelayScriptResourceRequirements : V1ResourceRequirements =
-    // The network delay script needs 0.05 vCPU and 32MB RAM
-    makeResourceRequirements 10 32 50 32
-
-
-let GetSimulatePubnetResources networkSize : V1ResourceRequirements =
-    // Running simulate-pubnet _needs_ a ways over 200MB RSS per node, and
-    // depending on queue backups it can spike over 300MB; we have 64GB limit
-    // for quota so to be generous we give each node 400MB limit and run only
-    // 100 nodes (despite survey showing many more).
-    //
-    // We also have a 100vCPU quota but only really 72 cores to play with, so
-    // to keep some spare room for other jobs without stressing the workers we
-    // want to stay under 50vCPU, again divided 100 ways across our simulated
-    // nodes.
-    //
-    // So we allocate a 64MB RAM request and 400MB RAM limit to each, and a
-    // 0.025vCPU request and 0.5vCPU limit to each.
-    //
-    // It increases the resource requirement in case the network size is big.
-    let cpuReqMili = 25
-    let memReqMebi = 64
-    let cpuLimMili = 500
-    let memLimMebi = 400
-    let k = if networkSize >= 200 then 2 else 1
-    makeResourceRequirements (k * cpuReqMili) (k * memReqMebi) (k * cpuLimMili) (k * memLimMebi)
+    // The network delay script needs 0.1 vCPU and 32MB RAM
+    makeResourceRequirements 20 32 100 32
 
 let SimulatePubnetTier1PerfCoreResourceRequirements : V1ResourceRequirements =
     // Tier1 perf simulation is interested in "how fast can we go in practice"
     // which means configuring the nodes like a real operator would: 1-4 vCPU
     // and 128MB-2GB RAM.
-    makeResourceRequirements 500 128 4000 4000
+    makeResourceRequirements 500 128 4000 6000
 
 let ParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
     // When doing parallel catchup, we give each container
-    // 1200MB RAM, 0.25 vCPUs, and 35 GB of disk bursting to 2vCPU, 6000MB and 40 GB
-    makeResourceRequirementsWithStorageLimit 250 1200 2000 6000 35 40
+    // 0.25 vCPUs, 1200MB RAM and 35 GB of disk bursting to 2vCPU, 6250MB and 40 GB
+    makeResourceRequirementsWithStorageLimit 250 1200 2000 6250 35 40
 
 let NonParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
     // When doing non-parallel catchup, we give each container
@@ -175,6 +152,14 @@ let AcceptanceTestCoreResourceRequirements : V1ResourceRequirements =
     // amount of memory because these tests are memory-intensive. 4 vCPU and 4GB
     // RAM required.
     makeResourceRequirements 4000 4096 4000 4096
+
+let SimulatePubnetResources : V1ResourceRequirements =
+    // Guarantee all pods 0.65 vCPUs, which is about as high as we can guarantee
+    // with ~600 nodes. However, allow them to burst up to 4 vCPUs. This is
+    // helpful because validators experience heavy CPU and wind up throttled if
+    // limited to 0.65 vCPUs. However, 0.65 is sufficient for the vast majority
+    // of watchers.
+    makeResourceRequirements 650 1500 4000 1500
 
 let PgContainerVolumeMounts : V1VolumeMount array =
     [| V1VolumeMount(name = CfgVal.dataVolumeName, mountPath = CfgVal.dataVolumePath) |]
@@ -329,7 +314,7 @@ let CoreContainerForCommand
         | SmallTestResources -> SmallTestCoreResourceRequirements
         | MediumTestResources -> MediumTestCoreResourceRequirements
         | AcceptanceTestResources -> AcceptanceTestCoreResourceRequirements
-        | SimulatePubnetResources size -> GetSimulatePubnetResources size
+        | SimulatePubnetResources -> SimulatePubnetResources
         | SimulatePubnetTier1PerfResources -> SimulatePubnetTier1PerfCoreResourceRequirements
         | ParallelCatchupResources -> ParallelCatchupCoreResourceRequirements
         | NonParallelCatchupResources -> NonParallelCatchupCoreResourceRequirements
@@ -354,6 +339,7 @@ let WithProbes (container: V1Container) (probeTimeout: int) : V1Container =
             periodSeconds = System.Nullable<int>(1),
             failureThreshold = System.Nullable<int>(60),
             timeoutSeconds = System.Nullable<int>(probeTimeout),
+            initialDelaySeconds = System.Nullable<int>(60),
             httpGet = V1HTTPGetAction(path = "/info", port = httpPortStr)
         )
 
@@ -541,7 +527,8 @@ type NetworkCfg with
                        Some(
                            ShCmd.OfStrs [| "createdb"
                                            "test" + i.ToString() |]
-                       ) |]
+                       )
+                       |> ignoreError |]
             | _ -> [||]
 
         let waitForDB : ShCmd Option =
@@ -582,6 +569,16 @@ type NetworkCfg with
         // we want.
         let newHistIgnoreError = ignoreError newHist
 
+        let pregenerate =
+            match init.pregenerateTxs with
+            | None -> None
+            | Some (txs, accounts, offset) ->
+                runCoreIf
+                    true
+                    [| "pregenerate-loadgen-txs"
+                       "--count " + txs.ToString()
+                       "--accounts " + accounts.ToString()
+                       "--offset " + offset.ToString() |]
 
         let initialCatchup = runCoreIf init.initialCatchup [| "catchup"; "current/0" |]
 
@@ -594,6 +591,7 @@ type NetworkCfg with
                         setPgHost
                         waitForTime
                         newDb
+                        pregenerate
                         newHistIgnoreError
                         initialCatchup |])
                     createDbs)
@@ -808,7 +806,7 @@ type NetworkCfg with
             V1StatefulSetSpec(
                 selector = V1LabelSelector(matchLabels = CfgVal.labels),
                 serviceName = self.ServiceName,
-                podManagementPolicy = "OrderedReady",
+                podManagementPolicy = "Parallel",
                 template = self.ToPodTemplateSpec coreSet,
                 replicas = System.Nullable<int>(coreSet.CurrentCount)
             )
@@ -875,7 +873,7 @@ type NetworkCfg with
             let ingressPath = V1HTTPIngressPath()
             ingressPath.Backend <- coreBackend pn
             ingressPath.Path <- sprintf "/%s/core(/|$)(.*)" pn.StringName
-            ingressPath.PathType <- "Prefix"
+            ingressPath.PathType <- "ImplementationSpecific"
             ingressPath
 
         let historyPath (coreSet: CoreSet) (i: int) : V1HTTPIngressPath =
@@ -883,7 +881,7 @@ type NetworkCfg with
             let ingressPath = V1HTTPIngressPath()
             ingressPath.Backend <- historyBackend pn
             ingressPath.Path <- sprintf "/%s/history(/|$)(.*)" pn.StringName
-            ingressPath.PathType <- "Prefix"
+            ingressPath.PathType <- "ImplementationSpecific"
             ingressPath
 
         let corePaths = self.MapAllPeers corePath
@@ -897,6 +895,7 @@ type NetworkCfg with
 
         let annotation =
             Map.ofArray [| ("kubernetes.io/ingress.class", self.missionContext.ingressClass)
+                           ("nginx.ingress.kubernetes.io/use-regex", "true")
                            ("nginx.ingress.kubernetes.io/rewrite-target", "/$2") |]
 
         let meta =

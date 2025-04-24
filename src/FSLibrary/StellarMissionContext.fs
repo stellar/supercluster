@@ -12,13 +12,20 @@ let GetOrDefault optional def =
     | Some (x) -> x
     | _ -> def
 
+// If `list` is empty, return `value`. Otherwise, return `list`.
+let defaultListValue value list =
+    match list with
+    | [] -> value
+    | _ -> list
+
+
 type LogLevels = { LogDebugPartitions: string list; LogTracePartitions: string list }
 
 type CoreResources =
     | SmallTestResources
     | MediumTestResources
     | AcceptanceTestResources
-    | SimulatePubnetResources of int
+    | SimulatePubnetResources
     | SimulatePubnetTier1PerfResources
     | ParallelCatchupResources
     | NonParallelCatchupResources
@@ -26,6 +33,7 @@ type CoreResources =
 
 type MissionContext =
     { kube: Kubernetes
+      kubeCfg: string
       destination: Destination
       image: string
       oldImage: string option
@@ -62,6 +70,8 @@ type MissionContext =
       pubnetData: string option
       flatQuorum: bool option
       tier1Keys: string option
+      maxConnections: int option
+      fullyConnectTier1: bool
       opCountDistribution: string option
       wasmBytesDistribution: ((int * int) list)
       dataEntriesDistribution: ((int * int) list)
@@ -77,6 +87,7 @@ type MissionContext =
       simulateApplyDuration: seq<int> option
       simulateApplyWeight: seq<int> option
       peerReadingCapacity: int option
+      enableBackggroundOverlay: bool
       peerFloodCapacity: int option
       peerFloodCapacityBytes: int option
       sleepMainThread: int option
@@ -88,11 +99,18 @@ type MissionContext =
       randomSeed: int
       tag: string option
       numRuns: int option
+      numPregeneratedTxs: int option
       networkSizeLimit: int
       pubnetParallelCatchupStartingLedger: int
+      pubnetParallelCatchupEndLedger: int option
+      pubnetParallelCatchupNumWorkers: int
+      genesisTestAccountCount: int option
 
       // Tail logging can cause the pubnet simulation missions like SorobanLoadGeneration
       // and SimulatePubnet to fail on the heartbeat handler due to what looks like a
       // server disconnection. Our solution for now is to just disable tail logging on
       // those missions.
-      enableTailLogging: bool }
+      enableTailLogging: bool
+      catchupSkipKnownResultsForTesting: bool option
+      checkEventsAreConsistentWithEntryDiffs: bool option
+      updateSorobanCosts: bool option }

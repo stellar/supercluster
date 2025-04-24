@@ -16,8 +16,9 @@ let loadGenerationWithTxSetLimit (context: MissionContext) =
         MakeLiveCoreSet
             "core"
             { CoreSetOptions.GetDefault context.image with
-                  invariantChecks = AllInvariantsExceptBucketConsistencyChecks
-                  dumpDatabase = false }
+                  invariantChecks = AllInvariantsExceptBucketConsistencyChecksAndEvents
+                  dumpDatabase = false
+                  updateSorobanCosts = Some(true) }
 
     let context =
         { context.WithSmallLoadgenOptions with

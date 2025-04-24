@@ -24,13 +24,15 @@ let ``Network nonce looks reasonable`` () =
 
 let coreSetOptions =
     { CoreSetOptions.GetDefault "stellar/stellar-core" with
-          syncStartupDelay = None }
+          syncStartupDelay = None
+          homeDomain = None }
 
 let coreSet = MakeLiveCoreSet "test" coreSetOptions
 let passOpt : NetworkPassphrase option = None
 
 let ctx : MissionContext =
     { kube = null
+      kubeCfg = ""
       destination = Destination(System.IO.Path.GetTempPath())
       image = "stellar/stellar-core"
       oldImage = None
@@ -51,7 +53,7 @@ let ctx : MissionContext =
       numNodes = 100
       namespaceProperty = "stellar-supercluster"
       logLevels = { LogDebugPartitions = []; LogTracePartitions = [] }
-      ingressClass = "private"
+      ingressClass = "ingress-private"
       ingressInternalDomain = "local"
       ingressExternalHost = None
       ingressExternalPort = 80
@@ -67,8 +69,11 @@ let ctx : MissionContext =
       pubnetData = None
       flatQuorum = None
       tier1Keys = None
+      maxConnections = None
+      fullyConnectTier1 = false
       peerReadingCapacity = None
       peerFloodCapacity = None
+      enableBackggroundOverlay = false
       peerFloodCapacityBytes = None
       outboundByteLimit = None
       sleepMainThread = None
@@ -109,11 +114,18 @@ let ctx : MissionContext =
       nonTier1NodesToAdd = 0
       randomSeed = 0
       pubnetParallelCatchupStartingLedger = 0
+      pubnetParallelCatchupEndLedger = None
+      pubnetParallelCatchupNumWorkers = 128
       tag = None
       numRuns = None
-      enableTailLogging = true }
+      numPregeneratedTxs = None
+      enableTailLogging = true
+      catchupSkipKnownResultsForTesting = None
+      checkEventsAreConsistentWithEntryDiffs = None
+      updateSorobanCosts = None
+      genesisTestAccountCount = None }
 
-let netdata = __SOURCE_DIRECTORY__ + "/../../../data/public-network-data-2021-01-05.json"
+let netdata = __SOURCE_DIRECTORY__ + "/../../../data/public-network-data-2024-08-01.json"
 let pubkeys = __SOURCE_DIRECTORY__ + "/../../../data/tier1keys.json"
 let pubnetctx = { ctx with pubnetData = Some netdata; tier1Keys = Some pubkeys }
 
@@ -232,7 +244,7 @@ type Tests(output: ITestOutputHelper) =
              Assert.Contains(coreSets, (fun cs -> cs.name = sdfCoreSetName))
              // Ensure that 'validator.stellar.expert' got a different name from
              // 'www.stellar.org'.
-             Assert.Contains(coreSets, (fun cs -> cs.name = (CoreSetName "expert")))
+             Assert.Contains(coreSets, (fun cs -> cs.name = (CoreSetName "expert-non-tier1")))
              let sdfCoreSet = List.find (fun cs -> cs.name = sdfCoreSetName) coreSets
              Assert.Equal(3, sdfCoreSet.options.nodeCount)
              let cfg = nCfg.StellarCoreCfg(sdfCoreSet, 0, MainCoreContainer)
@@ -241,11 +253,11 @@ type Tests(output: ITestOutputHelper) =
              Assert.Contains("[HISTORY.local]", toml)
              Assert.Matches(Regex("VALIDATORS.*blockdaemon-0"), toml)
              Assert.Matches(Regex("VALIDATORS.*stellar-0"), toml)
-             Assert.Matches(Regex("VALIDATORS.*keybase-0"), toml)
-             Assert.Matches(Regex("VALIDATORS.*wirexapp-0"), toml)
-             Assert.Matches(Regex("VALIDATORS.*coinqvest-0"), toml)
+             Assert.Matches(Regex("VALIDATORS.*publicnode-0"), toml)
+             Assert.Matches(Regex("VALIDATORS.*whalestack-0"), toml)
              Assert.Matches(Regex("VALIDATORS.*satoshipay-0"), toml)
-             Assert.Matches(Regex("VALIDATORS.*lobstr-0"), toml))
+             Assert.Matches(Regex("VALIDATORS.*lobstr-0"), toml)
+             Assert.Matches(Regex("VALIDATORS.*franklintempleton-0"), toml))
 
     [<Fact>]
     member __.``Geographic calculations are reasonable``() =

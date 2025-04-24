@@ -72,6 +72,8 @@ type MissionOptions
         pubnetData: string option,
         flatQuorum: bool option,
         tier1Keys: string option,
+        maxConnections: int option,
+        fullyConnectTier1: bool,
         opCountDistribution: string option,
         wasmBytesValues: seq<int>,
         wasmBytesWeights: seq<int>,
@@ -90,6 +92,7 @@ type MissionOptions
         installNetworkDelay: bool option,
         flatNetworkDelay: int option,
         peerReadingCapacity: int option,
+        enableBackgroundOverlay: bool,
         peerFloodCapacity: int option,
         peerFloodCapacityBytes: int option,
         flowControlSendMoreBatchSizeBytes: int option,
@@ -103,8 +106,14 @@ type MissionOptions
         nonTier1NodesToAdd: int,
         randomSeed: int,
         pubnetParallelCatchupStartingLedger: int,
+        pubnetParallelCatchupEndLedger: int option,
+        pubnetParallelCatchupNumWorkers: int,
         tag: string option,
-        numRuns: int option
+        numRuns: int option,
+        numPregeneratedTxs: int option,
+        genesisTestAccountCount: int option,
+        catchupSkipKnownResultsForTesting: bool option,
+        checkEventsAreConsistentWithEntryDiffs: bool option
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -125,7 +134,7 @@ type MissionOptions
     [<Option("ingress-class",
              HelpText = "Value for kubernetes.io/ingress.class, on ingress",
              Required = false,
-             Default = "private")>]
+             Default = "ingress-private")>]
     member self.IngressClass = ingressClass
 
     [<Option("ingress-internal-domain",
@@ -148,7 +157,7 @@ type MissionOptions
     [<Option("export-to-prometheus", HelpText = "Whether to export core metrics to prometheus")>]
     member self.ExportToPrometheus : bool = exportToPrometheus
 
-    [<Option("probe-timeout", HelpText = "Timeout for liveness probe", Required = false, Default = 5)>]
+    [<Option("probe-timeout", HelpText = "Timeout for liveness probe", Required = false, Default = 30)>]
     member self.ProbeTimeout = probeTimeout
 
     [<Value(0, Required = true)>]
@@ -170,7 +179,7 @@ type MissionOptions
     [<Option("netdelay-image",
              HelpText = "'Netdelay' utility image to use",
              Required = false,
-             Default = "stellar/netdelay:latest")>]
+             Default = "stellar/sdf-netdelay:latest")>]
     member self.netdelayImage = netdelayImage
 
     [<Option("postgres-image",
@@ -271,6 +280,17 @@ type MissionOptions
     [<Option("tier1-keys", HelpText = "JSON file containing list of 'tier-1' pubkeys from pubnet", Required = false)>]
     member self.Tier1Keys = tier1Keys
 
+    [<Option("max-connections",
+             HelpText = "Maximum number of connections to allow any node in pubnet data to have. When enabled, this option will prune connections for any node with more than this number of connections. (default: no limit)",
+             Required = false)>]
+    member self.MaxConnections = maxConnections
+
+    [<Option("fully-connect-tier1",
+             HelpText = "When using pubnet data, connect every tier 1 node to every other tier 1 node.",
+             Required = false,
+             Default = false)>]
+    member self.FullyConnectTier1 = fullyConnectTier1
+
     [<Option("op-count-distribution",
              HelpText = "Operation count distribution for SimulatePubnet. See csv-type-samples/sample-loadgen-op-count-distribution.csv for the format",
              Required = false)>]
@@ -359,6 +379,9 @@ type MissionOptions
              Required = false)>]
     member self.PeerReadingCapacity = peerReadingCapacity
 
+    [<Option("enable-background-overlay", HelpText = "background overlay")>]
+    member self.EnableBackgroundOverlay : bool = enableBackgroundOverlay
+
     [<Option("peer-flood-capacity",
              HelpText = "A config parameter that controls how many flood messages (tx or SCP) from a particular peer core can process simultaneously (See PEER_FLOOD_READING_CAPACITY)",
              Required = false)>]
@@ -413,7 +436,7 @@ type MissionOptions
     [<Option("network-size-limit",
              HelpText = "The number of nodes to run in SimulatePubnet",
              Required = false,
-             Default = 100)>]
+             Default = 600)>]
     member self.NetworkSizeLimit = networkSizeLimit
 
     [<Option("pubnet-parallel-catchup-starting-ledger",
@@ -422,6 +445,15 @@ type MissionOptions
              Default = 0)>]
     member self.PubnetParallelCatchupStartingLedger = pubnetParallelCatchupStartingLedger
 
+    [<Option("pubnet-parallel-catchup-end-ledger", HelpText = "end ledger to run parallel catchup on", Required = false)>]
+    member self.PubnetParallelCatchupEndLedger = pubnetParallelCatchupEndLedger
+
+    [<Option("pubnet-parallel-catchup-num-workers",
+             HelpText = "number of workers to run parallel catchup with (only supported for V2)",
+             Required = false,
+             Default = 192)>]
+    member self.PubnetParallelCatchupNumWorkers = pubnetParallelCatchupNumWorkers
+
     [<Option("tag", HelpText = "optional name to tag the run with", Required = false)>]
     member self.Tag = tag
 
@@ -429,6 +461,26 @@ type MissionOptions
              HelpText = "optional number of max TPS runs (more runs increase result accuracy)",
              Required = false)>]
     member self.NumRuns = numRuns
+
+    [<Option("num-pregenerated-txs",
+             HelpText = "Number of transactions to pregenerate for max TPS tests",
+             Required = false)>]
+    member self.NumPregeneratedTxs = numPregeneratedTxs
+
+    [<Option("genesis-test-account-count",
+             HelpText = "Number of test accounts to create in genesis (See GENESIS_TEST_ACCOUNT_COUNT)",
+             Required = false)>]
+    member self.GenesisTestAccountCount = genesisTestAccountCount
+
+    [<Option("catchup-skip-known-results-for-testing",
+             HelpText = "when this flag is provided, pubnet parallel catchup workers will run with CATCHUP_SKIP_KNOWN_RESULTS_FOR_TESTING = true, resulting in skipping application of failed transaction and signature verification",
+             Required = false)>]
+    member self.CatchupSkipKnownResultsForTesting = catchupSkipKnownResultsForTesting
+
+    [<Option("check-events-are-consistent-with-entry-diffs",
+             HelpText = "when this flag is provided, pubnet parallel catchup workers will run with `EMIT_CLASSIC_EVENTS` and `BACKFILL_STELLAR_ASSET_EVENTS` set, and have the `EventsAreConsistentWithEntryDiffs` invariant check enabled",
+             Required = false)>]
+    member self.CheckEventsAreConsistentWithEntryDiffs = checkEventsAreConsistentWithEntryDiffs
 
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' with
@@ -473,6 +525,7 @@ let main argv =
 
             let ctx =
                 { kube = kube
+                  kubeCfg = clean.KubeConfig
                   destination = Destination("destination")
                   image = "stellar/stellar-core"
                   oldImage = None
@@ -493,7 +546,7 @@ let main argv =
                   numNodes = 3
                   namespaceProperty = ns
                   logLevels = ll
-                  ingressClass = "private"
+                  ingressClass = "ingress-private"
                   ingressInternalDomain = "local"
                   ingressExternalHost = None
                   ingressExternalPort = 80
@@ -509,6 +562,8 @@ let main argv =
                   pubnetData = None
                   flatQuorum = None
                   tier1Keys = None
+                  maxConnections = None
+                  fullyConnectTier1 = false
                   opCountDistribution = None
                   wasmBytesDistribution = []
                   dataEntriesDistribution = []
@@ -525,6 +580,7 @@ let main argv =
                   simulateApplyWeight = None
                   peerFloodCapacity = None
                   peerReadingCapacity = None
+                  enableBackggroundOverlay = false
                   peerFloodCapacityBytes = None
                   outboundByteLimit = None
                   sleepMainThread = None
@@ -535,9 +591,16 @@ let main argv =
                   randomSeed = 0
                   networkSizeLimit = 0
                   pubnetParallelCatchupStartingLedger = 0
+                  pubnetParallelCatchupEndLedger = None
+                  pubnetParallelCatchupNumWorkers = 128
                   tag = None
                   numRuns = None
-                  enableTailLogging = true }
+                  numPregeneratedTxs = None
+                  genesisTestAccountCount = None
+                  enableTailLogging = true
+                  catchupSkipKnownResultsForTesting = None
+                  checkEventsAreConsistentWithEntryDiffs = None
+                  updateSorobanCosts = None }
 
             let nCfg = MakeNetworkCfg ctx [] None
             use formation = kube.MakeEmptyFormation nCfg
@@ -561,27 +624,24 @@ let main argv =
                 (LogInfo "-----------------------------------"
                  LogInfo "Supercluster command line: %s" (System.String.Join(" ", argv))
                  LogInfo "-----------------------------------"
-                 LogInfo "Connecting to Kubernetes cluster"
+                 LogInfo "Connecting to Kubernetes cluster: %s" mission.Destination
                  LogInfo "-----------------------------------"
 
                  let (kube, ns) = ConnectToCluster mission.KubeConfig mission.NamespaceProperty
                  let destination = Destination(mission.Destination)
 
-                 let heartbeatHandler _ =
+                 let podLogger _ =
                      try
                          ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (mission.ApiRateLimit)
                          let ranges = kube.ListNamespacedLimitRange(namespaceParameter = ns)
 
                          if isNull ranges then
-                             failwith "Connection issue!"
+                             LogError "Heartbeat did not return any data."
                          else
                              DumpPodInfo kube mission.ApiRateLimit ns
-                     with x ->
-                         LogError "Connection issue!"
-                         reraise ()
+                     with x -> LogError "Connection issue! Api call failed."
 
-                 // Poll cluster every minute to make sure we don't have any issues
-                 let timer = new System.Threading.Timer(TimerCallback(heartbeatHandler), null, 1000, 300000)
+                 let timer = new System.Threading.Timer(TimerCallback(podLogger), null, 1000, 300000)
 
                  for m in mission.Missions do
                      LogInfo "-----------------------------------"
@@ -593,6 +653,7 @@ let main argv =
                      try
                          let missionContext =
                              { MissionContext.kube = kube
+                               kubeCfg = mission.KubeConfig
                                destination = destination
                                image = mission.Image
                                oldImage = mission.OldImage
@@ -629,6 +690,8 @@ let main argv =
                                pubnetData = mission.PubnetData
                                flatQuorum = mission.FlatQuorum
                                tier1Keys = mission.Tier1Keys
+                               maxConnections = mission.MaxConnections
+                               fullyConnectTier1 = mission.FullyConnectTier1
                                opCountDistribution = mission.OpCountDistribution
                                wasmBytesDistribution =
                                    List.zip (List.ofSeq mission.WasmBytesValues) (List.ofSeq mission.WasmBytesWeights)
@@ -657,6 +720,7 @@ let main argv =
                                simulateApplyDuration = processInputSeq mission.SimulateApplyDuration
                                simulateApplyWeight = processInputSeq mission.SimulateApplyWeight
                                peerReadingCapacity = mission.PeerReadingCapacity
+                               enableBackggroundOverlay = mission.EnableBackgroundOverlay
                                peerFloodCapacity = mission.PeerFloodCapacity
                                peerFloodCapacityBytes = mission.PeerFloodCapacityBytes
                                outboundByteLimit = mission.OutboundByteLimit
@@ -668,9 +732,16 @@ let main argv =
                                networkSizeLimit = mission.NetworkSizeLimit
                                randomSeed = mission.RandomSeed
                                pubnetParallelCatchupStartingLedger = mission.PubnetParallelCatchupStartingLedger
+                               pubnetParallelCatchupEndLedger = mission.PubnetParallelCatchupEndLedger
+                               pubnetParallelCatchupNumWorkers = mission.PubnetParallelCatchupNumWorkers
                                tag = mission.Tag
                                numRuns = mission.NumRuns
-                               enableTailLogging = true }
+                               numPregeneratedTxs = mission.NumPregeneratedTxs
+                               enableTailLogging = true
+                               catchupSkipKnownResultsForTesting = mission.CatchupSkipKnownResultsForTesting
+                               checkEventsAreConsistentWithEntryDiffs = mission.CheckEventsAreConsistentWithEntryDiffs
+                               updateSorobanCosts = None
+                               genesisTestAccountCount = mission.GenesisTestAccountCount }
 
                          allMissions.[m] missionContext
 

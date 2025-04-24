@@ -13,19 +13,24 @@ open StellarCoreHTTP
 
 let runInMemoryMode (context: MissionContext) =
     let coreSet =
-        MakeLiveCoreSet "core" { CoreSetOptions.GetDefault context.image with dumpDatabase = false }
+        MakeLiveCoreSet
+            "core"
+            { CoreSetOptions.GetDefault context.image with
+                  dumpDatabase = false
+                  updateSorobanCosts = Some(true) }
 
     let coreSetWithCaptiveCore =
         MakeLiveCoreSet
             "in-memory-mode"
             { CoreSetOptions.GetDefault context.image with
-                  invariantChecks = AllInvariantsExceptBucketConsistencyChecks
+                  invariantChecks = AllInvariantsExceptBucketConsistencyChecksAndEvents
                   nodeCount = 1
                   inMemoryMode = true
                   validate = false
                   localHistory = false
                   quorumSet = CoreSetQuorum(CoreSetName "core")
-                  deprecatedSQLState = true }
+                  deprecatedSQLState = true
+                  updateSorobanCosts = Some(true) }
 
     let context =
         { context.WithSmallLoadgenOptions with

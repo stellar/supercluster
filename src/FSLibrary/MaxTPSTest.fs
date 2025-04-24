@@ -33,7 +33,7 @@ let private maxOption (x: int option) (y: int option) =
 
 // Upgrade max tx size to 2x the maximum possible from the distributions in
 // `context`
-let private upgradeSorobanTxLimits (context: MissionContext) (formation: StellarFormation) (coreSetList: CoreSet list) =
+let upgradeSorobanTxLimits (context: MissionContext) (formation: StellarFormation) (coreSetList: CoreSet list) =
     formation.SetupUpgradeContract coreSetList.Head
 
     let multiplier = 2
@@ -81,7 +81,7 @@ let private limitMultiplier = 5 * 2
 
 let private smallNetworkSize = 10
 
-let private upgradeSorobanLedgerLimits
+let upgradeSorobanLedgerLimits
     (context: MissionContext)
     (formation: StellarFormation)
     (coreSetList: CoreSet list)
@@ -132,10 +132,62 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
                 context.image
                 (if context.flatQuorum.IsSome then context.flatQuorum.Value else false)
 
+    // PayPregenerated requires node restart between failed iterations to ensure validity of the pregenerated transactions
+    // However, large-scale simulation restarts can be slow, so for now only use the new mode on small networks
+    let baseLoadGen =
+        if List.length allNodes <= 30 && baseLoadGen.mode = GeneratePaymentLoad then
+            { baseLoadGen with mode = PayPregenerated }
+        else
+            baseLoadGen
+
+    let context =
+        { context with
+              genesisTestAccountCount =
+                  if baseLoadGen.mode = PayPregenerated then
+                      Some(context.genesisTestAccountCount |> Option.defaultValue 100000)
+                  else
+                      None
+              numPregeneratedTxs =
+                  if baseLoadGen.mode = PayPregenerated then
+                      Some(context.numPregeneratedTxs |> Option.defaultValue 2500000)
+                  else
+                      None }
+
     let sdf =
         List.find (fun (cs: CoreSet) -> cs.name.StringName = "stellar" || cs.name.StringName = "sdf") allNodes
 
     let tier1 = List.filter (fun (cs: CoreSet) -> cs.options.tier1 = Some true) allNodes
+
+    // On smaller networks, run loadgen on all nodes to better balance the overhead of load generation
+    let loadGenNodes = if List.length allNodes > smallNetworkSize then tier1 else allNodes
+    let isLoadGenNode cs = List.exists (fun (cs': CoreSet) -> cs' = cs) loadGenNodes
+
+    // Assign pre-generated transaction information to each load generator node.
+    // Specifically, partition all availabe accounts evenly across nodes,
+    // and assign appropriate offsets to prevent conflicts.
+    let allNodes =
+        match context.numPregeneratedTxs, context.genesisTestAccountCount, baseLoadGen.mode with
+        | Some txs, Some accounts, PayPregenerated ->
+            let loadGenCount = List.length loadGenNodes
+            let accountsPerNode = accounts / loadGenCount
+            let mutable j = 0
+
+            List.map
+                (fun (cs: CoreSet) ->
+                    if isLoadGenNode cs then
+                        let i = j
+                        j <- j + 1
+
+                        { cs with
+                              options =
+                                  { cs.options with
+                                        initialization =
+                                            { cs.options.initialization with
+                                                  pregenerateTxs = Some(txs, accountsPerNode, accountsPerNode * i) } } }
+                    else
+                        cs)
+                allNodes
+        | _ -> allNodes
 
     context.ExecuteWithOptionalConsistencyCheck
         allNodes
@@ -143,24 +195,50 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
         false
         (fun (formation: StellarFormation) ->
 
-            let numAccounts = 30000
+            let numAccounts =
+                match context.genesisTestAccountCount with
+                | Some x -> x
+                | None -> 30000
 
             let upgradeMaxTxSetSize (coreSets: CoreSet list) (rate: int) =
                 // Max tx size to avoid overflowing the transaction queue
                 let size = rate * limitMultiplier
                 formation.UpgradeMaxTxSetSize coreSets size
 
-            // Setup overlay connections first before manually closing
-            // ledger, which kick off consensus
-            formation.WaitUntilConnected allNodes
-            formation.ManualClose allNodes
+            let setupCoreSets (coreSets: CoreSet list) =
+                // Setup overlay connections first before manually closing
+                // ledger, which kick off consensus
+                formation.WaitUntilConnected coreSets
+                formation.ManualClose coreSets
 
-            // Wait until the whole network is synced before proceeding,
-            // to fail asap in case of a misconfiguration
-            formation.WaitUntilSynced allNodes
-            formation.UpgradeProtocolToLatest allNodes
-            upgradeMaxTxSetSize allNodes 10000
-            formation.RunLoadgen sdf { context.GenerateAccountCreationLoad with accounts = numAccounts }
+                // Wait until the whole network is synced before proceeding,
+                // to fail asap in case of a misconfiguration
+                formation.WaitUntilSynced coreSets
+                formation.UpgradeProtocolToLatest coreSets
+
+            let restartCoreSetsOrWait (coreSets: CoreSet list) =
+                if baseLoadGen.mode = PayPregenerated then
+                    // Stop all nodes in parallel
+                    allNodes
+                    |> List.map (fun set -> async { formation.Stop set.name })
+                    |> Async.Parallel
+                    |> Async.RunSynchronously
+                    |> ignore
+
+                    // Start all nodes in parallel
+                    allNodes
+                    |> List.map (fun set -> async { formation.Start set.name })
+                    |> Async.Parallel
+                    |> Async.RunSynchronously
+                    |> ignore
+                else
+                    System.Threading.Thread.Sleep(5 * 60 * 1000)
+
+            setupCoreSets allNodes
+
+            if baseLoadGen.mode <> PayPregenerated then
+                upgradeMaxTxSetSize allNodes 10000
+                formation.RunLoadgen sdf { context.GenerateAccountCreationLoad with accounts = numAccounts }
 
             // Perform setup (if requested)
             match setupCfg with
@@ -171,26 +249,28 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
                     formation.RunLoadgen cs { cfg with accounts = numAccounts; minSorobanPercentSuccess = Some 100 }
             | None -> ()
 
-            let wait () = System.Threading.Thread.Sleep(5 * 60 * 1000)
-
             let getMiddle (low: int) (high: int) = low + (high - low) / 2
 
             let binarySearchWithThreshold (low: int) (high: int) (threshold: int) =
 
                 let mutable lowerBound = low
                 let mutable upperBound = high
-                let mutable shouldWait = false
+                let mutable shouldRestartOrWait = false
                 let mutable finalTxRate = None
 
                 while upperBound - lowerBound > threshold do
                     let middle = getMiddle lowerBound upperBound
 
-                    if shouldWait then wait ()
+                    if shouldRestartOrWait then
+                        restartCoreSetsOrWait allNodes
+                        setupCoreSets allNodes
 
                     formation.clearMetrics allNodes
                     upgradeMaxTxSetSize allNodes middle
-                    upgradeSorobanLedgerLimits context formation allNodes middle
-                    upgradeSorobanTxLimits context formation allNodes
+
+                    if baseLoadGen.mode <> PayPregenerated && baseLoadGen.mode <> GeneratePaymentLoad then
+                        upgradeSorobanLedgerLimits context formation allNodes middle
+                        upgradeSorobanTxLimits context formation allNodes
 
                     try
                         LogInfo "Run started at tx rate %i" middle
@@ -202,8 +282,6 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
                                   txs = middle * 1000
                                   txrate = middle }
 
-                        // On smaller networks, run loadgen on all nodes to better balance the overhead of load generation
-                        let loadGenNodes = if List.length allNodes > smallNetworkSize then tier1 else allNodes
                         formation.RunMultiLoadgen loadGenNodes loadGen
                         formation.CheckNoErrorsAndPairwiseConsistency()
                         formation.EnsureAllNodesInSync allNodes
@@ -212,12 +290,12 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
                         lowerBound <- middle
                         finalTxRate <- Some middle
                         LogInfo "Run succeeded at tx rate %i" middle
-                        shouldWait <- false
+                        shouldRestartOrWait <- false
 
                     with e ->
                         LogInfo "Run failed at tx rate %i: %s" middle e.Message
                         upperBound <- middle
-                        shouldWait <- true
+                        shouldRestartOrWait <- true
 
                 if finalTxRate.IsSome then
                     LogInfo "Found max tx rate %i" finalTxRate.Value
@@ -239,7 +317,7 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
                 LogInfo "Starting max TPS run %i out of %i" run numRuns
                 let resultRate = binarySearchWithThreshold context.txRate context.maxTxRate threshold
                 results <- List.append results [ resultRate ]
-                if run < numRuns then wait ()
+                if run < numRuns then restartCoreSetsOrWait allNodes
 
             LogInfo
                 "Final tx rate averaged to %i over %i runs for image %s"

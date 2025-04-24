@@ -17,8 +17,10 @@ let historyTestnetPerformance (context: MissionContext) =
     let opts =
         { TestnetCoreSetOptions context.image with
               localHistory = false
-              invariantChecks = AllInvariantsExceptBucketConsistencyChecks
+              invariantChecks = AllInvariantsExceptBucketConsistencyChecksAndEvents
               initialization = CoreSetInitialization.OnlyNewDb }
+
+    let context = { context with coreResources = MediumTestResources }
 
     // Testnet is reset every quarter (~90 days) so this test is not _perfectly_
     // stable. It attempts to replay a 10k ledger prefix (a half day of traffic)

@@ -23,9 +23,10 @@ let sorobanConfigUpgrades (context: MissionContext) =
         MakeLiveCoreSet
             "core"
             { CoreSetOptions.GetDefault context.image with
-                  invariantChecks = AllInvariantsExceptBucketConsistencyChecks
+                  invariantChecks = AllInvariantsExceptBucketConsistencyChecksAndEvents
                   emptyDirType = DiskBackedEmptyDir
                   quorumSet = quorumSet
+                  updateSorobanCosts = Some(true)
                   nodeCount = 5 }
 
     let context =

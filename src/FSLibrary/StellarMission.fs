@@ -18,6 +18,7 @@ open MissionHistoryPubnetRecentCatchup
 open MissionHistoryPubnetCompleteCatchup
 open MissionHistoryPubnetParallelCatchup
 open MissionHistoryPubnetParallelCatchupExtrawide
+open MissionHistoryPubnetParallelCatchupV2
 open MissionHistoryPubnetPerformance
 open MissionHistoryTestnetMinimumCatchup
 open MissionHistoryTestnetRecentCatchup
@@ -42,6 +43,8 @@ open MissionSorobanInvokeHostLoad
 open MissionSorobanCatchupWithPrevAndCurr
 open MissionMixedImageNetworkSurvey
 open MissionMaxTPSMixed
+open MissionSimulatePubnetMixedLoad
+open MissionMixedNominationLeaderElection
 
 type Mission = (MissionContext -> unit)
 
@@ -62,6 +65,7 @@ let allMissions : Map<string, Mission> =
                  ("HistoryPubnetCompleteCatchup", historyPubnetCompleteCatchup)
                  ("HistoryPubnetParallelCatchup", historyPubnetParallelCatchup)
                  ("HistoryPubnetParallelCatchupExtrawide", historyPubnetParallelCatchupExtrawide)
+                 ("HistoryPubnetParallelCatchupV2", historyPubnetParallelCatchupV2)
                  ("HistoryPubnetPerformance", historyPubnetPerformance)
                  ("HistoryTestnetMinimumCatchup", historyTestnetMinimumCatchup)
                  ("HistoryTestnetRecentCatchup", historyTestnetRecentCatchup)
@@ -84,4 +88,7 @@ let allMissions : Map<string, Mission> =
                  ("SorobanInvokeHostLoad", sorobanInvokeHostLoad)
                  ("SorobanCatchupWithPrevAndCurr", sorobanCatchupWithPrevAndCurr)
                  ("MixedImageNetworkSurvey", mixedImageNetworkSurvey)
-                 ("MaxTPSMixed", maxTPSMixed) |]
+                 ("MaxTPSMixed", maxTPSMixed)
+                 ("SimulatePubnetMixedLoad", simulatePubnetMixedLoad)
+                 ("MixedNominationLeaderElectionWithOldMajority", mixedNominationLeaderElectionWithOldMajority)
+                 ("MixedNominationLeaderElectionWithNewMajority", mixedNominationLeaderElectionWithNewMajority) |]

@@ -16,7 +16,7 @@ let loadGeneration (context: MissionContext) =
         MakeLiveCoreSet
             "core"
             { CoreSetOptions.GetDefault context.image with
-                  invariantChecks = AllInvariantsExceptBucketConsistencyChecks
+                  invariantChecks = AllInvariantsExceptBucketConsistencyChecksAndEvents
                   dumpDatabase = false }
 
     let context = { context with numAccounts = 2000; numTxs = 2000; txRate = 20 }

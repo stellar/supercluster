@@ -19,31 +19,7 @@ open StellarCoreHTTP
 let simulatePubnet (context: MissionContext) =
     let context =
         { context with
-              coreResources = SimulatePubnetResources context.networkSizeLimit
-              // When no value is given, use the default values derived from observing the pubnet.
-              // 9/10, 88/100, 3/1000 denote 9% => 10 usec, 88% => 100 usec, 3% => 1000 usec.
-              simulateApplyDuration =
-                  Some(
-                      context.simulateApplyDuration
-                      |> Option.defaultValue (
-                          seq {
-                              10
-                              100
-                              1000
-                          }
-                      )
-                  )
-              simulateApplyWeight =
-                  Some(
-                      context.simulateApplyWeight
-                      |> Option.defaultValue (
-                          seq {
-                              9
-                              88
-                              3
-                          }
-                      )
-                  )
+              coreResources = SimulatePubnetResources
               // As the goal of `SimulatePubnet` is to simulate a pubnet,
               // network delays are, in general, indispensable.
               // Therefore, unless explicitly told otherwise, we will use
@@ -61,7 +37,7 @@ let simulatePubnet (context: MissionContext) =
               spikeInterval = 65
               enableTailLogging = false }
 
-    let fullCoreSet = FullPubnetCoreSets context true true
+    let fullCoreSet = FullPubnetCoreSets context true false
 
     let sdf =
         List.find (fun (cs: CoreSet) -> cs.name.StringName = "stellar" || cs.name.StringName = "sdf") fullCoreSet

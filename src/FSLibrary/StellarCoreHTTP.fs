@@ -5,7 +5,6 @@
 module StellarCoreHTTP
 
 open FSharp.Data
-open stellar_dotnet_sdk
 open StellarCoreSet
 open PollRetry
 open Logging
@@ -13,7 +12,8 @@ open StellarMissionContext
 open StellarNetworkCfg
 open StellarCorePeer
 open System.Threading
-
+open StellarDotnetSdk.Transactions
+open StellarDotnetSdk.Responses.Results
 
 // Note to curious reader: these are "type providers" whereby the compiler's
 // type definition facility is extended by plugins that are themselves
@@ -50,6 +50,8 @@ type LoadGenMode =
     | SorobanInvokeSetup
     | SorobanInvoke
     | MixedClassicSoroban
+    | StopRun
+    | PayPregenerated
 
     override self.ToString() =
         match self with
@@ -62,6 +64,8 @@ type LoadGenMode =
         | SorobanInvokeSetup -> "soroban_invoke_setup"
         | SorobanInvoke -> "soroban_invoke"
         | MixedClassicSoroban -> "mixed_classic_soroban"
+        | StopRun -> "stop"
+        | PayPregenerated -> "pay_pregenerated"
 
 type LoadGen =
     { mode: LoadGenMode
@@ -714,6 +718,8 @@ type Peer with
                     query = loadGen.ToQuery
                 ))
 
+    member self.StopLoadGen() : string = self.GenerateLoad { LoadGen.GetDefault() with mode = StopRun }
+
     member self.ManualClose() =
         WebExceptionRetry
             DefaultRetry
@@ -751,7 +757,7 @@ type Peer with
             match res.Error with
             | None -> ()
             | Some (r) ->
-                let txr = responses.TransactionResult.FromXdr(r)
+                let txr = TransactionResult.FromXdrBase64(r)
                 LogError "Result details: %O" txr
 
             raise (TransactionRejectedException tx)

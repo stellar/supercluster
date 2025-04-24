@@ -4,7 +4,7 @@
 
 module StellarCoreSet
 
-open stellar_dotnet_sdk
+open StellarDotnetSdk.Accounts
 
 // A PodName followed by the (nonce-qualified) service DNS suffix for a
 // given network, such as
@@ -84,63 +84,94 @@ type CoreSetInitialization =
       newHist: bool
       initialCatchup: bool
       waitForConsensus: bool
-      fetchDBFromPeer: (CoreSetName * int) option }
+      fetchDBFromPeer: (CoreSetName * int) option
+      // (numTxs, numAccounts, offset)
+      pregenerateTxs: (int * int * int) option }
 
     static member Default =
         { newDb = true
           newHist = true
           initialCatchup = false
           waitForConsensus = false
-          fetchDBFromPeer = None }
+          fetchDBFromPeer = None
+          pregenerateTxs = None }
 
     static member DefaultNoForceSCP =
         { newDb = true
           newHist = true
           initialCatchup = false
           waitForConsensus = true
-          fetchDBFromPeer = None }
+          fetchDBFromPeer = None
+          pregenerateTxs = None }
 
     static member CatchupNoForceSCP =
         { newDb = true
           newHist = true
           initialCatchup = true
           waitForConsensus = true
-          fetchDBFromPeer = None }
+          fetchDBFromPeer = None
+          pregenerateTxs = None }
 
     static member OnlyNewDb =
         { newDb = true
           newHist = false
           initialCatchup = false
           waitForConsensus = true
-          fetchDBFromPeer = None }
+          fetchDBFromPeer = None
+          pregenerateTxs = None }
 
     static member NoInitCmds =
         { newDb = false
           newHist = false
           initialCatchup = false
           waitForConsensus = true
-          fetchDBFromPeer = None }
+          fetchDBFromPeer = None
+          pregenerateTxs = None }
 
 type GeoLoc = { lat: float; lon: float }
 
-type QuorumSet =
+type ExplicitQuorumSet =
     { thresholdPercent: int option
       validators: Map<PeerShortName, KeyPair>
-      innerQuorumSets: QuorumSet array }
+      innerQuorumSets: ExplicitQuorumSet array }
+
+type Quality =
+    | Critical
+    | High
+    | Medium
+    | Low
+
+type HomeDomain = { name: string; quality: Quality }
+
+type AutoValidator = { name: PeerShortName; homeDomain: string; keys: KeyPair }
+
+type AutoQuorumSet = { homeDomains: HomeDomain list; validators: AutoValidator list }
+
+type QuorumSet =
+    | ExplicitQuorumSet of ExplicitQuorumSet
+    | AutoQuorumSet of AutoQuorumSet
 
 type QuorumSetSpec =
     | CoreSetQuorum of CoreSetName
     | CoreSetQuorumList of CoreSetName list
     | CoreSetQuorumListWithThreshold of CoreSetName list * int
-    | ExplicitQuorum of QuorumSet
+    | ExplicitQuorum of ExplicitQuorumSet
+    | AutoQuorum of AutoQuorumSet
     | AllPeersQuorum
 
 // FIXME: see bug https://github.com/stellar/stellar-core/issues/2304
 // the BucketListIsConsistentWithDatabase invariant blocks too long,
 // so we provide a special variant to allow disabling it.
+
+// We don't enable the EventsAreConsistentWithEntryDiffs invariant on
+// any of the missions that use this spec because events would also need
+// to be enabled. We enable the events and the invariant for the
+// HistoryPubnetParallelCatchupV2 mission (which is configured
+// under MissionParallelCatchup/parallel_catchup_helm/files/stellar-core.cfg),
+// So we don't need it for the other missions.
 type InvariantChecksSpec =
-    | AllInvariants
-    | AllInvariantsExceptBucketConsistencyChecks
+    | AllInvariantsExceptEvents
+    | AllInvariantsExceptBucketConsistencyChecksAndEvents
     | NoInvariants
 
 type CoreSetOptions =
@@ -150,6 +181,12 @@ type CoreSetOptions =
       emptyDirType: EmptyDirType
       syncStartupDelay: int option
       quorumSet: QuorumSetSpec
+      // `requireAutoQset` checks and fails if the quorum set is not
+      // auto-generated. Setting this flag has no impact on whether the
+      // algorithm chooses to use auto quorum set generation, only on whether
+      // supercluster will fail if it is not used.
+      requireAutoQset: bool
+      forceOldStyleLeaderElection: bool
       historyNodes: CoreSetName list option
       preferredPeersMap: Map<byte [], byte [] list> option
       historyGetCommands: Map<PeerShortName, string>
@@ -161,6 +198,7 @@ type CoreSetOptions =
       unsafeQuorum: bool
       awaitSync: bool
       validate: bool
+      homeDomain: string option
       tier1: bool option
       catchupMode: CatchupMode
       image: string
@@ -172,7 +210,8 @@ type CoreSetOptions =
       inMemoryMode: bool
       addArtificialDelayUsec: int option
       deprecatedSQLState: bool
-      surveyPhaseDuration: int option }
+      surveyPhaseDuration: int option
+      updateSorobanCosts: bool option }
 
     member self.WithWaitForConsensus(w: bool) =
         { self with initialization = { self.initialization with waitForConsensus = w } }
@@ -184,6 +223,8 @@ type CoreSetOptions =
           emptyDirType = MemoryBackedEmptyDir
           syncStartupDelay = Some(5)
           quorumSet = AllPeersQuorum
+          forceOldStyleLeaderElection = false
+          requireAutoQset = false
           historyNodes = None
           preferredPeersMap = None
           historyGetCommands = Map.empty
@@ -195,18 +236,20 @@ type CoreSetOptions =
           unsafeQuorum = true
           awaitSync = true
           validate = true
+          homeDomain = Some "stellar.org"
           tier1 = None
           catchupMode = CatchupComplete
           image = image
           initialization = CoreSetInitialization.Default
-          invariantChecks = InvariantChecksSpec.AllInvariants
+          invariantChecks = InvariantChecksSpec.AllInvariantsExceptEvents
           dumpDatabase = true
           maxSlotsToRemember = 12
           maxBatchWriteCount = 1024
           inMemoryMode = false
           addArtificialDelayUsec = None
           deprecatedSQLState = false
-          surveyPhaseDuration = None }
+          surveyPhaseDuration = None
+          updateSorobanCosts = None }
 
 type CoreSet =
     { name: CoreSetName

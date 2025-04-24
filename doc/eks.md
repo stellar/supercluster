@@ -22,7 +22,9 @@ Before running the script, please follow
 
 In order to run the [theoretical max TPS test](theoretical-max-tps.md) with the
 recommended parameters, you'll need a quota of at least 160 vCPUs for on-demand
-M instance types in the region you plan to run the test in.
+M instance types in the region you plan to run the test in. At the time of
+writing, the script sets up on-demand instances and the corresponding quota is
+`L-1216C47A`.
 
 ## Running the Script
 
@@ -64,7 +66,9 @@ instances. If you are using an instance type with NVMe drives and you have not
 manually mounted them yourself, then you should answer "yes". Answering "yes"
 will result in the following prompt:
 
-* SSH private key: Private key corresponding to the public key you provided earlier.
+* SSH private key: Private key corresponding to the public key you provided
+  earlier. This will only use your private key as argument to `ssh -i` and will
+  not send your private key over the network.
 
 After answering the previous prompt, the script will SSH into each instance to
 format and mount the NVMe drives such that kubernetes pods will run on them.
@@ -81,7 +85,8 @@ script.
 
 Next, the script will prompt for your ingress domain. This is the domain name
 supercluster will use to communicate with the stellar-core nodes running on the
-cluster. This may be a subdomain (such as `ssc.example.com`).
+cluster. This may be a subdomain (such as `ssc.example.com`). To be clear, this
+must be a domain name for which you will to able to add CNAME record.
 
 After entering the ingress domain, the script will print out instructions for
 configuring DNS for the domain. You will need to add the wildcard CNAME record

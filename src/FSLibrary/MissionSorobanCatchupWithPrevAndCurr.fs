@@ -18,8 +18,9 @@ let sorobanCatchupWithPrevAndCurr (context: MissionContext) =
         MakeLiveCoreSet
             "core"
             { CoreSetOptions.GetDefault context.image with
-                  invariantChecks = AllInvariantsExceptBucketConsistencyChecks
-                  emptyDirType = DiskBackedEmptyDir }
+                  invariantChecks = AllInvariantsExceptBucketConsistencyChecksAndEvents
+                  emptyDirType = DiskBackedEmptyDir
+                  updateSorobanCosts = Some(true) }
 
     let quorumSet = CoreSetQuorum(CoreSetName("core"))
 
@@ -30,7 +31,8 @@ let sorobanCatchupWithPrevAndCurr (context: MissionContext) =
             { CoreSetOptions.GetDefault context.image with
                   nodeCount = 1
                   quorumSet = quorumSet
-                  catchupMode = CatchupComplete }
+                  catchupMode = CatchupComplete
+                  updateSorobanCosts = Some(true) }
 
     let context =
         { context.WithMediumLoadgenOptions with
@@ -47,32 +49,28 @@ let sorobanCatchupWithPrevAndCurr (context: MissionContext) =
 
             let supportedProtocol = (formation.NetworkCfg.GetPeer coreSet 0).GetSupportedProtocolVersion()
 
-            // We want to test against a protocol boundary that has Soroban enabled on both sides,
-            // so the image must be on the protocol version after Soroban was introduced.
-            // This check can be removed once we're on v21 for good and not just on vnext.
-            if supportedProtocol >= 21 then
-                formation.UpgradeProtocol [ coreSet ] (supportedProtocol - 1)
-                formation.UpgradeMaxTxSetSize [ coreSet ] 100000
+            formation.UpgradeProtocol [ coreSet ] (supportedProtocol - 1)
+            formation.UpgradeMaxTxSetSize [ coreSet ] 100000
 
-                formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
-                formation.UpgradeSorobanLedgerLimitsWithMultiplier [ coreSet ] 1000
-                formation.UpgradeSorobanTxLimitsWithMultiplier [ coreSet ] 100
-                formation.RunLoadgen coreSet context.SetupSorobanInvoke
-                formation.RunLoadgen coreSet context.GenerateSorobanInvokeLoad
+            formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
+            formation.UpgradeSorobanLedgerLimitsWithMultiplier [ coreSet ] 1000
+            formation.UpgradeSorobanTxLimitsWithMultiplier [ coreSet ] 100
+            formation.RunLoadgen coreSet context.SetupSorobanInvoke
+            formation.RunLoadgen coreSet context.GenerateSorobanInvokeLoad
 
-                formation.UpgradeProtocol [ coreSet ] (supportedProtocol)
+            formation.UpgradeProtocol [ coreSet ] (supportedProtocol)
 
-                formation.RunLoadgen coreSet context.SetupSorobanInvoke
-                formation.RunLoadgen coreSet context.GenerateSorobanInvokeLoad
+            formation.RunLoadgen coreSet context.SetupSorobanInvoke
+            formation.RunLoadgen coreSet context.GenerateSorobanInvokeLoad
 
-                // Start the second coreset that will replay all ledgers
-                formation.Start afterUpgradeCoreSet.name
+            // Start the second coreset that will replay all ledgers
+            formation.Start afterUpgradeCoreSet.name
 
-                let afterUpgradeCoreSetLive = formation.NetworkCfg.FindCoreSet afterUpgradeCoreSet.name
-                formation.WaitUntilSynced [ afterUpgradeCoreSetLive ]
+            let afterUpgradeCoreSetLive = formation.NetworkCfg.FindCoreSet afterUpgradeCoreSet.name
+            formation.WaitUntilSynced [ afterUpgradeCoreSetLive ]
 
-                let peer = formation.NetworkCfg.GetPeer coreSet 0
-                let ledgerNum = peer.GetLedgerNum()
+            let peer = formation.NetworkCfg.GetPeer coreSet 0
+            let ledgerNum = peer.GetLedgerNum()
 
-                let catchupPeer = formation.NetworkCfg.GetPeer afterUpgradeCoreSetLive 0
-                catchupPeer.WaitForLedgerNum(ledgerNum + 64))
+            let catchupPeer = formation.NetworkCfg.GetPeer afterUpgradeCoreSetLive 0
+            catchupPeer.WaitForLedgerNum(ledgerNum + 64))

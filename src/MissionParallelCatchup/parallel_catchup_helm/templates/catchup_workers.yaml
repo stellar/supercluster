@@ -1,0 +1,132 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: stellar-core
+spec:
+  clusterIP: None
+  selector:
+    app: stellar-core
+  ports:
+    - port: 11626
+      targetPort: 11626
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: stellar-core
+  labels:
+    app: stellar-core
+spec:
+  serviceName: "stellar-core"
+  replicas: {{ .Values.worker.replicas }}
+  selector:
+    matchLabels:
+      app: stellar-core
+  template:
+    metadata:
+      labels:
+        app: stellar-core
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
+              - key: purpose
+                operator: NotIn
+                values:
+                - ssc
+      containers:
+      - name: stellar-core
+        image: {{ .Values.worker.stellar_core_image }}
+        imagePullPolicy: Always
+        resources:
+          requests:
+            cpu: "{{ .Values.worker.resources.requests.cpu}}"
+            memory: "{{ .Values.worker.resources.requests.memory}}"
+            ephemeral-storage: "{{ .Values.worker.resources.requests.ephemeral_storage}}"
+          limits:
+            cpu: "{{ .Values.worker.resources.limits.cpu}}"
+            memory: "{{ .Values.worker.resources.limits.memory}}"
+            ephemeral-storage: "{{ .Values.worker.resources.limits.ephemeral_storage}}"
+        command: ["/bin/sh", "/scripts/worker.sh"]
+        ports:
+        - containerPort: 11626
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: ASAN_OPTIONS
+          value: quarantine_size_mb=1:malloc_context_size=5
+        envFrom:
+        - configMapRef:
+            name: worker-config
+        volumeMounts:
+        - name: config
+          mountPath: /config
+        - name: script
+          mountPath: /scripts
+        - name: data-volume
+          mountPath: /data
+      volumes:
+      - name: config
+        configMap:
+          name: stellar-core-config
+      - name: script
+        configMap:
+          name: worker-script
+      - emptyDir: {}
+        name: data-volume
+      topologySpreadConstraints:
+      - labelSelector:
+          matchLabels:
+            app: stellar-core
+        maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: worker-script
+data:
+  worker.sh: |-
+    {{- (.Files.Get "files/worker.sh") | nindent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stellar-core-config
+data:
+  stellar-core.cfg: |-
+    {{- if .Values.worker.catchup_skip_known_results_for_testing }}
+    {{ "\n" }}
+    CATCHUP_SKIP_KNOWN_RESULTS_FOR_TESTING = true
+    {{- end }}
+    {{- if .Values.worker.check_events_are_consistent_with_entry_diffs }}
+    {{ "\n" }}
+    EMIT_CLASSIC_EVENTS = true
+    BACKFILL_STELLAR_ASSET_EVENTS = true
+    INVARIANT_CHECKS = [ "(?!BucketListIsConsistentWithDatabase).*" ]
+    {{- else }}
+    {{ "\n" }}
+    INVARIANT_CHECKS = [ "(?!BucketListIsConsistentWithDatabase|EventsAreConsistentWithEntryDiffs).*" ]
+    {{- end }}
+    {{- (.Files.Get "files/stellar-core.cfg") | nindent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: worker-config
+data:
+  REDIS_HOST: "{{ .Values.redis.hostname}}"
+  REDIS_PORT: "{{ .Values.redis.port}}"
+  JOB_QUEUE: "{{ .Values.redis.job_queue }}"
+  SUCCESS_QUEUE: "{{ .Values.redis.success_queue }}"
+  FAILED_QUEUE: "{{ .Values.redis.failed_queue }}"
+  PROGRESS_QUEUE: "{{ .Values.redis.progress_queue }}"
+  METRICS: "{{ .Values.redis.metrics }}"
+  RELEASE_NAME: "{{ .Release.Name }}"

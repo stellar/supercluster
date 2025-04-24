@@ -4,9 +4,9 @@
 
 module StellarNetworkCfg
 
-open stellar_dotnet_sdk
 open StellarMissionContext
 open StellarCoreSet
+open StellarDotnetSdk
 
 // We identify SSC runs using a "nonce" composed from an hours-and-minutes
 // timestamp, a random 24-bit value, and an optional user-provided tag.

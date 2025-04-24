@@ -1,0 +1,45 @@
+redis:
+  hostname: "redis"
+  port: 6379
+  job_queue: "ranges"
+  success_queue: "succeeded"
+  failed_queue: "failed"
+  progress_queue: "in_progress"
+  metrics: "metrics"
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "100Mi"
+
+worker:
+  stellar_core_image: "stellar/stellar-core:latest"
+  replicas: 5
+  resources: # resources below are left empty on purpose, they are read and overridden from `StellarKubeCfg.fs`
+    requests:
+      cpu: ""
+      memory: ""
+      ephemeral_storage: ""
+    limits:
+      cpu: ""
+      memory: ""
+      ephemeral_storage: ""
+
+monitor:
+  ingress_class_name: "ingress-private"
+  hostname: "ssc-job-monitor.services.stellar-ops.com"
+  path: "/default/(.*)"
+  logging_interval_seconds: 300
+  logging_level: "INFO" # 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "100Mi"
+
+range_generator:
+  strategy: "uniform" # "uniform" or "logarithmic"
+  params:
+    starting_ledger: 0
+    latest_ledger_num: 100000
+    overlap_ledgers: 320
+    uniform_ledgers_per_job: 16000 # only for strategy="uniform"
+    logarithmic_floor_ledgers: 16000 # only for strategy="logarithmic"

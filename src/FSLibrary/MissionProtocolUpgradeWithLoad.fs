@@ -17,8 +17,13 @@ let protocolUpgradeWithLoad (context: MissionContext) =
         MakeLiveCoreSet
             "core"
             { CoreSetOptions.GetDefault context.image with
-                  invariantChecks = AllInvariantsExceptBucketConsistencyChecks
-                  dumpDatabase = false }
+                  invariantChecks = AllInvariantsExceptBucketConsistencyChecksAndEvents
+                  dumpDatabase = false
+                  updateSorobanCosts = Some(true)
+                  // Set `requireAutoQset` to `true` as an extra check that this
+                  // mission uses the application-specific nomination leader
+                  // election protocol.
+                  requireAutoQset = true }
 
     let context =
         { context.WithSmallLoadgenOptions with
