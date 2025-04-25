@@ -40,7 +40,7 @@ let mixedNominationAlgorithm (oldCount: int) (context: MissionContext) =
                   invariantChecks = AllInvariantsExceptBucketConsistencyChecksAndEvents
                   accelerateTime = false
                   dumpDatabase = false
-                  requireAutoQset = true }
+                  quorumSetConfigType = RequireAutoQset }
 
     let coreSets = [ oldCoreSet; newCoreSet ]
 
