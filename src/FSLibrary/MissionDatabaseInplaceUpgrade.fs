@@ -26,7 +26,13 @@ let databaseInplaceUpgrade (context: MissionContext) =
     let beforeUpgradeCoreSet =
         MakeLiveCoreSet
             "before-upgrade"
-            { CoreSetOptions.GetDefault oldImage with nodeCount = 1; quorumSet = quorumSet }
+            { CoreSetOptions.GetDefault oldImage with
+                  nodeCount = 1
+                  quorumSet = quorumSet
+                  // FIXME: Remove these options once the stable (old) image in
+                  // CI supports skipping validator quality checks
+                  skipHighCriticalValidatorChecks = false
+                  quorumSetConfigType = RequireExplicitQset }
 
     let fetchFromPeer = Some(CoreSetName("before-upgrade"), 0)
 

@@ -60,7 +60,12 @@ let MakeCatchupSets (options: CatchupMissionOptions) =
         { CoreSetOptions.GetDefault options.generatorImage with
               nodeCount = 1
               quorumSet = CoreSetQuorum(CoreSetName "generator")
-              accelerateTime = true }
+              accelerateTime = true
+              // FIXME: Remove these options once the stable (old) image in
+              // CI supports skipping validator quality checks
+              skipHighCriticalValidatorChecks = false
+              quorumSetConfigType = RequireExplicitQset }
+
 
     let generatorSet = MakeLiveCoreSet "generator" generatorOptions
 
@@ -69,7 +74,11 @@ let MakeCatchupSets (options: CatchupMissionOptions) =
               nodeCount = 1
               quorumSet = CoreSetQuorum(CoreSetName "generator")
               accelerateTime = true
-              initialization = CoreSetInitialization.DefaultNoForceSCP }
+              initialization = CoreSetInitialization.DefaultNoForceSCP
+              // FIXME: Remove these options once the stable (old) image in
+              // CI supports skipping validator quality checks
+              skipHighCriticalValidatorChecks = false
+              quorumSetConfigType = RequireExplicitQset }
 
     let minimal1Options = { newNodeOptions with catchupMode = CatchupRecent(0) }
     let minimal1Set = MakeDeferredCoreSet "minimal1" minimal1Options
@@ -124,7 +133,11 @@ let MakeCatchupSets (options: CatchupMissionOptions) =
         { CoreSetOptions.GetDefault options.versionImage with
               nodeCount = 1
               quorumSet = CoreSetQuorum(CoreSetName "version")
-              accelerateTime = true }
+              accelerateTime = true
+              // FIXME: Remove these options once the stable (old) image in
+              // CI supports skipping validator quality checks
+              skipHighCriticalValidatorChecks = false
+              quorumSetConfigType = RequireExplicitQset }
 
     let versionSet = MakeLiveCoreSet "version" versionOptions
 

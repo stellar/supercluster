@@ -222,8 +222,7 @@ type CoreSetOptions =
       // `skipHighCriticalValidatorChecks` exists to allow supercluster to
       // remain compatible with older stellar-core images that do not have the
       // ability to turn of validator checks for HIGH and CRITICAL validators
-      skipHighCriticalValidatorChecks: bool
-      }
+      skipHighCriticalValidatorChecks: bool }
 
     member self.WithWaitForConsensus(w: bool) =
         { self with initialization = { self.initialization with waitForConsensus = w } }
@@ -262,7 +261,7 @@ type CoreSetOptions =
           deprecatedSQLState = false
           surveyPhaseDuration = None
           updateSorobanCosts = None
-          skipHighCriticalValidatorChecks = true}
+          skipHighCriticalValidatorChecks = true }
 
 type CoreSet =
     { name: CoreSetName

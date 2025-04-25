@@ -28,8 +28,7 @@ let versionMixConsensus (context: MissionContext) =
                   // FIXME: Remove these options once the stable (old) image in
                   // CI supports skipping validator quality checks
                   skipHighCriticalValidatorChecks = false
-                  quorumSetConfigType = RequireExplicitQset
-                  }
+                  quorumSetConfigType = RequireExplicitQset }
 
     let fetchFromPeer = Some(CoreSetName("before"), 0)
 

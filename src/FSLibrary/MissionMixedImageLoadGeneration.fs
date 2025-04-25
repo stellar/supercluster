@@ -46,7 +46,11 @@ let mixedImageLoadGeneration (oldImageNodeCount: int) (context: MissionContext) 
                   invariantChecks = AllInvariantsExceptBucketConsistencyChecksAndEvents
                   accelerateTime = false
                   dumpDatabase = false
-                  quorumSet = qSet }
+                  quorumSet = qSet
+                  // FIXME: Remove these options once the stable (old) image in
+                  // CI supports skipping validator quality checks
+                  skipHighCriticalValidatorChecks = false
+                  quorumSetConfigType = RequireExplicitQset }
 
     let newCoreSet =
         MakeLiveCoreSet

@@ -516,7 +516,7 @@ type NetworkCfg with
             | RequireAutoQset, Some hd
             | PreferAutoQset, Some hd -> toAutoQSet (List.ofArray nks) hd
             | PreferAutoQset, None
-            | RequireExplicitQset, _-> toExplicitQSet nks None
+            | RequireExplicitQset, _ -> toExplicitQSet nks None
             | RequireAutoQset, None -> failwith "Auto quorum set configuration requires a home domain"
 
         let checkAutoQSetIncompatability (mode: string) =
