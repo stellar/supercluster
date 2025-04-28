@@ -113,4 +113,5 @@ type MissionContext =
       enableTailLogging: bool
       catchupSkipKnownResultsForTesting: bool option
       checkEventsAreConsistentWithEntryDiffs: bool option
-      updateSorobanCosts: bool option }
+      updateSorobanCosts: bool option
+      enableRelaxedAutoQsetConfig: bool }

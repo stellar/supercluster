@@ -174,6 +174,21 @@ type InvariantChecksSpec =
     | AllInvariantsExceptBucketConsistencyChecksAndEvents
     | NoInvariants
 
+// Determines how quorum set configurations should be generated
+type QuorumSetConfiguration =
+    // Prefer automatic quorum set configuration. Fall back on explicit quorum
+    // set configuration if automatic configuration is not possible, or if
+    // --enable-relaxed-auto-qset-config is not set.
+    | PreferAutoQset
+    // Require automatic quorum set configuration. Fail if automatic
+    // configuration is not possible. Uses automatic configuration even if
+    // --enable-relaxed-auto-qset-config is not set, so missions using this
+    // option *must* satisfy the HIGH quality validator checks present in
+    // stellar-core.
+    | RequireAutoQset
+    // Require explicit quorum set configuration.
+    | RequireExplicitQset
+
 type CoreSetOptions =
     { nodeCount: int
       nodeLocs: GeoLoc list option
@@ -181,11 +196,7 @@ type CoreSetOptions =
       emptyDirType: EmptyDirType
       syncStartupDelay: int option
       quorumSet: QuorumSetSpec
-      // `requireAutoQset` checks and fails if the quorum set is not
-      // auto-generated. Setting this flag has no impact on whether the
-      // algorithm chooses to use auto quorum set generation, only on whether
-      // supercluster will fail if it is not used.
-      requireAutoQset: bool
+      quorumSetConfigType: QuorumSetConfiguration
       forceOldStyleLeaderElection: bool
       historyNodes: CoreSetName list option
       preferredPeersMap: Map<byte [], byte [] list> option
@@ -211,7 +222,11 @@ type CoreSetOptions =
       addArtificialDelayUsec: int option
       deprecatedSQLState: bool
       surveyPhaseDuration: int option
-      updateSorobanCosts: bool option }
+      updateSorobanCosts: bool option
+      // `skipHighCriticalValidatorChecks` exists to allow supercluster to
+      // remain compatible with older stellar-core images that do not have the
+      // ability to turn of validator checks for HIGH and CRITICAL validators
+      skipHighCriticalValidatorChecks: bool }
 
     member self.WithWaitForConsensus(w: bool) =
         { self with initialization = { self.initialization with waitForConsensus = w } }
@@ -224,7 +239,7 @@ type CoreSetOptions =
           syncStartupDelay = Some(5)
           quorumSet = AllPeersQuorum
           forceOldStyleLeaderElection = false
-          requireAutoQset = false
+          quorumSetConfigType = PreferAutoQset
           historyNodes = None
           preferredPeersMap = None
           historyGetCommands = Map.empty
@@ -249,7 +264,8 @@ type CoreSetOptions =
           addArtificialDelayUsec = None
           deprecatedSQLState = false
           surveyPhaseDuration = None
-          updateSorobanCosts = None }
+          updateSorobanCosts = None
+          skipHighCriticalValidatorChecks = true }
 
 type CoreSet =
     { name: CoreSetName

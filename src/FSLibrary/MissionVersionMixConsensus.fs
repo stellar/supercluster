@@ -24,7 +24,11 @@ let versionMixConsensus (context: MissionContext) =
             "before"
             { CoreSetOptions.GetDefault oldImage with
                   nodeCount = 2
-                  quorumSet = CoreSetQuorum(CoreSetName "before") }
+                  quorumSet = CoreSetQuorum(CoreSetName "before")
+                  // FIXME: Remove these options once the stable (old) image in
+                  // CI supports skipping validator quality checks
+                  skipHighCriticalValidatorChecks = false
+                  quorumSetConfigType = RequireExplicitQset }
 
     let fetchFromPeer = Some(CoreSetName("before"), 0)
 
@@ -50,6 +54,10 @@ let versionMixConsensus (context: MissionContext) =
                   nodeCount = 2
                   historyNodes = Some([])
                   quorumSet = CoreSetQuorumList([ CoreSetName "new-core"; CoreSetName "old-core" ])
+                  // FIXME: Remove these options once the stable (old) image in
+                  // CI supports skipping validator quality checks
+                  skipHighCriticalValidatorChecks = false
+                  quorumSetConfigType = RequireExplicitQset
                   initialization =
                       { newDb = true
                         newHist = true

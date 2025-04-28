@@ -20,10 +20,10 @@ let protocolUpgradeWithLoad (context: MissionContext) =
                   invariantChecks = AllInvariantsExceptBucketConsistencyChecksAndEvents
                   dumpDatabase = false
                   updateSorobanCosts = Some(true)
-                  // Set `requireAutoQset` to `true` as an extra check that this
-                  // mission uses the application-specific nomination leader
-                  // election protocol.
-                  requireAutoQset = true }
+                  // Set `quorumSetConfigType` to `RequireAutoQset` as an extra
+                  // check that this mission uses the application-specific
+                  // nomination leader election protocol.
+                  quorumSetConfigType = RequireAutoQset }
 
     let context =
         { context.WithSmallLoadgenOptions with

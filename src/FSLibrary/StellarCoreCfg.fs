@@ -171,7 +171,8 @@ type StellarCoreCfg =
       addArtificialDelayUsec: int option // optional delay for testing in microseconds
       deprecatedSQLState: bool
       surveyPhaseDuration: int option
-      containerType: CoreContainerType }
+      containerType: CoreContainerType
+      skipHighCriticalValidatorChecks: bool }
 
     member self.ToTOML() : TomlTable =
         let t = Toml.Create()
@@ -217,6 +218,10 @@ type StellarCoreCfg =
         t.Add("PREFERRED_PEERS_ONLY", self.preferredPeersOnly) |> ignore
         t.Add("COMMANDS", logLevelCommands) |> ignore
         t.Add("CATCHUP_COMPLETE", self.catchupMode = CatchupComplete) |> ignore
+
+        if self.skipHighCriticalValidatorChecks
+           && self.network.missionContext.enableRelaxedAutoQsetConfig then
+            t.Add("SKIP_HIGH_CRITICAL_VALIDATOR_CHECKS_FOR_TESTING", true) |> ignore
 
         if self.network.missionContext.enableBackggroundOverlay then
             t.Add("EXPERIMENTAL_BACKGROUND_OVERLAY_PROCESSING", true) |> ignore
@@ -508,24 +513,16 @@ type NetworkCfg with
         // Produces a simple flat qset of nodes. Uses auto quorum set
         // configuration if possible.
         let simpleQuorum (nks: (PeerShortName * KeyPair) array) =
-            match o.homeDomain with
-            | Some hd ->
-                if nks.Length >= 3 then
-                    // There are enough validators to use auto quorum set config
-                    toAutoQSet (List.ofArray nks) hd
-                else if o.requireAutoQset then
-                    failwith "Auto quorum set configuration requires at least 3 validators"
-                else
-                    // Fall back on manual quorum set configuration
-                    toExplicitQSet nks None
-            | None ->
-                if o.requireAutoQset then
-                    failwith "Auto quorum set configuration requires a home domain"
-                else
-                    toExplicitQSet nks None
+            match o.quorumSetConfigType, o.homeDomain, self.missionContext.enableRelaxedAutoQsetConfig with
+            | RequireAutoQset, Some hd, _
+            | PreferAutoQset, Some hd, true -> toAutoQSet (List.ofArray nks) hd
+            | PreferAutoQset, None, _
+            | PreferAutoQset, _, false
+            | RequireExplicitQset, _, _ -> toExplicitQSet nks None
+            | RequireAutoQset, None, _ -> failwith "Auto quorum set configuration requires a home domain"
 
         let checkAutoQSetIncompatability (mode: string) =
-            if o.requireAutoQset then
+            if o.quorumSetConfigType = RequireAutoQset then
                 failwithf "Auto quorum set configuration is incompatible with %s" mode
             else
                 ()
@@ -603,7 +600,8 @@ type NetworkCfg with
           addArtificialDelayUsec = opts.addArtificialDelayUsec
           deprecatedSQLState = opts.deprecatedSQLState
           surveyPhaseDuration = opts.surveyPhaseDuration
-          containerType = MainCoreContainer }
+          containerType = MainCoreContainer
+          skipHighCriticalValidatorChecks = opts.skipHighCriticalValidatorChecks }
 
     member self.StellarCoreCfg(c: CoreSet, i: int, ctype: CoreContainerType) : StellarCoreCfg =
         { network = self
@@ -644,4 +642,5 @@ type NetworkCfg with
           addArtificialDelayUsec = c.options.addArtificialDelayUsec
           deprecatedSQLState = c.options.deprecatedSQLState
           surveyPhaseDuration = c.options.surveyPhaseDuration
-          containerType = ctype }
+          containerType = ctype
+          skipHighCriticalValidatorChecks = c.options.skipHighCriticalValidatorChecks }
