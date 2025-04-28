@@ -113,7 +113,8 @@ type MissionOptions
         numPregeneratedTxs: int option,
         genesisTestAccountCount: int option,
         catchupSkipKnownResultsForTesting: bool option,
-        checkEventsAreConsistentWithEntryDiffs: bool option
+        checkEventsAreConsistentWithEntryDiffs: bool option,
+        enableRelaxedAutoQsetConfig: bool
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -482,6 +483,13 @@ type MissionOptions
              Required = false)>]
     member self.CheckEventsAreConsistentWithEntryDiffs = checkEventsAreConsistentWithEntryDiffs
 
+    [<Option("enable-relaxed-auto-qset-config",
+             HelpText = "Enables the use of automatic quorum set configuration on missions that may create core sets with invalid HIGH quality validators. Requires a stellar-core version that supports the SKIP_HIGH_CRITICAL_VALIDATOR_CHECKS_FOR_TESTING config option.",
+             Required = false,
+             Default = false)>]
+    member self.EnableRelaxedAutoQsetConfig = enableRelaxedAutoQsetConfig
+
+
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' with
     | [| x |] -> (x, None)
@@ -600,7 +608,8 @@ let main argv =
                   enableTailLogging = true
                   catchupSkipKnownResultsForTesting = None
                   checkEventsAreConsistentWithEntryDiffs = None
-                  updateSorobanCosts = None }
+                  updateSorobanCosts = None
+                  enableRelaxedAutoQsetConfig = false }
 
             let nCfg = MakeNetworkCfg ctx [] None
             use formation = kube.MakeEmptyFormation nCfg
@@ -741,7 +750,8 @@ let main argv =
                                catchupSkipKnownResultsForTesting = mission.CatchupSkipKnownResultsForTesting
                                checkEventsAreConsistentWithEntryDiffs = mission.CheckEventsAreConsistentWithEntryDiffs
                                updateSorobanCosts = None
-                               genesisTestAccountCount = mission.GenesisTestAccountCount }
+                               genesisTestAccountCount = mission.GenesisTestAccountCount
+                               enableRelaxedAutoQsetConfig = mission.EnableRelaxedAutoQsetConfig }
 
                          allMissions.[m] missionContext
 

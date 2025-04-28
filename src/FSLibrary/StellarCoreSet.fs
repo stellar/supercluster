@@ -177,10 +177,14 @@ type InvariantChecksSpec =
 // Determines how quorum set configurations should be generated
 type QuorumSetConfiguration =
     // Prefer automatic quorum set configuration. Fall back on explicit quorum
-    // set configuration if automatic configuration is not possible.
+    // set configuration if automatic configuration is not possible, or if
+    // --enable-relaxed-auto-qset-config is not set.
     | PreferAutoQset
     // Require automatic quorum set configuration. Fail if automatic
-    // configuration is not possible.
+    // configuration is not possible. Uses automatic configuration even if
+    // --enable-relaxed-auto-qset-config is not set, so missions using this
+    // option *must* satisfy the HIGH quality validator checks present in
+    // stellar-core.
     | RequireAutoQset
     // Require explicit quorum set configuration.
     | RequireExplicitQset

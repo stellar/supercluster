@@ -219,7 +219,8 @@ type StellarCoreCfg =
         t.Add("COMMANDS", logLevelCommands) |> ignore
         t.Add("CATCHUP_COMPLETE", self.catchupMode = CatchupComplete) |> ignore
 
-        if self.skipHighCriticalValidatorChecks then
+        if self.skipHighCriticalValidatorChecks
+           && self.network.missionContext.enableRelaxedAutoQsetConfig then
             t.Add("SKIP_HIGH_CRITICAL_VALIDATOR_CHECKS_FOR_TESTING", true) |> ignore
 
         if self.network.missionContext.enableBackggroundOverlay then
@@ -512,12 +513,13 @@ type NetworkCfg with
         // Produces a simple flat qset of nodes. Uses auto quorum set
         // configuration if possible.
         let simpleQuorum (nks: (PeerShortName * KeyPair) array) =
-            match o.quorumSetConfigType, o.homeDomain with
-            | RequireAutoQset, Some hd
-            | PreferAutoQset, Some hd -> toAutoQSet (List.ofArray nks) hd
-            | PreferAutoQset, None
-            | RequireExplicitQset, _ -> toExplicitQSet nks None
-            | RequireAutoQset, None -> failwith "Auto quorum set configuration requires a home domain"
+            match o.quorumSetConfigType, o.homeDomain, self.missionContext.enableRelaxedAutoQsetConfig with
+            | RequireAutoQset, Some hd, _
+            | PreferAutoQset, Some hd, true -> toAutoQSet (List.ofArray nks) hd
+            | PreferAutoQset, None, _
+            | PreferAutoQset, _, false
+            | RequireExplicitQset, _, _ -> toExplicitQSet nks None
+            | RequireAutoQset, None, _ -> failwith "Auto quorum set configuration requires a home domain"
 
         let checkAutoQSetIncompatability (mode: string) =
             if o.quorumSetConfigType = RequireAutoQset then
