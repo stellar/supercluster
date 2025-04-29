@@ -697,9 +697,9 @@ let PubnetQuorum : ExplicitQuorumSet =
       innerQuorumSets = [||] }
 
 let PubnetPeers =
-    [ PeerDnsName "core-live4.stellar.org"
-      PeerDnsName "core-live5.stellar.org"
-      PeerDnsName "core-live6.stellar.org" ]
+    [ PeerDnsName "core-live-a.stellar.org"
+      PeerDnsName "core-live-b.stellar.org"
+      PeerDnsName "core-live-c.stellar.org" ]
 
 let PubnetCoreSetOptions (image: string) =
     { CoreSetOptions.GetDefault image with
