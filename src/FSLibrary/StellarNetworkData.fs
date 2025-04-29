@@ -540,10 +540,15 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
             |> Array.map
                 (fun (_, nodes: PubnetNode.Root []) -> Array.map (fun (n: PubnetNode.Root) -> n.PublicKey) nodes)
 
+        let orgToExplicitQSet (org: string array) : ExplicitQuorumSet =
+            { thresholdPercent = Some(51) // Simple majority
+              validators = pubKeysToValidators org
+              innerQuorumSets = Array.empty }
+
         let tier1Orgs =
             tier1Nodes
             |> Array.map
-                (fun (n: PubnetNode.Root) -> { name = (homeDomainNameForKey n.PublicKey).StringName; quality = Medium })
+                (fun (n: PubnetNode.Root) -> { name = (homeDomainNameForKey n.PublicKey).StringName; quality = High })
             |> Set.ofArray
 
         let flatQset =
@@ -553,9 +558,14 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
 
         if context.flatQuorum.IsSome && context.flatQuorum.Value then
             ExplicitQuorum flatQset
-        else
+        else if context.enableRelaxedAutoQsetConfig then
             let validators = Array.map pubKeysToAutoValidators tier1NodesGroupedByHomeDomain |> Array.toList
             AutoQuorum { homeDomains = Set.toList tier1Orgs; validators = List.fold (@) [] validators }
+        else
+            ExplicitQuorum
+                { thresholdPercent = Some(67) // 3f + 1
+                  validators = Map.empty
+                  innerQuorumSets = Array.map orgToExplicitQSet tier1NodesGroupedByHomeDomain }
 
     let pubnetOpts =
         { CoreSetOptions.GetDefault context.image with
