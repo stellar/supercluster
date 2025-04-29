@@ -484,7 +484,7 @@ type MissionOptions
     member self.CheckEventsAreConsistentWithEntryDiffs = checkEventsAreConsistentWithEntryDiffs
 
     [<Option("enable-relaxed-auto-qset-config",
-             HelpText = "Enables the use of automatic quorum set configuration on missions that may create core sets with invalid HIGH quality validators. Requires a stellar-core version that supports the SKIP_HIGH_CRITICAL_VALIDATOR_CHECKS_FOR_TESTING config option.",
+             HelpText = "Enables the use of automatic quorum set configuration on missions that may create core sets that do not satisfy the redundancy and history requirements placed on pubnet validators.  Requires a stellar-core version that supports the SKIP_HIGH_CRITICAL_VALIDATOR_CHECKS_FOR_TESTING config option.",
              Required = false,
              Default = false)>]
     member self.EnableRelaxedAutoQsetConfig = enableRelaxedAutoQsetConfig
