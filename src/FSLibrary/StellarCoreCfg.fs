@@ -533,6 +533,7 @@ type NetworkCfg with
         | CoreSetQuorumList (q) -> simpleQuorum (self.GetNameKeyList q)
         | CoreSetQuorumListWithThreshold (q, t) ->
             checkAutoQSetIncompatability "CoreSetQuorumListWithThreshold"
+            LogInfo "Using explicit quorum set configuration"
             toExplicitQSet (self.GetNameKeyList q) (Some(t))
         | ExplicitQuorum (e) ->
             LogInfo "Using explicit quorum set configuration"
