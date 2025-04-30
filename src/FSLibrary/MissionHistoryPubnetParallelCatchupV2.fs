@@ -8,6 +8,7 @@ open Logging
 open StellarKubeSpecs
 open StellarMissionContext
 open StellarNetworkData
+open StellarNetworkCfg
 
 open System
 open System.Diagnostics
@@ -25,7 +26,7 @@ let helmReleaseName = "parallel-catchup"
 let helmChartPath = "/supercluster/src/MissionParallelCatchup/parallel_catchup_helm"
 // let helmChartPath = "../MissionParallelCatchup/parallel_catchup_helm" // for local testing
 let valuesFilePath = helmChartPath + "/values.yaml"
-let jobMonitorHostName = "ssc-job-monitor.services.stellar-ops.com"
+let jobMonitorDomainName = "ssc-job-monitor.services.stellar-ops.com"
 let jobMonitorStatusEndPoint = "/status"
 let jobMonitorMetricsEndPoint = "/metrics"
 let jobMonitorLoggingIntervalSecs = 30 // frequency of job monitor's internal information gathering (querying core endpoint and redis metrics) and logging
@@ -35,6 +36,9 @@ let jobMonitorStatusCheckTimeOutSecs = 600
 let mutable toPerformCleanup = true
 let failedJobLogFileLineCount = 10000
 let failedJobLogStreamLineCount = 1000
+
+let mutable nonce : String = ""
+let jobMonitorHostName () = sprintf "%s.%s" nonce jobMonitorDomainName
 
 let runCommand (command: string []) =
     try
@@ -119,7 +123,7 @@ let installProject (context: MissionContext) =
         | None -> GetLatestPubnetLedgerNumber()
 
     setOptions.Add(sprintf "range_generator.params.latest_ledger_num=%d" endLedger)
-    setOptions.Add(sprintf "monitor.hostname=%s" jobMonitorHostName)
+    setOptions.Add(sprintf "monitor.hostname=%s" (jobMonitorHostName ()))
     setOptions.Add(sprintf "monitor.path=/%s/(.*)" context.namespaceProperty)
     setOptions.Add(sprintf "monitor.logging_interval_seconds=%d" jobMonitorLoggingIntervalSecs)
 
@@ -164,7 +168,7 @@ Console.CancelKeyPress.Add
 let queryJobMonitor (path: String, endPoint: String) =
     try
         use client = new HttpClient()
-        let url = "http://" + jobMonitorHostName + path + endPoint
+        let url = "http://" + jobMonitorHostName () + path + endPoint
         let response = client.GetStringAsync(url).Result
 
         LogInfo "job monitor query '%s', got response: %s" url response
@@ -201,6 +205,9 @@ let dumpLogs (context: MissionContext, podName: String) =
 
 let historyPubnetParallelCatchupV2 (context: MissionContext) =
     LogInfo "Running parallel catchup v2 ..."
+
+    nonce <- (MakeNetworkNonce context.tag).ToString()
+    LogDebug "nonce: '%s'" nonce
 
     installProject (context)
 
