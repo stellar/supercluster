@@ -114,7 +114,8 @@ type MissionOptions
         genesisTestAccountCount: int option,
         catchupSkipKnownResultsForTesting: bool option,
         checkEventsAreConsistentWithEntryDiffs: bool option,
-        enableRelaxedAutoQsetConfig: bool
+        enableRelaxedAutoQsetConfig: bool,
+        jobMonitorExternalHost: string option
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -489,6 +490,11 @@ type MissionOptions
              Default = false)>]
     member self.EnableRelaxedAutoQsetConfig = enableRelaxedAutoQsetConfig
 
+    [<Option("job-monitor-external-host",
+             HelpText = "Cluster-external hostname to connect to for access to job monitor",
+             Required = false)>]
+    member self.JobMonitorExternalHost = jobMonitorExternalHost
+
 
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' with
@@ -609,7 +615,8 @@ let main argv =
                   catchupSkipKnownResultsForTesting = None
                   checkEventsAreConsistentWithEntryDiffs = None
                   updateSorobanCosts = None
-                  enableRelaxedAutoQsetConfig = false }
+                  enableRelaxedAutoQsetConfig = false
+                  jobMonitorExternalHost = None }
 
             let nCfg = MakeNetworkCfg ctx [] None
             use formation = kube.MakeEmptyFormation nCfg
@@ -751,7 +758,8 @@ let main argv =
                                checkEventsAreConsistentWithEntryDiffs = mission.CheckEventsAreConsistentWithEntryDiffs
                                updateSorobanCosts = None
                                genesisTestAccountCount = mission.GenesisTestAccountCount
-                               enableRelaxedAutoQsetConfig = mission.EnableRelaxedAutoQsetConfig }
+                               enableRelaxedAutoQsetConfig = mission.EnableRelaxedAutoQsetConfig
+                               jobMonitorExternalHost = mission.JobMonitorExternalHost }
 
                          allMissions.[m] missionContext
 

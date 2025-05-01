@@ -26,7 +26,7 @@ worker:
 
 monitor:
   ingress_class_name: "ingress-private"
-  hostname: "ssc-job-monitor.services.stellar-ops.com"
+  hostname: "" # to be set by the mission
   path: "/default/(.*)"
   logging_interval_seconds: 300
   logging_level: "INFO" # 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'

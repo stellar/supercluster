@@ -114,4 +114,5 @@ type MissionContext =
       catchupSkipKnownResultsForTesting: bool option
       checkEventsAreConsistentWithEntryDiffs: bool option
       updateSorobanCosts: bool option
-      enableRelaxedAutoQsetConfig: bool }
+      enableRelaxedAutoQsetConfig: bool
+      jobMonitorExternalHost: string option }

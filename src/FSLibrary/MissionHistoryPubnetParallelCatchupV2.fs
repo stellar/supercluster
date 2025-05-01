@@ -26,7 +26,7 @@ let helmReleaseName = "parallel-catchup"
 let helmChartPath = "/supercluster/src/MissionParallelCatchup/parallel_catchup_helm"
 // let helmChartPath = "../MissionParallelCatchup/parallel_catchup_helm" // for local testing
 let valuesFilePath = helmChartPath + "/values.yaml"
-let jobMonitorDomainName = "ssc-job-monitor.services.stellar-ops.com"
+let defaultJobMonitorHostName = "ssc-job-monitor.services.stellar-ops.com"
 let jobMonitorStatusEndPoint = "/status"
 let jobMonitorMetricsEndPoint = "/metrics"
 let jobMonitorLoggingIntervalSecs = 30 // frequency of job monitor's internal information gathering (querying core endpoint and redis metrics) and logging
@@ -38,7 +38,11 @@ let failedJobLogFileLineCount = 10000
 let failedJobLogStreamLineCount = 1000
 
 let mutable nonce : String = ""
-let jobMonitorHostName () = sprintf "%s.%s" nonce jobMonitorDomainName
+
+let jobMonitorHostName (context: MissionContext) =
+    match context.jobMonitorExternalHost with
+    | Some host -> host
+    | None -> defaultJobMonitorHostName // TODO: append it with a nounce to make it session specific
 
 let runCommand (command: string []) =
     try
@@ -123,7 +127,7 @@ let installProject (context: MissionContext) =
         | None -> GetLatestPubnetLedgerNumber()
 
     setOptions.Add(sprintf "range_generator.params.latest_ledger_num=%d" endLedger)
-    setOptions.Add(sprintf "monitor.hostname=%s" (jobMonitorHostName ()))
+    setOptions.Add(sprintf "monitor.hostname=%s" (jobMonitorHostName context))
     setOptions.Add(sprintf "monitor.path=/%s/(.*)" context.namespaceProperty)
     setOptions.Add(sprintf "monitor.logging_interval_seconds=%d" jobMonitorLoggingIntervalSecs)
 
@@ -165,10 +169,10 @@ Console.CancelKeyPress.Add
         cleanup ()
         Environment.Exit(0))
 
-let queryJobMonitor (path: String, endPoint: String) =
+let queryJobMonitor (context: MissionContext, path: String, endPoint: String) =
     try
         use client = new HttpClient()
-        let url = "http://" + jobMonitorHostName () + path + endPoint
+        let url = "http://" + jobMonitorHostName context + path + endPoint
         let response = client.GetStringAsync(url).Result
 
         LogInfo "job monitor query '%s', got response: %s" url response
@@ -218,7 +222,7 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
 
     while not allJobsFinished do
         Thread.Sleep(jobMonitorStatusCheckIntervalSecs * 1000)
-        let statusOpt = queryJobMonitor (jobMonitorPath, jobMonitorStatusEndPoint)
+        let statusOpt = queryJobMonitor (context, jobMonitorPath, jobMonitorStatusEndPoint)
 
         try
             match statusOpt with
@@ -243,7 +247,7 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
 
                 if remainSize = 0 && JobsInProgress.Count = 0 then
                     // perform a final get for the metrics
-                    queryJobMonitor (jobMonitorPath, jobMonitorMetricsEndPoint) |> ignore
+                    queryJobMonitor (context, jobMonitorPath, jobMonitorMetricsEndPoint) |> ignore
 
                     // check all workers are down
                     let allWorkersDown =
@@ -260,7 +264,7 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
                 timeBeforeNextMetricsCheck <- timeBeforeNextMetricsCheck - jobMonitorStatusCheckIntervalSecs
 
                 if timeBeforeNextMetricsCheck <= 0 then
-                    queryJobMonitor (jobMonitorPath, jobMonitorMetricsEndPoint) |> ignore
+                    queryJobMonitor (context, jobMonitorPath, jobMonitorMetricsEndPoint) |> ignore
                     timeBeforeNextMetricsCheck <- jobMonitorMetricsCheckIntervalSecs
 
             | None ->
