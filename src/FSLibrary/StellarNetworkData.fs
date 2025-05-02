@@ -744,7 +744,6 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
                 let keys = [| getSimKey n.PublicKey |]
                 let tier1 = Set.contains n.PublicKey tier1KeySet
 
-                // TODO: Port to orgCoreSets too
                 let validate, qset = computeQset n
 
                 let coreSetOpts =
