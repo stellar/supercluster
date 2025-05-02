@@ -54,6 +54,8 @@ let ConnectToCluster (cfgFile: string) (nsOpt: string option) : (Kubernetes * st
                  "stellar-supercluster")
 
     let clientConfig = KubernetesClientConfiguration.BuildConfigFromConfigObject(kCfg)
+    // Disable HTTP2 to avoid intermittent issues with the cluster
+    clientConfig.DisableHttp2 <- true
     let kube = new k8s.Kubernetes(clientConfig)
     (kube, ns)
 
