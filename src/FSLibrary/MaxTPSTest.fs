@@ -311,7 +311,7 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
             // As the runs take a while, set a threshold of 10, so we get a
             // reasonable approximation
             let threshold = 10
-            let numRuns = if context.numRuns.IsSome then context.numRuns.Value else 3
+            let numRuns = if context.numRuns.IsSome then context.numRuns.Value else 1
 
             for run in 1 .. numRuns do
                 LogInfo "Starting max TPS run %i out of %i" run numRuns
