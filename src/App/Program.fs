@@ -109,7 +109,6 @@ type MissionOptions
         pubnetParallelCatchupEndLedger: int option,
         pubnetParallelCatchupNumWorkers: int,
         tag: string option,
-        numRuns: int option,
         numPregeneratedTxs: int option,
         genesisTestAccountCount: int option,
         catchupSkipKnownResultsForTesting: bool option,
@@ -459,11 +458,6 @@ type MissionOptions
     [<Option("tag", HelpText = "optional name to tag the run with", Required = false)>]
     member self.Tag = tag
 
-    [<Option("num-runs",
-             HelpText = "optional number of max TPS runs (more runs increase result accuracy)",
-             Required = false)>]
-    member self.NumRuns = numRuns
-
     [<Option("num-pregenerated-txs",
              HelpText = "Number of transactions to pregenerate for max TPS tests",
              Required = false)>]
@@ -608,7 +602,6 @@ let main argv =
                   pubnetParallelCatchupEndLedger = None
                   pubnetParallelCatchupNumWorkers = 128
                   tag = None
-                  numRuns = None
                   numPregeneratedTxs = None
                   genesisTestAccountCount = None
                   enableTailLogging = true
@@ -751,7 +744,6 @@ let main argv =
                                pubnetParallelCatchupEndLedger = mission.PubnetParallelCatchupEndLedger
                                pubnetParallelCatchupNumWorkers = mission.PubnetParallelCatchupNumWorkers
                                tag = mission.Tag
-                               numRuns = mission.NumRuns
                                numPregeneratedTxs = mission.NumPregeneratedTxs
                                enableTailLogging = true
                                catchupSkipKnownResultsForTesting = mission.CatchupSkipKnownResultsForTesting

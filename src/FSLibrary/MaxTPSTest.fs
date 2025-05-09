@@ -307,20 +307,11 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
 
                 finalTxRate.Value
 
-            let mutable results = []
             // As the runs take a while, set a threshold of 10, so we get a
             // reasonable approximation
             let threshold = 10
-            let numRuns = if context.numRuns.IsSome then context.numRuns.Value else 1
 
-            for run in 1 .. numRuns do
-                LogInfo "Starting max TPS run %i out of %i" run numRuns
-                let resultRate = binarySearchWithThreshold context.txRate context.maxTxRate threshold
-                results <- List.append results [ resultRate ]
-                if run < numRuns then restartCoreSetsOrWait allNodes
+            LogInfo "Starting max TPS run"
+            let resultRate = binarySearchWithThreshold context.txRate context.maxTxRate threshold
 
-            LogInfo
-                "Final tx rate averaged to %i over %i runs for image %s"
-                (results |> List.map float |> List.average |> int)
-                numRuns
-                context.image)
+            LogInfo "Final tx rate: %i for image %s" resultRate context.image)

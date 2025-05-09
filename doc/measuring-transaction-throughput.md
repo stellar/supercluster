@@ -6,7 +6,7 @@ Supercluster provides two missions that measure the maximum number of Transactio
 
 Other than the type of load generated, these two missions are identical. They both spin up a configurable network of stellar-core nodes, then measure the maximum TPS of the network using a binary search over a configurable range of TPS values. For each tested TPS value, the missions generate roughly 15 minutes of load, then check whether the mission was successful. To be considered successful, a mission must close 5-second ledgers at a sustained TPS value. That is, generated transactions must end up in the ledger (cannot be dropped) and all nodes must remain in sync. If the mission determines a run was successful, it will try again with a higher target TPS value. Otherwise, it will retry with a lower target TPS value.
 
-The missions perform the binary search a configurable number of times, then average the highest successful values from each run. Upon completion, the missions emit a log line of the form, “Final tx rate averaged to 1000 over 3 runs for image ...".
+The missions perform the binary search to find the maximum sustainable TPS value. Upon completion, the missions emit a log line of the form, "Final tx rate: 1000 for image ...".
 
 ## Docker images with performance tests enabled
 
@@ -24,7 +24,6 @@ These parameters affect both `MaxTPSClassic` and `MaxTPSMixed` missions:
 
 * `--tx-rate`: Binary search lower bound. If a run fails to achieve at least this value it will fail with an error and you should rerun the mission with a lower value.
 * `--max-tx-rate`: Binary search upper bound. If a run succeeds at this value you should rerun the mission with a higher value.
-* `--num-runs`: Number of max TPS runs to average to get a final TPS value. Defaults to 3.
 * `--pubnet-data`: Network topology to use. Defaults to a topology of tier 1 validators. See [Specifying network topologies](#specifying-network-topologies) for details on how to specify a custom topology.
 * `--netdelay-image`: Helper image providing simulated network delay for latency simulation. SDF provides a public image on dockerhub at `stellar/sdf-netdelay`.
 
