@@ -117,7 +117,6 @@ let ctx : MissionContext =
       pubnetParallelCatchupEndLedger = None
       pubnetParallelCatchupNumWorkers = 128
       tag = None
-      numRuns = None
       numPregeneratedTxs = None
       enableTailLogging = true
       catchupSkipKnownResultsForTesting = None
