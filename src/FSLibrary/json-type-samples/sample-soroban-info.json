@@ -10,7 +10,7 @@
     "fee_write_ledger_entry" : 3000,
     "ledger" : {
         "max_instructions" : 1000000000000000000,
-        "max_read_bytes" : 133120,
+        "max_disk_read_bytes" : 133120,
         "max_read_ledger_entries" : 30,
         "max_tx_count" : 30,
         "max_tx_size_bytes" : 71680,
@@ -36,7 +36,7 @@
     "tx" : {
         "max_contract_events_size_bytes" : 2048,
         "max_instructions" : 1000000000000000000,
-        "max_read_bytes" : 133120,
+        "max_disk_read_bytes" : 133120,
         "max_read_ledger_entries" : 30,
         "max_size_bytes" : 71680,
         "max_write_bytes" : 66560,

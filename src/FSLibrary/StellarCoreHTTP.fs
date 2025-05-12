@@ -412,7 +412,7 @@ type Peer with
 
     member self.GetLedgerMaxInstructions() : int64 = self.GetSorobanInfo().Ledger.MaxInstructions
 
-    member self.GetLedgerReadBytes() : int = self.GetSorobanInfo().Ledger.MaxReadBytes
+    member self.GetLedgerReadBytes() : int = self.GetSorobanInfo().Ledger.MaxDiskReadBytes
 
     member self.GetLedgerWriteBytes() : int = self.GetSorobanInfo().Ledger.MaxWriteBytes
 
@@ -426,7 +426,7 @@ type Peer with
 
     member self.GetTxMaxInstructions() : int64 = self.GetSorobanInfo().Tx.MaxInstructions
 
-    member self.GetTxReadBytes() : int = self.GetSorobanInfo().Tx.MaxReadBytes
+    member self.GetTxReadBytes() : int = self.GetSorobanInfo().Tx.MaxDiskReadBytes
 
     member self.GetTxWriteBytes() : int = self.GetSorobanInfo().Tx.MaxWriteBytes
 
