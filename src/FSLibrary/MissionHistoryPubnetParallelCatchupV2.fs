@@ -83,11 +83,11 @@ let installProject (context: MissionContext) =
             "worker.catchup_skip_known_results_for_testing=%b"
             (Option.defaultValue true context.catchupSkipKnownResultsForTesting)
     )
-    // Do not check events consistency invariant by default
+    // Check events consistency invariant by default
     setOptions.Add(
         sprintf
             "worker.check_events_are_consistent_with_entry_diffs=%b"
-            (Option.defaultValue false context.checkEventsAreConsistentWithEntryDiffs)
+            (Option.defaultValue true context.checkEventsAreConsistentWithEntryDiffs)
     )
 
     // read the resource requirements defined in StellarKubeSpecs.fs (where resource for various missions are centralized)
