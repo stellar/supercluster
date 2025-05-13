@@ -514,37 +514,58 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
         |> Array.map (fun k -> (peerShortNameForKey k, getSimKey k))
         |> Map.ofArray
 
+    let pubKeysToAutoValidators (pubKeys: string array) : AutoValidator list =
+        pubKeys
+        |> Array.map
+            (fun k ->
+                { name = peerShortNameForKey k
+                  homeDomain = (homeDomainNameForKey k).StringName
+                  keys = getSimKey k })
+        |> Array.toList
+
+
     // A full-tier-1 qset.
     // This contains all tier-1 nodes with
     // * 3f + 1 for cross organization thresholds (top level).
     // * 2f + 1 for thresholds within each organization.
-    let defaultQuorum : ExplicitQuorumSet =
-        let tier1NodesGroupedByHomeDomain : (string array) array =
+    let defaultQuorum : QuorumSetSpec =
+        let tier1Nodes =
             allPubnetNodes
             |> Array.filter
                 (fun (n: PubnetNode.Root) -> (Set.contains n.PublicKey tier1KeySet) && n.SbHomeDomain.IsSome)
+
+        let tier1NodesGroupedByHomeDomain : (string array) array =
+            tier1Nodes
             |> Array.groupBy (fun (n: PubnetNode.Root) -> n.SbHomeDomain.Value)
             |> Array.map
                 (fun (_, nodes: PubnetNode.Root []) -> Array.map (fun (n: PubnetNode.Root) -> n.PublicKey) nodes)
 
-        let orgToQSet (org: string array) : ExplicitQuorumSet =
+        let orgToExplicitQSet (org: string array) : ExplicitQuorumSet =
             { thresholdPercent = Some(51) // Simple majority
               validators = pubKeysToValidators org
               innerQuorumSets = Array.empty }
 
-        let nOrgs = Array.length tier1NodesGroupedByHomeDomain
+        let tier1Orgs =
+            tier1Nodes
+            |> Array.map
+                (fun (n: PubnetNode.Root) -> { name = (homeDomainNameForKey n.PublicKey).StringName; quality = High })
+            |> Set.ofArray
 
         let flatQset =
             { thresholdPercent = Some(100)
               validators = pubKeysToValidators (Set.fold (fun l se -> se :: l) [] tier1KeySet |> Array.ofList)
               innerQuorumSets = Array.empty }
 
-        let qset =
-            { thresholdPercent = Some(67) // 3f + 1
-              validators = Map.empty
-              innerQuorumSets = Array.map orgToQSet tier1NodesGroupedByHomeDomain }
-
-        if context.flatQuorum.IsSome && context.flatQuorum.Value then flatQset else qset
+        if context.flatQuorum.IsSome && context.flatQuorum.Value then
+            ExplicitQuorum flatQset
+        else if context.enableRelaxedAutoQsetConfig then
+            let validators = Array.map pubKeysToAutoValidators tier1NodesGroupedByHomeDomain |> Array.toList
+            AutoQuorum { homeDomains = Set.toList tier1Orgs; validators = List.fold (@) [] validators }
+        else
+            ExplicitQuorum
+                { thresholdPercent = Some(67) // 3f + 1
+                  validators = Map.empty
+                  innerQuorumSets = Array.map orgToExplicitQSet tier1NodesGroupedByHomeDomain }
 
     let pubnetOpts =
         { CoreSetOptions.GetDefault context.image with
@@ -628,17 +649,110 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
         |> Array.map (fun (k: KeyPair) -> (k.PublicKey, Map.find k.PublicKey preferredPeersMapForAllNodes))
         |> Map.ofArray
 
+    // Given a node, returns a tuple where the first element is a boolean
+    // indicating whether the node is a validator, and the second element is an
+    // appropriate quorum set configuration for that node.
+    let computeQset (n: PubnetNode.Root) =
+        let tier1 = Set.contains n.PublicKey tier1KeySet
+        let hdn = homeDomainNameForKey n.PublicKey
+
+        match tier1, n.SbIsValidating, defaultQuorum with
+        | true, _, _ ->
+            // Tier 1 nodes are always validators and have the default tier1
+            // quorum set. This ignores the stellarbeat validator designation
+            // because the user may have passed the --tier1-keys flag, or may be
+            // adding additional tier1 nodes with --tier-1-orgs-to-add.
+            true, defaultQuorum
+        | false, Some true, ExplicitQuorum _ ->
+            // Non-tier 1 validators can use the default tier1 quorum set if
+            // it's an ExplicitQuorum.
+            true, defaultQuorum
+        | false, Some true, AutoQuorum q ->
+            // Non-tier 1 validators with auto quorum set configuration must
+            // have a HOME_DOMAIN section for themselves in their quorum set
+            // config. Mark the validator as LOW quality so that it never elects
+            // itself as a leader.
+            let homeDomain = { name = hdn.StringName; quality = Low }
+
+            let validator =
+                { name = peerShortNameForKey n.PublicKey
+                  homeDomain = hdn.StringName
+                  keys = getSimKey n.PublicKey }
+
+            true,
+            AutoQuorum
+                { homeDomains = homeDomain :: q.homeDomains
+                  validators = validator :: q.validators }
+        | false, Some true, _ -> failwith "Unexpected quorum set type"
+        | (_, _, _) ->
+            // All else are non-validators who get the default config.
+            false, defaultQuorum
+
+    // Given a list of quorum sets generated by the `computeQset` function,
+    // merge into a single boolean indicating whether all nodes are validators
+    // and a quorum set for the group of validators.
+    let mergeQSets (qsets: (bool * QuorumSetSpec) list) =
+        // First, check whether all nodes are validators
+        let allValidators = List.forall (fun (v, _) -> v) qsets
+        // Then, check whether all nodes are using automatic quorum sets
+        let allUsingAutomatic =
+            List.forall
+                (fun (_, qset) ->
+                    match qset with
+                    | AutoQuorum _ -> true
+                    | _ -> false)
+                qsets
+
+        match allValidators, allUsingAutomatic with
+        | true, true ->
+            // Merge the quorum sets by combining all home domains and
+            // validators from all quorum sets.
+            let mergedQSet =
+                qsets
+                |> List.map
+                    (fun (_, qset) ->
+                        match qset with
+                        | AutoQuorum q -> q
+                        | _ -> failwith "Unexpected quorum set type")
+                |> List.fold
+                    (fun acc q ->
+                        { acc with
+                              validators = acc.validators @ q.validators
+                              homeDomains = acc.homeDomains @ q.homeDomains })
+                    { homeDomains = []; validators = [] }
+            // Simplify by removing duplicates
+            let simplifedMergedQSet =
+                { mergedQSet with
+                      validators = mergedQSet.validators |> List.distinct
+                      homeDomains = mergedQSet.homeDomains |> List.distinct }
+            // Return the merged quorum set
+            true, AutoQuorum simplifedMergedQSet
+        | true, false ->
+            // If all nodes are validators but not all are using automatic
+            // quorum sets, then all must be using explicit quorum sets. Return
+            // the default set in this case.
+            true, defaultQuorum
+        | false, _ ->
+            // Not all nodes are validators. Mark as non-validators and return
+            // the default quorum set.
+            false, defaultQuorum
+
     let miscCoreSets : CoreSet array =
         Array.mapi
             (fun (_: int) (n: PubnetNode.Root) ->
                 let hdn = homeDomainNameForKey n.PublicKey
                 let keys = [| getSimKey n.PublicKey |]
+                let tier1 = Set.contains n.PublicKey tier1KeySet
+
+                let validate, qset = computeQset n
 
                 let coreSetOpts =
                     { pubnetOpts with
                           nodeCount = 1
-                          quorumSet = ExplicitQuorum defaultQuorum
-                          tier1 = Some(Set.contains n.PublicKey tier1KeySet)
+                          quorumSet = qset
+                          tier1 = Some tier1
+                          validate = validate
+                          homeDomain = if validate then Some hdn.StringName else None
                           nodeLocs = Some [ getGeoLocOrDefault n ]
                           preferredPeersMap = Some(keysToPreferredPeersMap keys) }
 
@@ -653,12 +767,17 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
                 assert (nodes.Length <> 0)
                 let nodeList = List.ofArray nodes
                 let keys = Array.map (fun (n: PubnetNode.Root) -> getSimKey n.PublicKey) nodes
+                let tier1 = Set.contains nodes.[0].PublicKey tier1KeySet
+
+                let validate, qset = mergeQSets (List.map computeQset nodeList)
 
                 let coreSetOpts =
                     { pubnetOpts with
                           nodeCount = Array.length nodes
-                          quorumSet = ExplicitQuorum defaultQuorum
-                          tier1 = Some(Set.contains nodes.[0].PublicKey tier1KeySet)
+                          quorumSet = qset
+                          tier1 = Some tier1
+                          validate = validate
+                          homeDomain = if validate then Some hdn.StringName else None
                           nodeLocs = Some(List.map getGeoLocOrDefault nodeList)
                           preferredPeersMap = Some(keysToPreferredPeersMap keys) }
 
