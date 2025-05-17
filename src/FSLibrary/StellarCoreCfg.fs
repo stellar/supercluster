@@ -169,7 +169,6 @@ type StellarCoreCfg =
       maxBatchWriteCount: int
       inMemoryMode: bool
       addArtificialDelayUsec: int option // optional delay for testing in microseconds
-      deprecatedSQLState: bool
       surveyPhaseDuration: int option
       containerType: CoreContainerType
       skipHighCriticalValidatorChecks: bool }
@@ -197,7 +196,6 @@ type StellarCoreCfg =
         let preferredPeers = List.map (fun (x: PeerDnsName) -> x.StringName) self.preferredPeers
 
         t.Add("DATABASE", self.database.ToString()) |> ignore
-        t.Add("DEPRECATED_SQL_LEDGER_STATE", self.deprecatedSQLState) |> ignore
         t.Add("METADATA_DEBUG_LEDGERS", 0) |> ignore
 
         match self.network.missionContext.genesisTestAccountCount with
@@ -602,7 +600,6 @@ type NetworkCfg with
           maxBatchWriteCount = opts.maxBatchWriteCount
           inMemoryMode = opts.inMemoryMode
           addArtificialDelayUsec = opts.addArtificialDelayUsec
-          deprecatedSQLState = opts.deprecatedSQLState
           surveyPhaseDuration = opts.surveyPhaseDuration
           containerType = MainCoreContainer
           skipHighCriticalValidatorChecks = opts.skipHighCriticalValidatorChecks }
@@ -644,7 +641,6 @@ type NetworkCfg with
           maxBatchWriteCount = c.options.maxBatchWriteCount
           inMemoryMode = c.options.inMemoryMode
           addArtificialDelayUsec = c.options.addArtificialDelayUsec
-          deprecatedSQLState = c.options.deprecatedSQLState
           surveyPhaseDuration = c.options.surveyPhaseDuration
           containerType = ctype
           skipHighCriticalValidatorChecks = c.options.skipHighCriticalValidatorChecks }

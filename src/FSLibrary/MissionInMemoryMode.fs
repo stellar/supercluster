@@ -29,7 +29,6 @@ let runInMemoryMode (context: MissionContext) =
                   validate = false
                   localHistory = false
                   quorumSet = CoreSetQuorum(CoreSetName "core")
-                  deprecatedSQLState = true
                   updateSorobanCosts = Some(true) }
 
     let context =

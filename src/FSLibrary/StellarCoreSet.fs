@@ -220,7 +220,6 @@ type CoreSetOptions =
       maxBatchWriteCount: int
       inMemoryMode: bool
       addArtificialDelayUsec: int option
-      deprecatedSQLState: bool
       surveyPhaseDuration: int option
       updateSorobanCosts: bool option
       // `skipHighCriticalValidatorChecks` exists to allow supercluster to
@@ -262,7 +261,6 @@ type CoreSetOptions =
           maxBatchWriteCount = 1024
           inMemoryMode = false
           addArtificialDelayUsec = None
-          deprecatedSQLState = false
           surveyPhaseDuration = None
           updateSorobanCosts = None
           skipHighCriticalValidatorChecks = true }
