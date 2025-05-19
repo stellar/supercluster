@@ -210,7 +210,9 @@ type StellarFormation with
                   maxContractSizeBytes = Some(peer.GetMaxContractSize() * multiplier)
                   maxContractDataKeySizeBytes = Some(peer.GetMaxContractDataKeySize() * multiplier)
                   maxContractDataEntrySizeBytes = Some(peer.GetMaxContractDataEntrySize() * multiplier)
-                  txMaxContractEventsSizeBytes = Some(peer.GetTxMaxContractEventsSize() * multiplier) }
+                  txMaxContractEventsSizeBytes = Some(peer.GetTxMaxContractEventsSize() * multiplier)
+                  // For protocol versions before p23, we shouldn't set txMaxFootprintSize
+                  txMaxFootprintSize = Option.map ((*) multiplier) (peer.GetTxMaxFootprintSize()) }
             (System.DateTime.UtcNow)
 
         peer.WaitForTxMaxInstructions expectedInstructions |> ignore

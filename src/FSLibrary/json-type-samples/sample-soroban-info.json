@@ -41,6 +41,7 @@
         "max_size_bytes" : 71680,
         "max_write_bytes" : 66560,
         "max_write_ledger_entries" : 20,
+        "max_footprint_size": 30,
         "memory_limit" : 41943040
     }
     }     

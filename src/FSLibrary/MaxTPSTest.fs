@@ -61,6 +61,7 @@ let upgradeSorobanTxLimits (context: MissionContext) (formation: StellarFormatio
               txMaxWriteBytes = maxOption txBytes wasmBytes
               txMaxReadLedgerEntries = entries
               txMaxWriteLedgerEntries = entries
+              txMaxFootprintSize = entries
               txMaxSizeBytes = maxOption txSizeBytes wasmBytes
               maxContractSizeBytes = Option.map ((*) multiplier) (maxDistributionValue context.wasmBytesDistribution)
               // Memory limit must be reasonably high
