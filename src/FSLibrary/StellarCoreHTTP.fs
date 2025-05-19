@@ -105,6 +105,7 @@ type LoadGen =
       bucketListSizeWindowSampleSize: int option
       evictionScanSize: int64 option
       startingEvictionScanLevel: int option
+      txMaxFootprintSize: int option
 
       // Fields for BLEND_CLASSIC_SOROBAN mode
       payWeight: int option
@@ -160,6 +161,7 @@ type LoadGen =
                                                                 @ optionalParam
                                                                     "sorobaninvokeweight"
                                                                     self.sorobanInvokeWeight
+                                                                  @ optionalParam "txmxftprnt" self.txMaxFootprintSize
 
         mandatoryParams @ optionalParams
 
@@ -197,6 +199,7 @@ type LoadGen =
           bucketListSizeWindowSampleSize = None
           evictionScanSize = None
           startingEvictionScanLevel = None
+          txMaxFootprintSize = None
           payWeight = None
           sorobanUploadWeight = None
           sorobanInvokeWeight = None }
@@ -445,6 +448,14 @@ type Peer with
     member self.GetMaxContractDataEntrySize() : int = self.GetSorobanInfo().MaxContractDataEntrySize
 
     member self.GetTxMaxContractEventsSize() : int = self.GetSorobanInfo().Tx.MaxContractEventsSizeBytes
+
+    // Depending on which protocol version we are testing, "max_footprint_size" may not be present.
+    member self.GetTxMaxFootprintSize() : int option =
+        let sorobanInfo = self.GetSorobanInfo()
+
+        match sorobanInfo.Tx.JsonValue.TryGetProperty("max_footprint_size") with
+        | Some jprop -> Some(jprop.AsInteger())
+        | None -> None
 
     member self.GetLedgerProtocolVersion() : int = self.GetInfo().Ledger.Version
 
