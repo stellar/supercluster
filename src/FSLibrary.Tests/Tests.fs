@@ -128,7 +128,8 @@ let ctx : MissionContext =
       genesisTestAccountCount = None
       enableRelaxedAutoQsetConfig = false
       jobMonitorExternalHost = None
-      txBatchMaxSize = None }
+      txBatchMaxSize = None
+      runForMaxTps = false }
 
 let netdata = __SOURCE_DIRECTORY__ + "/../../../data/public-network-data-2024-08-01.json"
 let pubkeys = __SOURCE_DIRECTORY__ + "/../../../data/tier1keys.json"
