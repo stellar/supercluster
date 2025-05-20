@@ -198,6 +198,9 @@ type StellarCoreCfg =
         t.Add("DATABASE", self.database.ToString()) |> ignore
         t.Add("METADATA_DEBUG_LEDGERS", 0) |> ignore
 
+        if self.network.missionContext.enableParallelApply then
+            t.Add("EXPERIMENTAL_PARALLEL_LEDGER_APPLY", true) |> ignore
+
         match self.network.missionContext.genesisTestAccountCount with
         | Some count -> t.Add("GENESIS_TEST_ACCOUNT_COUNT", count) |> ignore
         | None -> ()
@@ -346,6 +349,13 @@ type StellarCoreCfg =
         t.Add("INVARIANT_CHECKS", invList) |> ignore
         t.Add("UNSAFE_QUORUM", self.unsafeQuorum) |> ignore
         t.Add("FAILURE_SAFETY", self.failureSafety) |> ignore
+
+        match self.network.missionContext.txBatchMaxSize with
+        | Some batchSize -> t.Add("EXPERIMENTAL_TX_BATCH_MAX_SIZE", batchSize) |> ignore
+        | None -> ()
+
+        if self.network.missionContext.enableInMemoryBuckets then
+            t.Add("BUCKETLIST_DB_INDEX_PAGE_SIZE_EXPONENT", 0) |> ignore
 
         match self.surveyPhaseDuration with
         | None -> ()

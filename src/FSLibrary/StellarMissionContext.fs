@@ -89,6 +89,8 @@ type MissionContext =
       peerReadingCapacity: int option
       enableBackggroundOverlay: bool
       enableBackgroundSigValidation: bool
+      enableParallelApply: bool
+      enableInMemoryBuckets: bool
       peerFloodCapacity: int option
       peerFloodCapacityBytes: int option
       sleepMainThread: int option
@@ -115,4 +117,5 @@ type MissionContext =
       checkEventsAreConsistentWithEntryDiffs: bool option
       updateSorobanCosts: bool option
       enableRelaxedAutoQsetConfig: bool
-      jobMonitorExternalHost: string option }
+      jobMonitorExternalHost: string option
+      txBatchMaxSize: int option }
