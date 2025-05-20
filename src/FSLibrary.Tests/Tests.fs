@@ -74,6 +74,7 @@ let ctx : MissionContext =
       peerReadingCapacity = None
       peerFloodCapacity = None
       enableBackggroundOverlay = false
+      enableBackgroundSigValidation = false
       peerFloodCapacityBytes = None
       outboundByteLimit = None
       sleepMainThread = None

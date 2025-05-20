@@ -228,6 +228,9 @@ type StellarCoreCfg =
         | None -> ()
         | Some hd -> t.Add("NODE_HOME_DOMAIN", hd) |> ignore
 
+        if self.network.missionContext.enableBackgroundSigValidation then
+            t.Add("EXPERIMENTAL_BACKGROUND_TX_SIG_VERIFICATION", true) |> ignore
+
         match self.network.missionContext.peerReadingCapacity, self.network.missionContext.peerFloodCapacity with
         | None, None -> ()
         | Some read, Some flood ->
