@@ -198,9 +198,6 @@ type StellarCoreCfg =
         t.Add("DATABASE", self.database.ToString()) |> ignore
         t.Add("METADATA_DEBUG_LEDGERS", 0) |> ignore
 
-        if self.network.missionContext.enableParallelApply then
-            t.Add("EXPERIMENTAL_PARALLEL_LEDGER_APPLY", true) |> ignore
-
         match self.network.missionContext.genesisTestAccountCount with
         | Some count -> t.Add("GENESIS_TEST_ACCOUNT_COUNT", count) |> ignore
         | None -> ()
@@ -339,24 +336,6 @@ type StellarCoreCfg =
         if self.forceOldStyleLeaderElection then
             t.Add("FORCE_OLD_STYLE_LEADER_ELECTION", true) |> ignore
 
-        if self.network.missionContext.runForMaxTps then
-            if not self.network.missionContext.enableInMemoryBuckets then
-                t.Add("BUCKETLIST_DB_INDEX_PAGE_SIZE_EXPONENT", 0) |> ignore
-
-            if not self.network.missionContext.enableParallelApply then
-                t.Add("EXPERIMENTAL_PARALLEL_LEDGER_APPLY", true) |> ignore
-
-            if not self.network.missionContext.enableBackgroundSigValidation then
-                t.Add("EXPERIMENTAL_BACKGROUND_TX_SIG_VERIFICATION", true) |> ignore
-
-            match self.network.missionContext.txBatchMaxSize with
-            | Some batchSize -> ()
-            | None -> t.Add("EXPERIMENTAL_TX_BATCH_MAX_SIZE", 500) |> ignore
-
-            t.Add("FLOOD_DEMAND_BACKOFF_DELAY_MS", 1000) |> ignore
-            t.Add("BUCKETLIST_DB_PERSIST_INDEX", false) |> ignore
-            t.Add("FLOOD_DEMAND_PERIOD_MS", 100) |> ignore
-
         let invList =
             match self.invariantChecks with
             | AllInvariantsExceptEvents -> [ "(?!EventsAreConsistentWithEntryDiffs).*" ]
@@ -367,13 +346,6 @@ type StellarCoreCfg =
         t.Add("INVARIANT_CHECKS", invList) |> ignore
         t.Add("UNSAFE_QUORUM", self.unsafeQuorum) |> ignore
         t.Add("FAILURE_SAFETY", self.failureSafety) |> ignore
-
-        match self.network.missionContext.txBatchMaxSize with
-        | Some batchSize -> t.Add("EXPERIMENTAL_TX_BATCH_MAX_SIZE", batchSize) |> ignore
-        | None -> ()
-
-        if self.network.missionContext.enableInMemoryBuckets then
-            t.Add("BUCKETLIST_DB_INDEX_PAGE_SIZE_EXPONENT", 0) |> ignore
 
         match self.surveyPhaseDuration with
         | None -> ()
