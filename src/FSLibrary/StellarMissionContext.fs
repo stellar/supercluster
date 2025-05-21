@@ -118,5 +118,4 @@ type MissionContext =
       updateSorobanCosts: bool option
       enableRelaxedAutoQsetConfig: bool
       jobMonitorExternalHost: string option
-      txBatchMaxSize: int option
-      runForMaxTps: bool }
+      txBatchMaxSize: int option }

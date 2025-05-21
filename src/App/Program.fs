@@ -118,8 +118,7 @@ type MissionOptions
         checkEventsAreConsistentWithEntryDiffs: bool option,
         enableRelaxedAutoQsetConfig: bool,
         jobMonitorExternalHost: string option,
-        txBatchMaxSize: int option,
-        runForMaxTps: bool
+        txBatchMaxSize: int option
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -514,12 +513,6 @@ type MissionOptions
              Required = false)>]
     member self.TxBatchMaxSize = txBatchMaxSize
 
-    [<Option("run-for-max-tps",
-             HelpText = "Sets core configuration to optimal for high throughput tests",
-             Required = false,
-             Default = false)>]
-    member self.RunForMaxTps = runForMaxTps
-
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' with
     | [| x |] -> (x, None)
@@ -643,8 +636,7 @@ let main argv =
                   updateSorobanCosts = None
                   enableRelaxedAutoQsetConfig = false
                   jobMonitorExternalHost = None
-                  txBatchMaxSize = None
-                  runForMaxTps = false }
+                  txBatchMaxSize = None }
 
             let nCfg = MakeNetworkCfg ctx [] None
             use formation = kube.MakeEmptyFormation nCfg
@@ -790,8 +782,7 @@ let main argv =
                                genesisTestAccountCount = mission.GenesisTestAccountCount
                                enableRelaxedAutoQsetConfig = mission.EnableRelaxedAutoQsetConfig
                                jobMonitorExternalHost = mission.JobMonitorExternalHost
-                               txBatchMaxSize = mission.TxBatchMaxSize
-                               runForMaxTps = mission.RunForMaxTps }
+                               txBatchMaxSize = mission.TxBatchMaxSize }
 
                          allMissions.[m] missionContext
 
