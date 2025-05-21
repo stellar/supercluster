@@ -195,7 +195,13 @@ type StellarCoreCfg =
         let logLevelCommands = List.append debugLevelCommands traceLevelCommands
         let preferredPeers = List.map (fun (x: PeerDnsName) -> x.StringName) self.preferredPeers
 
-        t.Add("DATABASE", self.database.ToString()) |> ignore
+        if self.network.missionContext.runForMaxTps then
+            // parallel apply feature is only supported on Postgres (for now)
+            let url = PostgreSQL(CfgVal.pgDb, CfgVal.pgUser, CfgVal.pgPassword, CfgVal.pgHost)
+            t.Add("DATABASE", url.ToString()) |> ignore
+        else
+            t.Add("DATABASE", self.database.ToString()) |> ignore
+
         t.Add("METADATA_DEBUG_LEDGERS", 0) |> ignore
 
         if self.network.missionContext.enableParallelApply then
