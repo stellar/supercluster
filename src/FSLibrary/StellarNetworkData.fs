@@ -572,7 +572,6 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
               accelerateTime = false
               historyNodes = Some([])
               emptyDirType = DiskBackedEmptyDir
-              dbType = Postgres
               // We need to use a synchronized startup delay
               // for networks as large as this, otherwise it loses
               // sync before all the nodes are online.
@@ -754,7 +753,6 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
                           tier1 = Some tier1
                           validate = validate
                           homeDomain = if validate then Some hdn.StringName else None
-                          dbType = Postgres
                           nodeLocs = Some [ getGeoLocOrDefault n ]
                           preferredPeersMap = Some(keysToPreferredPeersMap keys) }
 
@@ -780,7 +778,6 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
                           tier1 = Some tier1
                           validate = validate
                           homeDomain = if validate then Some hdn.StringName else None
-                          dbType = Postgres
                           nodeLocs = Some(List.map getGeoLocOrDefault nodeList)
                           preferredPeersMap = Some(keysToPreferredPeersMap keys) }
 
@@ -828,7 +825,6 @@ let PubnetCoreSetOptions (image: string) =
           emptyDirType = DiskBackedEmptyDir
           quorumSet = ExplicitQuorum PubnetQuorum
           historyGetCommands = PubnetGetCommands
-          dbType = Postgres
           peersDns = PubnetPeers
           accelerateTime = false
           initialization = { CoreSetInitialization.Default with waitForConsensus = true }
@@ -930,7 +926,6 @@ let StableApproximateTier1CoreSets (image: string) (flatQuorum: bool) : CoreSet 
                   localHistory = false
                   accelerateTime = false
                   tier1 = Some(true)
-                  dbType = Postgres
                   initialization = CoreSetInitialization.OnlyNewDb
                   invariantChecks = InvariantChecksSpec.NoInvariants
                   dumpDatabase = false }
