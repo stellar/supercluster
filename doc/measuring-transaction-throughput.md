@@ -26,6 +26,7 @@ These parameters affect both `MaxTPSClassic` and `MaxTPSMixed` missions:
 * `--max-tx-rate`: Binary search upper bound. If a run succeeds at this value you should rerun the mission with a higher value.
 * `--pubnet-data`: Network topology to use. Defaults to a topology of tier 1 validators. See [Specifying network topologies](#specifying-network-topologies) for details on how to specify a custom topology.
 * `--netdelay-image`: Helper image providing simulated network delay for latency simulation. SDF provides a public image on dockerhub at `stellar/sdf-netdelay`.
+* `--run-for-max-tps`: Enables additional, potentially experimental, performance features in stellar-core.
 
 ### Additional options for mixed soroban and classic traffic
 
@@ -89,5 +90,5 @@ Supercluster supports running missions with artificially generated network topol
 
 To run a mission with a custom topology that searches for a max TPS between 500 and 1500, your command would look roughly like:
 ```bash
-dotnet run --project src/App/App.fsproj --configuration Release -- mission MaxTPSClassic --image=stellar/unsafe-stellar-core:<stellar-core-perftest-build> --netdelay-image=stellar/sdf-netdelay:latest --pubnet-data=generated-overlay-topology.json --tx-rate=500 --max-tx-rate=1500
+dotnet run --project src/App/App.fsproj --configuration Release -- mission MaxTPSClassic --image=stellar/unsafe-stellar-core:<stellar-core-perftest-build> --netdelay-image=stellar/sdf-netdelay:latest --pubnet-data=generated-overlay-topology.json --tx-rate=500 --max-tx-rate=1500 --run-for-max-tps
 ```
