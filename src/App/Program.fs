@@ -94,6 +94,8 @@ type MissionOptions
         peerReadingCapacity: int option,
         enableBackgroundOverlay: bool,
         enableBackgroundSigValidation: bool,
+        enableParallelApply: bool,
+        enableInMemoryBuckets: bool,
         peerFloodCapacity: int option,
         peerFloodCapacityBytes: int option,
         flowControlSendMoreBatchSizeBytes: int option,
@@ -115,7 +117,9 @@ type MissionOptions
         catchupSkipKnownResultsForTesting: bool option,
         checkEventsAreConsistentWithEntryDiffs: bool option,
         enableRelaxedAutoQsetConfig: bool,
-        jobMonitorExternalHost: string option
+        jobMonitorExternalHost: string option,
+        txBatchMaxSize: int option,
+        runForMaxTps: bool
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -387,6 +391,18 @@ type MissionOptions
     [<Option("enable-background-sig-validation", HelpText = "enable background signature validation")>]
     member self.EnableBackgroundSigValidation : bool = enableBackgroundSigValidation
 
+    [<Option("enable-parallel-apply",
+             HelpText = "Enable EXPERIMENTAL_PARALLEL_LEDGER_APPLY configuration",
+             Required = false,
+             Default = false)>]
+    member self.EnableParallelApply : bool = enableParallelApply
+
+    [<Option("in-memory-buckets",
+             HelpText = "Enable in-memory buckets by setting BUCKETLIST_DB_INDEX_PAGE_SIZE_EXPONENT=0",
+             Required = false,
+             Default = false)>]
+    member self.EnableInMemoryBuckets : bool = enableInMemoryBuckets
+
     [<Option("peer-flood-capacity",
              HelpText = "A config parameter that controls how many flood messages (tx or SCP) from a particular peer core can process simultaneously (See PEER_FLOOD_READING_CAPACITY)",
              Required = false)>]
@@ -493,6 +509,16 @@ type MissionOptions
              Required = false)>]
     member self.JobMonitorExternalHost = jobMonitorExternalHost
 
+    [<Option("tx-batch-max-size",
+             HelpText = "Maximum size of transaction batches for parallel processing",
+             Required = false)>]
+    member self.TxBatchMaxSize = txBatchMaxSize
+
+    [<Option("run-for-max-tps",
+             HelpText = "Sets core configuration to optimal for high throughput tests",
+             Required = false,
+             Default = false)>]
+    member self.RunForMaxTps = runForMaxTps
 
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' with
@@ -594,6 +620,8 @@ let main argv =
                   peerReadingCapacity = None
                   enableBackggroundOverlay = false
                   enableBackgroundSigValidation = false
+                  enableParallelApply = false
+                  enableInMemoryBuckets = false
                   peerFloodCapacityBytes = None
                   outboundByteLimit = None
                   sleepMainThread = None
@@ -614,7 +642,9 @@ let main argv =
                   checkEventsAreConsistentWithEntryDiffs = None
                   updateSorobanCosts = None
                   enableRelaxedAutoQsetConfig = false
-                  jobMonitorExternalHost = None }
+                  jobMonitorExternalHost = None
+                  txBatchMaxSize = None
+                  runForMaxTps = false }
 
             let nCfg = MakeNetworkCfg ctx [] None
             use formation = kube.MakeEmptyFormation nCfg
@@ -736,6 +766,8 @@ let main argv =
                                peerReadingCapacity = mission.PeerReadingCapacity
                                enableBackggroundOverlay = mission.EnableBackgroundOverlay
                                enableBackgroundSigValidation = mission.EnableBackgroundSigValidation
+                               enableParallelApply = mission.EnableParallelApply
+                               enableInMemoryBuckets = mission.EnableInMemoryBuckets
                                peerFloodCapacity = mission.PeerFloodCapacity
                                peerFloodCapacityBytes = mission.PeerFloodCapacityBytes
                                outboundByteLimit = mission.OutboundByteLimit
@@ -757,7 +789,9 @@ let main argv =
                                updateSorobanCosts = None
                                genesisTestAccountCount = mission.GenesisTestAccountCount
                                enableRelaxedAutoQsetConfig = mission.EnableRelaxedAutoQsetConfig
-                               jobMonitorExternalHost = mission.JobMonitorExternalHost }
+                               jobMonitorExternalHost = mission.JobMonitorExternalHost
+                               txBatchMaxSize = mission.TxBatchMaxSize
+                               runForMaxTps = mission.RunForMaxTps }
 
                          allMissions.[m] missionContext
 

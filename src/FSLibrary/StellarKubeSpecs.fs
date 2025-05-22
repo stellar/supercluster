@@ -741,7 +741,7 @@ type NetworkCfg with
             else
                 runCmd
 
-        let usePostgres = (coreSet.options.dbType = Postgres)
+        let usePostgres = (coreSet.options.dbType = Postgres || self.missionContext.runForMaxTps)
         let exportToPrometheus = self.missionContext.exportToPrometheus
 
         let res = self.missionContext.coreResources
