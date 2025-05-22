@@ -488,22 +488,29 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
         |> Map.ofArray
 
     // When we don't have real HomeDomainNames (eg. for misc nodes) we use a
-    // node-XXXXXX name with the XXXXXX as the lowercased first 6 digits of the
-    // pubkey. Lowercase because kubernetes resource objects have to have all
-    // lowercase names.
-    let anonymousNodeName (pubkey: string) : string =
-        let simkey = (getSimKey pubkey).Address
-        let extract = simkey.Substring(0, 6)
-        let lowercase = extract.ToLower()
-        "node-" + lowercase
+    // node-# name with unique numbers for each node.
+    let mutable anonNodeNums : Map<string, int> = Map.empty
 
-    // Return either HomeDomainName name or a node-XXXXXX name derived from the pubkey.
+    let anonymousNodeName (pubkey: string) : string =
+        let nodeNum =
+            match anonNodeNums.TryFind pubkey with
+            | Some n -> n
+            | None ->
+                let n = anonNodeNums.Count
+                anonNodeNums <- anonNodeNums.Add(pubkey, n)
+                n
+
+        "node-" + nodeNum.ToString()
+
+    // Return either HomeDomainName name or a node-# name if no home domain
+    // exists
     let homeDomainNameForKey (pubkey: string) : HomeDomainName =
         match orgNodeHomeDomains.TryFind pubkey with
         | Some (s, _) -> s
         | None -> HomeDomainName(anonymousNodeName pubkey)
 
-    // Return either HomeDomainName-$i name or a node-XXXXXX-0 name derived from the pubkey.
+    // Return either HomeDomainName-$i name or a node-#-0 name if no home domain
+    // exists
     let peerShortNameForKey (pubkey: string) : PeerShortName =
         match orgNodeHomeDomains.TryFind pubkey with
         | Some (s, i) -> PeerShortName(sprintf "%s-%d" s.StringName i)
