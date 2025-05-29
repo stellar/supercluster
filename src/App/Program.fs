@@ -119,7 +119,7 @@ type MissionOptions
         enableRelaxedAutoQsetConfig: bool,
         jobMonitorExternalHost: string option,
         txBatchMaxSize: int option,
-        runForMaxTps: bool
+        runForMaxTps: string option
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -515,9 +515,8 @@ type MissionOptions
     member self.TxBatchMaxSize = txBatchMaxSize
 
     [<Option("run-for-max-tps",
-             HelpText = "Sets core configuration to optimal for high throughput tests",
-             Required = false,
-             Default = false)>]
+             HelpText = "Sets core configuration to optimal for high throughput tests. Values: 'classic' or 'soroban'",
+             Required = false)>]
     member self.RunForMaxTps = runForMaxTps
 
 let splitLabel (lab: string) : (string * string option) =
@@ -644,7 +643,7 @@ let main argv =
                   enableRelaxedAutoQsetConfig = false
                   jobMonitorExternalHost = None
                   txBatchMaxSize = None
-                  runForMaxTps = false }
+                  runForMaxTps = None }
 
             let nCfg = MakeNetworkCfg ctx [] None
             use formation = kube.MakeEmptyFormation nCfg

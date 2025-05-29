@@ -129,7 +129,7 @@ let ctx : MissionContext =
       enableRelaxedAutoQsetConfig = false
       jobMonitorExternalHost = None
       txBatchMaxSize = None
-      runForMaxTps = false }
+      runForMaxTps = None }
 
 let netdata = __SOURCE_DIRECTORY__ + "/../../../data/public-network-data-2024-08-01.json"
 let pubkeys = __SOURCE_DIRECTORY__ + "/../../../data/tier1keys.json"

@@ -195,12 +195,12 @@ type StellarCoreCfg =
         let logLevelCommands = List.append debugLevelCommands traceLevelCommands
         let preferredPeers = List.map (fun (x: PeerDnsName) -> x.StringName) self.preferredPeers
 
-        if self.network.missionContext.runForMaxTps then
+        match self.network.missionContext.runForMaxTps with
+        | Some _ ->
             // parallel apply feature is only supported on Postgres (for now)
             let url = PostgreSQL(CfgVal.pgDb, CfgVal.pgUser, CfgVal.pgPassword, CfgVal.pgHost)
             t.Add("DATABASE", url.ToString()) |> ignore
-        else
-            t.Add("DATABASE", self.database.ToString()) |> ignore
+        | None -> t.Add("DATABASE", self.database.ToString()) |> ignore
 
         t.Add("METADATA_DEBUG_LEDGERS", 0) |> ignore
 
@@ -225,6 +225,16 @@ type StellarCoreCfg =
         t.Add("PREFERRED_PEERS_ONLY", self.preferredPeersOnly) |> ignore
         t.Add("COMMANDS", logLevelCommands) |> ignore
         t.Add("CATCHUP_COMPLETE", self.catchupMode = CatchupComplete) |> ignore
+
+        match self.network.missionContext.runForMaxTps with
+        | Some "classic" ->
+            t.Add("TESTING_MAX_CLASSIC_BYTE_ALLOWANCE", 1024 * 1024 * 9) |> ignore
+            t.Add("TESTING_MAX_SOROBAN_BYTE_ALLOWANCE", 1024 * 1024 * 1) |> ignore
+        | Some "soroban" ->
+            t.Add("TESTING_MAX_CLASSIC_BYTE_ALLOWANCE", 1024 * 1024 * 1) |> ignore
+            t.Add("TESTING_MAX_SOROBAN_BYTE_ALLOWANCE", 1024 * 1024 * 9) |> ignore
+        | Some _ -> failwith "run-for-max-tps must be either classic or soroban"
+        | None -> ()
 
         if self.skipHighCriticalValidatorChecks
            && self.network.missionContext.enableRelaxedAutoQsetConfig then
@@ -345,7 +355,8 @@ type StellarCoreCfg =
         if self.forceOldStyleLeaderElection then
             t.Add("FORCE_OLD_STYLE_LEADER_ELECTION", true) |> ignore
 
-        if self.network.missionContext.runForMaxTps then
+        match self.network.missionContext.runForMaxTps with
+        | Some _ ->
             if not self.network.missionContext.enableInMemoryBuckets then
                 t.Add("BUCKETLIST_DB_INDEX_PAGE_SIZE_EXPONENT", 0) |> ignore
 
@@ -362,6 +373,9 @@ type StellarCoreCfg =
             t.Add("FLOOD_DEMAND_BACKOFF_DELAY_MS", 1000) |> ignore
             t.Add("BUCKETLIST_DB_PERSIST_INDEX", false) |> ignore
             t.Add("FLOOD_DEMAND_PERIOD_MS", 100) |> ignore
+            t.Add("TRANSACTION_QUEUE_SIZE_MULTIPLIER", 3) |> ignore
+            t.Add("SOROBAN_TRANSACTION_QUEUE_SIZE_MULTIPLIER", 3) |> ignore
+        | None -> ()
 
         let invList =
             match self.invariantChecks with

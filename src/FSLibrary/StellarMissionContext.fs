@@ -119,4 +119,4 @@ type MissionContext =
       enableRelaxedAutoQsetConfig: bool
       jobMonitorExternalHost: string option
       txBatchMaxSize: int option
-      runForMaxTps: bool }
+      runForMaxTps: string option }
