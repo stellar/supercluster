@@ -85,6 +85,6 @@ let pubnetWasmBytes =
 // fixed as part of stellar-core issue #4231.
 let pubnetDataEntries = [ (1, 667); (2, 333) ]
 
-let pubnetPayWeight = 99
-let pubnetInvokeWeight = 1
+let pubnetPayWeight = 95
+let pubnetInvokeWeight = 5
 let pubnetUploadWeight = 0
