@@ -39,7 +39,8 @@ let simulatePubnetMixedLoad (baseContext: MissionContext) =
               // performance.
               maxConnections = Some(baseContext.maxConnections |> Option.defaultValue 65)
 
-              enableBackggroundOverlay = true }
+              enableBackggroundOverlay = true
+              updateSorobanCosts = Some(true) }
 
     let fullCoreSet = FullPubnetCoreSets context true false
 
@@ -52,9 +53,9 @@ let simulatePubnetMixedLoad (baseContext: MissionContext) =
     let numLoadGenerators = 20
     let loadGenerators = List.take (min numLoadGenerators (List.length nonTier1)) nonTier1
 
-    // Transactions per second. ~1000 per ledger. 200 payment TPS and 2 invoke
-    // TPS.
-    let txrate = 202
+    // Transactions per second. ~1050 per ledger. ~200 payment TPS and ~10
+    // invoke TPS.
+    let txrate = 210
 
     let loadGen =
         { LoadGen.GetDefault() with
@@ -107,12 +108,7 @@ let simulatePubnetMixedLoad (baseContext: MissionContext) =
 
             for lg in loadGenerators do
                 // Run setup on nodes one at a time
-                formation.RunLoadgen
-                    lg
-                    { loadGen with
-                          mode = SorobanInvokeSetup
-                          txrate = 2
-                          minSorobanPercentSuccess = Some 100 }
+                formation.RunLoadgen lg context.SetupSorobanInvoke
 
             formation.RunMultiLoadgen loadGenerators loadGen
             formation.EnsureAllNodesInSync fullCoreSet)
