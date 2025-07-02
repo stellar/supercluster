@@ -260,7 +260,7 @@ type Tests(output: ITestOutputHelper) =
              Assert.Matches(Regex("VALIDATORS.*blockdaemon-0"), toml)
              Assert.Matches(Regex("VALIDATORS.*stellar-0"), toml)
              Assert.Matches(Regex("VALIDATORS.*publicnode-0"), toml)
-             Assert.Matches(Regex("VALIDATORS.*whalestack-0"), toml)
+             Assert.Matches(Regex("VALIDATORS.*creit-0"), toml)
              Assert.Matches(Regex("VALIDATORS.*satoshipay-0"), toml)
              Assert.Matches(Regex("VALIDATORS.*lobstr-0"), toml)
              Assert.Matches(Regex("VALIDATORS.*franklintempleton-0"), toml))
