@@ -87,7 +87,6 @@ type MissionContext =
       simulateApplyDuration: seq<int> option
       simulateApplyWeight: seq<int> option
       peerReadingCapacity: int option
-      enableBackggroundOverlay: bool
       enableBackgroundSigValidation: bool
       enableParallelApply: bool
       enableInMemoryBuckets: bool

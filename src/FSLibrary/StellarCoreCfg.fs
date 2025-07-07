@@ -240,9 +240,6 @@ type StellarCoreCfg =
            && self.network.missionContext.enableRelaxedAutoQsetConfig then
             t.Add("SKIP_HIGH_CRITICAL_VALIDATOR_CHECKS_FOR_TESTING", true) |> ignore
 
-        if self.network.missionContext.enableBackggroundOverlay then
-            t.Add("EXPERIMENTAL_BACKGROUND_OVERLAY_PROCESSING", true) |> ignore
-
         match self.homeDomain with
         | None -> ()
         | Some hd -> t.Add("NODE_HOME_DOMAIN", hd) |> ignore

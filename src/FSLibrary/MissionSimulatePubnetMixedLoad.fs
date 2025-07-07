@@ -39,7 +39,6 @@ let simulatePubnetMixedLoad (baseContext: MissionContext) =
               // performance.
               maxConnections = Some(baseContext.maxConnections |> Option.defaultValue 65)
 
-              enableBackggroundOverlay = true
               updateSorobanCosts = Some(true) }
 
     let fullCoreSet = FullPubnetCoreSets context true false
