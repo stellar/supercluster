@@ -92,7 +92,6 @@ type MissionOptions
         installNetworkDelay: bool option,
         flatNetworkDelay: int option,
         peerReadingCapacity: int option,
-        enableBackgroundOverlay: bool,
         enableBackgroundSigValidation: bool,
         enableParallelApply: bool,
         enableInMemoryBuckets: bool,
@@ -385,9 +384,6 @@ type MissionOptions
              Required = false)>]
     member self.PeerReadingCapacity = peerReadingCapacity
 
-    [<Option("enable-background-overlay", HelpText = "background overlay")>]
-    member self.EnableBackgroundOverlay : bool = enableBackgroundOverlay
-
     [<Option("enable-background-sig-validation", HelpText = "enable background signature validation")>]
     member self.EnableBackgroundSigValidation : bool = enableBackgroundSigValidation
 
@@ -617,7 +613,6 @@ let main argv =
                   simulateApplyWeight = None
                   peerFloodCapacity = None
                   peerReadingCapacity = None
-                  enableBackggroundOverlay = false
                   enableBackgroundSigValidation = false
                   enableParallelApply = false
                   enableInMemoryBuckets = false
@@ -763,7 +758,6 @@ let main argv =
                                simulateApplyDuration = processInputSeq mission.SimulateApplyDuration
                                simulateApplyWeight = processInputSeq mission.SimulateApplyWeight
                                peerReadingCapacity = mission.PeerReadingCapacity
-                               enableBackggroundOverlay = mission.EnableBackgroundOverlay
                                enableBackgroundSigValidation = mission.EnableBackgroundSigValidation
                                enableParallelApply = mission.EnableParallelApply
                                enableInMemoryBuckets = mission.EnableInMemoryBuckets

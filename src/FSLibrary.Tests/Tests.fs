@@ -73,7 +73,6 @@ let ctx : MissionContext =
       fullyConnectTier1 = false
       peerReadingCapacity = None
       peerFloodCapacity = None
-      enableBackggroundOverlay = false
       enableBackgroundSigValidation = false
       enableParallelApply = false
       enableInMemoryBuckets = false
