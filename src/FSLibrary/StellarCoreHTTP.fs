@@ -110,7 +110,14 @@ type LoadGen =
       // Fields for BLEND_CLASSIC_SOROBAN mode
       payWeight: int option
       sorobanUploadWeight: int option
-      sorobanInvokeWeight: int option }
+      sorobanInvokeWeight: int option
+
+      // Fields for SCP timing configuration
+      ledgerTargetCloseTimeMilliseconds: int option
+      ballotTimeoutIncrementMilliseconds: int option
+      ballotTimeoutInitialMilliseconds: int option
+      nominationTimeoutInitialMilliseconds: int option
+      nominationTimeoutIncrementMilliseconds: int option }
 
     member self.ToQuery : (string * string) list =
         let mandatoryParams =
@@ -162,6 +169,21 @@ type LoadGen =
                                                                     "sorobaninvokeweight"
                                                                     self.sorobanInvokeWeight
                                                                   @ optionalParam "txmxftprnt" self.txMaxFootprintSize
+                                                                    @ optionalParam
+                                                                        "ldgrclse"
+                                                                        self.ledgerTargetCloseTimeMilliseconds
+                                                                      @ optionalParam
+                                                                          "balinc"
+                                                                          self.ballotTimeoutIncrementMilliseconds
+                                                                        @ optionalParam
+                                                                            "balinit"
+                                                                            self.ballotTimeoutInitialMilliseconds
+                                                                          @ optionalParam
+                                                                              "nominit"
+                                                                              self.nominationTimeoutInitialMilliseconds
+                                                                            @ optionalParam
+                                                                                "nominc"
+                                                                                self.nominationTimeoutIncrementMilliseconds
 
         mandatoryParams @ optionalParams
 
@@ -202,7 +224,12 @@ type LoadGen =
           txMaxFootprintSize = None
           payWeight = None
           sorobanUploadWeight = None
-          sorobanInvokeWeight = None }
+          sorobanInvokeWeight = None
+          ledgerTargetCloseTimeMilliseconds = None
+          ballotTimeoutIncrementMilliseconds = None
+          ballotTimeoutInitialMilliseconds = None
+          nominationTimeoutInitialMilliseconds = None
+          nominationTimeoutIncrementMilliseconds = None }
 
 // Takes a default value `v` and a list `l` and returns `v` if `l` is empty,
 // otherwise `l`.

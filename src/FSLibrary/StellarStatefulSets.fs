@@ -217,6 +217,25 @@ type StellarFormation with
 
         peer.WaitForTxMaxInstructions expectedInstructions |> ignore
 
+    member self.UpgradeToMinimumSCPConfig(coreSetList: CoreSet list) =
+        self.SetupUpgradeContract coreSetList.[0]
+        let peer = self.NetworkCfg.GetPeer coreSetList.[0] 0
+
+        self.DeployUpgradeEntriesAndArm
+            coreSetList
+            { LoadGen.GetDefault() with
+                  mode = CreateSorobanUpgrade
+                  ledgerTargetCloseTimeMilliseconds = Some(4000)
+                  ballotTimeoutIncrementMilliseconds = Some(750)
+                  ballotTimeoutInitialMilliseconds = Some(750)
+                  nominationTimeoutInitialMilliseconds = Some(750)
+                  nominationTimeoutIncrementMilliseconds = Some(750) }
+            (System.DateTime.UtcNow.AddSeconds(20.0))
+
+        // Wait for the upgrade to take effect by waiting for a few ledgers
+        // TODO: Actually check for the config once sorobaninfo endpoint is updated
+        peer.WaitForFewLedgers 6 |> ignore
+
     member self.ReportStatus() = ReportAllPeerStatus self.NetworkCfg
 
     member self.CreateAccount (coreSet: CoreSet) (u: Username) =
