@@ -33,6 +33,13 @@
         "starting_eviction_scan_level" : 1,
         "temp_rent_rate_denominator" : 5356800
     },
+    "scp" : {
+        "ledger_close_time_ms" : 5000,
+        "nomination_timeout_ms" : 2000,
+        "nomination_timeout_inc_ms" : 1000,
+        "ballot_timeout_ms" : 3000,
+        "ballot_timeout_inc_ms" : 1000
+    },
     "tx" : {
         "max_contract_events_size_bytes" : 2048,
         "max_instructions" : 1000000000000000000,

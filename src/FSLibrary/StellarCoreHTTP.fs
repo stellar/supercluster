@@ -484,6 +484,17 @@ type Peer with
         | Some jprop -> Some(jprop.AsInteger())
         | None -> None
 
+    // SCP configuration getters
+    member self.GetScpLedgerCloseTimeMs() : int = self.GetSorobanInfo().Scp.LedgerCloseTimeMs
+
+    member self.GetScpNominationTimeoutMs() : int = self.GetSorobanInfo().Scp.NominationTimeoutMs
+
+    member self.GetScpNominationTimeoutIncMs() : int = self.GetSorobanInfo().Scp.NominationTimeoutIncMs
+
+    member self.GetScpBallotTimeoutMs() : int = self.GetSorobanInfo().Scp.BallotTimeoutMs
+
+    member self.GetScpBallotTimeoutIncMs() : int = self.GetSorobanInfo().Scp.BallotTimeoutIncMs
+
     member self.GetLedgerProtocolVersion() : int = self.GetInfo().Ledger.Version
 
     member self.GetSupportedProtocolVersion() : int = self.GetInfo().ProtocolVersion
@@ -585,6 +596,11 @@ type Peer with
         RetryUntilTrue
             (fun _ -> self.GetTxMaxInstructions() = n)
             (fun _ -> LogInfo "Waiting for TxMaxInstructions=%d on %s" n self.ShortName.StringName)
+
+    member self.WaitForScpLedgerCloseTime(n: int) =
+        RetryUntilTrue
+            (fun _ -> self.GetScpLedgerCloseTimeMs() = n)
+            (fun _ -> LogInfo "Waiting for ScpLedgerCloseTimeMs=%d on %s" n self.ShortName.StringName)
 
     member self.WaitForMaxTxSize(n: int) =
         RetryUntilTrue

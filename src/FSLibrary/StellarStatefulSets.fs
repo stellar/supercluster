@@ -232,9 +232,7 @@ type StellarFormation with
                   nominationTimeoutIncrementMilliseconds = Some(750) }
             (System.DateTime.UtcNow.AddSeconds(20.0))
 
-        // Wait for the upgrade to take effect by waiting for a few ledgers
-        // TODO: Actually check for the config once sorobaninfo endpoint is updated
-        peer.WaitForFewLedgers 6 |> ignore
+        peer.WaitForScpLedgerCloseTime 4000 |> ignore
 
     member self.ReportStatus() = ReportAllPeerStatus self.NetworkCfg
 

@@ -12,7 +12,6 @@ open StellarStatefulSets
 open StellarSupercluster
 open StellarCoreHTTP
 open StellarNetworkData
-open System.Threading
 open Logging
 
 let upgradeSCPSettings (context: MissionContext) =
@@ -86,10 +85,9 @@ let upgradeSCPSettings (context: MissionContext) =
 
             measureBlockTime 5.0
 
-            // Upgrade to protocol 23 and check that block times are still 5 seconds
-            LogInfo "Upgrading to protocol 23 and verifying 5-second block times"
-            formation.UpgradeProtocol tier1 23
-            peer.WaitForProtocol 23
+            // Upgrade to latest protocol and check that block times are still 5 seconds
+            LogInfo "Upgrading to latest protocol and verifying 5-second block times"
+            formation.UpgradeProtocolToLatest tier1
             measureBlockTime 5.0
 
             // Upgrade to minimum SCP timing configuration and check for 4-second block times
