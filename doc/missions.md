@@ -131,6 +131,10 @@ Test heavy Soroban load on a large network of nodes. This mission mostly focuses
 
 Test various upgrade scenarios for Soroban network configs (maximum transaction size, maximum transaction count, etc).
 
+## MissionUpgradeSCPSettings
+
+Test SCP timing configuration upgrades as defined in CAP-70.
+
 ## MissionSorobanInvokeHostLoad
 
 Test resource-intensive InvokeHostFunction operations on a small network of nodes.

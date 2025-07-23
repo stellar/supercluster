@@ -217,6 +217,36 @@ type StellarFormation with
 
         peer.WaitForTxMaxInstructions expectedInstructions |> ignore
 
+    member self.UpgradeToMinimumSCPConfig(coreSetList: CoreSet list) =
+        self.SetupUpgradeContract coreSetList.[0]
+        let peer = self.NetworkCfg.GetPeer coreSetList.[0] 0
+
+        self.DeployUpgradeEntriesAndArm
+            coreSetList
+            { LoadGen.GetDefault() with
+                  mode = CreateSorobanUpgrade
+                  ledgerTargetCloseTimeMilliseconds = Some(4000)
+                  ballotTimeoutIncrementMilliseconds = Some(750)
+                  ballotTimeoutInitialMilliseconds = Some(750)
+                  nominationTimeoutInitialMilliseconds = Some(750)
+                  nominationTimeoutIncrementMilliseconds = Some(750) }
+            (System.DateTime.UtcNow.AddSeconds(20.0))
+
+        peer.WaitForScpLedgerCloseTime 4000 |> ignore
+
+    member self.UpgradeSCPTargetLedgerCloseTime (coreSetList: CoreSet list) (closeTimeMs: int) =
+        self.SetupUpgradeContract coreSetList.[0]
+        let peer = self.NetworkCfg.GetPeer coreSetList.[0] 0
+
+        self.DeployUpgradeEntriesAndArm
+            coreSetList
+            { LoadGen.GetDefault() with
+                  mode = CreateSorobanUpgrade
+                  ledgerTargetCloseTimeMilliseconds = Some(closeTimeMs) }
+            (System.DateTime.UtcNow.AddSeconds(20.0))
+
+        peer.WaitForScpLedgerCloseTime closeTimeMs |> ignore
+
     member self.ReportStatus() = ReportAllPeerStatus self.NetworkCfg
 
     member self.CreateAccount (coreSet: CoreSet) (u: Username) =

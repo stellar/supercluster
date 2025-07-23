@@ -110,7 +110,14 @@ type LoadGen =
       // Fields for BLEND_CLASSIC_SOROBAN mode
       payWeight: int option
       sorobanUploadWeight: int option
-      sorobanInvokeWeight: int option }
+      sorobanInvokeWeight: int option
+
+      // Fields for SCP timing configuration
+      ledgerTargetCloseTimeMilliseconds: int option
+      ballotTimeoutIncrementMilliseconds: int option
+      ballotTimeoutInitialMilliseconds: int option
+      nominationTimeoutInitialMilliseconds: int option
+      nominationTimeoutIncrementMilliseconds: int option }
 
     member self.ToQuery : (string * string) list =
         let mandatoryParams =
@@ -162,6 +169,21 @@ type LoadGen =
                                                                     "sorobaninvokeweight"
                                                                     self.sorobanInvokeWeight
                                                                   @ optionalParam "txmxftprnt" self.txMaxFootprintSize
+                                                                    @ optionalParam
+                                                                        "ldgrclse"
+                                                                        self.ledgerTargetCloseTimeMilliseconds
+                                                                      @ optionalParam
+                                                                          "balinc"
+                                                                          self.ballotTimeoutIncrementMilliseconds
+                                                                        @ optionalParam
+                                                                            "balinit"
+                                                                            self.ballotTimeoutInitialMilliseconds
+                                                                          @ optionalParam
+                                                                              "nominit"
+                                                                              self.nominationTimeoutInitialMilliseconds
+                                                                            @ optionalParam
+                                                                                "nominc"
+                                                                                self.nominationTimeoutIncrementMilliseconds
 
         mandatoryParams @ optionalParams
 
@@ -202,7 +224,12 @@ type LoadGen =
           txMaxFootprintSize = None
           payWeight = None
           sorobanUploadWeight = None
-          sorobanInvokeWeight = None }
+          sorobanInvokeWeight = None
+          ledgerTargetCloseTimeMilliseconds = None
+          ballotTimeoutIncrementMilliseconds = None
+          ballotTimeoutInitialMilliseconds = None
+          nominationTimeoutInitialMilliseconds = None
+          nominationTimeoutIncrementMilliseconds = None }
 
 // Takes a default value `v` and a list `l` and returns `v` if `l` is empty,
 // otherwise `l`.
@@ -457,6 +484,17 @@ type Peer with
         | Some jprop -> Some(jprop.AsInteger())
         | None -> None
 
+    // SCP configuration getters
+    member self.GetScpLedgerCloseTimeMs() : int = self.GetSorobanInfo().Scp.LedgerCloseTimeMs
+
+    member self.GetScpNominationTimeoutMs() : int = self.GetSorobanInfo().Scp.NominationTimeoutMs
+
+    member self.GetScpNominationTimeoutIncMs() : int = self.GetSorobanInfo().Scp.NominationTimeoutIncMs
+
+    member self.GetScpBallotTimeoutMs() : int = self.GetSorobanInfo().Scp.BallotTimeoutMs
+
+    member self.GetScpBallotTimeoutIncMs() : int = self.GetSorobanInfo().Scp.BallotTimeoutIncMs
+
     member self.GetLedgerProtocolVersion() : int = self.GetInfo().Ledger.Version
 
     member self.GetSupportedProtocolVersion() : int = self.GetInfo().ProtocolVersion
@@ -558,6 +596,11 @@ type Peer with
         RetryUntilTrue
             (fun _ -> self.GetTxMaxInstructions() = n)
             (fun _ -> LogInfo "Waiting for TxMaxInstructions=%d on %s" n self.ShortName.StringName)
+
+    member self.WaitForScpLedgerCloseTime(n: int) =
+        RetryUntilTrue
+            (fun _ -> self.GetScpLedgerCloseTimeMs() = n)
+            (fun _ -> LogInfo "Waiting for ScpLedgerCloseTimeMs=%d on %s" n self.ShortName.StringName)
 
     member self.WaitForMaxTxSize(n: int) =
         RetryUntilTrue
