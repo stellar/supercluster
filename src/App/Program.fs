@@ -654,10 +654,25 @@ let main argv =
 
             match Seq.tryFind (allMissions.ContainsKey >> not) mission.Missions with
             | Some e ->
-                (LogError "Unknown mission: %s" e
-                 LogError "Available missions:"
-                 Map.iter (fun k _ -> LogError "        %s" k) allMissions
-                 1)
+                if e.Contains("=") then
+                    (LogError "Error: '%s' looks like a flag assignment but was interpreted as a mission name." e
+                     LogError "You may have passed a value to a boolean flag that doesn't accept one."
+                     LogError "For boolean flags, use the flag without '=value' to enable, or omit the flag to disable."
+                     LogError "Available missions:"
+                     Map.iter (fun k _ -> LogError "        %s" k) allMissions
+                     1)
+                elif e = "false" || e = "true" then
+                    (LogError "Error: '%s' was interpreted as a mission name but is likely a boolean value." e
+                     LogError "You may have passed a value to a boolean flag that doesn't accept one."
+                     LogError "For boolean flags, use the flag without '=value' to enable, or omit the flag to disable."
+                     LogError "Available missions:"
+                     Map.iter (fun k _ -> LogError "        %s" k) allMissions
+                     1)
+                else
+                    (LogError "Unknown mission: %s" e
+                     LogError "Available missions:"
+                     Map.iter (fun k _ -> LogError "        %s" k) allMissions
+                     1)
             | None ->
                 (LogInfo "-----------------------------------"
                  LogInfo "Supercluster command line: %s" (System.String.Join(" ", argv))
