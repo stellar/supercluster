@@ -20,7 +20,8 @@ let slowNodesNetwork (context: MissionContext) =
               flatNetworkDelay = Some(100)
               numAccounts = 20000
               numTxs = 40000
-              coreResources = MediumTestResources }
+              coreResources = MediumTestResources
+              genesisTestAccountCount = Some 20000 }
 
     let coreSet =
         MakeLiveCoreSet
@@ -55,5 +56,4 @@ let slowNodesNetwork (context: MissionContext) =
 
             formation.UpgradeMaxTxSetSize [ coreSet; slowCoreSet ] 100000
 
-            formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
             formation.RunLoadgen coreSet { context.GeneratePaymentLoad with txrate = 100 })

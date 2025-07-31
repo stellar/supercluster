@@ -39,7 +39,8 @@ let sorobanCatchupWithPrevAndCurr (context: MissionContext) =
               numAccounts = 100
               numTxs = 100
               txRate = 1
-              coreResources = MediumTestResources }
+              coreResources = MediumTestResources
+              genesisTestAccountCount = Some 100 }
 
     context.Execute
         [ coreSet; afterUpgradeCoreSet ]
@@ -52,7 +53,6 @@ let sorobanCatchupWithPrevAndCurr (context: MissionContext) =
             formation.UpgradeProtocol [ coreSet ] (supportedProtocol - 1)
             formation.UpgradeMaxTxSetSize [ coreSet ] 100000
 
-            formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
             formation.UpgradeSorobanLedgerLimitsWithMultiplier [ coreSet ] 1000
             formation.UpgradeSorobanTxLimitsWithMultiplier [ coreSet ] 100
             formation.RunLoadgen coreSet context.SetupSorobanInvoke

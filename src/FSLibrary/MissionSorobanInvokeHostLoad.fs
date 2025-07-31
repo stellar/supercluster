@@ -25,7 +25,8 @@ let sorobanInvokeHostLoad (context: MissionContext) =
               numAccounts = 100
               numTxs = 100
               txRate = 1
-              coreResources = MediumTestResources }
+              coreResources = MediumTestResources
+              genesisTestAccountCount = Some 100 }
 
     context.Execute
         [ coreSet ]
@@ -35,7 +36,6 @@ let sorobanInvokeHostLoad (context: MissionContext) =
             formation.UpgradeProtocolToLatest [ coreSet ]
             formation.UpgradeMaxTxSetSize [ coreSet ] 100000
 
-            formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
             formation.UpgradeSorobanLedgerLimitsWithMultiplier [ coreSet ] 1000
             formation.UpgradeSorobanTxLimitsWithMultiplier [ coreSet ] 100
             formation.RunLoadgen coreSet context.SetupSorobanInvoke

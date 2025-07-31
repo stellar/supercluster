@@ -14,7 +14,10 @@ open StellarDataDump
 open StellarSupercluster
 
 let databaseInplaceUpgrade (context: MissionContext) =
-    let context = context.WithNominalLoad
+    let context =
+        { context.WithNominalLoad with
+              genesisTestAccountCount = Some context.WithNominalLoad.numAccounts }
+
     let newImage = context.image
     let oldImage = GetOrDefault context.oldImage context.image
 
@@ -62,7 +65,6 @@ let databaseInplaceUpgrade (context: MissionContext) =
 
             formation.WaitUntilSynced [ beforeUpgradeCoreSet ]
 
-            formation.RunLoadgen beforeUpgradeCoreSet context.GenerateAccountCreationLoad
             formation.RunLoadgen beforeUpgradeCoreSet context.GeneratePaymentLoad
             formation.RunLoadgen coreSet context.GeneratePaymentLoad
 

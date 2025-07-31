@@ -15,7 +15,10 @@ open StellarDataDump
 open StellarSupercluster
 
 let versionMixConsensus (context: MissionContext) =
-    let context = context.WithNominalLoad
+    let context =
+        { context.WithNominalLoad with
+              genesisTestAccountCount = Some context.WithNominalLoad.numAccounts }
+
     let newImage = context.image
     let oldImage = GetOrDefault context.oldImage context.image
 
@@ -93,7 +96,6 @@ let versionMixConsensus (context: MissionContext) =
 
             formation.Stop beforeSet.name
 
-            formation.RunLoadgen oldCoreSetLive context.GenerateAccountCreationLoad
             formation.RunLoadgen oldCoreSetLive context.GeneratePaymentLoad
 
             let otherPeer = formation.NetworkCfg.GetPeer oldCoreSet 0

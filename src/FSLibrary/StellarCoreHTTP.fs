@@ -41,7 +41,6 @@ type LoadGenStatus =
     | Running
 
 type LoadGenMode =
-    | GenerateAccountCreationLoad
     | GeneratePaymentLoad
     | GeneratePretendLoad
     | GenerateSorobanUploadLoad
@@ -55,7 +54,6 @@ type LoadGenMode =
 
     override self.ToString() =
         match self with
-        | GenerateAccountCreationLoad -> "create"
         | GeneratePaymentLoad -> "pay"
         | GeneratePretendLoad -> "pretend"
         | GenerateSorobanUploadLoad -> "soroban_upload"
@@ -188,7 +186,7 @@ type LoadGen =
         mandatoryParams @ optionalParams
 
     static member GetDefault() =
-        { mode = GenerateAccountCreationLoad
+        { mode = GeneratePaymentLoad
           accounts = 100
           txs = 100
           spikesize = 0
@@ -261,19 +259,6 @@ type MissionContext with
               txSizeBytesDistribution = [ (64, 1) ]
               instructionsDistribution = [ (1000000, 1) ] }
 
-    member self.GenerateAccountCreationLoad : LoadGen =
-        { LoadGen.GetDefault() with
-              mode = GenerateAccountCreationLoad
-              accounts = self.numAccounts
-              txs = 0
-              spikesize = 0
-              spikeinterval = 0
-              // Use conservative rate for account creation, as the network may quickly get overloaded
-              txrate = 2
-              offset = 0
-              maxfeerate = self.maxFeeRate
-              skiplowfeetxs = self.skipLowFeeTxs }
-
     member self.GeneratePaymentLoad : LoadGen =
         { LoadGen.GetDefault() with
               mode = GeneratePaymentLoad
@@ -335,19 +320,6 @@ type MissionContext with
               skiplowfeetxs = self.skipLowFeeTxs
               wasms = self.numWasms
               instances = self.numInstances }
-
-let DefaultAccountCreationLoadGen =
-    { LoadGen.GetDefault() with
-          mode = GenerateAccountCreationLoad
-          accounts = 1000
-          txs = 0
-          spikesize = 0
-          spikeinterval = 0
-          txrate = 2
-          offset = 0
-          maxfeerate = None
-          skiplowfeetxs = false }
-
 
 type UpgradeParameters =
     { upgradeTime: System.DateTime

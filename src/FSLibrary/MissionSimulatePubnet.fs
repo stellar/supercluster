@@ -35,7 +35,8 @@ let simulatePubnet (context: MissionContext) =
               txRate = 36
               spikeSize = 424
               spikeInterval = 65
-              enableTailLogging = false }
+              enableTailLogging = false
+              genesisTestAccountCount = Some 10000 }
 
     let fullCoreSet = FullPubnetCoreSets context true false
 
@@ -59,6 +60,5 @@ let simulatePubnet (context: MissionContext) =
             formation.UpgradeProtocolToLatest tier1
             formation.UpgradeMaxTxSetSize tier1 1000000
 
-            formation.RunLoadgen sdf context.GenerateAccountCreationLoad
             formation.RunLoadgen sdf context.GeneratePretendLoad
             formation.EnsureAllNodesInSync fullCoreSet)

@@ -12,7 +12,10 @@ open StellarSupercluster
 open StellarCoreHTTP
 
 let versionMixNewCatchupToOld (context: MissionContext) =
-    let context = context.WithNominalLoad
+    let context =
+        { context.WithNominalLoad with
+              genesisTestAccountCount = Some context.WithNominalLoad.numAccounts }
+
     let newImage = context.image
     let oldImage = GetOrDefault context.oldImage newImage
 

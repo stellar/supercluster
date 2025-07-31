@@ -143,11 +143,7 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
 
     let context =
         { context with
-              genesisTestAccountCount =
-                  if baseLoadGen.mode = PayPregenerated then
-                      Some(context.genesisTestAccountCount |> Option.defaultValue 100000)
-                  else
-                      None
+              genesisTestAccountCount = Some(context.genesisTestAccountCount |> Option.defaultValue 100000)
               numPregeneratedTxs =
                   if baseLoadGen.mode = PayPregenerated then
                       Some(context.numPregeneratedTxs |> Option.defaultValue 2500000)
@@ -196,10 +192,7 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
         false
         (fun (formation: StellarFormation) ->
 
-            let numAccounts =
-                match context.genesisTestAccountCount with
-                | Some x -> x
-                | None -> 30000
+            let numAccounts = context.genesisTestAccountCount.Value
 
             let upgradeMaxTxSetSize (coreSets: CoreSet list) (rate: int) =
                 // Max tx size to avoid overflowing the transaction queue
@@ -236,10 +229,6 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
                     System.Threading.Thread.Sleep(5 * 60 * 1000)
 
             setupCoreSets allNodes
-
-            if baseLoadGen.mode <> PayPregenerated then
-                upgradeMaxTxSetSize allNodes 10000
-                formation.RunLoadgen sdf { context.GenerateAccountCreationLoad with accounts = numAccounts }
 
             // Perform setup (if requested)
             match setupCfg with

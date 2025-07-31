@@ -26,7 +26,8 @@ let loadGenerationWithTxSetLimit (context: MissionContext) =
               numAccounts = 20000
               numTxs = 50000
               txRate = 1000
-              skipLowFeeTxs = true }
+              skipLowFeeTxs = true
+              genesisTestAccountCount = Some 20000 }
 
     context.Execute
         [ coreSet ]
@@ -36,7 +37,6 @@ let loadGenerationWithTxSetLimit (context: MissionContext) =
             formation.UpgradeProtocolToLatest [ coreSet ]
             formation.UpgradeMaxTxSetSize [ coreSet ] 1000
 
-            formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
             formation.RunLoadgen coreSet context.GeneratePaymentLoad
             formation.UpgradeSorobanLedgerLimitsWithMultiplier [ coreSet ] 100
             formation.RunLoadgen coreSet { context.GenerateSorobanUploadLoad with txrate = 1; txs = 200 })

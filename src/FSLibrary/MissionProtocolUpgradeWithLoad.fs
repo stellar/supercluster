@@ -31,7 +31,8 @@ let protocolUpgradeWithLoad (context: MissionContext) =
               numAccounts = 20000
               numTxs = 50000
               txRate = 1000
-              skipLowFeeTxs = true }
+              skipLowFeeTxs = true
+              genesisTestAccountCount = Some 20000 }
 
     context.Execute
         [ coreSet ]
@@ -44,7 +45,6 @@ let protocolUpgradeWithLoad (context: MissionContext) =
 
             formation.UpgradeProtocol [ coreSet ] (latestProtocol - 1)
             formation.UpgradeMaxTxSetSize [ coreSet ] 1000
-            formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
 
             formation.ScheduleProtocolUpgrade [ coreSet ] latestProtocol (System.DateTime.Now.AddSeconds(20.0))
             formation.RunLoadgen coreSet context.GeneratePaymentLoad
