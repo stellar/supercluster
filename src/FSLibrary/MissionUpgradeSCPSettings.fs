@@ -21,7 +21,8 @@ let upgradeSCPSettings (context: MissionContext) =
               installNetworkDelay = Some(context.installNetworkDelay |> Option.defaultValue true)
               numAccounts = 1000
               numTxs = 1000
-              txRate = 50 }
+              txRate = 50
+              genesisTestAccountCount = Some 1000 }
 
     let fullCoreSet = StableApproximateTier1CoreSets context.image false
 
@@ -76,9 +77,6 @@ let upgradeSCPSettings (context: MissionContext) =
             if currentProtocol <> 22 then formation.UpgradeProtocol tier1 22
 
             formation.UpgradeMaxTxSetSize tier1 100000
-
-            // Create accounts for payment load later
-            formation.RunLoadgen sdf context.GenerateAccountCreationLoad
 
             measureBlockTime 5.0
 

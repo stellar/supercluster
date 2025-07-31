@@ -370,8 +370,8 @@ type StellarCoreCfg =
             t.Add("FLOOD_DEMAND_BACKOFF_DELAY_MS", 1000) |> ignore
             t.Add("BUCKETLIST_DB_PERSIST_INDEX", false) |> ignore
             t.Add("FLOOD_DEMAND_PERIOD_MS", 100) |> ignore
-            t.Add("TRANSACTION_QUEUE_SIZE_MULTIPLIER", 3) |> ignore
-            t.Add("SOROBAN_TRANSACTION_QUEUE_SIZE_MULTIPLIER", 3) |> ignore
+            t.Add("TRANSACTION_QUEUE_SIZE_MULTIPLIER_FOR_TESTING", 3) |> ignore
+            t.Add("SOROBAN_TRANSACTION_QUEUE_SIZE_MULTIPLIER_FOR_TESTING", 3) |> ignore
         | None -> ()
 
         let invList =

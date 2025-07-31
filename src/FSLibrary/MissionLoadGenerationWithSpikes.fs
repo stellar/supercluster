@@ -26,7 +26,8 @@ let loadGenerationWithSpikes (context: MissionContext) =
               numTxs = 20000
               txRate = 20
               spikeSize = 2000
-              spikeInterval = 30 }
+              spikeInterval = 30
+              genesisTestAccountCount = Some 2000 }
 
     context.Execute
         [ coreSet ]
@@ -36,5 +37,4 @@ let loadGenerationWithSpikes (context: MissionContext) =
             formation.UpgradeProtocolToLatest [ coreSet ]
             formation.UpgradeMaxTxSetSize [ coreSet ] 100000
 
-            formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
             formation.RunLoadgen coreSet context.GeneratePaymentLoad)

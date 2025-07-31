@@ -19,7 +19,12 @@ let loadGeneration (context: MissionContext) =
                   invariantChecks = AllInvariantsExceptBucketConsistencyChecksAndEvents
                   dumpDatabase = false }
 
-    let context = { context with numAccounts = 2000; numTxs = 2000; txRate = 20 }
+    let context =
+        { context with
+              numAccounts = 2000
+              numTxs = 2000
+              txRate = 20
+              genesisTestAccountCount = Some 2000 }
 
     context.Execute
         [ coreSet ]
@@ -29,5 +34,4 @@ let loadGeneration (context: MissionContext) =
             formation.UpgradeProtocolToLatest [ coreSet ]
             formation.UpgradeMaxTxSetSize [ coreSet ] 100000
 
-            formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
             formation.RunLoadgen coreSet context.GeneratePaymentLoad)

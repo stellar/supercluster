@@ -68,7 +68,8 @@ let mixedImageLoadGeneration (oldImageNodeCount: int) (context: MissionContext) 
               numAccounts = 20000
               numTxs = 50000
               txRate = 250
-              skipLowFeeTxs = true }
+              skipLowFeeTxs = true
+              genesisTestAccountCount = Some 20000 }
 
     // Put the version with majority of nodes in front of the set to let it generate
     // the load and possibly leave the minority of nodes out of consensus in case of bugs.
@@ -90,7 +91,6 @@ let mixedImageLoadGeneration (oldImageNodeCount: int) (context: MissionContext) 
                 formation.UpgradeMaxTxSetSize coreSets 1000
 
                 let loadgenCoreSet = coreSets.[0]
-                formation.RunLoadgen loadgenCoreSet { context.GenerateAccountCreationLoad with txrate = 1 }
                 formation.RunLoadgen loadgenCoreSet context.GeneratePaymentLoad
 
                 let majorityPeer = formation.NetworkCfg.GetPeer loadgenCoreSet 0

@@ -12,7 +12,9 @@ open StellarSupercluster
 open StellarCoreHTTP
 
 let complexTopology (context: MissionContext) =
-    let context = context.WithNominalLoad
+    let context =
+        { context.WithNominalLoad with
+              genesisTestAccountCount = Some context.WithNominalLoad.numAccounts }
 
     let coreSet =
         MakeLiveCoreSet
@@ -53,5 +55,4 @@ let complexTopology (context: MissionContext) =
 
             formation.UpgradeProtocolToLatest [ coreSet ]
 
-            formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
             formation.RunLoadgen coreSet context.GeneratePaymentLoad)

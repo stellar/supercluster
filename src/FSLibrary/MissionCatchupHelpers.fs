@@ -172,8 +172,6 @@ let doCatchupForVersion
         generatorPeer.UpgradeMaxTxSetSize 1000000 System.DateTime.UtcNow
         generatorPeer.WaitForMaxTxSetSize 1000000
 
-    formation.RunLoadgen catchupSets.generatorSet context.GenerateAccountCreationLoad
-
     formation.RunLoadgen
         catchupSets.generatorSet
         (if doSoroban then

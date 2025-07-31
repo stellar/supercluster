@@ -26,7 +26,8 @@ let sorobanLoadGeneration (context: MissionContext) =
               skipLowFeeTxs = true
               maxFeeRate = Some 100000000
               enableTailLogging = false
-              updateSorobanCosts = Some(true) }
+              updateSorobanCosts = Some(true)
+              genesisTestAccountCount = Some 10000 }
 
     let fullCoreSet = FullPubnetCoreSets context true true
 
@@ -50,7 +51,6 @@ let sorobanLoadGeneration (context: MissionContext) =
             formation.UpgradeProtocolToLatest tier1
             formation.UpgradeMaxTxSetSize tier1 1000000
 
-            formation.RunLoadgen sdf context.GenerateAccountCreationLoad
             formation.UpgradeSorobanLedgerLimitsWithMultiplier tier1 100
             formation.RunLoadgen sdf context.GenerateSorobanUploadLoad
             formation.EnsureAllNodesInSync fullCoreSet)

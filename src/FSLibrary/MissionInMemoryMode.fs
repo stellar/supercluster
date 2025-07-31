@@ -35,7 +35,8 @@ let runInMemoryMode (context: MissionContext) =
         { context.WithSmallLoadgenOptions with
               numAccounts = 100
               numTxs = 100
-              txRate = 20 }
+              txRate = 20
+              genesisTestAccountCount = Some 100 }
 
     context.Execute
         [ coreSet; coreSetWithCaptiveCore ]
@@ -49,7 +50,6 @@ let runInMemoryMode (context: MissionContext) =
 
             formation.UpgradeMaxTxSetSize [ coreSet; coreSetWithCaptiveCore ] 100000
 
-            formation.RunLoadgen coreSet context.GenerateAccountCreationLoad
             formation.RunLoadgen coreSet context.GeneratePaymentLoad
             formation.UpgradeSorobanLedgerLimitsWithMultiplier [ coreSet ] 100
             formation.RunLoadgen coreSet { context.GenerateSorobanUploadLoad with txrate = 1 })

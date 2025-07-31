@@ -22,6 +22,7 @@ let simulatePubnetMixedLoad (baseContext: MissionContext) =
         { baseContext with
               numAccounts = 30000
               coreResources = SimulatePubnetResources
+              genesisTestAccountCount = Some 30000
               // As the goal of `SimulatePubnet` is to simulate a pubnet,
               // network delays are, in general, indispensable.
               // Therefore, unless explicitly told otherwise, we will use
@@ -97,10 +98,6 @@ let simulatePubnetMixedLoad (baseContext: MissionContext) =
             // Setup
             formation.UpgradeProtocolToLatest tier1
             formation.UpgradeMaxTxSetSize tier1 (txrate * 10)
-
-            formation.RunLoadgen
-                loadGenerators.Head
-                { context.GenerateAccountCreationLoad with accounts = context.numAccounts }
 
             upgradeSorobanLedgerLimits context formation tier1 txrate
             upgradeSorobanTxLimits context formation tier1
