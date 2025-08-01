@@ -20,6 +20,7 @@
     "max_contract_data_entry_size" : 65536,
     "max_contract_data_key_size" : 300,
     "max_contract_size" : 65536,
+    "max_dependent_tx_clusters" : 2,
     "state_archival" : {
         "average_bucket_list_size" : 242431812,
         "bucket_list_size_snapshot_period" : 17280,
