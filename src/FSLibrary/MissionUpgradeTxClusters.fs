@@ -39,9 +39,9 @@ let upgradeTxClusters (context: MissionContext) =
     // This tests upgrading ledgerMaxDependentTxClusters:
     // 1. Start with default settings
     // 2. Increase ledgerMaxDependentTxClusters to a higher value
-    // 3. Run loadgen to test the new settings
-    // 4. Decrease ledgerMaxDependentTxClusters to a lower value
-    // 5. Run loadgen again
+    // 3. Run soroban_invoke loadgen. This should last until the end of the test.
+    // 4. Decrease ledgerMaxDependentTxClusters to a lower value using a different core node
+    // 5. Wait for step 3 to complete.
     context.Execute
         [ coreSet ]
         None
