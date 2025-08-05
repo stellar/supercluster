@@ -26,8 +26,8 @@ let upgradeTxClusters (context: MissionContext) =
     let context =
         { context with
               numAccounts = 100
-              numTxs = 100
-              txRate = 12
+              numTxs = 1500
+              txRate = 15
               coreResources = MediumTestResources
               genesisTestAccountCount = Some 100
               wasmBytesDistribution = [ (3000, 1) ]
@@ -62,11 +62,16 @@ let upgradeTxClusters (context: MissionContext) =
                       ledgerMaxDependentTxClusters = Some(8) }
                 (System.DateTime.UtcNow.AddSeconds(20.0))
 
-            let peer = formation.NetworkCfg.GetPeer coreSet 0
-            peer.WaitForMaxDependentTxClusters 8
+            let peer0 = formation.NetworkCfg.GetPeer coreSet 0
+            peer0.WaitForMaxDependentTxClusters 8
 
-            formation.RunLoadgen coreSet context.SetupSorobanInvoke
-            formation.RunLoadgen coreSet context.GenerateSorobanInvokeLoad
+            // Don't use peer 0. This will let us run soroban_invoke on peer 1
+            // and then do the settings upgrade on peer 0.
+            let peer1 = formation.NetworkCfg.GetPeer coreSet 1
+            LogInfo "Loadgen: %s" (peer1.GenerateLoad context.SetupSorobanInvoke)
+            peer1.WaitForLoadGenComplete context.SetupSorobanInvoke
+            // 1500 txs at a rate of 15 txs/sec should take ~100 seconds, so we'll have enough time to do both settings upgrades
+            LogInfo "Loadgen: %s" (peer1.GenerateLoad context.GenerateSorobanInvokeLoad)
 
             formation.SetupUpgradeContract coreSet
 
@@ -74,10 +79,9 @@ let upgradeTxClusters (context: MissionContext) =
                 [ coreSet ]
                 { LoadGen.GetDefault() with
                       mode = CreateSorobanUpgrade
-                      ledgerMaxDependentTxClusters = Some(2) }
+                      ledgerMaxDependentTxClusters = Some(4) }
                 (System.DateTime.UtcNow.AddSeconds(20.0))
 
-            peer.WaitForMaxDependentTxClusters 2
+            peer0.WaitForMaxDependentTxClusters 4
 
-            formation.RunLoadgen coreSet context.SetupSorobanInvoke
-            formation.RunLoadgen coreSet context.GenerateSorobanInvokeLoad)
+            peer1.WaitForLoadGenComplete context.GenerateSorobanInvokeLoad)
