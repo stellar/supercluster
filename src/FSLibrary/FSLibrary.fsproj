@@ -73,6 +73,7 @@
     <Compile Include="MissionAcceptanceUnitTests.fs" />
     <Compile Include="MissionMaxTPSMixed.fs" />
     <Compile Include="MissionUpgradeSCPSettings.fs" />
+    <Compile Include="MissionUpgradeTxClusters.fs" />
     <Compile Include="StellarMission.fs" />
   </ItemGroup>
   <ItemGroup>

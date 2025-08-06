@@ -46,6 +46,7 @@ open MissionMaxTPSMixed
 open MissionSimulatePubnetMixedLoad
 open MissionMixedNominationLeaderElection
 open MissionUpgradeSCPSettings
+open MissionUpgradeTxClusters
 
 type Mission = (MissionContext -> unit)
 
@@ -93,4 +94,5 @@ let allMissions : Map<string, Mission> =
                  ("SimulatePubnetMixedLoad", simulatePubnetMixedLoad)
                  ("MixedNominationLeaderElectionWithOldMajority", mixedNominationLeaderElectionWithOldMajority)
                  ("MixedNominationLeaderElectionWithNewMajority", mixedNominationLeaderElectionWithNewMajority)
-                 ("UpgradeSCPSettings", upgradeSCPSettings) |]
+                 ("UpgradeSCPSettings", upgradeSCPSettings)
+                 ("UpgradeTxClusters", upgradeTxClusters) |]

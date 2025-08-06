@@ -115,7 +115,8 @@ type LoadGen =
       ballotTimeoutIncrementMilliseconds: int option
       ballotTimeoutInitialMilliseconds: int option
       nominationTimeoutInitialMilliseconds: int option
-      nominationTimeoutIncrementMilliseconds: int option }
+      nominationTimeoutIncrementMilliseconds: int option
+      ledgerMaxDependentTxClusters: int option }
 
     member self.ToQuery : (string * string) list =
         let mandatoryParams =
@@ -182,6 +183,9 @@ type LoadGen =
                                                                             @ optionalParam
                                                                                 "nominc"
                                                                                 self.nominationTimeoutIncrementMilliseconds
+                                                                              @ optionalParam
+                                                                                  "maxtxclstrs"
+                                                                                  self.ledgerMaxDependentTxClusters
 
         mandatoryParams @ optionalParams
 
@@ -227,7 +231,8 @@ type LoadGen =
           ballotTimeoutIncrementMilliseconds = None
           ballotTimeoutInitialMilliseconds = None
           nominationTimeoutInitialMilliseconds = None
-          nominationTimeoutIncrementMilliseconds = None }
+          nominationTimeoutIncrementMilliseconds = None
+          ledgerMaxDependentTxClusters = None }
 
 // Takes a default value `v` and a list `l` and returns `v` if `l` is empty,
 // otherwise `l`.
@@ -447,6 +452,7 @@ type Peer with
     member self.GetMaxContractDataEntrySize() : int = self.GetSorobanInfo().MaxContractDataEntrySize
 
     member self.GetTxMaxContractEventsSize() : int = self.GetSorobanInfo().Tx.MaxContractEventsSizeBytes
+    member self.GetMaxDependentTxClusters() : int = self.GetSorobanInfo().MaxDependentTxClusters
 
     // Depending on which protocol version we are testing, "max_footprint_size" may not be present.
     member self.GetTxMaxFootprintSize() : int option =
@@ -578,6 +584,11 @@ type Peer with
         RetryUntilTrue
             (fun _ -> self.GetMaxTxSize() = n)
             (fun _ -> LogInfo "Waiting for MaxTxSize=%d on %s" n self.ShortName.StringName)
+
+    member self.WaitForMaxDependentTxClusters(n: int) =
+        RetryUntilTrue
+            (fun _ -> self.GetMaxDependentTxClusters() = n)
+            (fun _ -> LogInfo "Waiting for MaxDependentTxClusters=%d on %s" n self.ShortName.StringName)
 
     member self.WaitForNextSeq (src: string) (n: int64) =
         let desiredSeq = n + int64 (1)
