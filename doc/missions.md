@@ -111,10 +111,6 @@ Upgrade core image with the existing state, perform any migrations.
 
 Run stellar-core acceptance tests that take a long time.
 
-## MissionSimulatePubnet
-
-Simulate Public Network topology and throughput based on user-supplied distributions derived from network stats.
-
 ## MissionSimulatePubnetMixedLoad
 
 Simulate Public Network topology and throughput based on user-supplied distributions derived from network stats under load with a mix of classic and soroban traffic.

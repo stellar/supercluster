@@ -29,6 +29,7 @@ let simulatePubnetMixedLoad (baseContext: MissionContext) =
               // network delays.
               installNetworkDelay = Some(baseContext.installNetworkDelay |> Option.defaultValue true)
               enableTailLogging = false
+              byteCountDistribution = defaultListValue pubnetByteCounts baseContext.byteCountDistribution
               wasmBytesDistribution = defaultListValue pubnetWasmBytes baseContext.wasmBytesDistribution
               dataEntriesDistribution = defaultListValue pubnetDataEntries baseContext.dataEntriesDistribution
               totalKiloBytesDistribution = defaultListValue pubnetTotalKiloBytes baseContext.totalKiloBytesDistribution

@@ -97,11 +97,7 @@ let ctx : MissionContext =
                   70
               }
           )
-      opCountDistribution =
-          Some(
-              __SOURCE_DIRECTORY__
-              + "/../FSLibrary/csv-type-samples/sample-loadgen-op-count-distribution.csv"
-          )
+      byteCountDistribution = []
       wasmBytesDistribution = []
       dataEntriesDistribution = []
       totalKiloBytesDistribution = []
@@ -169,8 +165,6 @@ type Tests(output: ITestOutputHelper) =
         Assert.Contains("OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING = [10, 100]", toml)
         Assert.Contains("OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING = [30, 70]", toml)
         Assert.Contains("HTTP_PORT = " + CfgVal.httpPort.ToString(), toml)
-        Assert.Contains("LOADGEN_OP_COUNT_FOR_TESTING = [1, 2, 10]", toml)
-        Assert.Contains("LOADGEN_OP_COUNT_DISTRIBUTION_FOR_TESTING = [80, 19, 1]", toml)
 
     // Test init config
     // REVERTME: temporarily avoid looking for HTTP_PORT=0 on InitContainers
