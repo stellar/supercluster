@@ -73,13 +73,12 @@ let upgradeTxClusters (context: MissionContext) =
             // 1500 txs at a rate of 15 txs/sec should take ~100 seconds, so we'll have enough time to do both settings upgrades
             LogInfo "Loadgen: %s" (peer1.GenerateLoad context.GenerateSorobanInvokeLoad)
 
-            formation.SetupUpgradeContract coreSet
-
             formation.DeployUpgradeEntriesAndArm
                 [ coreSet ]
                 { LoadGen.GetDefault() with
                       mode = CreateSorobanUpgrade
-                      ledgerMaxDependentTxClusters = Some(4) }
+                      ledgerMaxDependentTxClusters = Some(4)
+                      minSorobanPercentSuccess = Some 100 }
                 (System.DateTime.UtcNow.AddSeconds(20.0))
 
             peer0.WaitForMaxDependentTxClusters 4
