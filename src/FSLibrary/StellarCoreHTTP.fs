@@ -339,7 +339,7 @@ type UpgradeParameters =
         let maybe name opt = Option.toList (Option.map (fun v -> (name, v.ToString())) opt)
 
         List.concat [| [ ("mode", "set") ]
-                       [ ("upgradetime", self.upgradeTime.ToUniversalTime().ToString("o")) ]
+                       [ ("upgradetime", self.upgradeTime.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")) ]
                        maybe "protocolversion" self.protocolVersion
                        maybe "basefee" self.baseFee
                        maybe "basereserve" self.baseReserve
