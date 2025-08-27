@@ -123,6 +123,7 @@ type NamespaceContent(kube: Kubernetes, apiRateLimit: int, namespaceProperty: st
     member self.AddAll() =
         ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (apiRateLimit)
 
+        kube.ListNamespacedRole(namespaceParameter = namespaceProperty) |> ignore
         for s in kube.ListNamespacedService(namespaceParameter = namespaceProperty).Items do
             self.Add(s)
 
