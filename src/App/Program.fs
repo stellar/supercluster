@@ -123,7 +123,10 @@ type MissionOptions
         runForMaxTps: string option,
         requireNodeLabelsPcV2: seq<string>,
         avoidNodeLabelsPcV2: seq<string>,
-        tolerateNodeTaintsPcV2: seq<string>
+        tolerateNodeTaintsPcV2: seq<string>,
+        benchmarkInfrastructure: bool option,
+        benchmarkOnly: bool option,
+        benchmarkDurationSeconds: int option
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -543,6 +546,22 @@ type MissionOptions
              Required = false)>]
     member self.TolerateNodeTaintsPcV2 = tolerateNodeTaintsPcV2
 
+    [<Option("benchmark-infra",
+             HelpText = "Run network infrastructure benchmark in addition to stellar-core tests",
+             Required = false)>]
+    member self.BenchmarkInfrastructure = benchmarkInfrastructure
+
+    [<Option("benchmark-only",
+             HelpText = "Run ONLY the network infrastructure benchmark, skip stellar-core tests (requires --benchmark-infra)",
+             Required = false)>]
+    member self.BenchmarkOnly = benchmarkOnly
+
+    [<Option("benchmark-duration-seconds",
+             HelpText = "Duration of network benchmark tests in seconds",
+             Required = false,
+             Default = 30)>]
+    member self.BenchmarkDurationSeconds = benchmarkDurationSeconds
+
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' with
     | [| x |] -> (x, None)
@@ -670,7 +689,10 @@ let main argv =
                   runForMaxTps = None
                   requireNodeLabelsPcV2 = []
                   avoidNodeLabelsPcV2 = []
-                  tolerateNodeTaintsPcV2 = [] }
+                  tolerateNodeTaintsPcV2 = []
+                  benchmarkInfrastructure = None
+                  benchmarkInfrastructureOnly = None
+                  benchmarkDurationSeconds = None }
 
             let nCfg = MakeNetworkCfg ctx [] None
             use formation = kube.MakeEmptyFormation nCfg
@@ -721,6 +743,11 @@ let main argv =
                      let processInputSeq s = if Seq.isEmpty s then None else Some((Seq.map int) s)
 
                      try
+                         // Validate benchmark flag combinations
+                         if mission.BenchmarkOnly = Some true
+                            && mission.BenchmarkInfrastructure <> Some true then
+                             failwith "Error: --benchmark-only requires --benchmark-infra to be set"
+
                          let missionContext =
                              { MissionContext.kube = kube
                                kubeCfg = mission.KubeConfig
@@ -821,7 +848,10 @@ let main argv =
                                runForMaxTps = mission.RunForMaxTps
                                requireNodeLabelsPcV2 = List.map splitLabel (List.ofSeq mission.RequireNodeLabelsPcV2)
                                avoidNodeLabelsPcV2 = List.map splitLabel (List.ofSeq mission.AvoidNodeLabelsPcV2)
-                               tolerateNodeTaintsPcV2 = List.map splitLabel (List.ofSeq mission.TolerateNodeTaintsPcV2) }
+                               tolerateNodeTaintsPcV2 = List.map splitLabel (List.ofSeq mission.TolerateNodeTaintsPcV2)
+                               benchmarkInfrastructure = mission.BenchmarkInfrastructure
+                               benchmarkInfrastructureOnly = mission.BenchmarkOnly
+                               benchmarkDurationSeconds = mission.BenchmarkDurationSeconds }
 
                          allMissions.[m] missionContext
 

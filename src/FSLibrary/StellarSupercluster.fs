@@ -381,18 +381,44 @@ type MissionContext with
         (checkConsistency: bool)
         (run: StellarFormation -> unit)
         : unit =
-        use formation = self.MakeFormation coreSetList passphrase
 
-        try
+        // If benchmark-only mode, run benchmark without creating stellar-core pods
+        if self.benchmarkInfrastructureOnly.IsSome
+           && self.benchmarkInfrastructureOnly.Value then
+            LogInfo "Running benchmark only"
+            // Create an empty formation just for the benchmark
+            let nCfg = MakeNetworkCfg self coreSetList passphrase
+            use formation = self.kube.MakeEmptyFormation nCfg
+            formation.RunP2PNetworkBenchmark()
+            LogInfo "Network benchmark complete. Exiting without running mission"
+            ()
+        else
+            // Run benchmark first if requested (before creating stellar-core pods)
+            if self.benchmarkInfrastructure.IsSome && self.benchmarkInfrastructure.Value then
+                LogInfo "Running network benchmark before creating stellar-core pods..."
+                let nCfg = MakeNetworkCfg self coreSetList passphrase
+                use benchFormation = self.kube.MakeEmptyFormation nCfg
+                benchFormation.RunP2PNetworkBenchmark()
+                LogInfo "Network benchmark complete. Waiting for system to stabilize..."
+
+                // Give the cluster 20 seconds to clean up and stabilize before spinning
+                // up core pods
+                System.Threading.Thread.Sleep(20000)
+                LogInfo "Now creating stellar-core pods..."
+
+            // Now create stellar-core formation and run the actual tests
+            use formation = self.MakeFormation coreSetList passphrase
+
             try
-                formation.WaitUntilReady()
-                run formation
-                if checkConsistency then formation.CheckNoErrorsAndPairwiseConsistency()
-            finally
-                formation.DumpData()
-        with x ->
-            (if self.keepData then formation.KeepData()
-             reraise ())
+                try
+                    formation.WaitUntilReady()
+                    run formation
+                    if checkConsistency then formation.CheckNoErrorsAndPairwiseConsistency()
+                finally
+                    formation.DumpData()
+            with x ->
+                (if self.keepData then formation.KeepData()
+                 reraise ())
 
     member self.Execute
         (coreSetList: CoreSet list)
