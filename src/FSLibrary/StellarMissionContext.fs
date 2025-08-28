@@ -127,4 +127,7 @@ type MissionContext =
       tolerateNodeTaintsPcV2: ((string * string option) list)
       serviceAccountAnnotationsPcV2: ((string * string) list)
       s3HistoryMirrorOverridePcV2: string option
-      s3HistoryMirrorRegionPcV2: string }
+      s3HistoryMirrorRegionPcV2: string
+      benchmarkInfrastructure: bool option
+      benchmarkInfrastructureOnly: bool option
+      benchmarkDurationSeconds: int option }

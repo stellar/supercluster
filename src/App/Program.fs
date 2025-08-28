@@ -127,7 +127,10 @@ type MissionOptions
         tolerateNodeTaintsPcV2: seq<string>,
         serviceAccountAnnotationsPcV2: seq<string>,
         s3HistoryMirrorOverridePcV2: string option,
-        s3HistoryMirrorRegionPcV2: string
+        s3HistoryMirrorRegionPcV2: string,
+        benchmarkInfrastructure: bool option,
+        benchmarkOnly: bool option,
+        benchmarkDurationSeconds: int option
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -569,6 +572,22 @@ type MissionOptions
              Default = "us-east-1")>]
     member self.S3HistoryMirrorRegionPcV2 = s3HistoryMirrorRegionPcV2
 
+    [<Option("benchmark-infra",
+             HelpText = "Run network infrastructure benchmark in addition to stellar-core tests",
+             Required = false)>]
+    member self.BenchmarkInfrastructure = benchmarkInfrastructure
+
+    [<Option("benchmark-only",
+             HelpText = "Run ONLY the network infrastructure benchmark, skip stellar-core tests (requires --benchmark-infra)",
+             Required = false)>]
+    member self.BenchmarkOnly = benchmarkOnly
+
+    [<Option("benchmark-duration-seconds",
+             HelpText = "Duration of network benchmark tests in seconds",
+             Required = false,
+             Default = 30)>]
+    member self.BenchmarkDurationSeconds = benchmarkDurationSeconds
+
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' |> Array.toList with
     | [ x ] -> x, None
@@ -707,7 +726,10 @@ let main argv =
                   tolerateNodeTaintsPcV2 = []
                   serviceAccountAnnotationsPcV2 = []
                   s3HistoryMirrorOverridePcV2 = None
-                  s3HistoryMirrorRegionPcV2 = "us-east-1" }
+                  s3HistoryMirrorRegionPcV2 = "us-east-1"
+                  benchmarkInfrastructure = None
+                  benchmarkInfrastructureOnly = None
+                  benchmarkDurationSeconds = None }
 
             let nCfg = MakeNetworkCfg ctx [] None
             use formation = kube.MakeEmptyFormation nCfg
@@ -758,6 +780,11 @@ let main argv =
                      let processInputSeq s = if Seq.isEmpty s then None else Some((Seq.map int) s)
 
                      try
+                         // Validate benchmark flag combinations
+                         if mission.BenchmarkOnly = Some true
+                            && mission.BenchmarkInfrastructure <> Some true then
+                             failwith "Error: --benchmark-only requires --benchmark-infra to be set"
+
                          let missionContext =
                              { MissionContext.kube = kube
                                kubeCfg = mission.KubeConfig
@@ -865,7 +892,10 @@ let main argv =
                                        (splitLabel >> requireLabelValue)
                                        (List.ofSeq mission.ServiceAccountAnnotationsPcV2)
                                s3HistoryMirrorOverridePcV2 = mission.S3HistoryMirrorOverridePcV2
-                               s3HistoryMirrorRegionPcV2 = mission.S3HistoryMirrorRegionPcV2 }
+                               s3HistoryMirrorRegionPcV2 = mission.S3HistoryMirrorRegionPcV2
+                               benchmarkInfrastructure = mission.BenchmarkInfrastructure
+                               benchmarkInfrastructureOnly = mission.BenchmarkOnly
+                               benchmarkDurationSeconds = mission.BenchmarkDurationSeconds }
 
                          allMissions.[m] missionContext
 

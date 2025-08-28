@@ -19,6 +19,8 @@ type Destination(path: string) =
 
     member public self.Path = path
 
+    member public self.GetFullPath(name: string) : string = Path.Combine [| path; name |]
+
     member public self.RemoveIfExists name =
         let fullPath = Path.Combine [| path; name |]
 
