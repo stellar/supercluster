@@ -118,7 +118,10 @@ type MissionOptions
         enableRelaxedAutoQsetConfig: bool,
         jobMonitorExternalHost: string option,
         txBatchMaxSize: int option,
-        runForMaxTps: string option
+        runForMaxTps: string option,
+        benchmarkInfrastructure: bool option,
+        benchmarkOnly: bool option,
+        benchmarkDurationSeconds: int option
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -515,6 +518,22 @@ type MissionOptions
              Required = false)>]
     member self.RunForMaxTps = runForMaxTps
 
+    [<Option("benchmark-infra",
+             HelpText = "Run network infrastructure benchmark in addition to stellar-core tests",
+             Required = false)>]
+    member self.BenchmarkInfrastructure = benchmarkInfrastructure
+
+    [<Option("benchmark-only",
+             HelpText = "Run ONLY the network infrastructure benchmark, skip stellar-core tests (requires --benchmark-infra)",
+             Required = false)>]
+    member self.BenchmarkOnly = benchmarkOnly
+
+    [<Option("benchmark-duration-seconds",
+             HelpText = "Duration of network benchmark tests in seconds",
+             Required = false,
+             Default = 30)>]
+    member self.BenchmarkDurationSeconds = benchmarkDurationSeconds
+
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' with
     | [| x |] -> (x, None)
@@ -638,7 +657,10 @@ let main argv =
                   enableRelaxedAutoQsetConfig = false
                   jobMonitorExternalHost = None
                   txBatchMaxSize = None
-                  runForMaxTps = None }
+                  runForMaxTps = None
+                  benchmarkInfrastructure = None
+                  benchmarkInfrastructureOnly = None
+                  benchmarkDurationSeconds = None }
 
             let nCfg = MakeNetworkCfg ctx [] None
             use formation = kube.MakeEmptyFormation nCfg
@@ -689,6 +711,11 @@ let main argv =
                      let processInputSeq s = if Seq.isEmpty s then None else Some((Seq.map int) s)
 
                      try
+                         // Validate benchmark flag combinations
+                         if mission.BenchmarkOnly = Some true
+                            && mission.BenchmarkInfrastructure <> Some true then
+                             failwith "Error: --benchmark-only requires --benchmark-infra to be set"
+
                          let missionContext =
                              { MissionContext.kube = kube
                                kubeCfg = mission.KubeConfig
@@ -784,7 +811,10 @@ let main argv =
                                enableRelaxedAutoQsetConfig = mission.EnableRelaxedAutoQsetConfig
                                jobMonitorExternalHost = mission.JobMonitorExternalHost
                                txBatchMaxSize = mission.TxBatchMaxSize
-                               runForMaxTps = mission.RunForMaxTps }
+                               runForMaxTps = mission.RunForMaxTps
+                               benchmarkInfrastructure = mission.BenchmarkInfrastructure
+                               benchmarkInfrastructureOnly = mission.BenchmarkOnly
+                               benchmarkDurationSeconds = mission.BenchmarkDurationSeconds }
 
                          allMissions.[m] missionContext
 
