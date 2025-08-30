@@ -152,21 +152,22 @@ let installProject (context: MissionContext) =
     | _ -> ()
 
 // Cleanup on exit
-let cleanup () =
+let cleanupParallelCatchupV2 () =
     if toPerformCleanup then
         toPerformCleanup <- false
         LogInfo "Cleaning up resources..."
 
         runCommand [| "helm"
                       "uninstall"
-                      helmReleaseName |]
+                      helmReleaseName
+                      "--ignore-not-found" |]
         |> ignore
 
-System.AppDomain.CurrentDomain.ProcessExit.Add(fun _ -> cleanup ())
+System.AppDomain.CurrentDomain.ProcessExit.Add(fun _ -> cleanupParallelCatchupV2 ())
 
 Console.CancelKeyPress.Add
     (fun _ ->
-        cleanup ()
+        cleanupParallelCatchupV2 ()
         Environment.Exit(0))
 
 let queryJobMonitor (context: MissionContext, path: String, endPoint: String) =
@@ -272,7 +273,7 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
                 timeoutLeft <- timeoutLeft - jobMonitorStatusCheckIntervalSecs
                 if timeoutLeft <= 0 then failwith "job monitor not reachable"
         with ex ->
-            cleanup ()
+            cleanupParallelCatchupV2 ()
             raise ex
 
-    cleanup ()
+    cleanupParallelCatchupV2 ()
