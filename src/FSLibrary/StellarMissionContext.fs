@@ -126,4 +126,5 @@ type MissionContext =
       tolerateNodeTaintsPcV2: ((string * string option) list)
       benchmarkInfrastructure: bool option
       benchmarkInfrastructureOnly: bool option
-      benchmarkDurationSeconds: int option }
+      benchmarkDurationSeconds: int option
+      enableTcpTuning: bool }

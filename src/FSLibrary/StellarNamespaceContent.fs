@@ -17,6 +17,7 @@ type NamespaceContent(kube: Kubernetes, apiRateLimit: int, namespaceProperty: st
     let statefulSets : Set<string> ref = ref Set.empty
     let ingresses : Set<string> ref = ref Set.empty
     let jobs : Set<string> ref = ref Set.empty
+    let daemonSets : Set<string> ref = ref Set.empty
 
     let ignoreError f =
         try
@@ -83,6 +84,18 @@ type NamespaceContent(kube: Kubernetes, apiRateLimit: int, namespaceProperty: st
                     propagationPolicy = "Foreground"
                 ))
 
+    let delDaemonSet (name: string) =
+        LogInfo "Deleting DaemonSet %s" name
+        ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (apiRateLimit)
+
+        ignoreError
+            (fun _ ->
+                kube.DeleteNamespacedDaemonSet(
+                    namespaceParameter = namespaceProperty,
+                    name = name,
+                    propagationPolicy = "Foreground"
+                ))
+
     let cleanSet (f: 'a -> unit) (s: Set<'a> ref) : unit =
         Set.iter f (!s)
         s := Set.empty
@@ -99,6 +112,7 @@ type NamespaceContent(kube: Kubernetes, apiRateLimit: int, namespaceProperty: st
         cleanSet delConfigMap configMaps
         cleanSet delIngress ingresses
         cleanSet delJob jobs
+        cleanSet delDaemonSet daemonSets
 
     member self.Add(service: V1Service) = addOne services service.Metadata.Name
 
@@ -110,6 +124,8 @@ type NamespaceContent(kube: Kubernetes, apiRateLimit: int, namespaceProperty: st
 
     member self.Add(job: V1Job) = addOne jobs job.Metadata.Name
 
+    member self.Add(daemonSet: V1DaemonSet) = addOne daemonSets daemonSet.Metadata.Name
+
     member self.Del(service: V1Service) = delOne delService services service.Metadata.Name
 
     member self.Del(configMap: V1ConfigMap) = delOne delConfigMap configMaps configMap.Metadata.Name
@@ -119,6 +135,8 @@ type NamespaceContent(kube: Kubernetes, apiRateLimit: int, namespaceProperty: st
     member self.Del(ingress: V1Ingress) = delOne delIngress ingresses ingress.Metadata.Name
 
     member self.Del(job: V1Job) = delOne delJob jobs job.Metadata.Name
+
+    member self.Del(daemonSet: V1DaemonSet) = delOne delDaemonSet daemonSets daemonSet.Metadata.Name
 
     member self.AddAll() =
         ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (apiRateLimit)
@@ -146,3 +164,8 @@ type NamespaceContent(kube: Kubernetes, apiRateLimit: int, namespaceProperty: st
 
         for i in kube.ListNamespacedJob(namespaceParameter = namespaceProperty).Items do
             self.Add(i)
+
+        ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (apiRateLimit)
+
+        for d in kube.ListNamespacedDaemonSet(namespaceParameter = namespaceProperty).Items do
+            self.Add(d)

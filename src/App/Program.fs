@@ -126,7 +126,11 @@ type MissionOptions
         tolerateNodeTaintsPcV2: seq<string>,
         benchmarkInfrastructure: bool option,
         benchmarkOnly: bool option,
-        benchmarkDurationSeconds: int option
+        benchmarkDurationSeconds: int option,
+        benchmarkInfrastructure: bool,
+        benchmarkOnly: bool,
+        benchmarkDurationSeconds: int,
+        enableTcpTuning: bool
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -548,12 +552,14 @@ type MissionOptions
 
     [<Option("benchmark-infra",
              HelpText = "Run network infrastructure benchmark in addition to stellar-core tests",
-             Required = false)>]
+             Required = false,
+             Default = false)>]
     member self.BenchmarkInfrastructure = benchmarkInfrastructure
 
     [<Option("benchmark-only",
              HelpText = "Run ONLY the network infrastructure benchmark, skip stellar-core tests (requires --benchmark-infra)",
-             Required = false)>]
+             Required = false,
+             Default = false)>]
     member self.BenchmarkOnly = benchmarkOnly
 
     [<Option("benchmark-duration-seconds",
@@ -561,6 +567,12 @@ type MissionOptions
              Required = false,
              Default = 30)>]
     member self.BenchmarkDurationSeconds = benchmarkDurationSeconds
+
+    [<Option("enable-tcp-tuning",
+             HelpText = "Enable TCP tuning for improved network performance",
+             Required = false,
+             Default = false)>]
+    member self.EnableTcpTuning = enableTcpTuning
 
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' with
@@ -692,10 +704,11 @@ let main argv =
                   tolerateNodeTaintsPcV2 = []
                   benchmarkInfrastructure = None
                   benchmarkInfrastructureOnly = None
-                  benchmarkDurationSeconds = None }
+                  benchmarkDurationSeconds = None
+                  enableTcpTuning = false }
 
             let nCfg = MakeNetworkCfg ctx [] None
-            use formation = kube.MakeEmptyFormation nCfg
+            use formation = kube.MakeEmptyFormation(nCfg, skipTcpConfig = true)
             formation.CleanNamespace()
             0
 
@@ -744,8 +757,7 @@ let main argv =
 
                      try
                          // Validate benchmark flag combinations
-                         if mission.BenchmarkOnly = Some true
-                            && mission.BenchmarkInfrastructure <> Some true then
+                         if mission.BenchmarkOnly && not mission.BenchmarkInfrastructure then
                              failwith "Error: --benchmark-only requires --benchmark-infra to be set"
 
                          let missionContext =
@@ -851,7 +863,11 @@ let main argv =
                                tolerateNodeTaintsPcV2 = List.map splitLabel (List.ofSeq mission.TolerateNodeTaintsPcV2)
                                benchmarkInfrastructure = mission.BenchmarkInfrastructure
                                benchmarkInfrastructureOnly = mission.BenchmarkOnly
-                               benchmarkDurationSeconds = mission.BenchmarkDurationSeconds }
+                               benchmarkDurationSeconds = mission.BenchmarkDurationSeconds
+                               benchmarkInfrastructure = Some mission.BenchmarkInfrastructure
+                               benchmarkInfrastructureOnly = Some mission.BenchmarkOnly
+                               benchmarkDurationSeconds = Some mission.BenchmarkDurationSeconds
+                               enableTcpTuning = mission.EnableTcpTuning }
 
                          allMissions.[m] missionContext
 
