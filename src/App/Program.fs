@@ -511,7 +511,7 @@ type MissionOptions
     member self.TxBatchMaxSize = txBatchMaxSize
 
     [<Option("run-for-max-tps",
-             HelpText = "Sets core configuration to optimal for high throughput tests. Values: 'classic' or 'soroban'",
+             HelpText = "Sets core configuration to optimal for high throughput tests. Values: 'classic', 'classic-v22-compat', or 'soroban'",
              Required = false)>]
     member self.RunForMaxTps = runForMaxTps
 
