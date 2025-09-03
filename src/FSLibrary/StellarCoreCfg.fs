@@ -245,8 +245,6 @@ type StellarCoreCfg =
         if self.network.missionContext.enableBackgroundSigValidation then
             t.Add("EXPERIMENTAL_BACKGROUND_TX_SIG_VERIFICATION", true) |> ignore
 
-        t.Add("EXPERIMENTAL_TRIGGER_TIMER", true) |> ignore
-
         match self.network.missionContext.peerReadingCapacity, self.network.missionContext.peerFloodCapacity with
         | None, None -> ()
         | Some read, Some flood ->

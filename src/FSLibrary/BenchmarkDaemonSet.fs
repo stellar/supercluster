@@ -20,62 +20,41 @@ let benchmarkImage = "networkstatic/iperf3:latest"
 
 let benchmarkLabels = Map.ofSeq [ "app", "network-benchmark" ]
 
-// Extract short name from stellar-core DNS patterns for use in benchmark pod names
-// We keep the full name including "node-" prefix to ensure DNS resolution works
-// Examples: "node-0-0" -> "node-0-0", "sdf-0" -> "sdf-0", "pn-0" -> "pn-0"
-let extractShortNameFromStellarCoreDns (fullName: string) : string =
-    // Keep the full name to ensure DNS resolution works correctly
-    // The benchmark pods use the same naming pattern as stellar-core pods
-    fullName
-
-// Extract node name from benchmark pod name by finding match in topology
-// Pod names are like: ssc-1234z-benchmark-bd-0-0 (last -0 is StatefulSet replica index)
+// Extract node name from benchmark pod name (format: {runId}-benchmark-{shortName}-0)
 let extractNodeNameFromBenchmarkPod (podName: string) (topology: Map<string, string array>) : string =
-    // Remove the StatefulSet replica suffix (-0) if present
+    let parts = podName.Split('-')
+    // Remove StatefulSet replica suffix if present
     let podNameWithoutReplica =
-        let parts = podName.Split('-')
-
         if parts.Length > 0 && parts.[parts.Length - 1] = "0" then
-            // Remove the last "-0" (replica index)
             String.Join("-", parts.[0..parts.Length - 2])
         else
             podName
 
-    // Extract the short name from the benchmark StatefulSet name
-    // Format after removing replica: {runId}-benchmark-{shortName}
-    if podNameWithoutReplica.Contains("-benchmark-") then
-        let benchmarkIndex = podNameWithoutReplica.IndexOf("-benchmark-")
-        let shortName = podNameWithoutReplica.Substring(benchmarkIndex + 11) // Length of "-benchmark-"
+    match podNameWithoutReplica.IndexOf("-benchmark-") with
+    | -1 -> podName
+    | idx ->
+        let shortName = podNameWithoutReplica.Substring(idx + 11)
 
-        // Find the matching full node name in topology using the short name
         topology
-        |> Map.toArray
-        |> Array.tryFind
-            (fun (fullName, _) ->
-                let nodeShortName = extractShortNameFromStellarCoreDns fullName
-                nodeShortName = shortName)
-        |> Option.map fst
+        |> Map.tryFindKey (fun fullName _ -> fullName = shortName)
         |> Option.defaultValue podName
-    else
-        podName
 
-// Create a single headless service for all benchmark pods for DNS resolution
+// Headless service for benchmark pod DNS resolution
 let createBenchmarkHeadlessService (nCfg: NetworkCfg) (runId: string) : V1Service =
-    let metadata =
-        V1ObjectMeta(
-            name = sprintf "%s-benchmark" runId,
-            labels = benchmarkLabels,
-            namespaceProperty = nCfg.NamespaceProperty
-        )
-
-    let serviceSpec =
-        V1ServiceSpec(
-            clusterIP = "None",
-            selector = benchmarkLabels,
-            ports = [| V1ServicePort(name = "iperf3", port = 5201, protocol = "TCP") |]
-        )
-
-    V1Service(metadata = metadata, spec = serviceSpec)
+    V1Service(
+        metadata =
+            V1ObjectMeta(
+                name = sprintf "%s-benchmark" runId,
+                labels = benchmarkLabels,
+                namespaceProperty = nCfg.NamespaceProperty
+            ),
+        spec =
+            V1ServiceSpec(
+                clusterIP = "None",
+                selector = benchmarkLabels,
+                ports = [| V1ServicePort(name = "iperf3", port = 5201, protocol = "TCP") |]
+            )
+    )
 
 // Create StatefulSet for benchmark with the same topology as stellar-core sts
 //
@@ -122,7 +101,7 @@ let createBenchmarkStatefulSet
     (nodeIndex: int)
     : V1StatefulSet =
 
-    let shortName = extractShortNameFromStellarCoreDns nodeName
+    let shortName = nodeName
     let stsName = sprintf "%s-benchmark-%s" runId shortName
 
     // Pod template - contains:
@@ -172,7 +151,7 @@ let createBenchmarkStatefulSet
                     (fun peerDns ->
                         // Extract the pod name from the DNS (everything before first dot)
                         let podName = peerDns.Split('.').[0]
-                        extractShortNameFromStellarCoreDns podName)
+                        podName)
 
             let peerList = String.Join(",", benchmarkPeers)
 
@@ -278,3 +257,92 @@ let createBenchmarkStatefulSet
         metadata = V1ObjectMeta(name = stsName, labels = benchmarkLabels, namespaceProperty = nCfg.NamespaceProperty),
         spec = statefulSetSpec
     )
+
+// ConfigMap containing TCP tuning scripts from src/scripts directory
+let createTcpScriptsConfigMap (nCfg: NetworkCfg) : V1ConfigMap =
+    let scriptsPath = System.IO.Path.Combine(__SOURCE_DIRECTORY__, "../scripts")
+
+    V1ConfigMap(
+        metadata = V1ObjectMeta(name = "tcp-scripts", namespaceProperty = nCfg.NamespaceProperty),
+        data =
+            dict [ ("tcp-tune.sh", System.IO.File.ReadAllText(System.IO.Path.Combine(scriptsPath, "tcp-tune.sh")))
+                   ("tcp-reset.sh", System.IO.File.ReadAllText(System.IO.Path.Combine(scriptsPath, "tcp-reset.sh"))) ]
+    )
+
+let private createTcpDaemonSet
+    (name: string)
+    (scriptName: string)
+    (labels: IDictionary<string, string>)
+    (nCfg: NetworkCfg)
+    =
+    V1DaemonSet(
+        metadata = V1ObjectMeta(name = name, labels = labels, namespaceProperty = nCfg.NamespaceProperty),
+        spec =
+            V1DaemonSetSpec(
+                selector = V1LabelSelector(matchLabels = dict [ ("app", name) ]),
+                template =
+                    V1PodTemplateSpec(
+                        metadata = V1ObjectMeta(labels = dict [ ("app", name) ]),
+                        spec =
+                            V1PodSpec(
+                                hostNetwork = System.Nullable<bool>(true),
+                                hostPID = System.Nullable<bool>(true),
+                                containers =
+                                    [| V1Container(
+                                           name = name,
+                                           image = "busybox:latest",
+                                           command = [| "/bin/sh" |],
+                                           args = [| sprintf "/scripts/%s" scriptName; "--daemon" |],
+                                           volumeMounts =
+                                               [| V1VolumeMount(
+                                                      name = "tcp-scripts",
+                                                      mountPath = "/scripts",
+                                                      readOnlyProperty = System.Nullable<bool>(true)
+                                                  ) |],
+                                           securityContext =
+                                               V1SecurityContext(
+                                                   privileged = System.Nullable<bool>(true),
+                                                   capabilities = V1Capabilities(add = [| "SYS_ADMIN"; "NET_ADMIN" |])
+                                               ),
+                                           resources =
+                                               V1ResourceRequirements(
+                                                   requests =
+                                                       dict [ ("memory", ResourceQuantity("50Mi"))
+                                                              ("cpu", ResourceQuantity("10m")) ],
+                                                   limits =
+                                                       dict [ ("memory", ResourceQuantity("100Mi"))
+                                                              ("cpu", ResourceQuantity("50m")) ]
+                                               )
+                                       ) |],
+                                volumes =
+                                    [| V1Volume(
+                                           name = "tcp-scripts",
+                                           configMap =
+                                               V1ConfigMapVolumeSource(
+                                                   name = "tcp-scripts",
+                                                   defaultMode = System.Nullable<int>(0o755)
+                                               )
+                                       ) |],
+                                tolerations = [| V1Toleration(operatorProperty = "Exists") |]
+                            )
+                    )
+            )
+    )
+
+// DaemonSet to reset TCP settings to defaults
+let createTcpResetDaemonSet (nCfg: NetworkCfg) : V1DaemonSet =
+    createTcpDaemonSet
+        "tcp-reset"
+        "tcp-reset.sh"
+        (dict [ ("app", "tcp-reset")
+                ("component", "network-reset") ])
+        nCfg
+
+// DaemonSet to apply TCP performance tuning
+let createTcpTuningDaemonSet (nCfg: NetworkCfg) : V1DaemonSet =
+    createTcpDaemonSet
+        "tcp-tuning"
+        "tcp-tune.sh"
+        (dict [ ("app", "tcp-tuning")
+                ("component", "network-optimization") ])
+        nCfg

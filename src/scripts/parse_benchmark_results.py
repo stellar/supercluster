@@ -60,7 +60,7 @@ import sys
 import re
 import statistics
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 
 def parse_iperf3_json(json_str: str) -> Dict:
@@ -87,9 +87,52 @@ def parse_iperf3_json(json_str: str) -> Dict:
     try:
         data = json.loads(json_str)
 
+        # If there's an error, try to extract data from intervals first
         if 'error' in data and data['error']:
             result['error'] = data['error']
-            return result
+            # Try to extract partial data from intervals if available
+            if 'intervals' in data and data['intervals']:
+                all_rtt_values = []
+                last_throughput_interval = None
+
+                # Look through all intervals to find RTT and throughput data
+                for interval in data['intervals']:
+                    # Get RTT from streams in this interval
+                    if 'streams' in interval:
+                        for stream in interval['streams']:
+                            if 'rtt' in stream and stream['rtt'] and stream.get('sender', False):
+                                # RTT is in microseconds, convert to milliseconds
+                                rtt_ms = stream['rtt'] / 1000.0
+                                all_rtt_values.append(rtt_ms)
+
+                    # Keep track of the last interval with throughput data
+                    if 'sum' in interval and interval['sum']:
+                        last_throughput_interval = interval
+
+                # Use the last interval with throughput data for bandwidth stats
+                if last_throughput_interval:
+                    if 'sum' in last_throughput_interval and last_throughput_interval['sum']:
+                        sum_data = last_throughput_interval['sum']
+                        if 'bits_per_second' in sum_data:
+                            result['send_mbps'] = sum_data['bits_per_second'] / 1_000_000
+                        if 'retransmits' in sum_data:
+                            result['retransmits'] = sum_data.get('retransmits', 0)
+
+                    # Reverse direction data
+                    if 'sum_bidir_reverse' in last_throughput_interval and last_throughput_interval['sum_bidir_reverse']:
+                        reverse_data = last_throughput_interval['sum_bidir_reverse']
+                        if 'bits_per_second' in reverse_data:
+                            result['reverse_recv_mbps'] = reverse_data['bits_per_second'] / 1_000_000
+
+                # Set RTT statistics from all collected values
+                if all_rtt_values:
+                    result['mean_rtt_ms'] = statistics.mean(all_rtt_values)
+                    result['min_rtt_ms'] = min(all_rtt_values)
+                    result['max_rtt_ms'] = max(all_rtt_values)
+
+            # If we got some data despite the error, don't return yet
+            if result['send_mbps'] == 0 and result['reverse_recv_mbps'] == 0:
+                return result
 
         # Extract data from the 'end' section
         if 'end' in data:
@@ -115,8 +158,9 @@ def parse_iperf3_json(json_str: str) -> Dict:
                 if 'bits_per_second' in end['sum_received_bidir_reverse']:
                     result['reverse_recv_mbps'] = end['sum_received_bidir_reverse']['bits_per_second'] / 1_000_000
 
-            # Extract RTT statistics from streams
-            result.update(extract_rtt_from_streams(end.get('streams', [])))
+            # Extract RTT statistics from streams if not already extracted from intervals
+            if result['mean_rtt_ms'] is None:
+                result.update(extract_rtt_from_streams(end.get('streams', [])))
 
     except json.JSONDecodeError as e:
         result['error'] = f"JSON parse error: {e}"
@@ -204,7 +248,8 @@ def aggregate_bidirectional_results(all_pods_data: List[Dict], topology: Dict[st
         initiator_node = pod_data.get('node_name', pod_data.get('name', 'unknown'))
         kubectl_output = pod_data.get('kubectl_output', '')
 
-        if not kubectl_output or '"end"' not in kubectl_output:
+        # Allow processing even if "end" is missing (partial results with errors)
+        if not kubectl_output or ('"start"' not in kubectl_output):
             continue
 
         # Get peers for this node and determine which tests it would initiate
@@ -221,9 +266,11 @@ def aggregate_bidirectional_results(all_pods_data: List[Dict], topology: Dict[st
         test_results = []
 
         for part in parts:
-            if '"end"' in part and '"start"' in part:
+            # Accept partial results with errors, as long as they have start section
+            if '"start"' in part:
                 result = parse_iperf3_json(part)
-                if not result['error']:
+                if (result['send_mbps'] > 0 or result['reverse_recv_mbps'] > 0 or 
+                    result['mean_rtt_ms'] is not None):
                     test_results.append(result)
 
         # Match results to peers and aggregate metrics

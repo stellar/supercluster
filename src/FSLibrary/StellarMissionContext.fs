@@ -130,4 +130,5 @@ type MissionContext =
       s3HistoryMirrorRegionPcV2: string
       benchmarkInfrastructure: bool option
       benchmarkInfrastructureOnly: bool option
-      benchmarkDurationSeconds: int option }
+      benchmarkDurationSeconds: int option
+      enableTcpTuning: bool }
