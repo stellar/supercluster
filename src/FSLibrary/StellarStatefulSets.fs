@@ -426,6 +426,81 @@ type StellarFormation with
         if List.exists (fun (peer: Peer) -> peer.IsLoadGenComplete() = Failure) loadGenPeers then
             failwith "Loadgen failed!"
 
+    // Deploys TCP tuning DaemonSets to configure node-level network settings.
+    //
+    // How it works:
+    // - DaemonSets run privileged containers on every node in the cluster
+    // - Containers modify kernel TCP parameters via sysctl commands
+    // - Settings persist at the node level even after DaemonSet deletion
+    // - All pods scheduled on tuned nodes benefit from the optimized settings
+    //
+    // After the run finishes, note that the settings remain permanently changed
+    // on those nodes, even for follow up runs. To account for this, we always
+    // set TCP settings at the start of the run, either to our optimized settings
+    // or Linux defaults.
+    //
+    // Scripts are stored in a ConfigMap and mounted into DaemonSet pods at /scripts/
+    member self.DeployTcpTuningDaemonSet() : unit =
+        let ns = self.NetworkCfg.NamespaceProperty
+
+        LogInfo "Creating TCP scripts ConfigMap..."
+        let configMap = BenchmarkDaemonSet.createTcpScriptsConfigMap self.NetworkCfg
+
+        self.Kube.CreateNamespacedConfigMap(body = configMap, namespaceParameter = ns)
+        |> ignore
+
+        self.NamespaceContent.Add(configMap)
+
+        // Determine which DaemonSet to deploy based on TCP tuning flag
+        let (daemonSetName, daemonSet, actionMsg) =
+            if not self.NetworkCfg.missionContext.enableTcpTuning then
+                LogInfo "Resetting TCP settings to defaults"
+                ("tcp-reset", BenchmarkDaemonSet.createTcpResetDaemonSet self.NetworkCfg, "reset")
+            else
+                LogInfo "Setting TCP settings for network performance"
+                ("tcp-tuning", BenchmarkDaemonSet.createTcpTuningDaemonSet self.NetworkCfg, "applied")
+
+        try
+            // Create and deploy the DaemonSet
+            let ds = self.Kube.CreateNamespacedDaemonSet(body = daemonSet, namespaceParameter = ns)
+            LogInfo "Created %s DaemonSet, waiting for settings to be %s..." daemonSetName actionMsg
+
+            // Wait for DaemonSet to be ready on all nodes
+            let mutable allReady = false
+            let mutable attempts = 0
+            let maxAttempts = if daemonSetName = "tcp-reset" then 20 else 30
+
+            while not allReady && attempts < maxAttempts do
+                System.Threading.Thread.Sleep(2000)
+                attempts <- attempts + 1
+
+                try
+                    let currentDs = self.Kube.ReadNamespacedDaemonSet(name = daemonSetName, namespaceParameter = ns)
+                    let desired = currentDs.Status.DesiredNumberScheduled
+                    let numReady = currentDs.Status.NumberReady
+                    LogInfo "%s DaemonSet: %d/%d nodes ready" daemonSetName numReady desired
+
+                    if desired > 0 && numReady = desired then
+                        allReady <- true
+                        LogInfo "TCP settings %s on all %d nodes" actionMsg desired
+                with ex -> LogWarn "Failed to check %s DaemonSet status: %s" daemonSetName ex.Message
+
+            if not allReady then
+                LogWarn "%s DaemonSet did not complete on all nodes within timeout" daemonSetName
+            else if daemonSetName = "tcp-tuning" then
+                // Give a bit more time for tuning settings to take effect
+                System.Threading.Thread.Sleep(3000)
+
+            // Delete the DaemonSet - settings will persist on nodes
+            try
+                self.Kube.DeleteNamespacedDaemonSet(name = daemonSetName, namespaceParameter = ns)
+                |> ignore
+            with ex ->
+                LogWarn "Failed to delete %s DaemonSet: %s" daemonSetName ex.Message
+                // Track it for cleanup if deletion failed
+                if daemonSetName = "tcp-tuning" then self.NamespaceContent.Add(ds)
+        with ex -> LogWarn "Failed to deploy %s DaemonSet: %s. TCP settings may be invalid" daemonSetName ex.Message
+
     // Runs a P2P network infrastructure benchmark that mirrors the stellar-core network topology.
     //
     // Architecture Overview:
@@ -565,7 +640,7 @@ type StellarFormation with
         successfulStatefulSets
         |> Map.iter
             (fun nodeName stsName ->
-                let shortName = BenchmarkDaemonSet.extractShortNameFromStellarCoreDns nodeName
+                let shortName = nodeName
 
                 let podName = sprintf "%s-0" stsName // StatefulSet pods have -0 suffix
 

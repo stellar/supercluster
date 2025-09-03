@@ -121,4 +121,5 @@ type MissionContext =
       runForMaxTps: string option
       benchmarkInfrastructure: bool option
       benchmarkInfrastructureOnly: bool option
-      benchmarkDurationSeconds: int option }
+      benchmarkDurationSeconds: int option
+      enableTcpTuning: bool }
