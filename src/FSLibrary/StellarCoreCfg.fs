@@ -233,8 +233,8 @@ type StellarCoreCfg =
         | Some "soroban" ->
             t.Add("TESTING_MAX_CLASSIC_BYTE_ALLOWANCE", 1024 * 1024 * 1) |> ignore
             t.Add("TESTING_MAX_SOROBAN_BYTE_ALLOWANCE", 1024 * 1024 * 9) |> ignore
-        | Some "classic-v22-compat" -> ()
-        | Some _ -> failwith "run-for-max-tps must be either classic, classic-v22-compat, or soroban"
+        | Some "classic-prev-version" -> ()
+        | Some _ -> failwith "run-for-max-tps must be either classic, classic-prev-version, or soroban"
         | None -> ()
 
         if self.skipHighCriticalValidatorChecks
@@ -372,7 +372,7 @@ type StellarCoreCfg =
             t.Add("BUCKETLIST_DB_PERSIST_INDEX", false) |> ignore
             t.Add("FLOOD_DEMAND_PERIOD_MS", 100) |> ignore
 
-            if mode <> "classic-v22-compat" then
+            if mode <> "classic-prev-version" then
                 t.Add("TRANSACTION_QUEUE_SIZE_MULTIPLIER_FOR_TESTING", 3) |> ignore
                 t.Add("SOROBAN_TRANSACTION_QUEUE_SIZE_MULTIPLIER_FOR_TESTING", 3) |> ignore
         | None -> ()
