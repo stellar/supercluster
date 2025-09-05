@@ -11,14 +11,14 @@ To run the test, first [set up an EKS cluster](eks.md). Accepting the default
 settings will produce a topology identical to what we use in our test setup.
 Then, run a `MaxTPSClassic` mission with the following template:
 ```bash
-dotnet run --project src/App/App.fsproj --configuration Release -- mission MaxTPSClassic --image=<core-image> --pubnet-data=<path-to-repo>/topologies/theoretical-max-tps.json --tx-rate=<min-tx-rate> --max-tx-rate=<max-tx-rate> --namespace default --ingress-internal-domain=<domain> --ingress-class=nginx --run-for-max-tps
+dotnet run --project src/App/App.fsproj --configuration Release -- mission MaxTPSClassic --image=<core-image> --pubnet-data=<path-to-repo>/topologies/theoretical-max-tps.json --tx-rate=<min-tx-rate> --max-tx-rate=<max-tx-rate> --namespace default --ingress-internal-domain=<domain> --ingress-class=nginx --run-for-max-tps=classic
 ```
 For more information about how to set the parameters in the above command, see
 [Measuring Transaction Throughput](measuring-transaction-throughput.md).
 
 At the end of the test you should see a line that looks like:
 ```
-Final tx rate averaged to <rate> over <runs> runs for image <core-image>
+Final tx rate: <rate> for image <core-image>
 ```
 
 Finally, don't forget to shut down your EKS cluster.
@@ -39,6 +39,9 @@ stellar-core release. The columns are as follows:
 
 | Core Version | Core Image | Core Compiler Flags | Core Configure Flags | Supercluster Commit | Extra Supercluster Options | Max TPS | Notes |
 |--------------|------------|---------------------|----------------------|---------------------|----------------------------|---------|-------|
+| 23.0.1 | `stellar/unsafe-stellar-core:23.0.2-2688.050eacf11.focal-tmtps-perftests` | `-ggdb -O3 -fstack-protector-strong` | | `d1c90850c6691b58f4d5a425ee2c57cfb14a790d` | `--run-for-max-tps=classic --enable-relaxed-auto-qset-config` | 2223 | Performance improvement partially due to increased configurability in testing infrastructure. |
+| 22.4.1 | `stellar/unsafe-stellar-core:23.0.2-2687.5d4528c33.focal-tmtps-perftests` | `-ggdb -O3 -fstack-protector-strong` | | `d1c90850c6691b58f4d5a425ee2c57cfb14a790d` | `--run-for-max-tps=classic-prev-version --enable-relaxed-auto-qset-config` | 2108 | |
+| 22.3.0 | `stellar/unsafe-stellar-core:23.0.2-2691.e643061a4.focal-tmtps-perftests` | `-ggdb -O3 -fstack-protector-strong` | | `d1c90850c6691b58f4d5a425ee2c57cfb14a790d` | `--run-for-max-tps=classic-prev-version --enable-relaxed-auto-qset-config` | 2089 | |
 | 22.3.0 | `stellar/unsafe-stellar-core:22.3.1-2490.e643061a4.focal-tmtps-perftests` | `-ggdb -O3 -fstack-protector-strong` | | `d9df3be5ec3ea6d7f18262c601b05c793eb2c63b` | `--run-for-max-tps --enable-relaxed-auto-qset-config` | 2032 | Performance improvement due to a combination of new stellar-core performance focused features, and testing methodology changes due to pregenerating transactions for load generation. See [release notes](https://github.com/stellar/stellar-core/releases/tag/v22.3.0) for more info. |
 | 22.2.0 | `stellar/unsafe-stellar-core:22.2.0-2361.e6c1f3bfc.focal-perftests` | `-ggdb -O3 -fstack-protector-strong` | `--enable-tracy --enable-tracy-capture --enable-tracy-csvexport` | `b49c0810f159e0305328e127057e1f6fc08a0524` | | 1079 | Performance improvement due to BucketList caching changes |
 | 22.1.0rc1 | `stellar/unsafe-stellar-core:22.1.0-2189.rc1.fdd833d57.focal-perftests` | `-ggdb -O3 -fstack-protector-strong` | `--enable-tracy --enable-tracy-capture --enable-tracy-csvexport` | | | 989 | Performance improvement due to [networking changes](https://github.com/stellar/stellar-core/pull/4544) |
