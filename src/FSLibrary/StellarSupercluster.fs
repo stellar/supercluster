@@ -108,10 +108,14 @@ let ConnectToCluster (cfgFile: string) (nsOpt: string option) : (Kubernetes * st
             (fun _ ->
                 match Seq.length ctxs with
                 | 1 ->
-                    let username = (Seq.exactlyOne ctxs).ContextDetails.User
-                    LogInfo "User is '%s'" username
-                    let users = cfgInit.Users |> Seq.where (fun (u: User) -> u.Name = username)
-                    Some(username, users)
+                    try
+                        let username = (Seq.exactlyOne ctxs).ContextDetails.User
+                        LogInfo "User is '%s'" username
+                        let users = cfgInit.Users |> Seq.where (fun (u: User) -> u.Name = username)
+                        Some(username, users)
+                    with
+                    | :? NullReferenceException -> None
+                    | :? ArgumentNullException -> None
                 | n ->
                     LogWarn "Could not determine user for ns '%s' (%d matching contexts found)" ns n
                     None)
@@ -130,30 +134,33 @@ let ConnectToCluster (cfgFile: string) (nsOpt: string option) : (Kubernetes * st
             (fun state ->
                 let username, users = state
                 let user = Seq.exactlyOne users
-                let provider = user.UserCredentials.AuthProvider
-                let authCfg = provider.Config
 
-                if provider.Name = "oidc" && authCfg.ContainsKey "refresh-token" then
-                    LogInfo "User has oidc auth with refresh-token"
+                try
+                    let provider = user.UserCredentials.AuthProvider
+                    let authCfg = provider.Config
 
-                    let initToken = if authCfg.ContainsKey "id-token" then Some(authCfg.Item "id-token") else None
+                    if provider.Name = "oidc" && authCfg.ContainsKey "refresh-token" then
+                        LogInfo "User has oidc auth with refresh-token"
 
-                    match runKubectl [ "config"; "set-credentials"; username; "--auth-provider-arg"; "id-token=" ] [] with
-                    | DidNotRun ->
-                        LogWarn "Failed to run kubectl"
+                        let initToken = if authCfg.ContainsKey "id-token" then Some(authCfg.Item "id-token") else None
+
+                        match runKubectl [ "config"; "set-credentials"; username; "--auth-provider-arg"; "id-token=" ] [] with
+                        | DidNotRun ->
+                            LogWarn "Failed to run kubectl"
+                            None
+                        | RanWithError code ->
+                            LogWarn "Ran, but got error code %d" code
+                            None
+                        | DidNotComplete killed ->
+                            LogWarn "kubectl failed to complete within one minute"
+                            if not killed then LogWarn "kubectl failed to be stopped"
+                            None
+                        | RanSuccess ->
+                            LogInfo "Reset oidc id-token"
+                            Some(username, initToken)
+                    else
                         None
-                    | RanWithError code ->
-                        LogWarn "Ran, but got error code %d" code
-                        None
-                    | DidNotComplete killed ->
-                        LogWarn "kubectl failed to complete within one minute"
-                        if not killed then LogWarn "kubectl failed to be stopped"
-                        None
-                    | RanSuccess ->
-                        LogInfo "Reset oidc id-token"
-                        Some(username, initToken)
-                else
-                    None)
+                with :? NullReferenceException -> None)
         // Attempt to refresh oidc id-token
         |> Option.bind
             (fun state ->
