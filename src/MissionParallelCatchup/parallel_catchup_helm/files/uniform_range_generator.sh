@@ -12,18 +12,34 @@ ledgersPerJob=$LEDGERS_PER_JOB
 overlapLedgers=$OVERLAP_LEDGERS
 startingLedger=$(echo "$STARTING_LEDGER" | awk '{printf "%d", $1}')
 endRange=$(echo "$LATEST_LEDGER_NUM" | awk '{printf "%d", $1}')
+ledgersToApply=$((ledgersPerJob + overlapLedgers));
 
-echo "Generating uniform ledger ranges from parameters 
+echo "$(date) Generating uniform ledger ranges from parameters
 ledgersPerJob=$ledgersPerJob,
 overlapLedgers=$overlapLedgers,
+ledgersToApply=$ledgersToApply,
 startingLedger=$startingLedger,
 endRange=$endRange"
 
+# Store redis commands in a file for bulk upload in a transaction
+CMD_FILE=redis_bulk_load
+echo "MULTI">$CMD_FILE  # Start redis transaction
 while [ "$endRange" -gt "$startingLedger" ]; do
-    ledgersToApply=$((ledgersPerJob + overlapLedgers));
     echo "${endRange}/${ledgersToApply}";
-    redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" RPUSH ranges "${endRange}/${ledgersToApply}";
+    echo "RPUSH ranges \"${endRange}/${ledgersToApply}\"">>$CMD_FILE
     endRange=$(( endRange - ledgersPerJob ));
-    # sleep for a short duration to avoid overloading the redis-cli connection
-    sleep 1
 done
+echo "EXEC">>$CMD_FILE  # Close redis transaction
+
+echo "$(date) Created file $CMD_FILE with $(wc -l $CMD_FILE) lines. Loading into redis"
+for i in $(seq 1 6);do
+    redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" <$CMD_FILE
+    if [ $? -eq 0 ]; then
+        break
+    else
+        echo "$(date) Error inserting data. Sleeping and retrying"
+        sleep 5
+    fi
+done
+
+echo "$(date) Finished generating ranges"

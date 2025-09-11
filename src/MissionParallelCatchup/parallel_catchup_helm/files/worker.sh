@@ -32,13 +32,12 @@ if [ -n "$JOB_KEY" ]; then
 
     if [ ! "$(/usr/bin/stellar-core --conf /config/stellar-core.cfg new-db --console&&
     /usr/bin/stellar-core --conf /config/stellar-core.cfg catchup "$JOB_KEY" --metric 'ledger.transaction.apply' --console)" ]; then
-    echo "Error processing job: $JOB_KEY"
-    redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" LPUSH "$FAILED_QUEUE" "$JOB_KEY|$POD_NAME" # enhance the entry with pod name for tracking
+        echo "Error processing job: $JOB_KEY"
+        QUEUE_COMMAND="LPUSH $FAILED_QUEUE \"$JOB_KEY|$POD_NAME\""  # enhance the entry with pod name for tracking
     else
-    echo "Successfully processed job: $JOB_KEY"
-    redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" LPUSH "$SUCCESS_QUEUE" "$JOB_KEY"
+        echo "Successfully processed job: $JOB_KEY"
+        QUEUE_COMMAND="LPUSH $SUCCESS_QUEUE \"$JOB_KEY\""
     fi
-    redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" LREM "$PROGRESS_QUEUE" -1 "$JOB_KEY"
 
     # Parse and extract the metrics from the log file
     LOG_FILE=$(ls -t $LOG_DIR/stellar-core*.log | head -n 1)
@@ -56,11 +55,26 @@ if [ -n "$JOB_KEY" ]; then
     DURATION=$((END_TIME - START_TIME))s
     echo "Finish processing job: $JOB_KEY, duration: $DURATION"
 
-    # push metrics
+    # Push metrics to redis in a transaction to ensure data consistency. Retry for 5min on failures
     core_id=$(echo "$POD_NAME" | grep -o '[0-9]\+')
-    redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" SADD "$METRICS" "$JOB_KEY|$core_id|$tx_apply_ms|$DURATION"
+    for i in $(seq 1 30);do
+        redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" <<EOF
+MULTI
+$QUEUE_COMMAND
+LREM "$PROGRESS_QUEUE" -1 "$JOB_KEY"
+SADD "$METRICS" "$JOB_KEY|$core_id|$tx_apply_ms|$DURATION"
+EXEC
+EOF
+        result=$?
+        if [ $result -ne 0 ]; then
+            echo "Redis transaction failed. Sleeping and retrying"
+            sleep 10
+        else
+            break
+        fi
+    done
 else
-    echo "No more jobs in the queue. Sleeping for $SLEEP_INTERVAL seconds..."
+    echo "$(date) No more jobs in the queue. Sleeping for $SLEEP_INTERVAL seconds..."
     sleep $SLEEP_INTERVAL
 fi
 done
