@@ -22,7 +22,7 @@ module PubnetData
 // distributions. We do not trim the transaction size or wasm size distributions
 // so that the overlay remains realistically stressed.
 
-// Use the `histogram-generator.py` script in the `scripts` directory of the
+// Use the `HistogramGenerator.py` script in the `scripts` directory of the
 // `stellar-core` repo to generate histograms from Hubble data.
 
 let pubnetApplyDuration =
@@ -63,6 +63,10 @@ let pubnetTxSizeBytes =
       (3228, 18)
       (3620, 2)
       (4012, 3) ]
+
+// Temporary default until the next time distributions are updated: 0 means we
+// won't add any additional padding
+let pubnetByteCounts = [ (0, 1) ]
 
 let pubnetWasmBytes =
     [ (3333, 296)

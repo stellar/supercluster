@@ -42,7 +42,6 @@ type LoadGenStatus =
 
 type LoadGenMode =
     | GeneratePaymentLoad
-    | GeneratePretendLoad
     | GenerateSorobanUploadLoad
     | SetupSorobanUpgrade
     | CreateSorobanUpgrade
@@ -55,7 +54,6 @@ type LoadGenMode =
     override self.ToString() =
         match self with
         | GeneratePaymentLoad -> "pay"
-        | GeneratePretendLoad -> "pretend"
         | GenerateSorobanUploadLoad -> "soroban_upload"
         | SetupSorobanUpgrade -> "upgrade_setup"
         | CreateSorobanUpgrade -> "create_upgrade"
@@ -267,18 +265,6 @@ type MissionContext with
     member self.GeneratePaymentLoad : LoadGen =
         { LoadGen.GetDefault() with
               mode = GeneratePaymentLoad
-              accounts = self.numAccounts
-              txs = self.numTxs
-              txrate = self.txRate
-              spikesize = self.spikeSize
-              spikeinterval = self.spikeInterval
-              offset = 0
-              maxfeerate = self.maxFeeRate
-              skiplowfeetxs = self.skipLowFeeTxs }
-
-    member self.GeneratePretendLoad : LoadGen =
-        { LoadGen.GetDefault() with
-              mode = GeneratePretendLoad
               accounts = self.numAccounts
               txs = self.numTxs
               txrate = self.txRate

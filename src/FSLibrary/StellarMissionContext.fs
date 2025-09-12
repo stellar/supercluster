@@ -72,7 +72,7 @@ type MissionContext =
       tier1Keys: string option
       maxConnections: int option
       fullyConnectTier1: bool
-      opCountDistribution: string option
+      byteCountDistribution: ((int * int) list)
       wasmBytesDistribution: ((int * int) list)
       dataEntriesDistribution: ((int * int) list)
       totalKiloBytesDistribution: ((int * int) list)

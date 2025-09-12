@@ -74,7 +74,8 @@ type MissionOptions
         tier1Keys: string option,
         maxConnections: int option,
         fullyConnectTier1: bool,
-        opCountDistribution: string option,
+        byteCountValues: seq<int>,
+        byteCountWeights: seq<int>,
         wasmBytesValues: seq<int>,
         wasmBytesWeights: seq<int>,
         dataEntriesValues: seq<int>,
@@ -296,10 +297,15 @@ type MissionOptions
              Default = false)>]
     member self.FullyConnectTier1 = fullyConnectTier1
 
-    [<Option("op-count-distribution",
-             HelpText = "Operation count distribution for SimulatePubnet. See csv-type-samples/sample-loadgen-op-count-distribution.csv for the format",
+    [<Option("byte-counts",
+             HelpText = "A space-separated list of sizes of classical transactions for MIX_CLASSIC_SOROBAN loadgen mode (See LOADGEN_BYTE_COUNT_FOR_TESTING)",
              Required = false)>]
-    member self.OpCountDistribution = opCountDistribution
+    member self.ByteCountValues = byteCountValues
+
+    [<Option("byte-count-weights",
+             HelpText = "A space-separated list indicating how often to select a certain size when generating classical transactions for MIX_CLASSIC_SOROBAN loadgen mode (See LOADGEN_BYTE_COUNT_DISTRIBUTION_FOR_TESTING)",
+             Required = false)>]
+    member self.ByteCountWeights = byteCountWeights
 
     [<Option("wasm-bytes",
              HelpText = "A space-separated list of sizes of wasm blobs for SOROBAN_UPLOAD and MIX_CLASSIC_SOROBAN loadgen modes (See LOADGEN_WASM_BYTES_FOR_TESTING)",
@@ -597,7 +603,7 @@ let main argv =
                   tier1Keys = None
                   maxConnections = None
                   fullyConnectTier1 = false
-                  opCountDistribution = None
+                  byteCountDistribution = []
                   wasmBytesDistribution = []
                   dataEntriesDistribution = []
                   totalKiloBytesDistribution = []
@@ -730,7 +736,8 @@ let main argv =
                                tier1Keys = mission.Tier1Keys
                                maxConnections = mission.MaxConnections
                                fullyConnectTier1 = mission.FullyConnectTier1
-                               opCountDistribution = mission.OpCountDistribution
+                               byteCountDistribution =
+                                   List.zip (List.ofSeq mission.ByteCountValues) (List.ofSeq mission.ByteCountWeights)
                                wasmBytesDistribution =
                                    List.zip (List.ofSeq mission.WasmBytesValues) (List.ofSeq mission.WasmBytesWeights)
                                dataEntriesDistribution =

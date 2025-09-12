@@ -33,7 +33,6 @@ open MissionProtocolUpgradePubnet
 open MissionProtocolUpgradeWithLoad
 open MissionDatabaseInplaceUpgrade
 open MissionAcceptanceUnitTests
-open MissionSimulatePubnet
 open MissionSlowNodesNetwork
 open MissionMaxTPSClassic
 open StellarMissionContext
@@ -82,7 +81,6 @@ let allMissions : Map<string, Mission> =
                  ("ProtocolUpgradeWithLoad", protocolUpgradeWithLoad)
                  ("DatabaseInplaceUpgrade", databaseInplaceUpgrade)
                  ("AcceptanceUnitTests", acceptanceUnitTests)
-                 ("SimulatePubnet", simulatePubnet)
                  ("SlowNodesNetwork", slowNodesNetwork)
                  ("MaxTPSClassic", maxTPSClassic)
                  ("SorobanLoadGeneration", sorobanLoadGeneration)

@@ -122,9 +122,6 @@ type CoreContainerType =
 [<Literal>]
 let cwd = __SOURCE_DIRECTORY__
 
-type Distribution =
-    CsvProvider<"csv-type-samples/sample-loadgen-op-count-distribution.csv", HasHeaders=true, ResolutionFolder=cwd>
-
 // Add a loadgen distribution to a TOML table.
 let distributionToToml (d: (int * int) list) (name: string) (t: TomlTable) : unit =
     match d with
@@ -322,20 +319,7 @@ type StellarCoreCfg =
                 System.ArgumentException "simulate-apply-weight and simulate-apply-duration must be defined together"
             )
 
-        if self.network.missionContext.opCountDistribution.IsSome then
-            // Read the content of the file specified by `opCountDistribution`
-            // and convert that into the config options.
-            let distribution =
-                seq {
-                    for row in Distribution.Load(self.network.missionContext.opCountDistribution.Value).Rows ->
-                        row.OpCount, row.Frequency
-                }
-
-            t.Add("LOADGEN_OP_COUNT_FOR_TESTING", distribution |> Seq.map fst) |> ignore
-
-            t.Add("LOADGEN_OP_COUNT_DISTRIBUTION_FOR_TESTING", distribution |> Seq.map snd)
-            |> ignore
-
+        distributionToToml self.network.missionContext.byteCountDistribution "BYTE_COUNT" t
         distributionToToml self.network.missionContext.wasmBytesDistribution "WASM_BYTES" t
         distributionToToml self.network.missionContext.dataEntriesDistribution "NUM_DATA_ENTRIES" t
         distributionToToml self.network.missionContext.totalKiloBytesDistribution "IO_KILOBYTES" t
