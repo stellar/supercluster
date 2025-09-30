@@ -69,21 +69,27 @@ let runCommand (command: string []) =
         LogError "Command execution failed: %s" ex.Message
         None
 
-// Helper functions to convert label/taint tuples to Helm-compatible format
-let requireNodeLabelToHelm ((key: string), (value: string option)) =
+// Helper functions to convert label/taint tuples to Helm-compatible format using indexed notation
+let requireNodeLabelToHelmIndexed (index: int) ((key: string), (value: string option)) =
     match value with
-    | None -> sprintf "{key: \"%s\", operator: Exists}" key
-    | Some v -> sprintf "{key: \"%s\", operator: In, values: [\"%s\"]}" key v
+    | None ->
+        sprintf "worker.requireNodeLabels[%d].key=%s,worker.requireNodeLabels[%d].operator=Exists" index key index
+    | Some v ->
+        sprintf "worker.requireNodeLabels[%d].key=%s,worker.requireNodeLabels[%d].operator=In,worker.requireNodeLabels[%d].values[0]=\"%s\"" index key index index v
 
-let avoidNodeLabelToHelm ((key: string), (value: string option)) =
+let avoidNodeLabelToHelmIndexed (index: int) ((key: string), (value: string option)) =
     match value with
-    | None -> sprintf "{key: \"%s\", operator: DoesNotExist}" key
-    | Some v -> sprintf "{key: \"%s\", operator: NotIn, values: [\"%s\"]}" key v
+    | None ->
+        sprintf "worker.avoidNodeLabels[%d].key=%s,worker.avoidNodeLabels[%d].operator=DoesNotExist" index key index
+    | Some v ->
+        sprintf "worker.avoidNodeLabels[%d].key=%s,worker.avoidNodeLabels[%d].operator=NotIn,worker.avoidNodeLabels[%d].values[0]=\"%s\"" index key index index v
 
-let tolerateTaintToHelm ((key: string), (value: string option)) =
+let tolerateTaintToHelmIndexed (index: int) ((key: string), (value: string option)) =
     match value with
-    | None -> sprintf "{key: \"%s\", operator: Exists}" key
-    | Some v -> sprintf "{key: \"%s\", operator: Equal, value: \"%s\"}" key v
+    | None ->
+        sprintf "worker.tolerateNodeTaints[%d].key=%s,worker.tolerateNodeTaints[%d].operator=Exists" index key index
+    | Some v ->
+        sprintf "worker.tolerateNodeTaints[%d].key=%s,worker.tolerateNodeTaints[%d].operator=Equal,worker.tolerateNodeTaints[%d].value=\"%s\"" index key index index v
 
 let installProject (context: MissionContext) =
     LogInfo "Installing Helm chart..."
@@ -152,16 +158,16 @@ let installProject (context: MissionContext) =
     setOptions.Add(sprintf "worker.unevenSched=%b" context.unevenSched)
 
     if not (List.isEmpty context.requireNodeLabelsPcV2) then
-        let requireLabelsHelm = "[" + String.concat "\\," (List.map requireNodeLabelToHelm context.requireNodeLabelsPcV2) + "]"
-        setOptions.Add(sprintf "worker.requireNodeLabels=%s" requireLabelsHelm)
+        let requireLabelsHelm = context.requireNodeLabelsPcV2 |> List.mapi requireNodeLabelToHelmIndexed |> String.concat ","
+        setOptions.Add(requireLabelsHelm)
 
     if not (List.isEmpty context.avoidNodeLabelsPcV2) then
-        let avoidLabelsHelm = "[" + String.concat "\\," (List.map avoidNodeLabelToHelm context.avoidNodeLabelsPcV2) + "]"
-        setOptions.Add(sprintf "worker.avoidNodeLabels=%s" avoidLabelsHelm)
+        let avoidLabelsHelm = context.avoidNodeLabelsPcV2 |> List.mapi avoidNodeLabelToHelmIndexed |> String.concat ","
+        setOptions.Add(avoidLabelsHelm)
 
     if not (List.isEmpty context.tolerateNodeTaintsPcV2) then
-        let tolerateTaintsHelm = "[" + String.concat "\\," (List.map tolerateTaintToHelm context.tolerateNodeTaintsPcV2) + "]"
-        setOptions.Add(sprintf "worker.tolerateNodeTaints=%s" tolerateTaintsHelm)
+        let tolerateTaintsHelm = context.tolerateNodeTaintsPcV2 |> List.mapi tolerateTaintToHelmIndexed |> String.concat ","
+        setOptions.Add(tolerateTaintsHelm)
 
     // comment out the line below when doing local testing
     Environment.SetEnvironmentVariable("KUBECONFIG", context.kubeCfg)
