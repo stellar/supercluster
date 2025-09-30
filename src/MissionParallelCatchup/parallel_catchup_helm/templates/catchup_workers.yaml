@@ -32,12 +32,32 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
             - matchExpressions:
+              {{- range .Values.worker.requireNodeLabels }}
+              - key: {{ .key }}
+                operator: {{ .operator }}
+                {{- with .values }}
+                values: {{ toJson . }}
+                {{- end }}
+              {{- end }}
+              {{- range .Values.worker.avoidNodeLabels }}
+              - key: {{ .key }}
+                operator: {{ .operator }}
+                {{- with .values }}
+                values: {{ toJson . }}
+                {{- end }}
+              {{- end }}
+              {{- if not .Values.worker.unevenSched }}
               - key: node-role.kubernetes.io/control-plane
                 operator: DoesNotExist
-              - key: purpose
-                operator: NotIn
-                values:
-                - ssc
+              {{- end }}
+      tolerations:
+      {{- range .Values.worker.tolerateNodeTaints }}
+      - key: {{ .key }}
+        operator: {{ .operator }}
+        {{- with .value }}
+        value: {{ . }}
+        {{- end }}
+      {{- end }}
       containers:
       - name: stellar-core
         image: {{ .Values.worker.stellar_core_image }}
@@ -80,6 +100,7 @@ spec:
           name: worker-script
       - emptyDir: {}
         name: data-volume
+      {{- if not .Values.worker.unevenSched }}
       topologySpreadConstraints:
       - labelSelector:
           matchLabels:
@@ -87,6 +108,7 @@ spec:
         maxSkew: 1
         topologyKey: kubernetes.io/hostname
         whenUnsatisfiable: DoNotSchedule
+      {{- end }}
 ---
 apiVersion: v1
 kind: ConfigMap

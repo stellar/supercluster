@@ -14,6 +14,10 @@ redis:
 worker:
   stellar_core_image: "stellar/stellar-core:latest"
   replicas: 5
+  unevenSched: false
+  requireNodeLabels: []
+  avoidNodeLabels: []
+  tolerateNodeTaints: []
   resources: # resources below are left empty on purpose, they are read and overridden from `StellarKubeCfg.fs`
     requests:
       cpu: ""

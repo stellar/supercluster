@@ -69,6 +69,22 @@ let runCommand (command: string []) =
         LogError "Command execution failed: %s" ex.Message
         None
 
+// Helper functions to convert label/taint tuples to Helm-compatible format
+let requireNodeLabelToHelm ((key: string), (value: string option)) =
+    match value with
+    | None -> sprintf "{key: \"%s\", operator: Exists}" key
+    | Some v -> sprintf "{key: \"%s\", operator: In, values: [\"%s\"]}" key v
+
+let avoidNodeLabelToHelm ((key: string), (value: string option)) =
+    match value with
+    | None -> sprintf "{key: \"%s\", operator: DoesNotExist}" key
+    | Some v -> sprintf "{key: \"%s\", operator: NotIn, values: [\"%s\"]}" key v
+
+let tolerateTaintToHelm ((key: string), (value: string option)) =
+    match value with
+    | None -> sprintf "{key: \"%s\", operator: Exists}" key
+    | Some v -> sprintf "{key: \"%s\", operator: Equal, value: \"%s\"}" key v
+
 let installProject (context: MissionContext) =
     LogInfo "Installing Helm chart..."
 
@@ -130,6 +146,22 @@ let installProject (context: MissionContext) =
     setOptions.Add(sprintf "monitor.hostname=%s" (jobMonitorHostName context))
     setOptions.Add(sprintf "monitor.path=/%s/(.*)" context.namespaceProperty)
     setOptions.Add(sprintf "monitor.logging_interval_seconds=%d" jobMonitorLoggingIntervalSecs)
+
+    // Convert labels and taints to Helm array format
+    // Only add these options if they are non-empty, otherwise use the default empty arrays from values.yaml
+    setOptions.Add(sprintf "worker.unevenSched=%b" context.unevenSched)
+
+    if not (List.isEmpty context.requireNodeLabelsPcV2) then
+        let requireLabelsHelm = "[" + String.concat "\\," (List.map requireNodeLabelToHelm context.requireNodeLabelsPcV2) + "]"
+        setOptions.Add(sprintf "worker.requireNodeLabels=%s" requireLabelsHelm)
+
+    if not (List.isEmpty context.avoidNodeLabelsPcV2) then
+        let avoidLabelsHelm = "[" + String.concat "\\," (List.map avoidNodeLabelToHelm context.avoidNodeLabelsPcV2) + "]"
+        setOptions.Add(sprintf "worker.avoidNodeLabels=%s" avoidLabelsHelm)
+
+    if not (List.isEmpty context.tolerateNodeTaintsPcV2) then
+        let tolerateTaintsHelm = "[" + String.concat "\\," (List.map tolerateTaintToHelm context.tolerateNodeTaintsPcV2) + "]"
+        setOptions.Add(sprintf "worker.tolerateNodeTaints=%s" tolerateTaintsHelm)
 
     // comment out the line below when doing local testing
     Environment.SetEnvironmentVariable("KUBECONFIG", context.kubeCfg)
