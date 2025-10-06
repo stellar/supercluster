@@ -114,6 +114,7 @@ type MissionOptions
         tag: string option,
         numPregeneratedTxs: int option,
         genesisTestAccountCount: int option,
+        asanOptions: string option,
         catchupSkipKnownResultsForTesting: bool option,
         checkEventsAreConsistentWithEntryDiffs: bool option,
         enableRelaxedAutoQsetConfig: bool,
@@ -490,6 +491,9 @@ type MissionOptions
              Required = false)>]
     member self.GenesisTestAccountCount = genesisTestAccountCount
 
+    [<Option("asan-options", HelpText = "Value for ASAN_OPTIONS environment variable", Required = false)>]
+    member self.asanOptions = asanOptions
+
     [<Option("catchup-skip-known-results-for-testing",
              HelpText = "when this flag is provided, pubnet parallel catchup workers will run with CATCHUP_SKIP_KNOWN_RESULTS_FOR_TESTING = true, resulting in skipping application of failed transaction and signature verification",
              Required = false)>]
@@ -637,6 +641,7 @@ let main argv =
                   tag = None
                   numPregeneratedTxs = None
                   genesisTestAccountCount = None
+                  asanOptions = None
                   enableTailLogging = true
                   catchupSkipKnownResultsForTesting = None
                   checkEventsAreConsistentWithEntryDiffs = None
@@ -788,6 +793,7 @@ let main argv =
                                checkEventsAreConsistentWithEntryDiffs = mission.CheckEventsAreConsistentWithEntryDiffs
                                updateSorobanCosts = None
                                genesisTestAccountCount = mission.GenesisTestAccountCount
+                               asanOptions = mission.asanOptions
                                enableRelaxedAutoQsetConfig = mission.EnableRelaxedAutoQsetConfig
                                jobMonitorExternalHost = mission.JobMonitorExternalHost
                                txBatchMaxSize = mission.TxBatchMaxSize

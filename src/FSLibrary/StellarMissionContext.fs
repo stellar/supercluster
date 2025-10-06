@@ -107,6 +107,8 @@ type MissionContext =
       pubnetParallelCatchupNumWorkers: int
       genesisTestAccountCount: int option
 
+      asanOptions: string option
+
       // Tail logging can cause the pubnet simulation missions like SorobanLoadGeneration
       // and SimulatePubnet to fail on the heartbeat handler due to what looks like a
       // server disconnection. Our solution for now is to just disable tail logging on
