@@ -524,13 +524,19 @@ type MissionOptions
              Required = false)>]
     member self.RunForMaxTps = runForMaxTps
 
-    [<Option("require-node-labels-pc-v2", HelpText = "Only run ParallelCatchupV2 workers on nodes with matching `key:value` labels", Required = false)>]
+    [<Option("require-node-labels-pc-v2",
+             HelpText = "Only run ParallelCatchupV2 workers on nodes with matching `key:value` labels",
+             Required = false)>]
     member self.RequireNodeLabelsPcV2 = requireNodeLabelsPcV2
 
-    [<Option("avoid-node-labels-pc-v2", HelpText = "Do not run ParallelCatchupV2 workers on nodes with matching `key:value` labels", Required = false)>]
+    [<Option("avoid-node-labels-pc-v2",
+             HelpText = "Do not run ParallelCatchupV2 workers on nodes with matching `key:value` labels",
+             Required = false)>]
     member self.AvoidNodeLabelsPcV2 = avoidNodeLabelsPcV2
 
-    [<Option("tolerate-node-taints-pc-v2", HelpText = "Allow ParallelCatchupV2 workers to run on nodes with matching taints (format: `key` or `key:effect`, effect defaults to NoSchedule)", Required = false)>]
+    [<Option("tolerate-node-taints-pc-v2",
+             HelpText = "Allow ParallelCatchupV2 workers to run on nodes with matching taints (format: `key` or `key:effect`, effect defaults to NoSchedule)",
+             Required = false)>]
     member self.TolerateNodeTaintsPcV2 = tolerateNodeTaintsPcV2
 
 let splitLabel (lab: string) : (string * string option) =
