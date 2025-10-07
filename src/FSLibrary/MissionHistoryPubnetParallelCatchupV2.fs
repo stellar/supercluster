@@ -72,17 +72,28 @@ let runCommand (command: string []) =
 // Helper functions to convert label/taint tuples to Helm-compatible format using indexed notation
 let requireNodeLabelToHelmIndexed (index: int) ((key: string), (value: string option)) =
     match value with
-    | None ->
-        sprintf "worker.requireNodeLabels[%d].key=%s,worker.requireNodeLabels[%d].operator=Exists" index key index
+    | None -> sprintf "worker.requireNodeLabels[%d].key=%s,worker.requireNodeLabels[%d].operator=Exists" index key index
     | Some v ->
-        sprintf "worker.requireNodeLabels[%d].key=%s,worker.requireNodeLabels[%d].operator=In,worker.requireNodeLabels[%d].values[0]=\"%s\"" index key index index v
+        sprintf
+            "worker.requireNodeLabels[%d].key=%s,worker.requireNodeLabels[%d].operator=In,worker.requireNodeLabels[%d].values[0]=\"%s\""
+            index
+            key
+            index
+            index
+            v
 
 let avoidNodeLabelToHelmIndexed (index: int) ((key: string), (value: string option)) =
     match value with
     | None ->
         sprintf "worker.avoidNodeLabels[%d].key=%s,worker.avoidNodeLabels[%d].operator=DoesNotExist" index key index
     | Some v ->
-        sprintf "worker.avoidNodeLabels[%d].key=%s,worker.avoidNodeLabels[%d].operator=NotIn,worker.avoidNodeLabels[%d].values[0]=\"%s\"" index key index index v
+        sprintf
+            "worker.avoidNodeLabels[%d].key=%s,worker.avoidNodeLabels[%d].operator=NotIn,worker.avoidNodeLabels[%d].values[0]=\"%s\""
+            index
+            key
+            index
+            index
+            v
 
 let tolerateTaintToHelmIndexed (index: int) ((key: string), (effect: string option)) =
     let effectValue = Option.defaultValue "NoSchedule" effect
@@ -152,15 +163,27 @@ let installProject (context: MissionContext) =
 
     // Convert labels and taints to Helm array format
     if not (List.isEmpty context.requireNodeLabelsPcV2) then
-        let requireLabelsHelm = context.requireNodeLabelsPcV2 |> List.mapi requireNodeLabelToHelmIndexed |> String.concat ","
+        let requireLabelsHelm =
+            context.requireNodeLabelsPcV2
+            |> List.mapi requireNodeLabelToHelmIndexed
+            |> String.concat ","
+
         setOptions.Add(requireLabelsHelm)
 
     if not (List.isEmpty context.avoidNodeLabelsPcV2) then
-        let avoidLabelsHelm = context.avoidNodeLabelsPcV2 |> List.mapi avoidNodeLabelToHelmIndexed |> String.concat ","
+        let avoidLabelsHelm =
+            context.avoidNodeLabelsPcV2
+            |> List.mapi avoidNodeLabelToHelmIndexed
+            |> String.concat ","
+
         setOptions.Add(avoidLabelsHelm)
 
     if not (List.isEmpty context.tolerateNodeTaintsPcV2) then
-        let tolerateTaintsHelm = context.tolerateNodeTaintsPcV2 |> List.mapi tolerateTaintToHelmIndexed |> String.concat ","
+        let tolerateTaintsHelm =
+            context.tolerateNodeTaintsPcV2
+            |> List.mapi tolerateTaintToHelmIndexed
+            |> String.concat ","
+
         setOptions.Add(tolerateTaintsHelm)
 
     // comment out the line below when doing local testing
