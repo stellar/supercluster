@@ -13,6 +13,7 @@ open StellarKubeSpecs
 open StellarNetworkCfg
 open StellarNetworkDelays
 open StellarCoreCfg
+open StellarMissionContext
 
 // Docker image for iperf3 - a tool for measuring network throughput and latency
 // We use it to run bidirectional P2P network performance tests between stellar-core nodes
@@ -137,7 +138,7 @@ let createBenchmarkStatefulSet
                 command = [| "/bin/sh" |],
                 args = [| "-c"; serverCommands + "\nwait" |],
                 ports = allPorts,
-                resources = SmallTestCoreResourceRequirements
+                resources = GetCoreResourceRequirements nCfg.missionContext.coreResources
             )
 
         // Client container
@@ -178,7 +179,7 @@ let createBenchmarkStatefulSet
                 command = [| "/bin/bash" |],
                 args = [| "-c"; clientScript |],
                 volumeMounts = [| V1VolumeMount(name = "results", mountPath = "/results") |],
-                resources = SmallTestCoreResourceRequirements
+                resources = GetCoreResourceRequirements nCfg.missionContext.coreResources
             )
 
         // Network delay container if needed
