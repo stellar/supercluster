@@ -18,6 +18,7 @@ metadata:
     app: stellar-core
 spec:
   serviceName: "stellar-core"
+  podManagementPolicy: Parallel
   replicas: {{ .Values.worker.replicas }}
   selector:
     matchLabels:
@@ -46,17 +47,10 @@ spec:
                 values: {{ toJson . }}
                 {{- end }}
               {{- end }}
-              {{- if not .Values.worker.unevenSched }}
-              - key: node-role.kubernetes.io/control-plane
-                operator: DoesNotExist
-              {{- end }}
       tolerations:
       {{- range .Values.worker.tolerateNodeTaints }}
       - key: {{ .key }}
-        operator: {{ .operator }}
-        {{- with .value }}
-        value: "{{ . }}"
-        {{- end }}
+        effect: {{ .effect }}
       {{- end }}
       containers:
       - name: stellar-core

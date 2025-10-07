@@ -84,12 +84,9 @@ let avoidNodeLabelToHelmIndexed (index: int) ((key: string), (value: string opti
     | Some v ->
         sprintf "worker.avoidNodeLabels[%d].key=%s,worker.avoidNodeLabels[%d].operator=NotIn,worker.avoidNodeLabels[%d].values[0]=\"%s\"" index key index index v
 
-let tolerateTaintToHelmIndexed (index: int) ((key: string), (value: string option)) =
-    match value with
-    | None ->
-        sprintf "worker.tolerateNodeTaints[%d].key=%s,worker.tolerateNodeTaints[%d].operator=Exists" index key index
-    | Some v ->
-        sprintf "worker.tolerateNodeTaints[%d].key=%s,worker.tolerateNodeTaints[%d].operator=Equal,worker.tolerateNodeTaints[%d].value=\"%s\"" index key index index v
+let tolerateTaintToHelmIndexed (index: int) ((key: string), (effect: string option)) =
+    let effectValue = Option.defaultValue "NoSchedule" effect
+    sprintf "worker.tolerateNodeTaints[%d].key=%s,worker.tolerateNodeTaints[%d].effect=%s" index key index effectValue
 
 let installProject (context: MissionContext) =
     LogInfo "Installing Helm chart..."
@@ -154,9 +151,6 @@ let installProject (context: MissionContext) =
     setOptions.Add(sprintf "monitor.logging_interval_seconds=%d" jobMonitorLoggingIntervalSecs)
 
     // Convert labels and taints to Helm array format
-    // Only add these options if they are non-empty, otherwise use the default empty arrays from values.yaml
-    setOptions.Add(sprintf "worker.unevenSched=%b" context.unevenSched)
-
     if not (List.isEmpty context.requireNodeLabelsPcV2) then
         let requireLabelsHelm = context.requireNodeLabelsPcV2 |> List.mapi requireNodeLabelToHelmIndexed |> String.concat ","
         setOptions.Add(requireLabelsHelm)
