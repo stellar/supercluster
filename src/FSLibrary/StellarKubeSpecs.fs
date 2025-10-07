@@ -265,6 +265,7 @@ let emptyDirDataVolumeSpec (c: CoreSetOptions option) : V1Volume =
 let CoreContainerForCommand
     (imageName: string)
     (configOpt: ConfigOption)
+    (asanOptions: string option)
     (cr: CoreResources)
     (command: string array)
     (initCommands: ShCmd array)
@@ -276,7 +277,10 @@ let CoreContainerForCommand
     let peerNameEnvVar = V1EnvVar(name = CfgVal.peerNameEnvVarName, valueFrom = peerNameEnvVarSource)
 
     let asanOptionsEnvVar =
-        V1EnvVar(name = CfgVal.asanOptionsEnvVarName, value = CfgVal.asanOptionsEnvVarValue)
+        V1EnvVar(
+            name = CfgVal.asanOptionsEnvVarName,
+            value = defaultArg asanOptions CfgVal.asanOptionsEnvVarDefaultValue
+        )
 
     let cfgWords = cfgFileArgs configOpt MainCoreContainer
     let containerName = CfgVal.stellarCoreContainerName (Array.get command 0)
@@ -638,13 +642,14 @@ type NetworkCfg with
         let dataVol = emptyDirDataVolumeSpec (self.jobCoreSetOptions)
 
         let res = self.missionContext.coreResources
+        let asan = self.missionContext.asanOptions
 
         let containers =
             match self.jobCoreSetOptions with
-            | None -> [| CoreContainerForCommand image cfgOpt res command [||] [| jobName |] |]
+            | None -> [| CoreContainerForCommand image cfgOpt asan res command [||] [| jobName |] |]
             | Some (opts) ->
                 let initCmds = self.getInitCommands cfgOpt opts
-                let coreContainer = CoreContainerForCommand image cfgOpt res command initCmds [| jobName |]
+                let coreContainer = CoreContainerForCommand image cfgOpt asan res command initCmds [| jobName |]
 
                 match opts.dbType with
                 | Postgres -> [| coreContainer; PostgresContainer self.missionContext.postgresImage |]
@@ -745,10 +750,11 @@ type NetworkCfg with
         let exportToPrometheus = self.missionContext.exportToPrometheus
 
         let res = self.missionContext.coreResources
+        let asan = self.missionContext.asanOptions
 
         let containers =
             [| WithProbes
-                (CoreContainerForCommand imageName cfgOpt res runCmd initCommands peerNames)
+                (CoreContainerForCommand imageName cfgOpt asan res runCmd initCommands peerNames)
                 self.missionContext.probeTimeout
                HistoryContainer self.missionContext.nginxImage |]
 

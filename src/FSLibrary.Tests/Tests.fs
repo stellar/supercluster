@@ -121,6 +121,7 @@ let ctx : MissionContext =
       checkEventsAreConsistentWithEntryDiffs = None
       updateSorobanCosts = None
       genesisTestAccountCount = None
+      asanOptions = None
       enableRelaxedAutoQsetConfig = false
       jobMonitorExternalHost = None
       txBatchMaxSize = None
