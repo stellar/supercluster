@@ -669,97 +669,189 @@ type StellarFormation with
         // The benchmark tests are already running in the client containers
         LogInfo "Benchmark tests running for %d seconds..." duration
 
-        // Wait for tests to complete, plus a little extra for writing results
-        System.Threading.Thread.Sleep((duration + 10) * 1000)
+        // Wait for tests to complete, plus some time for writing results.
+        let waitTime = duration + 20
+        LogInfo "Waiting %d seconds for tests to complete..." waitTime
+        System.Threading.Thread.Sleep(waitTime * 1000)
 
         // Collect results while pods are still running
         LogInfo "Collecting benchmark results from pods..."
 
         let testId = sprintf "benchmark-%s" (System.DateTime.UtcNow.ToString("yyyyMMdd-HHmmss"))
 
+        // Get all benchmark pods for this specific run. Make sure they all succeeded with non-zero exit codes
+        // and are still running so we can pull data from them.
+        let labelSelector = "app=network-benchmark"
+
+        let podList =
+            self.Kube.ListNamespacedPod(namespaceParameter = ns, labelSelector = labelSelector)
+
         let podDataList =
-            try
-                // Get all benchmark pods for this specific run
-                let labelSelector = "app=network-benchmark"
-
-                let podList =
-                    self.Kube.ListNamespacedPod(namespaceParameter = ns, labelSelector = labelSelector)
-
+            // First, report on failed pods
+            let failedPods =
                 podList.Items
+                |> Seq.filter (fun pod -> pod.Metadata.Name.StartsWith(sprintf "%s-benchmark-" runId))
                 |> Seq.filter
                     (fun pod ->
-                        // Only collect from pods belonging to this run
-                        pod.Metadata.Name.StartsWith(sprintf "%s-benchmark-" runId)
-                        &&
-                        // Try to collect from both Running and recently Succeeded pods
-                        (pod.Status.Phase = "Running" || pod.Status.Phase = "Succeeded"))
-                |> Seq.map
-                    (fun pod ->
-                        try
-                            let nodeName = BenchmarkDaemonSet.extractNodeNameFromBenchmarkPod pod.Metadata.Name topology
+                        match pod.Status.ContainerStatuses with
+                        | null -> false
+                        | statuses ->
+                            statuses
+                            |> Seq.exists
+                                (fun cs ->
+                                    cs.Name = "client"
+                                    && cs.State.Terminated <> null
+                                    && cs.State.Terminated.ExitCode <> 0))
+                |> Seq.toList
 
-                            // Get logs from the client container
-                            let logs =
-                                try
-                                    let logStream =
-                                        self.Kube.ReadNamespacedPodLog(
-                                            name = pod.Metadata.Name,
-                                            namespaceParameter = ns,
-                                            container = "client"
-                                        )
+            if not (List.isEmpty failedPods) then
+                LogError "The following benchmark pods failed with non-zero exit codes:"
 
-                                    use reader = new System.IO.StreamReader(logStream)
-                                    reader.ReadToEnd()
-                                with ex ->
-                                    LogWarn "Failed to get logs from %s: %s" pod.Metadata.Name ex.Message
-                                    ""
+                for pod in failedPods do
+                    let clientStatus = pod.Status.ContainerStatuses |> Seq.tryFind (fun cs -> cs.Name = "client")
 
-                            // Use kubectl exec to get the raw iperf3 JSON files from the pod
-                            let kubectlOutput =
-                                try
-                                    let processInfo = System.Diagnostics.ProcessStartInfo()
-                                    processInfo.FileName <- "kubectl"
+                    match clientStatus with
+                    | Some cs when cs.State.Terminated <> null ->
+                        LogError
+                            "  - %s: exit code %d (reason: %s)"
+                            pod.Metadata.Name
+                            cs.State.Terminated.ExitCode
+                            (if cs.State.Terminated.Reason <> null then
+                                 cs.State.Terminated.Reason
+                             else
+                                 "unknown")
+                    | _ -> LogError "  - %s: unknown failure" pod.Metadata.Name
 
-                                    processInfo.Arguments <-
-                                        sprintf
-                                            "exec %s -n %s -c client -- sh -c \"cat /results/*.json 2>/dev/null\""
-                                            pod.Metadata.Name
-                                            ns
+            podList.Items
+            |> Seq.filter
+                (fun pod ->
+                    // Only collect from pods belonging to this run
+                    let belongsToRun = pod.Metadata.Name.StartsWith(sprintf "%s-benchmark-" runId)
 
-                                    processInfo.UseShellExecute <- false
-                                    processInfo.RedirectStandardOutput <- true
-                                    processInfo.RedirectStandardError <- true
+                    if not belongsToRun then
+                        false
+                    else
+                        let clientContainerReady =
+                            match pod.Status.ContainerStatuses with
+                            | null ->
+                                LogDebug "  Pod %s: No container statuses available" pod.Metadata.Name
+                                false
+                            | statuses ->
+                                match statuses |> Seq.tryFind (fun cs -> cs.Name = "client") with
+                                | None ->
+                                    LogDebug "  Pod %s: No 'client' container found" pod.Metadata.Name
+                                    false
+                                | Some cs ->
+                                    // Since we use sleep infinity, container should be running
+                                    let isRunning = cs.State.Running <> null
+                                    let isReady = cs.Ready
+                                    isRunning // Container must be running
 
-                                    use proc = System.Diagnostics.Process.Start(processInfo)
-                                    let output = proc.StandardOutput.ReadToEnd()
-                                    let stderr = proc.StandardError.ReadToEnd()
-                                    proc.WaitForExit()
+                        clientContainerReady)
+            |> Seq.choose
+                (fun pod ->
+                    let nodeName = BenchmarkDaemonSet.extractNodeNameFromBenchmarkPod pod.Metadata.Name topology
 
-                                    if proc.ExitCode <> 0 then
-                                        LogDebug "kubectl exec failed for pod %s: %s" pod.Metadata.Name stderr
-                                        ""
-                                    else
-                                        output // Return raw kubectl output
-                                with ex ->
-                                    LogDebug "Failed to exec into pod %s: %s" pod.Metadata.Name ex.Message
-                                    ""
+                    // Get logs from the client container
+                    let logs =
+                        let logStream =
+                            self.Kube.ReadNamespacedPodLog(
+                                name = pod.Metadata.Name,
+                                namespaceParameter = ns,
+                                container = "client"
+                            )
 
+                        use reader = new System.IO.StreamReader(logStream)
+                        reader.ReadToEnd()
+
+                    // First check if the tests completed successfully by reading the exit code
+                    let testsSucceeded =
+                        let processInfo = System.Diagnostics.ProcessStartInfo()
+                        processInfo.FileName <- "kubectl"
+                        processInfo.WorkingDirectory <- "/"
+
+                        processInfo.Arguments <-
+                            sprintf
+                                "exec %s -n %s -c client -- sh -c \"cat /results/exit_code 2>/dev/null\""
+                                pod.Metadata.Name
+                                ns
+
+                        processInfo.UseShellExecute <- false
+                        processInfo.RedirectStandardOutput <- true
+                        processInfo.RedirectStandardError <- true
+
+                        use proc = System.Diagnostics.Process.Start(processInfo)
+                        let output = proc.StandardOutput.ReadToEnd().Trim()
+                        let stderr = proc.StandardError.ReadToEnd()
+                        proc.WaitForExit()
+
+                        if proc.ExitCode <> 0 then
+                            LogError
+                                "Pod %s: Cannot read exit_code file (kubectl exit code %d): %s"
+                                pod.Metadata.Name
+                                proc.ExitCode
+                                stderr
+
+                            false
+                        else if output = "" then
+                            LogError "Pod %s: exit_code file is empty or doesn't exist yet" pod.Metadata.Name
+                            false
+                        else if output = "0" then
+                            true
+                        else
+                            LogError "Pod %s: Tests failed with exit_code=%s" pod.Metadata.Name output
+                            false
+
+                    if not testsSucceeded then
+                        failwithf "Pod %s: Tests failed or incomplete, aborting benchmark" pod.Metadata.Name
+                    else
+                        // Use kubectl exec to get the raw iperf3 JSON files from the pod
+                        let kubectlOutput =
+                            let processInfo = System.Diagnostics.ProcessStartInfo()
+                            processInfo.FileName <- "kubectl"
+                            processInfo.WorkingDirectory <- "/"
+
+                            processInfo.Arguments <-
+                                sprintf
+                                    "exec %s -n %s -c client -- sh -c \"cat /results/*.json 2>/dev/null\""
+                                    pod.Metadata.Name
+                                    ns
+
+                            processInfo.UseShellExecute <- false
+                            processInfo.RedirectStandardOutput <- true
+                            processInfo.RedirectStandardError <- true
+
+                            use proc = System.Diagnostics.Process.Start(processInfo)
+                            let output = proc.StandardOutput.ReadToEnd()
+                            let stderr = proc.StandardError.ReadToEnd()
+                            proc.WaitForExit()
+
+                            if proc.ExitCode <> 0 then
+                                // Check if it's the "container not found" error, which means the container already terminated
+                                if stderr.Contains("container not found") then
+                                    failwithf
+                                        "Cannot retrieve results from terminated container in pod %s"
+                                        pod.Metadata.Name
+                                else
+                                    failwithf
+                                        "Failed to retrieve results from pod %s (kubectl exec failed): %s"
+                                        pod.Metadata.Name
+                                        stderr
+                            else if String.IsNullOrWhiteSpace(output) then
+                                failwithf "No benchmark results found in pod %s (empty output)" pod.Metadata.Name
+                            else
+                                Some output // Return raw kubectl output
+
+                        match kubectlOutput with
+                        | None -> failwith "Failed to retrieve kubectl output"
+                        | Some output ->
                             // Return pod data for Python processing
-                            {| name = pod.Metadata.Name
-                               node_name = nodeName
-                               logs = logs
-                               kubectl_output = kubectlOutput |}
-                        with ex ->
-                            LogWarn "Failed to collect data from pod %s: %s" pod.Metadata.Name ex.Message
-
-                            {| name = pod.Metadata.Name
-                               node_name = "unknown"
-                               logs = ""
-                               kubectl_output = "" |})
-                |> Array.ofSeq
-            with ex ->
-                LogError "Failed to collect benchmark data: %s" ex.Message
-                [||]
+                            Some
+                                {| name = pod.Metadata.Name
+                                   node_name = nodeName
+                                   logs = logs
+                                   kubectl_output = output |})
+            |> Array.ofSeq
 
         // Now process the results using Python script
         LogInfo "Processing benchmark results..."

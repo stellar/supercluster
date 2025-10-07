@@ -31,7 +31,8 @@ sleep 10
 # Parse peer list
 IFS=',' read -ra PEER_ARRAY <<< "$PEERS"
 
-# Run iperf3 clients for each peer
+# Run iperf3 clients for each peer in parallel
+pids=()
 for PEER_DNS in "${PEER_ARRAY[@]}"; do
     if [ -z "$PEER_DNS" ]; then continue; fi
 
@@ -54,15 +55,73 @@ for PEER_DNS in "${PEER_ARRAY[@]}"; do
 
     echo "Testing to $PEER_DNS_NAME on port $SEND_PORT"
 
-    # Run bidirectional test
-    iperf3 -c $PEER_DNS_NAME \
-           -p $SEND_PORT \
-           -t $DURATION \
-           --bidir \
-           -J > /results/result-$PEER_SHORT-bidir.json 2>&1
+    # Run bidirectional test in background (1 stream per peer, matching actual simulation)
+    # Add 15 second grace period to timeout to account for connection setup and completion
+    # Limit bandwidth to 300Mbps per direction to realistically simulate stellar-core.
+    (
+        timeout $((DURATION + 15)) iperf3 -c $PEER_DNS_NAME \
+               -p $SEND_PORT \
+               -t $DURATION \
+               -b 300M \
+               --bidir \
+               -J > /results/result-$PEER_SHORT-bidir.json 2>&1
+        iperf_exit_code=$?
+        if [ $iperf_exit_code -eq 0 ]; then
+            echo "Completed test to $PEER_SHORT successfully"
+        elif [ $iperf_exit_code -eq 124 ]; then
+            echo "ERROR: Test to $PEER_SHORT timed out (exceeded $((DURATION + 10))s)"
+            exit 124
+        else
+            echo "ERROR: Test to $PEER_SHORT failed with code $iperf_exit_code"
+            exit $iperf_exit_code
+        fi
+    ) &
 
-    echo "Completed test to $PEER_SHORT"
+    pids+=($!)
 done
 
-echo "All tests completed"
+echo "Waiting for all ${#pids[@]} parallel tests to complete..."
+exit_code=0
+failed_tests=()
+successful_tests=0
+
+for i in "${!pids[@]}"; do
+    pid="${pids[$i]}"
+
+    if wait $pid; then
+        successful_tests=$((successful_tests + 1))
+        echo "✓ Test completed successfully (PID: $pid)"
+    else
+        test_exit_code=$?
+        exit_code=1
+        failed_tests+=("PID $pid failed with code $test_exit_code")
+        echo "✗ Test failed (PID: $pid, exit code: $test_exit_code)"
+    fi
+done
+
+echo "================================"
+echo "Benchmark Summary:"
+echo "  Total tests: ${#pids[@]}"
+echo "  Successful: $successful_tests"
+echo "  Failed: ${#failed_tests[@]}"
+if [ ${#failed_tests[@]} -gt 0 ]; then
+    echo "  Failed tests:"
+    for failure in "${failed_tests[@]}"; do
+        echo "    - $failure"
+    done
+fi
+echo "================================"
+
+# Write exit code to a file so the orchestrator can check it
+echo "$exit_code" > /results/exit_code
+
+if [ $exit_code -ne 0 ]; then
+    echo "ERROR: Some iperf3 tests failed. Exit code: $exit_code"
+    echo "Container will remain alive for result collection..."
+else
+    echo "All tests completed successfully"
+fi
+
+# Always keep container alive for result collection
+echo "Keeping container alive for result collection..."
 sleep infinity
