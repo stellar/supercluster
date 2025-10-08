@@ -4,15 +4,13 @@
 
 module BenchmarkDaemonSet
 
-open k8s
 open k8s.Models
 open System
 open System.Collections.Generic
-open Logging
+open ScriptUtils
 open StellarKubeSpecs
 open StellarNetworkCfg
 open StellarNetworkDelays
-open StellarCoreCfg
 open StellarMissionContext
 
 // Docker image for iperf3 - a tool for measuring network throughput and latency
@@ -157,9 +155,7 @@ let createBenchmarkStatefulSet
             let peerList = String.Join(",", benchmarkPeers)
 
             let clientScriptTemplate =
-                let scriptPath =
-                    System.IO.Path.Combine(__SOURCE_DIRECTORY__, "..", "scripts", "start-benchmark-client.sh")
-
+                let scriptPath = GetScriptPath "start-benchmark-client.sh"
                 System.IO.File.ReadAllText(scriptPath)
 
             let clientScript =
@@ -259,15 +255,13 @@ let createBenchmarkStatefulSet
         spec = statefulSetSpec
     )
 
-// ConfigMap containing TCP tuning scripts from src/scripts directory
-let createTcpScriptsConfigMap (nCfg: NetworkCfg) : V1ConfigMap =
-    let scriptsPath = System.IO.Path.Combine(__SOURCE_DIRECTORY__, "../scripts")
+// ConfigMap containing TCP tuning script
+let createTcpTuningConfigMap (nCfg: NetworkCfg) : V1ConfigMap =
+    let scriptPath = GetScriptPath "tcp-tune.sh"
 
     V1ConfigMap(
-        metadata = V1ObjectMeta(name = "tcp-scripts", namespaceProperty = nCfg.NamespaceProperty),
-        data =
-            dict [ ("tcp-tune.sh", System.IO.File.ReadAllText(System.IO.Path.Combine(scriptsPath, "tcp-tune.sh")))
-                   ("tcp-reset.sh", System.IO.File.ReadAllText(System.IO.Path.Combine(scriptsPath, "tcp-reset.sh"))) ]
+        metadata = V1ObjectMeta(name = "tcp-tuning-script", namespaceProperty = nCfg.NamespaceProperty),
+        data = dict [ ("tcp-tune.sh", System.IO.File.ReadAllText(scriptPath)) ]
     )
 
 let private createTcpDaemonSet
@@ -296,7 +290,7 @@ let private createTcpDaemonSet
                                            args = [| sprintf "/scripts/%s" scriptName; "--daemon" |],
                                            volumeMounts =
                                                [| V1VolumeMount(
-                                                      name = "tcp-scripts",
+                                                      name = "tcp-tuning-script",
                                                       mountPath = "/scripts",
                                                       readOnlyProperty = System.Nullable<bool>(true)
                                                   ) |],
@@ -317,10 +311,10 @@ let private createTcpDaemonSet
                                        ) |],
                                 volumes =
                                     [| V1Volume(
-                                           name = "tcp-scripts",
+                                           name = "tcp-tuning-script",
                                            configMap =
                                                V1ConfigMapVolumeSource(
-                                                   name = "tcp-scripts",
+                                                   name = "tcp-tuning-script",
                                                    defaultMode = System.Nullable<int>(0o755)
                                                )
                                        ) |],
@@ -329,15 +323,6 @@ let private createTcpDaemonSet
                     )
             )
     )
-
-// DaemonSet to reset TCP settings to defaults
-let createTcpResetDaemonSet (nCfg: NetworkCfg) : V1DaemonSet =
-    createTcpDaemonSet
-        "tcp-reset"
-        "tcp-reset.sh"
-        (dict [ ("app", "tcp-reset")
-                ("component", "network-reset") ])
-        nCfg
 
 // DaemonSet to apply TCP performance tuning
 let createTcpTuningDaemonSet (nCfg: NetworkCfg) : V1DaemonSet =

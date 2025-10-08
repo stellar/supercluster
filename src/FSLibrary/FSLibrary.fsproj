@@ -9,6 +9,7 @@
   <ItemGroup>
     <Compile Include="PubnetData.fs" />
     <Compile Include="Logging.fs" />
+    <Compile Include="ScriptUtils.fs" />
     <Compile Include="ApiRateLimit.fs" />
     <Compile Include="PollRetry.fs" />
     <Compile Include="StellarShellCmd.fs" />
@@ -90,5 +91,15 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\CSLibrary\CSLibrary.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\scripts\**\*.sh">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>scripts\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Content>
+    <Content Include="..\scripts\**\*.py">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>scripts\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Content>
   </ItemGroup>
 </Project>
