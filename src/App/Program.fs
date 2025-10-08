@@ -98,10 +98,10 @@ type MissionOptions
         enableInMemoryBuckets: bool,
         peerFloodCapacity: int option,
         peerFloodCapacityBytes: int option,
-        flowControlSendMoreBatchSizeBytes: int option,
-        outboundByteLimit: int option,
         sleepMainThread: int option,
         flowControlSendMoreBatchSize: int option,
+        flowControlSendMoreBatchSizeBytes: int option,
+        outboundByteLimit: int option,
         simulateApplyDuration: seq<string>,
         simulateApplyWeight: seq<string>,
         networkSizeLimit: int,
@@ -124,9 +124,6 @@ type MissionOptions
         requireNodeLabelsPcV2: seq<string>,
         avoidNodeLabelsPcV2: seq<string>,
         tolerateNodeTaintsPcV2: seq<string>,
-        benchmarkInfrastructure: bool option,
-        benchmarkOnly: bool option,
-        benchmarkDurationSeconds: int option,
         benchmarkInfrastructure: bool,
         benchmarkOnly: bool,
         benchmarkDurationSeconds: int,
@@ -702,9 +699,9 @@ let main argv =
                   requireNodeLabelsPcV2 = []
                   avoidNodeLabelsPcV2 = []
                   tolerateNodeTaintsPcV2 = []
-                  benchmarkInfrastructure = None
-                  benchmarkInfrastructureOnly = None
-                  benchmarkDurationSeconds = None
+                  benchmarkInfrastructure = Some false
+                  benchmarkInfrastructureOnly = Some false
+                  benchmarkDurationSeconds = Some 30
                   enableTcpTuning = false }
 
             let nCfg = MakeNetworkCfg ctx [] None
@@ -757,8 +754,9 @@ let main argv =
 
                      try
                          // Validate benchmark flag combinations
-                         if mission.BenchmarkOnly && not mission.BenchmarkInfrastructure then
-                             failwith "Error: --benchmark-only requires --benchmark-infra to be set"
+                         match mission.BenchmarkOnly, mission.BenchmarkInfrastructure with
+                         | true, false -> failwith "Error: --benchmark-only requires --benchmark-infra to be set"
+                         | _ -> ()
 
                          let missionContext =
                              { MissionContext.kube = kube
@@ -861,9 +859,6 @@ let main argv =
                                requireNodeLabelsPcV2 = List.map splitLabel (List.ofSeq mission.RequireNodeLabelsPcV2)
                                avoidNodeLabelsPcV2 = List.map splitLabel (List.ofSeq mission.AvoidNodeLabelsPcV2)
                                tolerateNodeTaintsPcV2 = List.map splitLabel (List.ofSeq mission.TolerateNodeTaintsPcV2)
-                               benchmarkInfrastructure = mission.BenchmarkInfrastructure
-                               benchmarkInfrastructureOnly = mission.BenchmarkOnly
-                               benchmarkDurationSeconds = mission.BenchmarkDurationSeconds
                                benchmarkInfrastructure = Some mission.BenchmarkInfrastructure
                                benchmarkInfrastructureOnly = Some mission.BenchmarkOnly
                                benchmarkDurationSeconds = Some mission.BenchmarkDurationSeconds

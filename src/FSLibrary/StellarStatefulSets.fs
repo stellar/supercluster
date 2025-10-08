@@ -519,31 +519,16 @@ type StellarFormation with
     // Results Collection:
     // - After tests complete, collects logs and raw iperf3 JSON results from all pods
     // - parse_benchmark_results.py creates and writes a results summary file
-    member self.RunP2PNetworkBenchmark() : unit =
-        assert (self.NetworkCfg.missionContext.benchmarkInfrastructure.IsSome)
 
-        LogInfo "==============================================="
-        LogInfo "Starting P2P Network Infrastructure Benchmark"
-        LogInfo "==============================================="
-
-        let ns = self.NetworkCfg.NamespaceProperty
-        let apiRateLimit = self.NetworkCfg.missionContext.apiRateLimit
-        let runId = sprintf "ssc-%xz" (System.Random().Next(0x10000))
-
-        // Extract peer topology
+    // Helper function to setup network topology and create node index mappings
+    member private self.SetupBenchmarkTopology() =
         let topology = extractPeerTopology self.NetworkCfg
         let avgPeerCount = getAveragePeerCount topology
 
         LogInfo "Network topology: %d nodes, average %.1f peers per node" (Map.count topology) avgPeerCount
-        LogInfo "Using run ID: %s" runId
-
-        // Deploy iperf3 servers for each node
-        LogInfo "Deploying iperf3 servers using StatefulSets..."
 
         // Create a global index for all nodes
         // Maps each node name to a unique integer (0 to N-1) used for port assignment
-        // Each client connects to peers using port = 5201 + source_node_index
-        // Every connection has a unique port to make make collision avoidance easy
         let globalNodeIndex =
             topology
             |> Map.toArray
@@ -561,17 +546,26 @@ type StellarFormation with
                     targetPeerDnsNames
                     |> Array.map
                         (fun targetDns ->
-                            // Extract pod name from DNS name (e.g., "ssc-xxx-sts-bd-0" from "ssc-xxx-sts-bd-0.garand.svc.cluster.local")
                             let targetPodName = targetDns.Split('.').[0]
                             (targetPodName, sourceName)))
             |> Array.groupBy fst
             |> Array.map (fun (target, sources) -> (target, sources |> Array.map snd))
             |> Map.ofArray
 
-        let duration = self.NetworkCfg.missionContext.benchmarkDurationSeconds.Value
+        (topology, globalNodeIndex, reverseTopology, avgPeerCount)
 
-        // We need to mirror the stellar-core topology exactly here for accurate testing.
-        // First, spin up a single headless service for DNS.
+    member private self.CreateBenchmarkStatefulSets
+        (
+            runId: string,
+            topology: Map<string, string []>,
+            globalNodeIndex: Map<string, int>,
+            reverseTopology: Map<string, string []>,
+            duration: int
+        ) =
+        let ns = self.NetworkCfg.NamespaceProperty
+        let apiRateLimit = self.NetworkCfg.missionContext.apiRateLimit
+
+        // Create headless service for DNS
         LogInfo "Creating headless service for benchmark StatefulSets..."
         let headlessService = BenchmarkDaemonSet.createBenchmarkHeadlessService self.NetworkCfg runId
 
@@ -627,27 +621,26 @@ type StellarFormation with
                         (nodeName, sts.Metadata.Name)
                     with ex -> failwithf "Failed to create StatefulSet for %s: %s" nodeName ex.Message)
 
-        // All StatefulSets created successfully (or we would have failed above)
         let successfulStatefulSets = statefulSetDeployments |> Map.ofArray
         let totalCreated = Map.count successfulStatefulSets
-
-        LogInfo "All %d StatefulSets created successfully. Waiting for pods to be ready..." totalCreated
-
-        // Wait for pods to be ready.
+        LogInfo "All %d StatefulSets created successfully." totalCreated
         successfulStatefulSets
+
+    member private self.WaitForBenchmarkPodsReady(statefulSets: Map<string, string>) =
+        let ns = self.NetworkCfg.NamespaceProperty
+        LogInfo "Waiting for pods to be ready..."
+
+        statefulSets
         |> Map.iter
             (fun nodeName stsName ->
-                let shortName = nodeName
-
                 let podName = sprintf "%s-0" stsName // StatefulSet pods have -0 suffix
-
                 let mutable ready = false
                 let mutable attempts = 0
 
                 while not ready && attempts < 30 do
                     try
                         let pod = self.Kube.ReadNamespacedPod(name = podName, namespaceParameter = ns)
-                        // Check if all containers are ready
+
                         if pod.Status.Phase = "Running"
                            && pod.Status.ContainerStatuses <> null
                            && pod.Status.ContainerStatuses |> Seq.forall (fun cs -> cs.Ready) then
@@ -663,88 +656,67 @@ type StellarFormation with
                 if not ready then
                     LogWarn "Pod %s failed to become ready after %d attempts" podName attempts)
 
-        // The benchmark tests are already running in the client containers
-        LogInfo "Benchmark tests running for %d seconds..." duration
-
-        // Wait for tests to complete, plus some time for writing results.
-        let waitTime = duration + 20
-        LogInfo "Waiting %d seconds for tests to complete..." waitTime
-        System.Threading.Thread.Sleep(waitTime * 1000)
-
-        // Collect results while pods are still running
-        LogInfo "Collecting benchmark results from pods..."
-
+    member private self.CollectBenchmarkResults(runId: string, topology: Map<string, string []>, duration: int) =
+        let ns = self.NetworkCfg.NamespaceProperty
         let testId = sprintf "benchmark-%s" (System.DateTime.UtcNow.ToString("yyyyMMdd-HHmmss"))
 
-        // Get all benchmark pods for this specific run. Make sure they all succeeded with non-zero exit codes
-        // and are still running so we can pull data from them.
+        LogInfo "Collecting benchmark results from pods..."
+
+        // Get all benchmark pods for this specific run
         let labelSelector = "app=network-benchmark"
 
         let podList =
             self.Kube.ListNamespacedPod(namespaceParameter = ns, labelSelector = labelSelector)
 
-        let podDataList =
-            // First, report on failed pods
-            let failedPods =
-                podList.Items
-                |> Seq.filter (fun pod -> pod.Metadata.Name.StartsWith(sprintf "%s-benchmark-" runId))
-                |> Seq.filter
-                    (fun pod ->
-                        match pod.Status.ContainerStatuses with
-                        | null -> false
-                        | statuses ->
-                            statuses
-                            |> Seq.exists
-                                (fun cs ->
-                                    cs.Name = "client"
-                                    && cs.State.Terminated <> null
-                                    && cs.State.Terminated.ExitCode <> 0))
-                |> Seq.toList
-
-            if not (List.isEmpty failedPods) then
-                LogError "The following benchmark pods failed with non-zero exit codes:"
-
-                for pod in failedPods do
-                    let clientStatus = pod.Status.ContainerStatuses |> Seq.tryFind (fun cs -> cs.Name = "client")
-
-                    match clientStatus with
-                    | Some cs when cs.State.Terminated <> null ->
-                        LogError
-                            "  - %s: exit code %d (reason: %s)"
-                            pod.Metadata.Name
-                            cs.State.Terminated.ExitCode
-                            (if cs.State.Terminated.Reason <> null then
-                                 cs.State.Terminated.Reason
-                             else
-                                 "unknown")
-                    | _ -> LogError "  - %s: unknown failure" pod.Metadata.Name
-
+        // Check for failed pods
+        let failedPods =
             podList.Items
+            |> Seq.filter (fun pod -> pod.Metadata.Name.StartsWith(sprintf "%s-benchmark-" runId))
             |> Seq.filter
                 (fun pod ->
-                    // Only collect from pods belonging to this run
-                    let belongsToRun = pod.Metadata.Name.StartsWith(sprintf "%s-benchmark-" runId)
+                    match pod.Status.ContainerStatuses with
+                    | null -> false
+                    | statuses ->
+                        statuses
+                        |> Seq.exists
+                            (fun cs ->
+                                cs.Name = "client"
+                                && cs.State.Terminated <> null
+                                && cs.State.Terminated.ExitCode <> 0))
+            |> Seq.toList
 
-                    if not belongsToRun then
-                        false
-                    else
-                        let clientContainerReady =
-                            match pod.Status.ContainerStatuses with
-                            | null ->
-                                LogDebug "  Pod %s: No container statuses available" pod.Metadata.Name
-                                false
-                            | statuses ->
-                                match statuses |> Seq.tryFind (fun cs -> cs.Name = "client") with
-                                | None ->
-                                    LogDebug "  Pod %s: No 'client' container found" pod.Metadata.Name
-                                    false
-                                | Some cs ->
-                                    // Since we use sleep infinity, container should be running
-                                    let isRunning = cs.State.Running <> null
-                                    let isReady = cs.Ready
-                                    isRunning // Container must be running
+        if not (List.isEmpty failedPods) then
+            LogError "The following benchmark pods failed with non-zero exit codes:"
 
-                        clientContainerReady)
+            for pod in failedPods do
+                let clientStatus = pod.Status.ContainerStatuses |> Seq.tryFind (fun cs -> cs.Name = "client")
+
+                match clientStatus with
+                | Some cs when cs.State.Terminated <> null ->
+                    LogError
+                        "  - %s: exit code %d (reason: %s)"
+                        pod.Metadata.Name
+                        cs.State.Terminated.ExitCode
+                        (if cs.State.Terminated.Reason <> null then
+                             cs.State.Terminated.Reason
+                         else
+                             "unknown")
+                | _ -> LogError "  - %s: unknown failure" pod.Metadata.Name
+
+            failwithf "Benchmark run aborted: %d pods failed with non-zero exit codes" (List.length failedPods)
+
+        // Collect data from each pod
+        let podDataList =
+            podList.Items
+            |> Seq.filter (fun pod -> pod.Metadata.Name.StartsWith(sprintf "%s-benchmark-" runId))
+            |> Seq.filter
+                (fun pod ->
+                    match pod.Status.ContainerStatuses with
+                    | null -> false
+                    | statuses ->
+                        match statuses |> Seq.tryFind (fun cs -> cs.Name = "client") with
+                        | Some cs -> cs.State.Running <> null
+                        | None -> false)
             |> Seq.choose
                 (fun pod ->
                     let nodeName = BenchmarkDaemonSet.extractNodeNameFromBenchmarkPod pod.Metadata.Name topology
@@ -761,7 +733,7 @@ type StellarFormation with
                         use reader = new System.IO.StreamReader(logStream)
                         reader.ReadToEnd()
 
-                    // First check if the tests completed successfully by reading the exit code
+                    // Check if tests completed successfully
                     let testsSucceeded =
                         let processInfo = System.Diagnostics.ProcessStartInfo()
                         processInfo.FileName <- "kubectl"
@@ -802,7 +774,7 @@ type StellarFormation with
                     if not testsSucceeded then
                         failwithf "Pod %s: Tests failed or incomplete, aborting benchmark" pod.Metadata.Name
                     else
-                        // Use kubectl exec to get the raw iperf3 JSON files from the pod
+                        // Get the raw iperf3 JSON files from the pod
                         let kubectlOutput =
                             let processInfo = System.Diagnostics.ProcessStartInfo()
                             processInfo.FileName <- "kubectl"
@@ -824,7 +796,6 @@ type StellarFormation with
                             proc.WaitForExit()
 
                             if proc.ExitCode <> 0 then
-                                // Check if it's the "container not found" error, which means the container already terminated
                                 if stderr.Contains("container not found") then
                                     failwithf
                                         "Cannot retrieve results from terminated container in pod %s"
@@ -837,12 +808,11 @@ type StellarFormation with
                             else if String.IsNullOrWhiteSpace(output) then
                                 failwithf "No benchmark results found in pod %s (empty output)" pod.Metadata.Name
                             else
-                                Some output // Return raw kubectl output
+                                Some output
 
                         match kubectlOutput with
                         | None -> failwith "Failed to retrieve kubectl output"
                         | Some output ->
-                            // Return pod data for Python processing
                             Some
                                 {| name = pod.Metadata.Name
                                    node_name = nodeName
@@ -850,10 +820,18 @@ type StellarFormation with
                                    kubectl_output = output |})
             |> Array.ofSeq
 
-        // Now process the results using Python script
+        (testId, podDataList)
+
+    // Helper function to process results with Python script
+    member private self.ProcessBenchmarkResults
+        (
+            testId: string,
+            podDataList: _ [],
+            topology: Map<string, string []>,
+            duration: int
+        ) =
         LogInfo "Processing benchmark results..."
 
-        // Prepare data for Python script
         let topologyData = topology |> Map.map (fun nodeName peers -> peers)
 
         let inputData =
@@ -865,7 +843,7 @@ type StellarFormation with
 
         let jsonInput = Newtonsoft.Json.JsonConvert.SerializeObject(inputData)
 
-        // Call Python script to process results from stdin
+        // Call Python script to process results
         let pythonScriptPath = GetScriptPath "parse_benchmark_results.py"
 
         let processInfo = System.Diagnostics.ProcessStartInfo()
@@ -878,7 +856,6 @@ type StellarFormation with
 
         try
             use proc = System.Diagnostics.Process.Start(processInfo)
-            // Write JSON to stdin
             proc.StandardInput.Write(jsonInput)
             proc.StandardInput.Close()
 
@@ -891,20 +868,20 @@ type StellarFormation with
                 LogInfo "Falling back to basic results display"
                 LogInfo "Collected data from %d pods" (Array.length podDataList)
             else
-                // Display the formatted results
                 LogInfo "%s" output
 
-                // Extract the filename from stderr if present
                 if stderr.Contains("RESULTS_FILE:") then
                     let startIdx = stderr.IndexOf("RESULTS_FILE:") + 13
                     let resultsFile = stderr.Substring(startIdx).Trim()
                     LogInfo "Results saved to %s" resultsFile
         with ex -> failwithf "Failed to run Python script: %s" ex.Message
 
+    member private self.CleanupBenchmarkResources(runId: string, statefulSets: Map<string, string>) =
+        let ns = self.NetworkCfg.NamespaceProperty
         LogInfo "Cleaning up benchmark resources..."
 
         // Delete all StatefulSets
-        successfulStatefulSets
+        statefulSets
         |> Map.iter
             (fun nodeName stsName ->
                 try
@@ -924,4 +901,37 @@ type StellarFormation with
             LogInfo "Deleted headless service %s" serviceName
         with ex -> LogWarn "Failed to delete headless service: %s" ex.Message
 
+    member self.RunP2PNetworkBenchmark() : unit =
+        assert (self.NetworkCfg.missionContext.benchmarkInfrastructure.IsSome)
+
+        LogInfo "==============================================="
+        LogInfo "Starting P2P Network Infrastructure Benchmark"
+        LogInfo "==============================================="
+
+        let runId = sprintf "ssc-%xz" (System.Random().Next(0x10000))
+        LogInfo "Using run ID: %s" runId
+
+        // Setup network topology
+        let (topology, globalNodeIndex, reverseTopology, avgPeerCount) = self.SetupBenchmarkTopology()
+
+        let duration = self.NetworkCfg.missionContext.benchmarkDurationSeconds.Value
+
+        // Create and deploy benchmark StatefulSets
+        let successfulStatefulSets =
+            self.CreateBenchmarkStatefulSets(runId, topology, globalNodeIndex, reverseTopology, duration)
+
+        self.WaitForBenchmarkPodsReady(successfulStatefulSets)
+        LogInfo "Benchmark tests running for %d seconds..." duration
+
+        // Wait for tests to complete, plus some time for writing results
+        let waitTime = duration + 20
+        LogInfo "Waiting %d seconds for tests to complete..." waitTime
+        System.Threading.Thread.Sleep(waitTime * 1000)
+
+        // Collect benchmark results from pods
+        let (testId, podDataList) = self.CollectBenchmarkResults(runId, topology, duration)
+        self.ProcessBenchmarkResults(testId, podDataList, topology, duration)
+
+        // Cleanup benchmark resources
+        self.CleanupBenchmarkResources(runId, successfulStatefulSets)
         LogInfo "Network benchmark complete!"
