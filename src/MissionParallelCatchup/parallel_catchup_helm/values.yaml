@@ -17,6 +17,7 @@ worker:
   requireNodeLabels: []
   avoidNodeLabels: []
   tolerateNodeTaints: []
+  asanOptions: "quarantine_size_mb=1:malloc_context_size=5"
   resources: # resources below are left empty on purpose, they are read and overridden from `StellarKubeCfg.fs`
     requests:
       cpu: ""
