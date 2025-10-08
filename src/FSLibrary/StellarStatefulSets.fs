@@ -7,6 +7,7 @@ module StellarStatefulSets
 open k8s
 open k8s.Models
 open Logging
+open ScriptUtils
 open StellarFormation
 open StellarDataDump
 open StellarCoreSet
@@ -441,26 +442,21 @@ type StellarFormation with
     //
     // Scripts are stored in a ConfigMap and mounted into DaemonSet pods at /scripts/
     member self.DeployTcpTuningDaemonSet() : unit =
-        let ns = self.NetworkCfg.NamespaceProperty
+        if self.NetworkCfg.missionContext.enableTcpTuning then
+            let ns = self.NetworkCfg.NamespaceProperty
 
-        LogInfo "Creating TCP scripts ConfigMap..."
-        let configMap = BenchmarkDaemonSet.createTcpScriptsConfigMap self.NetworkCfg
+            LogInfo "Creating TCP tuning ConfigMap..."
+            let configMap = BenchmarkDaemonSet.createTcpTuningConfigMap self.NetworkCfg
 
-        self.Kube.CreateNamespacedConfigMap(body = configMap, namespaceParameter = ns)
-        |> ignore
+            self.Kube.CreateNamespacedConfigMap(body = configMap, namespaceParameter = ns)
+            |> ignore
 
-        self.NamespaceContent.Add(configMap)
+            self.NamespaceContent.Add(configMap)
+            LogInfo "Setting TCP settings for network performance"
+            let daemonSetName = "tcp-tuning"
+            let daemonSet = BenchmarkDaemonSet.createTcpTuningDaemonSet self.NetworkCfg
+            let actionMsg = "applied"
 
-        // Determine which DaemonSet to deploy based on TCP tuning flag
-        let (daemonSetName, daemonSet, actionMsg) =
-            if not self.NetworkCfg.missionContext.enableTcpTuning then
-                LogInfo "Resetting TCP settings to defaults"
-                ("tcp-reset", BenchmarkDaemonSet.createTcpResetDaemonSet self.NetworkCfg, "reset")
-            else
-                LogInfo "Setting TCP settings for network performance"
-                ("tcp-tuning", BenchmarkDaemonSet.createTcpTuningDaemonSet self.NetworkCfg, "applied")
-
-        try
             // Create and deploy the DaemonSet
             let ds = self.Kube.CreateNamespacedDaemonSet(body = daemonSet, namespaceParameter = ns)
             LogInfo "Created %s DaemonSet, waiting for settings to be %s..." daemonSetName actionMsg
@@ -468,7 +464,7 @@ type StellarFormation with
             // Wait for DaemonSet to be ready on all nodes
             let mutable allReady = false
             let mutable attempts = 0
-            let maxAttempts = if daemonSetName = "tcp-reset" then 20 else 30
+            let maxAttempts = 30
 
             while not allReady && attempts < maxAttempts do
                 System.Threading.Thread.Sleep(2000)
@@ -486,8 +482,10 @@ type StellarFormation with
                 with ex -> LogWarn "Failed to check %s DaemonSet status: %s" daemonSetName ex.Message
 
             if not allReady then
-                LogWarn "%s DaemonSet did not complete on all nodes within timeout" daemonSetName
-            else if daemonSetName = "tcp-tuning" then
+                failwithf
+                    "TCP tuning DaemonSet did not complete on all nodes within timeout (waited %d seconds)"
+                    (maxAttempts * 2)
+            else
                 // Give a bit more time for tuning settings to take effect
                 System.Threading.Thread.Sleep(3000)
 
@@ -498,8 +496,7 @@ type StellarFormation with
             with ex ->
                 LogWarn "Failed to delete %s DaemonSet: %s" daemonSetName ex.Message
                 // Track it for cleanup if deletion failed
-                if daemonSetName = "tcp-tuning" then self.NamespaceContent.Add(ds)
-        with ex -> LogWarn "Failed to deploy %s DaemonSet: %s. TCP settings may be invalid" daemonSetName ex.Message
+                self.NamespaceContent.Add(ds)
 
     // Runs a P2P network infrastructure benchmark that mirrors the stellar-core network topology.
     //
@@ -869,8 +866,7 @@ type StellarFormation with
         let jsonInput = Newtonsoft.Json.JsonConvert.SerializeObject(inputData)
 
         // Call Python script to process results from stdin
-        let pythonScriptPath =
-            System.IO.Path.Combine(__SOURCE_DIRECTORY__, "..", "scripts", "parse_benchmark_results.py")
+        let pythonScriptPath = GetScriptPath "parse_benchmark_results.py"
 
         let processInfo = System.Diagnostics.ProcessStartInfo()
         processInfo.FileName <- "python3"
