@@ -76,14 +76,21 @@ let getNetworkDelayCommands (loc1: GeoLoc) (locsAndNames: (GeoLoc * PeerDnsName)
     // between the "loc1" peer and the destination peer associated with the htb
     // class that's the parent of the netem.
     //
-    // Here's a diagram:
+    // Finally, each netem qdisc will have a "Fair Queue" (fq) leaf that is
+    // configured to pace the traffic to each peer. Since we artificially delay
+    // connections, lower latency peers naturally get more bandwidth. This ensures that the
+    // traffic is paced fairly and a low-latency peer can't dominate bandwidth.
+    //
     //
     //    root qdisc
-    //    (htb) 1:0 --+--> class 1:1 --> netem qdisc, 100ms delay
+    //    (htb) 1:0 --+--> class 1:1 --> netem 101: (100ms delay, limit 4096)
+    //                |                              └─> fq (flow_limit 4096, limit 32768)
     //                |
-    //                +--> class 1:2 --> netem qdisc, 50ms delay
+    //                +--> class 1:2 --> netem 102: (50ms delay, limit 4096)
+    //                |                              └─> fq (flow_limit 4096, limit 32768)
     //                |
-    //                +--> class 1:3 --> netem qdisc, 200ms delay
+    //                +--> class 1:3 --> netem 103: (200ms delay, limit 4096)
+    //                                               └─> fq (flow_limit 4096, limit 32768)
 
     let setDeviceTxQlen : ShCmd =
         // the txqlen on eth0 is 0-sized on container virtual devs; this makes
@@ -121,6 +128,12 @@ let getNetworkDelayCommands (loc1: GeoLoc) (locsAndNames: (GeoLoc * PeerDnsName)
                         "1:0"
                         "htb" |]
 
+    // Queue sizing parameters
+    let netemLimit = 4096
+    let fqFlowLimit = 4096
+    let fqLimit = 32768
+    let quantum = 1514
+
     let addClass (n: int) : ShCmd =
         ShCmd.OfStrs [| "tc"
                         "class"
@@ -133,6 +146,8 @@ let getNetworkDelayCommands (loc1: GeoLoc) (locsAndNames: (GeoLoc * PeerDnsName)
                         sprintf "1:%d" n
                         "htb"
                         "rate"
+                        "10gbit"
+                        "ceil"
                         "10gbit" |]
 
     let peerVar (n: int) : string = sprintf "PEER%d" n
@@ -206,17 +221,46 @@ let getNetworkDelayCommands (loc1: GeoLoc) (locsAndNames: (GeoLoc * PeerDnsName)
                         "classid"
                         sprintf "1:%d" n |]
 
+    // Helper to compute a unique handle major for the Nth netem qdisc
+    // Handles must be unique and not conflict with root (1:0)
+    // We start at 100 to leave room for system qdiscs
+    let netemHandle (n: int) : int = 100 + n
+
+    // Creates a netem (network emulation) qdisc for artificial delay
+    // This preserves the geographic latency simulation while adding a handle
+    // so we can attach an fq leaf underneath for better pacing
     let addNetemQdisc (n: int) (msDelay: int) : ShCmd =
         ShCmd.OfStrs [| "tc"
                         "qdisc"
-                        "add"
+                        "replace"
                         "dev"
                         "eth0"
                         "parent"
-                        sprintf "1:%d" n
+                        sprintf "1:%d" n // Parent is HTB class 1:N
+                        "handle"
+                        sprintf "%d:" (netemHandle n) // Unique handle for this netem
                         "netem"
                         "delay"
-                        sprintf "%dms" msDelay |]
+                        sprintf "%dms" msDelay
+                        "limit"
+                        string netemLimit |]
+
+    // Adds Fair Queue (fq) schedulerg
+    let addFqLeaf (n: int) : ShCmd =
+        ShCmd.OfStrs [| "tc"
+                        "qdisc"
+                        "replace"
+                        "dev"
+                        "eth0"
+                        "parent"
+                        sprintf "%d:" (netemHandle n) // Parent is the netem qdisc
+                        "fq"
+                        "flow_limit"
+                        string fqFlowLimit
+                        "limit"
+                        string fqLimit
+                        "quantum"
+                        string quantum |]
 
     let perPeerResolveCmds : ShCmd array =
         Array.mapi
@@ -229,9 +273,17 @@ let getNetworkDelayCommands (loc1: GeoLoc) (locsAndNames: (GeoLoc * PeerDnsName)
     let perPeerCmds : ShCmd array =
         Array.mapi
             (fun (i: int) (loc2: GeoLoc, peer: PeerDnsName) ->
-                let (msDelay: int) = if delay.IsSome then delay.Value else int (networkDelayInMs loc1 loc2)
+                let msDelay =
+                    match delay with
+                    | Some d -> d
+                    | None -> int (networkDelayInMs loc1 loc2)
+
                 let classNo = 1 + i
-                [| addClass classNo; addFilter classNo; addNetemQdisc classNo msDelay |])
+
+                [| addClass classNo
+                   addFilter classNo
+                   addNetemQdisc classNo msDelay
+                   addFqLeaf classNo |])
             locsAndNames
         |> Array.concat
 
