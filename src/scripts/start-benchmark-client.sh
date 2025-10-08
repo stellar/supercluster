@@ -62,7 +62,7 @@ for PEER_DNS in "${PEER_ARRAY[@]}"; do
         timeout $((DURATION + 15)) iperf3 -c $PEER_DNS_NAME \
                -p $SEND_PORT \
                -t $DURATION \
-               -b 300M \
+               -b 1000M \
                --bidir \
                -J > /results/result-$PEER_SHORT-bidir.json 2>&1
         iperf_exit_code=$?
