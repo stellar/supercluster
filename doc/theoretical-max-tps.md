@@ -11,7 +11,7 @@ To run the test, first [set up an EKS cluster](eks.md). Accepting the default
 settings will produce a topology identical to what we use in our test setup.
 Then, run a `MaxTPSClassic` mission with the following template:
 ```bash
-dotnet run --project src/App/App.fsproj --configuration Release -- mission MaxTPSClassic --image=<core-image> --pubnet-data=<path-to-repo>/topologies/theoretical-max-tps.json --tx-rate=<min-tx-rate> --max-tx-rate=<max-tx-rate> --namespace default --ingress-internal-domain=<domain> --ingress-class=nginx --run-for-max-tps=classic
+dotnet run --project src/App/App.fsproj --configuration Release -- mission MaxTPSClassic --image=<core-image> --pubnet-data=<path-to-repo>/topologies/theoretical-max-tps.json --tx-rate=<min-tx-rate> --max-tx-rate=<max-tx-rate> --namespace default --ingress-internal-domain=<domain> --ingress-class=nginx --run-for-max-tps=classic --enable-tcp-tuning
 ```
 For more information about how to set the parameters in the above command, see
 [Measuring Transaction Throughput](measuring-transaction-throughput.md).

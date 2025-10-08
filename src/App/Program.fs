@@ -98,10 +98,10 @@ type MissionOptions
         enableInMemoryBuckets: bool,
         peerFloodCapacity: int option,
         peerFloodCapacityBytes: int option,
-        flowControlSendMoreBatchSizeBytes: int option,
-        outboundByteLimit: int option,
         sleepMainThread: int option,
         flowControlSendMoreBatchSize: int option,
+        flowControlSendMoreBatchSizeBytes: int option,
+        outboundByteLimit: int option,
         simulateApplyDuration: seq<string>,
         simulateApplyWeight: seq<string>,
         networkSizeLimit: int,
@@ -128,9 +128,6 @@ type MissionOptions
         serviceAccountAnnotationsPcV2: seq<string>,
         s3HistoryMirrorOverridePcV2: string option,
         s3HistoryMirrorRegionPcV2: string,
-        benchmarkInfrastructure: bool option,
-        benchmarkOnly: bool option,
-        benchmarkDurationSeconds: int option,
         benchmarkInfrastructure: bool,
         benchmarkOnly: bool,
         benchmarkDurationSeconds: int,
@@ -739,9 +736,9 @@ let main argv =
                   serviceAccountAnnotationsPcV2 = []
                   s3HistoryMirrorOverridePcV2 = None
                   s3HistoryMirrorRegionPcV2 = "us-east-1"
-                  benchmarkInfrastructure = None
-                  benchmarkInfrastructureOnly = None
-                  benchmarkDurationSeconds = None
+                  benchmarkInfrastructure = Some false
+                  benchmarkInfrastructureOnly = Some false
+                  benchmarkDurationSeconds = Some 30
                   enableTcpTuning = false }
 
             let nCfg = MakeNetworkCfg ctx [] None
@@ -794,8 +791,9 @@ let main argv =
 
                      try
                          // Validate benchmark flag combinations
-                         if mission.BenchmarkOnly && not mission.BenchmarkInfrastructure then
-                             failwith "Error: --benchmark-only requires --benchmark-infra to be set"
+                         match mission.BenchmarkOnly, mission.BenchmarkInfrastructure with
+                         | true, false -> failwith "Error: --benchmark-only requires --benchmark-infra to be set"
+                         | _ -> ()
 
                          let missionContext =
                              { MissionContext.kube = kube
@@ -905,9 +903,6 @@ let main argv =
                                        (List.ofSeq mission.ServiceAccountAnnotationsPcV2)
                                s3HistoryMirrorOverridePcV2 = mission.S3HistoryMirrorOverridePcV2
                                s3HistoryMirrorRegionPcV2 = mission.S3HistoryMirrorRegionPcV2
-                               benchmarkInfrastructure = mission.BenchmarkInfrastructure
-                               benchmarkInfrastructureOnly = mission.BenchmarkOnly
-                               benchmarkDurationSeconds = mission.BenchmarkDurationSeconds
                                benchmarkInfrastructure = Some mission.BenchmarkInfrastructure
                                benchmarkInfrastructureOnly = Some mission.BenchmarkOnly
                                benchmarkDurationSeconds = Some mission.BenchmarkDurationSeconds
