@@ -120,4 +120,7 @@ type MissionContext =
       enableRelaxedAutoQsetConfig: bool
       jobMonitorExternalHost: string option
       txBatchMaxSize: int option
-      runForMaxTps: string option }
+      runForMaxTps: string option
+      requireNodeLabelsPcV2: ((string * string option) list)
+      avoidNodeLabelsPcV2: ((string * string option) list)
+      tolerateNodeTaintsPcV2: ((string * string option) list) }

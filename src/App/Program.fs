@@ -120,7 +120,10 @@ type MissionOptions
         enableRelaxedAutoQsetConfig: bool,
         jobMonitorExternalHost: string option,
         txBatchMaxSize: int option,
-        runForMaxTps: string option
+        runForMaxTps: string option,
+        requireNodeLabelsPcV2: seq<string>,
+        avoidNodeLabelsPcV2: seq<string>,
+        tolerateNodeTaintsPcV2: seq<string>
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -525,6 +528,21 @@ type MissionOptions
              Required = false)>]
     member self.RunForMaxTps = runForMaxTps
 
+    [<Option("require-node-labels-pc-v2",
+             HelpText = "Only run ParallelCatchupV2 workers on nodes with matching `key:value` labels",
+             Required = false)>]
+    member self.RequireNodeLabelsPcV2 = requireNodeLabelsPcV2
+
+    [<Option("avoid-node-labels-pc-v2",
+             HelpText = "Do not run ParallelCatchupV2 workers on nodes with matching `key:value` labels",
+             Required = false)>]
+    member self.AvoidNodeLabelsPcV2 = avoidNodeLabelsPcV2
+
+    [<Option("tolerate-node-taints-pc-v2",
+             HelpText = "Allow ParallelCatchupV2 workers to run on nodes with matching taints (format: `key` or `key:effect`, effect defaults to NoSchedule)",
+             Required = false)>]
+    member self.TolerateNodeTaintsPcV2 = tolerateNodeTaintsPcV2
+
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' with
     | [| x |] -> (x, None)
@@ -649,7 +667,10 @@ let main argv =
                   enableRelaxedAutoQsetConfig = false
                   jobMonitorExternalHost = None
                   txBatchMaxSize = None
-                  runForMaxTps = None }
+                  runForMaxTps = None
+                  requireNodeLabelsPcV2 = []
+                  avoidNodeLabelsPcV2 = []
+                  tolerateNodeTaintsPcV2 = [] }
 
             let nCfg = MakeNetworkCfg ctx [] None
             use formation = kube.MakeEmptyFormation nCfg
@@ -797,7 +818,10 @@ let main argv =
                                enableRelaxedAutoQsetConfig = mission.EnableRelaxedAutoQsetConfig
                                jobMonitorExternalHost = mission.JobMonitorExternalHost
                                txBatchMaxSize = mission.TxBatchMaxSize
-                               runForMaxTps = mission.RunForMaxTps }
+                               runForMaxTps = mission.RunForMaxTps
+                               requireNodeLabelsPcV2 = List.map splitLabel (List.ofSeq mission.RequireNodeLabelsPcV2)
+                               avoidNodeLabelsPcV2 = List.map splitLabel (List.ofSeq mission.AvoidNodeLabelsPcV2)
+                               tolerateNodeTaintsPcV2 = List.map splitLabel (List.ofSeq mission.TolerateNodeTaintsPcV2) }
 
                          allMissions.[m] missionContext
 

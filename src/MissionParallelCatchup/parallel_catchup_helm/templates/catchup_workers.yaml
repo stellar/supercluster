@@ -18,6 +18,7 @@ metadata:
     app: stellar-core
 spec:
   serviceName: "stellar-core"
+  podManagementPolicy: Parallel
   replicas: {{ .Values.worker.replicas }}
   selector:
     matchLabels:
@@ -32,12 +33,25 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
             - matchExpressions:
-              - key: node-role.kubernetes.io/control-plane
-                operator: DoesNotExist
-              - key: purpose
-                operator: NotIn
-                values:
-                - ssc
+              {{- range .Values.worker.requireNodeLabels }}
+              - key: {{ .key }}
+                operator: {{ .operator }}
+                {{- with .values }}
+                values: {{ toJson . }}
+                {{- end }}
+              {{- end }}
+              {{- range .Values.worker.avoidNodeLabels }}
+              - key: {{ .key }}
+                operator: {{ .operator }}
+                {{- with .values }}
+                values: {{ toJson . }}
+                {{- end }}
+              {{- end }}
+      tolerations:
+      {{- range .Values.worker.tolerateNodeTaints }}
+      - key: {{ .key }}
+        effect: {{ .effect }}
+      {{- end }}
       containers:
       - name: stellar-core
         image: {{ .Values.worker.stellar_core_image }}
@@ -80,6 +94,7 @@ spec:
           name: worker-script
       - emptyDir: {}
         name: data-volume
+      {{- if not .Values.worker.unevenSched }}
       topologySpreadConstraints:
       - labelSelector:
           matchLabels:
@@ -87,6 +102,7 @@ spec:
         maxSkew: 1
         topologyKey: kubernetes.io/hostname
         whenUnsatisfiable: DoNotSchedule
+      {{- end }}
 ---
 apiVersion: v1
 kind: ConfigMap
