@@ -161,6 +161,11 @@ let installProject (context: MissionContext) =
     setOptions.Add(sprintf "monitor.path=/%s/(.*)" context.namespaceProperty)
     setOptions.Add(sprintf "monitor.logging_interval_seconds=%d" jobMonitorLoggingIntervalSecs)
 
+    // Set ASAN_OPTIONS if provided
+    match context.asanOptions with
+    | Some asanOpts -> setOptions.Add(sprintf "worker.asanOptions=%s" asanOpts)
+    | None -> ()
+
     // Convert labels and taints to Helm array format
     if not (List.isEmpty context.requireNodeLabelsPcV2) then
         let requireLabelsHelm =

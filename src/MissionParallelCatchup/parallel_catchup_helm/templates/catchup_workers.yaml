@@ -74,7 +74,7 @@ spec:
             fieldRef:
               fieldPath: metadata.name
         - name: ASAN_OPTIONS
-          value: quarantine_size_mb=1:malloc_context_size=5
+          value: {{ .Values.worker.asanOptions | quote }}
         envFrom:
         - configMapRef:
             name: worker-config
