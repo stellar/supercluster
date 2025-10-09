@@ -98,10 +98,10 @@ type MissionOptions
         enableInMemoryBuckets: bool,
         peerFloodCapacity: int option,
         peerFloodCapacityBytes: int option,
-        flowControlSendMoreBatchSizeBytes: int option,
-        outboundByteLimit: int option,
         sleepMainThread: int option,
         flowControlSendMoreBatchSize: int option,
+        flowControlSendMoreBatchSizeBytes: int option,
+        outboundByteLimit: int option,
         simulateApplyDuration: seq<string>,
         simulateApplyWeight: seq<string>,
         networkSizeLimit: int,
@@ -123,7 +123,11 @@ type MissionOptions
         runForMaxTps: string option,
         requireNodeLabelsPcV2: seq<string>,
         avoidNodeLabelsPcV2: seq<string>,
-        tolerateNodeTaintsPcV2: seq<string>
+        tolerateNodeTaintsPcV2: seq<string>,
+        benchmarkInfrastructure: bool,
+        benchmarkOnly: bool,
+        benchmarkDurationSeconds: int,
+        enableTcpTuning: bool
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -543,6 +547,30 @@ type MissionOptions
              Required = false)>]
     member self.TolerateNodeTaintsPcV2 = tolerateNodeTaintsPcV2
 
+    [<Option("benchmark-infra",
+             HelpText = "Run network infrastructure benchmark in addition to stellar-core tests",
+             Required = false,
+             Default = false)>]
+    member self.BenchmarkInfrastructure = benchmarkInfrastructure
+
+    [<Option("benchmark-only",
+             HelpText = "Run ONLY the network infrastructure benchmark, skip stellar-core tests (requires --benchmark-infra)",
+             Required = false,
+             Default = false)>]
+    member self.BenchmarkOnly = benchmarkOnly
+
+    [<Option("benchmark-duration-seconds",
+             HelpText = "Duration of network benchmark tests in seconds",
+             Required = false,
+             Default = 30)>]
+    member self.BenchmarkDurationSeconds = benchmarkDurationSeconds
+
+    [<Option("enable-tcp-tuning",
+             HelpText = "Enable TCP tuning for improved network performance",
+             Required = false,
+             Default = false)>]
+    member self.EnableTcpTuning = enableTcpTuning
+
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' with
     | [| x |] -> (x, None)
@@ -670,10 +698,14 @@ let main argv =
                   runForMaxTps = None
                   requireNodeLabelsPcV2 = []
                   avoidNodeLabelsPcV2 = []
-                  tolerateNodeTaintsPcV2 = [] }
+                  tolerateNodeTaintsPcV2 = []
+                  benchmarkInfrastructure = Some false
+                  benchmarkInfrastructureOnly = Some false
+                  benchmarkDurationSeconds = Some 30
+                  enableTcpTuning = false }
 
             let nCfg = MakeNetworkCfg ctx [] None
-            use formation = kube.MakeEmptyFormation nCfg
+            use formation = kube.MakeEmptyFormation(nCfg, skipTcpConfig = true)
             formation.CleanNamespace()
             0
 
@@ -721,6 +753,11 @@ let main argv =
                      let processInputSeq s = if Seq.isEmpty s then None else Some((Seq.map int) s)
 
                      try
+                         // Validate benchmark flag combinations
+                         match mission.BenchmarkOnly, mission.BenchmarkInfrastructure with
+                         | true, false -> failwith "Error: --benchmark-only requires --benchmark-infra to be set"
+                         | _ -> ()
+
                          let missionContext =
                              { MissionContext.kube = kube
                                kubeCfg = mission.KubeConfig
@@ -821,7 +858,11 @@ let main argv =
                                runForMaxTps = mission.RunForMaxTps
                                requireNodeLabelsPcV2 = List.map splitLabel (List.ofSeq mission.RequireNodeLabelsPcV2)
                                avoidNodeLabelsPcV2 = List.map splitLabel (List.ofSeq mission.AvoidNodeLabelsPcV2)
-                               tolerateNodeTaintsPcV2 = List.map splitLabel (List.ofSeq mission.TolerateNodeTaintsPcV2) }
+                               tolerateNodeTaintsPcV2 = List.map splitLabel (List.ofSeq mission.TolerateNodeTaintsPcV2)
+                               benchmarkInfrastructure = Some mission.BenchmarkInfrastructure
+                               benchmarkInfrastructureOnly = Some mission.BenchmarkOnly
+                               benchmarkDurationSeconds = Some mission.BenchmarkDurationSeconds
+                               enableTcpTuning = mission.EnableTcpTuning }
 
                          allMissions.[m] missionContext
 
