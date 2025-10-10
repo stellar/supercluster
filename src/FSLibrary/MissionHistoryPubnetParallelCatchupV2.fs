@@ -158,14 +158,14 @@ let installProject (context: MissionContext) =
         | None -> GetLatestPubnetLedgerNumber()
 
     setOptions.Add(sprintf "range_generator.params.latest_ledger_num=%d" endLedger)
-    
+
     // Set uniform_ledgers_per_job if provided (convert checkpoints to ledgers)
     match context.pubnetParallelCatchupCheckpointsPerJob with
-    | Some checkpointsPerJob -> 
+    | Some checkpointsPerJob ->
         let ledgersPerJob = checkpointsPerJob * ledgersPerCheckpoint
         setOptions.Add(sprintf "range_generator.params.uniform_ledgers_per_job=%d" ledgersPerJob)
     | None -> ()
-    
+
     setOptions.Add(sprintf "monitor.hostname=%s" (jobMonitorHostName context))
     setOptions.Add(sprintf "monitor.path=/%s/(.*)" context.namespaceProperty)
     setOptions.Add(sprintf "monitor.logging_interval_seconds=%d" jobMonitorLoggingIntervalSecs)
