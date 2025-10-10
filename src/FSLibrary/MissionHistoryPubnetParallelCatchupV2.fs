@@ -108,12 +108,19 @@ let installProject (context: MissionContext) =
     setOptions.Add(sprintf "worker.stellar_core_image=%s" context.image)
     setOptions.Add(sprintf "worker.replicas=%d" context.pubnetParallelCatchupNumWorkers)
     setOptions.Add(sprintf "range_generator.params.starting_ledger=%d" context.pubnetParallelCatchupStartingLedger)
+
     let endLedger =
         match context.pubnetParallelCatchupEndLedger with
         | Some value -> value
         | None -> GetLatestPubnetLedgerNumber()
+
     setOptions.Add(sprintf "range_generator.params.latest_ledger_num=%d" endLedger)
-    setOptions.Add(sprintf "range_generator.params.uniform_ledgers_per_job=%d" (context.pubnetParallelCatchupCheckpointsPerJob * ledgersPerCheckpoint))
+
+    setOptions.Add(
+        sprintf
+            "range_generator.params.uniform_ledgers_per_job=%d"
+            (context.pubnetParallelCatchupCheckpointsPerJob * ledgersPerCheckpoint)
+    )
 
     // Skip known results by default
     setOptions.Add(
