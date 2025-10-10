@@ -110,7 +110,7 @@ type MissionOptions
         randomSeed: int,
         pubnetParallelCatchupStartingLedger: int,
         pubnetParallelCatchupEndLedger: int option,
-        pubnetParallelCatchupCheckpointsPerJob: int option,
+        pubnetParallelCatchupCheckpointsPerJob: int,
         pubnetParallelCatchupNumWorkers: int,
         tag: string option,
         numPregeneratedTxs: int option,
@@ -662,8 +662,8 @@ let main argv =
                   networkSizeLimit = 0
                   pubnetParallelCatchupStartingLedger = 0
                   pubnetParallelCatchupEndLedger = None
-                  pubnetParallelCatchupCheckpointsPerJob = None
-                  pubnetParallelCatchupNumWorkers = 128
+                  pubnetParallelCatchupCheckpointsPerJob = 64
+                  pubnetParallelCatchupNumWorkers = 192
                   tag = None
                   numPregeneratedTxs = None
                   genesisTestAccountCount = None
