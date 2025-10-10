@@ -110,7 +110,7 @@ type MissionOptions
         randomSeed: int,
         pubnetParallelCatchupStartingLedger: int,
         pubnetParallelCatchupEndLedger: int option,
-        pubnetParallelCatchupLedgersPerJob: int option,
+        pubnetParallelCatchupCheckpointsPerJob: int option,
         pubnetParallelCatchupNumWorkers: int,
         tag: string option,
         numPregeneratedTxs: int option,
@@ -476,11 +476,11 @@ type MissionOptions
     [<Option("pubnet-parallel-catchup-end-ledger", HelpText = "end ledger to run parallel catchup on", Required = false)>]
     member self.PubnetParallelCatchupEndLedger = pubnetParallelCatchupEndLedger
 
-    [<Option("pubnet-parallel-catchup-ledgers-per-job",
-             HelpText = "number of ledgers per job for parallel catchup",
+    [<Option("pubnet-parallel-catchup-checkpoints-per-job",
+             HelpText = "number of checkpoints per job for parallel catchup (1 checkpoint = 64 ledgers)",
              Required = false,
-             Default = 16000)>]
-    member self.PubnetParallelCatchupLedgersPerJob = pubnetParallelCatchupLedgersPerJob
+             Default = 250)>]
+    member self.PubnetParallelCatchupCheckpointsPerJob = pubnetParallelCatchupCheckpointsPerJob
 
     [<Option("pubnet-parallel-catchup-num-workers",
              HelpText = "number of workers to run parallel catchup with (only supported for V2)",
@@ -662,7 +662,7 @@ let main argv =
                   networkSizeLimit = 0
                   pubnetParallelCatchupStartingLedger = 0
                   pubnetParallelCatchupEndLedger = None
-                  pubnetParallelCatchupLedgersPerJob = None
+                  pubnetParallelCatchupCheckpointsPerJob = None
                   pubnetParallelCatchupNumWorkers = 128
                   tag = None
                   numPregeneratedTxs = None
@@ -814,7 +814,7 @@ let main argv =
                                randomSeed = mission.RandomSeed
                                pubnetParallelCatchupStartingLedger = mission.PubnetParallelCatchupStartingLedger
                                pubnetParallelCatchupEndLedger = mission.PubnetParallelCatchupEndLedger
-                               pubnetParallelCatchupLedgersPerJob = mission.PubnetParallelCatchupLedgersPerJob
+                               pubnetParallelCatchupCheckpointsPerJob = mission.PubnetParallelCatchupCheckpointsPerJob
                                pubnetParallelCatchupNumWorkers = mission.PubnetParallelCatchupNumWorkers
                                tag = mission.Tag
                                numPregeneratedTxs = mission.NumPregeneratedTxs
