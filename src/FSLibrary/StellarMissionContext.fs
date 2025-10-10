@@ -104,7 +104,7 @@ type MissionContext =
       networkSizeLimit: int
       pubnetParallelCatchupStartingLedger: int
       pubnetParallelCatchupEndLedger: int option
-      pubnetParallelCatchupCheckpointsPerJob: int
+      pubnetParallelCatchupLedgersPerJob: int
       pubnetParallelCatchupNumWorkers: int
       genesisTestAccountCount: int option
 

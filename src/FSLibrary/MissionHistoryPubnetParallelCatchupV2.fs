@@ -27,7 +27,6 @@ let helmChartPath = "/supercluster/src/MissionParallelCatchup/parallel_catchup_h
 // let helmChartPath = "../MissionParallelCatchup/parallel_catchup_helm" // for local testing
 let valuesFilePath = helmChartPath + "/values.yaml"
 let defaultJobMonitorHostName = "ssc-job-monitor.services.stellar-ops.com"
-let ledgersPerCheckpoint = 64
 let jobMonitorStatusEndPoint = "/status"
 let jobMonitorMetricsEndPoint = "/metrics"
 let jobMonitorLoggingIntervalSecs = 30 // frequency of job monitor's internal information gathering (querying core endpoint and redis metrics) and logging
@@ -117,9 +116,7 @@ let installProject (context: MissionContext) =
     setOptions.Add(sprintf "range_generator.params.latest_ledger_num=%d" endLedger)
 
     setOptions.Add(
-        sprintf
-            "range_generator.params.uniform_ledgers_per_job=%d"
-            (context.pubnetParallelCatchupCheckpointsPerJob * ledgersPerCheckpoint)
+        sprintf "range_generator.params.uniform_ledgers_per_job=%d" context.pubnetParallelCatchupLedgersPerJob
     )
 
     // Skip known results by default
