@@ -110,6 +110,7 @@ type MissionOptions
         randomSeed: int,
         pubnetParallelCatchupStartingLedger: int,
         pubnetParallelCatchupEndLedger: int option,
+        pubnetParallelCatchupLedgersPerJob: int option,
         pubnetParallelCatchupNumWorkers: int,
         tag: string option,
         numPregeneratedTxs: int option,
@@ -475,6 +476,12 @@ type MissionOptions
     [<Option("pubnet-parallel-catchup-end-ledger", HelpText = "end ledger to run parallel catchup on", Required = false)>]
     member self.PubnetParallelCatchupEndLedger = pubnetParallelCatchupEndLedger
 
+    [<Option("pubnet-parallel-catchup-ledgers-per-job",
+             HelpText = "number of ledgers per job for parallel catchup",
+             Required = false,
+             Default = 16000)>]
+    member self.PubnetParallelCatchupLedgersPerJob = pubnetParallelCatchupLedgersPerJob
+
     [<Option("pubnet-parallel-catchup-num-workers",
              HelpText = "number of workers to run parallel catchup with (only supported for V2)",
              Required = false,
@@ -655,6 +662,7 @@ let main argv =
                   networkSizeLimit = 0
                   pubnetParallelCatchupStartingLedger = 0
                   pubnetParallelCatchupEndLedger = None
+                  pubnetParallelCatchupLedgersPerJob = None
                   pubnetParallelCatchupNumWorkers = 128
                   tag = None
                   numPregeneratedTxs = None
@@ -806,6 +814,7 @@ let main argv =
                                randomSeed = mission.RandomSeed
                                pubnetParallelCatchupStartingLedger = mission.PubnetParallelCatchupStartingLedger
                                pubnetParallelCatchupEndLedger = mission.PubnetParallelCatchupEndLedger
+                               pubnetParallelCatchupLedgersPerJob = mission.PubnetParallelCatchupLedgersPerJob
                                pubnetParallelCatchupNumWorkers = mission.PubnetParallelCatchupNumWorkers
                                tag = mission.Tag
                                numPregeneratedTxs = mission.NumPregeneratedTxs
