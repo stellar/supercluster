@@ -10,6 +10,15 @@ spec:
     - port: 11626
       targetPort: 11626
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: stellar-supercluster
+  annotations:
+    {{- range .Values.service_account.annotations }}
+    {{ .key }}: {{ .value }}
+    {{- end }}
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -28,6 +37,7 @@ spec:
       labels:
         app: stellar-core
     spec:
+      serviceAccountName: stellar-supercluster
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -131,7 +141,7 @@ data:
     {{ "\n" }}
     INVARIANT_CHECKS = [ "(?!BucketListIsConsistentWithDatabase|EventsAreConsistentWithEntryDiffs).*" ]
     {{- end }}
-    {{- (.Files.Get "files/stellar-core.cfg") | nindent 4 }}
+    {{- tpl (.Files.Get "files/stellar-core.cfg") . | nindent 4 }}
 ---
 apiVersion: v1
 kind: ConfigMap

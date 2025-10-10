@@ -124,7 +124,9 @@ type MissionOptions
         runForMaxTps: string option,
         requireNodeLabelsPcV2: seq<string>,
         avoidNodeLabelsPcV2: seq<string>,
-        tolerateNodeTaintsPcV2: seq<string>
+        tolerateNodeTaintsPcV2: seq<string>,
+        serviceAccountAnnotationsPcV2: seq<string>,
+        s3HistoryMirrorOverridePcV2: string option
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -550,11 +552,28 @@ type MissionOptions
              Required = false)>]
     member self.TolerateNodeTaintsPcV2 = tolerateNodeTaintsPcV2
 
+    [<Option("service-account-annotations-pc-v2",
+             HelpText = "Annotations to add to the ServiceAccount used by ParallelCatchupV2 workers (format: space separated list of `key:value` pairs)",
+             Required = false)>]
+    member self.ServiceAccountAnnotationsPcV2 = serviceAccountAnnotationsPcV2
+
+    [<Option("s3-history-mirror-override-pc-v2",
+             HelpText = "When set, configures the ParallelCatchupV2 workers to fetch from the specified S3 history mirror",
+             Required = false)>]
+    member self.S3HistoryMirrorOverridePcV2 = s3HistoryMirrorOverridePcV2
+
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' with
     | [| x |] -> (x, None)
     | [| a; b |] -> (a, Some b)
     | _ -> failwith ("unexpected label '" + lab + "', need string of form 'key' or 'key:value'")
+
+// Given a (key, value option) output form `splitLabel`, return (key, value) or
+// fail if value is None
+let requireLabelValue (label: string * string option) : (string * string) =
+    match label with
+    | k, Some v -> k, v
+    | k, None -> failwith ("key '" + k + "' is missing a value. Must be a string of form 'key:value'")
 
 [<EntryPoint>]
 let main argv =
@@ -678,7 +697,9 @@ let main argv =
                   runForMaxTps = None
                   requireNodeLabelsPcV2 = []
                   avoidNodeLabelsPcV2 = []
-                  tolerateNodeTaintsPcV2 = [] }
+                  tolerateNodeTaintsPcV2 = []
+                  serviceAccountAnnotationsPcV2 = []
+                  s3HistoryMirrorOverridePcV2 = None }
 
             let nCfg = MakeNetworkCfg ctx [] None
             use formation = kube.MakeEmptyFormation nCfg
@@ -830,7 +851,12 @@ let main argv =
                                runForMaxTps = mission.RunForMaxTps
                                requireNodeLabelsPcV2 = List.map splitLabel (List.ofSeq mission.RequireNodeLabelsPcV2)
                                avoidNodeLabelsPcV2 = List.map splitLabel (List.ofSeq mission.AvoidNodeLabelsPcV2)
-                               tolerateNodeTaintsPcV2 = List.map splitLabel (List.ofSeq mission.TolerateNodeTaintsPcV2) }
+                               tolerateNodeTaintsPcV2 = List.map splitLabel (List.ofSeq mission.TolerateNodeTaintsPcV2)
+                               serviceAccountAnnotationsPcV2 =
+                                   List.map
+                                       (splitLabel >> requireLabelValue)
+                                       (List.ofSeq mission.ServiceAccountAnnotationsPcV2)
+                               s3HistoryMirrorOverridePcV2 = mission.S3HistoryMirrorOverridePcV2 }
 
                          allMissions.[m] missionContext
 
