@@ -27,6 +27,12 @@ worker:
       cpu: ""
       memory: ""
       ephemeral_storage: ""
+  historyGetCommandCore001:
+    "curl -sf http://history.stellar.org/prd/core-live/core_live_001/{0} -o {1}"
+  historyGetCommandCore002:
+    "curl -sf http://history.stellar.org/prd/core-live/core_live_002/{0} -o {1}"
+  historyGetCommandCore003:
+    "curl -sf http://history.stellar.org/prd/core-live/core_live_003/{0} -o {1}"
 
 monitor:
   ingress_class_name: "ingress-private"
@@ -47,3 +53,6 @@ range_generator:
     overlap_ledgers: 320
     uniform_ledgers_per_job: 16000 # only for strategy="uniform"
     logarithmic_floor_ledgers: 16000 # only for strategy="logarithmic"
+
+service_account:
+  annotations: []
