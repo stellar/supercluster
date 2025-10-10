@@ -47,7 +47,6 @@ type MissionOptions
         ingressExternalPort: int,
         exportToPrometheus: bool,
         probeTimeout: int,
-        missions: string seq,
         destination: string,
         image: string,
         oldImage: string option,
@@ -124,7 +123,8 @@ type MissionOptions
         runForMaxTps: string option,
         requireNodeLabelsPcV2: seq<string>,
         avoidNodeLabelsPcV2: seq<string>,
-        tolerateNodeTaintsPcV2: seq<string>
+        tolerateNodeTaintsPcV2: seq<string>,
+        missions: string seq
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
