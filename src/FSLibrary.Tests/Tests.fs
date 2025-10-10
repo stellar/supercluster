@@ -113,6 +113,7 @@ let ctx : MissionContext =
       randomSeed = 0
       pubnetParallelCatchupStartingLedger = 0
       pubnetParallelCatchupEndLedger = None
+      pubnetParallelCatchupCheckpointsPerJob = None
       pubnetParallelCatchupNumWorkers = 128
       tag = None
       numPregeneratedTxs = None
