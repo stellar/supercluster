@@ -172,7 +172,7 @@ let installProject (context: MissionContext) =
         if index < 1 || index > 3 then
             failwith "s3HistoryGetCommand: index must be between 1 and 3 inclusive"
 
-        let s3GetCommandBase = "aws s3 cp --region us-east-1"
+        let s3GetCommandBase = sprintf "aws s3 cp --region %s" context.s3HistoryMirrorRegionPcV2
         let command = sprintf "%s s3://%s/core_live_00%d/{0} {1}" s3GetCommandBase url index
         setOptions.Add(sprintf "worker.historyGetCommandCore00%d=\"%s\"" index command)
 

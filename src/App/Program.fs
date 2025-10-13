@@ -126,7 +126,8 @@ type MissionOptions
         avoidNodeLabelsPcV2: seq<string>,
         tolerateNodeTaintsPcV2: seq<string>,
         serviceAccountAnnotationsPcV2: seq<string>,
-        s3HistoryMirrorOverridePcV2: string option
+        s3HistoryMirrorOverridePcV2: string option,
+        s3HistoryMirrorRegionPcV2: string
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -562,10 +563,16 @@ type MissionOptions
              Required = false)>]
     member self.S3HistoryMirrorOverridePcV2 = s3HistoryMirrorOverridePcV2
 
+    [<Option("s3-history-mirror-region-pc-v2",
+             HelpText = "When set, configures the ParallelCatchupV2 workers to use the specified AWS region when accessing S3 history mirrors. Only applicable if --s3-history-mirror-override-pc-v2 is also set. If unset, the region defaults to us-east-1.",
+             Required = false,
+             Default = "us-east-1")>]
+    member self.S3HistoryMirrorRegionPcV2 = s3HistoryMirrorRegionPcV2
+
 let splitLabel (lab: string) : (string * string option) =
-    match lab.Split ':' with
-    | [| x |] -> (x, None)
-    | [| a; b |] -> (a, Some b)
+    match lab.Split ':' |> Array.toList with
+    | [ x ] -> x, None
+    | head :: tail -> head, Some(System.String.Join(":", tail))
     | _ -> failwith ("unexpected label '" + lab + "', need string of form 'key' or 'key:value'")
 
 // Given a (key, value option) output form `splitLabel`, return (key, value) or
@@ -699,7 +706,8 @@ let main argv =
                   avoidNodeLabelsPcV2 = []
                   tolerateNodeTaintsPcV2 = []
                   serviceAccountAnnotationsPcV2 = []
-                  s3HistoryMirrorOverridePcV2 = None }
+                  s3HistoryMirrorOverridePcV2 = None
+                  s3HistoryMirrorRegionPcV2 = "us-east-1" }
 
             let nCfg = MakeNetworkCfg ctx [] None
             use formation = kube.MakeEmptyFormation nCfg
@@ -856,7 +864,8 @@ let main argv =
                                    List.map
                                        (splitLabel >> requireLabelValue)
                                        (List.ofSeq mission.ServiceAccountAnnotationsPcV2)
-                               s3HistoryMirrorOverridePcV2 = mission.S3HistoryMirrorOverridePcV2 }
+                               s3HistoryMirrorOverridePcV2 = mission.S3HistoryMirrorOverridePcV2
+                               s3HistoryMirrorRegionPcV2 = mission.S3HistoryMirrorRegionPcV2 }
 
                          allMissions.[m] missionContext
 

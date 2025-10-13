@@ -126,4 +126,5 @@ type MissionContext =
       avoidNodeLabelsPcV2: ((string * string option) list)
       tolerateNodeTaintsPcV2: ((string * string option) list)
       serviceAccountAnnotationsPcV2: ((string * string) list)
-      s3HistoryMirrorOverridePcV2: string option }
+      s3HistoryMirrorOverridePcV2: string option
+      s3HistoryMirrorRegionPcV2: string }
