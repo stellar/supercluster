@@ -107,6 +107,18 @@ let installProject (context: MissionContext) =
     setOptions.Add(sprintf "worker.stellar_core_image=%s" context.image)
     setOptions.Add(sprintf "worker.replicas=%d" context.pubnetParallelCatchupNumWorkers)
     setOptions.Add(sprintf "range_generator.params.starting_ledger=%d" context.pubnetParallelCatchupStartingLedger)
+
+    let endLedger =
+        match context.pubnetParallelCatchupEndLedger with
+        | Some value -> value
+        | None -> GetLatestPubnetLedgerNumber()
+
+    setOptions.Add(sprintf "range_generator.params.latest_ledger_num=%d" endLedger)
+
+    setOptions.Add(
+        sprintf "range_generator.params.uniform_ledgers_per_job=%d" context.pubnetParallelCatchupLedgersPerJob
+    )
+
     // Skip known results by default
     setOptions.Add(
         sprintf
@@ -151,12 +163,6 @@ let installProject (context: MissionContext) =
     setOptions.Add(sprintf "worker.resources.requests.ephemeral_storage=%s" storageReqGibi)
     setOptions.Add(sprintf "worker.resources.limits.ephemeral_storage=%s" storageLimGibi)
 
-    let endLedger =
-        match context.pubnetParallelCatchupEndLedger with
-        | Some value -> value
-        | None -> GetLatestPubnetLedgerNumber()
-
-    setOptions.Add(sprintf "range_generator.params.latest_ledger_num=%d" endLedger)
     setOptions.Add(sprintf "monitor.hostname=%s" (jobMonitorHostName context))
     setOptions.Add(sprintf "monitor.path=/%s/(.*)" context.namespaceProperty)
     setOptions.Add(sprintf "monitor.logging_interval_seconds=%d" jobMonitorLoggingIntervalSecs)
