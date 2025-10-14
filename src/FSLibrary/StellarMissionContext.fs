@@ -124,4 +124,8 @@ type MissionContext =
       runForMaxTps: string option
       requireNodeLabelsPcV2: ((string * string option) list)
       avoidNodeLabelsPcV2: ((string * string option) list)
-      tolerateNodeTaintsPcV2: ((string * string option) list) }
+      tolerateNodeTaintsPcV2: ((string * string option) list)
+      benchmarkInfrastructure: bool option
+      benchmarkInfrastructureOnly: bool option
+      benchmarkDurationSeconds: int option
+      enableTcpTuning: bool }
