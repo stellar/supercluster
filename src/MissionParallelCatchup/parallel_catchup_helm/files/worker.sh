@@ -21,42 +21,62 @@ SLEEP_INTERVAL=10
 LOG_DIR="/data"
 
 while true; do
-# Fetch the next job key from the Redis queue. 
+# Fetch the next job key from the Redis queue.
 # Our ranges are generated in the order we want to run them from left to right, so we always pull from the left
 JOB_KEY=$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" LMOVE "$JOB_QUEUE" "$PROGRESS_QUEUE" LEFT LEFT)
+LMOVE_EXIT_CODE=$?
 
-if [ -n "$JOB_KEY" ]; then
+# Only process a job if the command succeeded AND we got a non-empty job key
+if [ $LMOVE_EXIT_CODE -eq 0 ] && [ -n "$JOB_KEY" ]; then
     # Start timer
-    START_TIME=$(date +%s)  
+    START_TIME=$(date +%s)
     echo "Processing job: $JOB_KEY"
 
-    if [ ! "$(/usr/bin/stellar-core --conf /config/stellar-core.cfg new-db --console&&
-    /usr/bin/stellar-core --conf /config/stellar-core.cfg catchup "$JOB_KEY" --metric 'ledger.transaction.apply' --console)" ]; then
-        echo "Error processing job: $JOB_KEY"
-        QUEUE_COMMAND="LPUSH $FAILED_QUEUE \"$JOB_KEY|$POD_NAME\""  # enhance the entry with pod name for tracking
-    else
-        echo "Successfully processed job: $JOB_KEY"
-        QUEUE_COMMAND="LPUSH $SUCCESS_QUEUE \"$JOB_KEY\""
-    fi
-
-    # Parse and extract the metrics from the log file
-    LOG_FILE=$(ls -t $LOG_DIR/stellar-core*.log | head -n 1)
-    if [ -z "$LOG_FILE" ]; then
-    echo "No log file found."
-    exit 1
-    fi
-
-    tx_apply_ms=$(tac "$LOG_FILE" | grep -m 1 -B 11 "metric 'ledger.transaction.apply':" | grep "sum =" | awk '{print $NF}')
-    echo "Log file: $LOG_FILE"
-    echo "ledger.transaction.apply sum: $tx_apply_ms"
+    # Run stellar-core: create new-db then catchup
+    /usr/bin/stellar-core --conf /config/stellar-core.cfg new-db --console && \
+    /usr/bin/stellar-core --conf /config/stellar-core.cfg catchup "$JOB_KEY" \
+        --metric 'ledger.transaction.apply' --console
+    STELLAR_CORE_EXIT_CODE=$?
 
     # End timer and duration
     END_TIME=$(date +%s)
     DURATION=$((END_TIME - START_TIME))s
     echo "Finish processing job: $JOB_KEY, duration: $DURATION"
 
+    # Check if both commands succeeded
+    if [ $STELLAR_CORE_EXIT_CODE -eq 0 ]; then
+        echo "Successfully processed job: $JOB_KEY"
+        QUEUE_COMMAND="LPUSH $SUCCESS_QUEUE \"$JOB_KEY\""
+    else
+        echo "Error processing job: $JOB_KEY (exit code: $STELLAR_CORE_EXIT_CODE)"
+        QUEUE_COMMAND="LPUSH $FAILED_QUEUE \"$JOB_KEY|$POD_NAME\""
+    fi
+
+    # Parse and extract the metrics from the log file
+    LOG_FILE=$(ls -t "$LOG_DIR"/stellar-core*.log 2>/dev/null | head -n 1)
+    if [ -z "$LOG_FILE" ]; then
+        echo "No log file found in $LOG_DIR"
+        exit 1
+    fi
+
+    tx_apply_ms=$(tac "$LOG_FILE" | grep -m 1 -B 11 "metric 'ledger.transaction.apply':" | grep "sum =" | awk '{print $NF}')
+    echo "Log file: $LOG_FILE"
+    echo "ledger.transaction.apply sum: $tx_apply_ms"
+    # Validate metric was extracted successfully
+    if [ -z "$tx_apply_ms" ]; then
+        echo "Warning: Failed to extract metric 'ledger.transaction.apply' from log file"
+        tx_apply_ms="N/A"
+    fi
+
     # Push metrics to redis in a transaction to ensure data consistency. Retry for 5min on failures
     core_id=$(echo "$POD_NAME" | grep -o '[0-9]\+')
+    # Validate core_id was extracted successfully
+    if [ -z "$core_id" ]; then
+        echo "Error: Failed to extract core_id from POD_NAME: $POD_NAME"
+        core_id="N/A"
+    fi
+
+    result=1  # Initialize to failure
     for i in $(seq 1 30);do
         redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" <<EOF
 MULTI
@@ -67,14 +87,26 @@ EXEC
 EOF
         result=$?
         if [ $result -ne 0 ]; then
-            echo "Redis transaction failed. Sleeping and retrying"
+            echo "Redis transaction failed. Sleeping and retrying (attempt $i/30)"
             sleep 10
         else
             break
         fi
-    done
+    done    
+    # Check if all retries were exhausted
+    if [ "$result" -ne 0 ]; then
+        echo "Error: Redis transaction failed after all 30 retry attempts. Exiting."
+        exit 1
+    fi
+
 else
-    echo "$(date) No more jobs in the queue. Sleeping for $SLEEP_INTERVAL seconds..."
+    # Either Redis command failed OR queue is empty
+    if [ $LMOVE_EXIT_CODE -ne 0 ]; then
+        echo "Error: Failed to connect to Redis at $REDIS_HOST:$REDIS_PORT"
+    else
+        echo "$(date) No more jobs in the queue."
+    fi
+    echo "Sleeping for $SLEEP_INTERVAL seconds..."
     sleep $SLEEP_INTERVAL
 fi
 done
