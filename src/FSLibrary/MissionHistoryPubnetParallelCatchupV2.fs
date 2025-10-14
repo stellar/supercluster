@@ -99,6 +99,9 @@ let tolerateTaintToHelmIndexed (index: int) ((key: string), (effect: string opti
     let effectValue = Option.defaultValue "NoSchedule" effect
     sprintf "worker.tolerateNodeTaints[%d].key=%s,worker.tolerateNodeTaints[%d].effect=%s" index key index effectValue
 
+let serviceAccountAnnotationsToHelmIndexed (index: int) (key: string, value: string) =
+    sprintf "service_account.annotations[%d].key=%s,service_account.annotations[%d].value=%s" index key index value
+
 let installProject (context: MissionContext) =
     LogInfo "Installing Helm chart..."
 
@@ -163,6 +166,21 @@ let installProject (context: MissionContext) =
     setOptions.Add(sprintf "worker.resources.requests.ephemeral_storage=%s" storageReqGibi)
     setOptions.Add(sprintf "worker.resources.limits.ephemeral_storage=%s" storageLimGibi)
 
+    // Construct command for fetching history files from S3 for core node
+    // `index` and set the corresponding Helm option
+    let setS3HistoryGetCommand (url: string) (index: int) =
+        if index < 1 || index > 3 then
+            failwith "s3HistoryGetCommand: index must be between 1 and 3 inclusive"
+
+        let s3GetCommandBase = sprintf "aws s3 cp --region %s" context.s3HistoryMirrorRegionPcV2
+        let command = sprintf "%s s3://%s/core_live_00%d/{0} {1}" s3GetCommandBase url index
+        setOptions.Add(sprintf "worker.historyGetCommandCore00%d=\"%s\"" index command)
+
+
+    match context.s3HistoryMirrorOverridePcV2 with
+    | Some mirrorUrl -> [ 1 .. 3 ] |> List.iter (setS3HistoryGetCommand mirrorUrl)
+    | None -> ()
+
     setOptions.Add(sprintf "monitor.hostname=%s" (jobMonitorHostName context))
     setOptions.Add(sprintf "monitor.path=/%s/(.*)" context.namespaceProperty)
     setOptions.Add(sprintf "monitor.logging_interval_seconds=%d" jobMonitorLoggingIntervalSecs)
@@ -196,6 +214,14 @@ let installProject (context: MissionContext) =
             |> String.concat ","
 
         setOptions.Add(tolerateTaintsHelm)
+
+    match context.serviceAccountAnnotationsPcV2 with
+    | [] -> ()
+    | _ ->
+        context.serviceAccountAnnotationsPcV2
+        |> List.mapi serviceAccountAnnotationsToHelmIndexed
+        |> String.concat ","
+        |> setOptions.Add
 
     // comment out the line below when doing local testing
     Environment.SetEnvironmentVariable("KUBECONFIG", context.kubeCfg)

@@ -129,7 +129,10 @@ let ctx : MissionContext =
       runForMaxTps = None
       requireNodeLabelsPcV2 = []
       avoidNodeLabelsPcV2 = []
-      tolerateNodeTaintsPcV2 = [] }
+      tolerateNodeTaintsPcV2 = []
+      serviceAccountAnnotationsPcV2 = []
+      s3HistoryMirrorOverridePcV2 = None
+      s3HistoryMirrorRegionPcV2 = "us-east-1" }
 
 let netdata = __SOURCE_DIRECTORY__ + "/../../../data/public-network-data-2024-08-01.json"
 let pubkeys = __SOURCE_DIRECTORY__ + "/../../../data/tier1keys.json"
