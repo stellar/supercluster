@@ -14,10 +14,12 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: stellar-supercluster
+  {{- if .Values.service_account.annotations }}
   annotations:
     {{- range .Values.service_account.annotations }}
     {{ .key }}: {{ .value }}
     {{- end }}
+  {{- end }}
 ---
 apiVersion: apps/v1
 kind: StatefulSet
