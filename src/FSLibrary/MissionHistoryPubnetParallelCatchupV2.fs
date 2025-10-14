@@ -9,6 +9,7 @@ open StellarKubeSpecs
 open StellarMissionContext
 open StellarNetworkData
 open StellarNetworkCfg
+open StellarSupercluster
 
 open System
 open System.Diagnostics
@@ -24,9 +25,14 @@ open k8s
 // Constants
 let helmReleaseName = "parallel-catchup"
 let helmChartPath = "/supercluster/src/MissionParallelCatchup/parallel_catchup_helm"
-// let helmChartPath = "../MissionParallelCatchup/parallel_catchup_helm" // for local testing
+
+// Comment out the path below for local testing
+// Example command to run local testing (in the `supercluster/` directory):
+// $ dotnet run --project src/App/App.fsproj -- mission HistoryPubnetParallelCatchupV2 --image=docker-registry.services.stellar-ops.com/dev/stellar-core:23.0.3-2779.4d1df2b03.jammy-vnext-buildtests  --pubnet-parallel-catchup-num-workers=2 --pubnet-parallel-catchup-starting-ledger=0 --pubnet-parallel-catchup-end-ledger=6400 --pubnet-parallel-catchup-ledgers-per-job 1280  --destination ./logs
+// let helmChartPath = "src/MissionParallelCatchup/parallel_catchup_helm"
 let valuesFilePath = helmChartPath + "/values.yaml"
-let defaultJobMonitorHostName = "ssc-job-monitor.services.stellar-ops.com"
+
+let defaultJobMonitorHostName = "ssc-job-monitor-eks.services.stellar-ops.com"
 let jobMonitorStatusEndPoint = "/status"
 let jobMonitorMetricsEndPoint = "/metrics"
 let jobMonitorLoggingIntervalSecs = 30 // frequency of job monitor's internal information gathering (querying core endpoint and redis metrics) and logging
@@ -223,8 +229,9 @@ let installProject (context: MissionContext) =
         |> String.concat ","
         |> setOptions.Add
 
-    // comment out the line below when doing local testing
-    Environment.SetEnvironmentVariable("KUBECONFIG", context.kubeCfg)
+    // Expand tilde in kubeconfig path before setting environment variable
+    let expandedKubeCfg = ExpandHomeDirTilde context.kubeCfg
+    Environment.SetEnvironmentVariable("KUBECONFIG", expandedKubeCfg)
 
     runCommand [| "helm"
                   "install"
