@@ -40,6 +40,7 @@ spec:
         app: stellar-core
     spec:
       serviceAccountName: stellar-supercluster
+      {{- if or .Values.worker.requireNodeLabels .Values.worker.avoidNodeLabels }}
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -59,10 +60,13 @@ spec:
                 values: {{ toJson . }}
                 {{- end }}
               {{- end }}
+      {{- end }}
+      {{- if .Values.worker.tolerateNodeTaints }}
       tolerations:
       {{- range .Values.worker.tolerateNodeTaints }}
       - key: {{ .key }}
         effect: {{ .effect }}
+      {{- end }}
       {{- end }}
       containers:
       - name: stellar-core
