@@ -66,6 +66,7 @@ status = {
     'workers_up': 0,
     'workers_down': 0,
     'workers_refresh_duration': 0,
+    'mission_duration': 0,
 }
 status_lock = threading.Lock()
 
@@ -81,7 +82,7 @@ metric_refresh_duration = Gauge('ssc_parallel_catchup_workers_refresh_duration_s
 metric_full_duration = Histogram('ssc_parallel_catchup_job_full_duration_seconds', 'Exposes full job duration as histogram', buckets=metric_buckets)
 metric_tx_apply_duration = Histogram('ssc_parallel_catchup_job_tx_apply_duration_seconds', 'Exposes job TX apply duration as histogram', buckets=metric_buckets)
 metric_mission_duration = Gauge('ssc_parallel_catchup_mission_duration_seconds', 'Number of seconds since the mission started ')
-metric_retries = Gauge('ssc_parallel_catchup_job_retried_count', 'Number of jobs that were retried')
+metric_retries = Counter('ssc_parallel_catchup_job_retried_count', 'Number of jobs that were retried')
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -160,7 +161,7 @@ def update_status_and_metrics():
             # update the status
             with status_lock:
                 status = {
-                    'num_remain': queue_remain_count,  # Needed for backwards compatibility with the reset of the code
+                    'num_remain': queue_remain_count,  # Needed for backwards compatibility with the rest of the code
                     'queue_remain_count': queue_remain_count,
                     'queue_succeeded_count': queue_succeeded_count,
                     'queue_failed_count': queue_failed_count,
