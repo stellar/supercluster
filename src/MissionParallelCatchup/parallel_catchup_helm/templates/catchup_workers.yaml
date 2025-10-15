@@ -115,7 +115,7 @@ spec:
       - labelSelector:
           matchLabels:
             app: stellar-core
-        maxSkew: 1
+        maxSkew: 2
         topologyKey: kubernetes.io/hostname
         whenUnsatisfiable: DoNotSchedule
       {{- end }}
