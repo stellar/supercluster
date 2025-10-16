@@ -7,7 +7,7 @@ import logging
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from prometheus_client import Gauge, Histogram, generate_latest, REGISTRY, CONTENT_TYPE_LATEST
+from prometheus_client import Gauge, Counter, Histogram, generate_latest, REGISTRY, CONTENT_TYPE_LATEST
 from datetime import datetime, timezone
 
 # Configuration
