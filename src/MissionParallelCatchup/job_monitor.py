@@ -174,14 +174,14 @@ def update_status_and_metrics():
                     'workers_refresh_duration': workers_refresh_duration,
                     'mission_duration': mission_duration,
                 }
-                metric_catchup_queues.labels(queue="remain").set(queue_remain_count)
-                metric_catchup_queues.labels(queue="succeeded").set(queue_succeeded_count)
-                metric_catchup_queues.labels(queue="failed").set(queue_failed_count)
-                metric_catchup_queues.labels(queue="in_progress").set(queue_in_progress_count)
-                metric_workers.labels(status="up").set(workers_up)
-                metric_workers.labels(status="down").set(workers_down)
-                metric_refresh_duration.set(workers_refresh_duration)
-                metric_mission_duration.set(mission_duration)
+            metric_catchup_queues.labels(queue="remain").set(queue_remain_count)
+            metric_catchup_queues.labels(queue="succeeded").set(queue_succeeded_count)
+            metric_catchup_queues.labels(queue="failed").set(queue_failed_count)
+            metric_catchup_queues.labels(queue="in_progress").set(queue_in_progress_count)
+            metric_workers.labels(status="up").set(workers_up)
+            metric_workers.labels(status="down").set(workers_down)
+            metric_refresh_duration.set(workers_refresh_duration)
+            metric_mission_duration.set(mission_duration)
             logger.info("Status: %s", json.dumps(status))
 
             # update the metrics
@@ -189,11 +189,11 @@ def update_status_and_metrics():
             if len(new_metrics) > 0:
                 with metrics_lock:
                     metrics['metrics'].extend(new_metrics)
-                    for timing in new_metrics:
-                        # Example: 36024000/8320|213|1.47073e+06ms|2965s
-                        _, _, tx_apply, full_duration = timing.split('|')
-                        metric_full_duration.observe(float(full_duration.rstrip('s')))
-                        metric_tx_apply_duration.observe(float(tx_apply.rstrip('ms'))/1000)
+                for timing in new_metrics:
+                    # Example: 36024000/8320|213|1.47073e+06ms|2965s
+                    _, _, tx_apply, full_duration = timing.split('|')
+                    metric_full_duration.observe(float(full_duration.rstrip('s')))
+                    metric_tx_apply_duration.observe(float(tx_apply.rstrip('ms'))/1000)
             logger.info("Metrics: %s", json.dumps(metrics))
 
         except Exception as e:
