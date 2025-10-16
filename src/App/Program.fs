@@ -110,6 +110,7 @@ type MissionOptions
         randomSeed: int,
         pubnetParallelCatchupStartingLedger: int,
         pubnetParallelCatchupEndLedger: int option,
+        pubnetParallelCatchupLedgersPerJob: int,
         pubnetParallelCatchupNumWorkers: int,
         tag: string option,
         numPregeneratedTxs: int option,
@@ -123,7 +124,10 @@ type MissionOptions
         runForMaxTps: string option,
         requireNodeLabelsPcV2: seq<string>,
         avoidNodeLabelsPcV2: seq<string>,
-        tolerateNodeTaintsPcV2: seq<string>
+        tolerateNodeTaintsPcV2: seq<string>,
+        serviceAccountAnnotationsPcV2: seq<string>,
+        s3HistoryMirrorOverridePcV2: string option,
+        s3HistoryMirrorRegionPcV2: string
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -475,6 +479,12 @@ type MissionOptions
     [<Option("pubnet-parallel-catchup-end-ledger", HelpText = "end ledger to run parallel catchup on", Required = false)>]
     member self.PubnetParallelCatchupEndLedger = pubnetParallelCatchupEndLedger
 
+    [<Option("pubnet-parallel-catchup-ledgers-per-job",
+             HelpText = "number of ledgers per job for parallel catchup",
+             Required = false,
+             Default = 16000)>]
+    member self.PubnetParallelCatchupLedgersPerJob = pubnetParallelCatchupLedgersPerJob
+
     [<Option("pubnet-parallel-catchup-num-workers",
              HelpText = "number of workers to run parallel catchup with (only supported for V2)",
              Required = false,
@@ -543,11 +553,34 @@ type MissionOptions
              Required = false)>]
     member self.TolerateNodeTaintsPcV2 = tolerateNodeTaintsPcV2
 
+    [<Option("service-account-annotations-pc-v2",
+             HelpText = "Annotations to add to the ServiceAccount used by ParallelCatchupV2 workers (format: space separated list of `key:value` pairs)",
+             Required = false)>]
+    member self.ServiceAccountAnnotationsPcV2 = serviceAccountAnnotationsPcV2
+
+    [<Option("s3-history-mirror-override-pc-v2",
+             HelpText = "When set, configures the ParallelCatchupV2 workers to fetch from the specified S3 history mirror",
+             Required = false)>]
+    member self.S3HistoryMirrorOverridePcV2 = s3HistoryMirrorOverridePcV2
+
+    [<Option("s3-history-mirror-region-pc-v2",
+             HelpText = "When set, configures the ParallelCatchupV2 workers to use the specified AWS region when accessing S3 history mirrors. Only applicable if --s3-history-mirror-override-pc-v2 is also set. If unset, the region defaults to us-east-1.",
+             Required = false,
+             Default = "us-east-1")>]
+    member self.S3HistoryMirrorRegionPcV2 = s3HistoryMirrorRegionPcV2
+
 let splitLabel (lab: string) : (string * string option) =
-    match lab.Split ':' with
-    | [| x |] -> (x, None)
-    | [| a; b |] -> (a, Some b)
+    match lab.Split ':' |> Array.toList with
+    | [ x ] -> x, None
+    | head :: tail -> head, Some(System.String.Join(":", tail))
     | _ -> failwith ("unexpected label '" + lab + "', need string of form 'key' or 'key:value'")
+
+// Given a (key, value option) output form `splitLabel`, return (key, value) or
+// fail if value is None
+let requireLabelValue (label: string * string option) : (string * string) =
+    match label with
+    | k, Some v -> k, v
+    | k, None -> failwith ("key '" + k + "' is missing a value. Must be a string of form 'key:value'")
 
 [<EntryPoint>]
 let main argv =
@@ -655,7 +688,8 @@ let main argv =
                   networkSizeLimit = 0
                   pubnetParallelCatchupStartingLedger = 0
                   pubnetParallelCatchupEndLedger = None
-                  pubnetParallelCatchupNumWorkers = 128
+                  pubnetParallelCatchupLedgersPerJob = 16000
+                  pubnetParallelCatchupNumWorkers = 192
                   tag = None
                   numPregeneratedTxs = None
                   genesisTestAccountCount = None
@@ -670,7 +704,10 @@ let main argv =
                   runForMaxTps = None
                   requireNodeLabelsPcV2 = []
                   avoidNodeLabelsPcV2 = []
-                  tolerateNodeTaintsPcV2 = [] }
+                  tolerateNodeTaintsPcV2 = []
+                  serviceAccountAnnotationsPcV2 = []
+                  s3HistoryMirrorOverridePcV2 = None
+                  s3HistoryMirrorRegionPcV2 = "us-east-1" }
 
             let nCfg = MakeNetworkCfg ctx [] None
             use formation = kube.MakeEmptyFormation nCfg
@@ -806,6 +843,7 @@ let main argv =
                                randomSeed = mission.RandomSeed
                                pubnetParallelCatchupStartingLedger = mission.PubnetParallelCatchupStartingLedger
                                pubnetParallelCatchupEndLedger = mission.PubnetParallelCatchupEndLedger
+                               pubnetParallelCatchupLedgersPerJob = mission.PubnetParallelCatchupLedgersPerJob
                                pubnetParallelCatchupNumWorkers = mission.PubnetParallelCatchupNumWorkers
                                tag = mission.Tag
                                numPregeneratedTxs = mission.NumPregeneratedTxs
@@ -821,7 +859,13 @@ let main argv =
                                runForMaxTps = mission.RunForMaxTps
                                requireNodeLabelsPcV2 = List.map splitLabel (List.ofSeq mission.RequireNodeLabelsPcV2)
                                avoidNodeLabelsPcV2 = List.map splitLabel (List.ofSeq mission.AvoidNodeLabelsPcV2)
-                               tolerateNodeTaintsPcV2 = List.map splitLabel (List.ofSeq mission.TolerateNodeTaintsPcV2) }
+                               tolerateNodeTaintsPcV2 = List.map splitLabel (List.ofSeq mission.TolerateNodeTaintsPcV2)
+                               serviceAccountAnnotationsPcV2 =
+                                   List.map
+                                       (splitLabel >> requireLabelValue)
+                                       (List.ofSeq mission.ServiceAccountAnnotationsPcV2)
+                               s3HistoryMirrorOverridePcV2 = mission.S3HistoryMirrorOverridePcV2
+                               s3HistoryMirrorRegionPcV2 = mission.S3HistoryMirrorRegionPcV2 }
 
                          allMissions.[m] missionContext
 

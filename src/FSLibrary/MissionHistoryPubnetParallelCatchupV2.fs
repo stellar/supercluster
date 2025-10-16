@@ -9,6 +9,7 @@ open StellarKubeSpecs
 open StellarMissionContext
 open StellarNetworkData
 open StellarNetworkCfg
+open StellarSupercluster
 
 open System
 open System.Diagnostics
@@ -24,9 +25,14 @@ open k8s
 // Constants
 let helmReleaseName = "parallel-catchup"
 let helmChartPath = "/supercluster/src/MissionParallelCatchup/parallel_catchup_helm"
-// let helmChartPath = "../MissionParallelCatchup/parallel_catchup_helm" // for local testing
+
+// Comment out the path below for local testing
+// Example command to run local testing (in the `supercluster/` directory):
+// $ dotnet run --project src/App/App.fsproj -- mission HistoryPubnetParallelCatchupV2 --image=docker-registry.services.stellar-ops.com/dev/stellar-core:23.0.3-2779.4d1df2b03.jammy-vnext-buildtests  --pubnet-parallel-catchup-num-workers=2 --pubnet-parallel-catchup-starting-ledger=0 --pubnet-parallel-catchup-end-ledger=6400 --pubnet-parallel-catchup-ledgers-per-job 1280  --destination ./logs
+// let helmChartPath = "src/MissionParallelCatchup/parallel_catchup_helm"
 let valuesFilePath = helmChartPath + "/values.yaml"
-let defaultJobMonitorHostName = "ssc-job-monitor.services.stellar-ops.com"
+
+let defaultJobMonitorHostName = "ssc-job-monitor-eks.services.stellar-ops.com"
 let jobMonitorStatusEndPoint = "/status"
 let jobMonitorMetricsEndPoint = "/metrics"
 let jobMonitorLoggingIntervalSecs = 30 // frequency of job monitor's internal information gathering (querying core endpoint and redis metrics) and logging
@@ -99,6 +105,9 @@ let tolerateTaintToHelmIndexed (index: int) ((key: string), (effect: string opti
     let effectValue = Option.defaultValue "NoSchedule" effect
     sprintf "worker.tolerateNodeTaints[%d].key=%s,worker.tolerateNodeTaints[%d].effect=%s" index key index effectValue
 
+let serviceAccountAnnotationsToHelmIndexed (index: int) (key: string, value: string) =
+    sprintf "service_account.annotations[%d].key=%s,service_account.annotations[%d].value=%s" index key index value
+
 let installProject (context: MissionContext) =
     LogInfo "Installing Helm chart..."
 
@@ -107,6 +116,18 @@ let installProject (context: MissionContext) =
     setOptions.Add(sprintf "worker.stellar_core_image=%s" context.image)
     setOptions.Add(sprintf "worker.replicas=%d" context.pubnetParallelCatchupNumWorkers)
     setOptions.Add(sprintf "range_generator.params.starting_ledger=%d" context.pubnetParallelCatchupStartingLedger)
+
+    let endLedger =
+        match context.pubnetParallelCatchupEndLedger with
+        | Some value -> value
+        | None -> GetLatestPubnetLedgerNumber()
+
+    setOptions.Add(sprintf "range_generator.params.latest_ledger_num=%d" endLedger)
+
+    setOptions.Add(
+        sprintf "range_generator.params.uniform_ledgers_per_job=%d" context.pubnetParallelCatchupLedgersPerJob
+    )
+
     // Skip known results by default
     setOptions.Add(
         sprintf
@@ -151,12 +172,21 @@ let installProject (context: MissionContext) =
     setOptions.Add(sprintf "worker.resources.requests.ephemeral_storage=%s" storageReqGibi)
     setOptions.Add(sprintf "worker.resources.limits.ephemeral_storage=%s" storageLimGibi)
 
-    let endLedger =
-        match context.pubnetParallelCatchupEndLedger with
-        | Some value -> value
-        | None -> GetLatestPubnetLedgerNumber()
+    // Construct command for fetching history files from S3 for core node
+    // `index` and set the corresponding Helm option
+    let setS3HistoryGetCommand (url: string) (index: int) =
+        if index < 1 || index > 3 then
+            failwith "s3HistoryGetCommand: index must be between 1 and 3 inclusive"
 
-    setOptions.Add(sprintf "range_generator.params.latest_ledger_num=%d" endLedger)
+        let s3GetCommandBase = sprintf "aws s3 cp --region %s" context.s3HistoryMirrorRegionPcV2
+        let command = sprintf "%s s3://%s/core_live_00%d/{0} {1}" s3GetCommandBase url index
+        setOptions.Add(sprintf "worker.historyGetCommandCore00%d=\"%s\"" index command)
+
+
+    match context.s3HistoryMirrorOverridePcV2 with
+    | Some mirrorUrl -> [ 1 .. 3 ] |> List.iter (setS3HistoryGetCommand mirrorUrl)
+    | None -> ()
+
     setOptions.Add(sprintf "monitor.hostname=%s" (jobMonitorHostName context))
     setOptions.Add(sprintf "monitor.path=/%s/(.*)" context.namespaceProperty)
     setOptions.Add(sprintf "monitor.logging_interval_seconds=%d" jobMonitorLoggingIntervalSecs)
@@ -191,8 +221,17 @@ let installProject (context: MissionContext) =
 
         setOptions.Add(tolerateTaintsHelm)
 
-    // comment out the line below when doing local testing
-    Environment.SetEnvironmentVariable("KUBECONFIG", context.kubeCfg)
+    match context.serviceAccountAnnotationsPcV2 with
+    | [] -> ()
+    | _ ->
+        context.serviceAccountAnnotationsPcV2
+        |> List.mapi serviceAccountAnnotationsToHelmIndexed
+        |> String.concat ","
+        |> setOptions.Add
+
+    // Expand tilde in kubeconfig path before setting environment variable
+    let expandedKubeCfg = ExpandHomeDirTilde context.kubeCfg
+    Environment.SetEnvironmentVariable("KUBECONFIG", expandedKubeCfg)
 
     runCommand [| "helm"
                   "install"
