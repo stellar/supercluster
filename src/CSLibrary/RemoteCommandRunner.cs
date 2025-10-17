@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Threading.Tasks;
 using k8s;
 using k8s.Models;
@@ -61,6 +62,57 @@ namespace CSLibrary
                await stdinWriter.FlushAsync().ConfigureAwait(false);
                var errors = await errorReader.ReadToEndAsync().ConfigureAwait(false);
                return Kubernetes.GetExitCodeOrThrow(SafeJsonConvert.DeserializeObject<V1Status>(errors));
+            }
+        }
+
+        // Execute a command and capture stdout to a file (for copying files from pod)
+        public static void RunRemoteCommandAndCaptureOutput(Kubernetes kube, string ns, string podName,
+            string containerName, string[] command, string outputFilePath)
+        {
+            Task task = RunRemoteCommandAndCaptureOutputAsync(kube, ns, podName, containerName, command, outputFilePath);
+            task.Wait();
+        }
+
+        public static async Task RunRemoteCommandAndCaptureOutputAsync(Kubernetes kube, string ns, string podName,
+            string containerName, string[] command, string outputFilePath)
+        {
+            // The `using` lifetime guard ensure these objects lifetimes last the entire task,
+            // and is properly disposed after the task finishes.
+            using (var mstr =
+               await kube.MuxedStreamNamespacedPodExecAsync(
+                   name: podName,
+                   @namespace: ns,
+                   command: command,
+                   container: containerName,
+                   stdin: false,
+                   stdout: true,
+                   stderr: true,
+                   tty: false).ConfigureAwait(false))
+            using (System.IO.Stream stdout = mstr.GetStream(ChannelIndex.StdOut, null))
+            using (System.IO.Stream stderr = mstr.GetStream(ChannelIndex.Error, null))
+            using (System.IO.StreamReader errorReader = new System.IO.StreamReader(stderr))
+            using (System.IO.FileStream fileStream = new System.IO.FileStream(outputFilePath, FileMode.Create, FileAccess.Write, FileShare.None,
+        bufferSize: 128 * 1024, useAsync: true))
+            {
+                // Start the MuxStream, this establishes the connection and routes bytes back into separate channels.
+                // We only care about stdout(1) and stderr(2). 
+                mstr.Start();
+
+                // Copy stdout → file asynchronously, and drain stderr concurrently.
+                var copyTask = stdout.CopyToAsync(fileStream);
+                var errorTask = errorReader.ReadToEndAsync();
+
+                await Task.WhenAll(copyTask, errorTask).ConfigureAwait(false);
+
+                // Flush the file stream to ensure all data is written
+                await fileStream.FlushAsync().ConfigureAwait(false);
+
+                // Log any errors to console
+                string errors = errorTask.Result;
+                if (!string.IsNullOrEmpty(errors))
+                {
+                    Console.WriteLine($"Command stderr from pod {podName}: {errors}");
+                }
             }
         }
     }

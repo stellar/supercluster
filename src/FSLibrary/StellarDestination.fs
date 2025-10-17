@@ -17,6 +17,8 @@ type Destination(path: string) =
         else
             Directory.CreateDirectory(path) |> ignore
 
+    member public self.Path = path
+
     member public self.RemoveIfExists name =
         let fullPath = Path.Combine [| path; name |]
 

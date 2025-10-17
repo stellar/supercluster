@@ -14,6 +14,7 @@ open StellarSupercluster
 open System
 open System.Diagnostics
 open System.Net.Http
+open System.IO
 
 open Newtonsoft.Json.Linq
 open Microsoft.FSharp.Control
@@ -21,6 +22,7 @@ open System.Threading
 open System
 
 open k8s
+open CSLibrary
 
 // Constants
 let helmReleaseName = "parallel-catchup"
@@ -250,22 +252,83 @@ let installProject (context: MissionContext) =
     | Some valuesOutput -> LogInfo "%s" valuesOutput
     | _ -> ()
 
+// Collect log files from all parallel catchup worker pods
+// This function:
+// 1. Automatically determines worker pod names from context.pubnetParallelCatchupNumWorkers
+// 2. For each pod, finds all files matching "stellar-core-*.log" in /data
+// 3. Creates a tar.gz archive and copies it to context.destination directory
+let collectLogsFromPods (context: MissionContext) =
+    // Generate pod names based on number of workers
+    // Pod names follow the pattern: stellar-core-0, stellar-core-1, etc.
+    let podNames =
+        [ 0 .. context.pubnetParallelCatchupNumWorkers - 1 ]
+        |> List.map (fun i -> sprintf "stellar-core-%d" i)
+
+    LogInfo "Collecting logs from %d worker pods to directory: %s" (List.length podNames) context.destination.Path
+
+    for podName in podNames do
+        try
+            LogInfo "Collecting logs from pod: %s" podName
+
+            // Build the tar command to archive log files
+            // The command tars all stellar-core-*.log files in /data
+            // Using `-f -` to write the file contents to stdout
+            let command = [| "sh"; "-c"; "cd /data && tar -czf - stellar-core-*.log" |]
+
+            // Output file path for this pod's logs
+            let outputFile = Path.Combine(context.destination.Path, sprintf "%s-logs.tar.gz" podName)
+
+            // Execute the command and capture the tar output to a local file
+            RemoteCommandRunner.RunRemoteCommandAndCaptureOutput(
+                kube = context.kube,
+                ns = context.namespaceProperty,
+                podName = podName,
+                containerName = "stellar-core",
+                command = command,
+                outputFilePath = outputFile
+            )
+
+            let fileInfo = FileInfo(outputFile)
+
+            if fileInfo.Exists && fileInfo.Length > 0L then
+                LogInfo "Successfully collected logs from %s to %s (size: %d bytes)" podName outputFile fileInfo.Length
+            else
+                LogWarn "No logs found or empty archive for pod %s" podName
+
+        with ex ->
+            LogWarn "Could not collect logs from pod %s (this is expected if pod doesn't exist): %s" podName ex.Message
+
 // Cleanup on exit
-let cleanup () =
+let cleanup (context: MissionContext) =
     if toPerformCleanup then
         toPerformCleanup <- false
         LogInfo "Cleaning up resources..."
+
+        // Try to collect logs from all worker pods before cleanup
+        try
+            LogInfo "Attempting to collect worker logs before cleanup..."
+            collectLogsFromPods context
+        with ex -> LogWarn "Failed to collect some or all worker logs: %s" ex.Message
 
         runCommand [| "helm"
                       "uninstall"
                       helmReleaseName |]
         |> ignore
 
-System.AppDomain.CurrentDomain.ProcessExit.Add(fun _ -> cleanup ())
+let mutable cleanupContext : MissionContext option = None
+
+System.AppDomain.CurrentDomain.ProcessExit.Add
+    (fun _ ->
+        match cleanupContext with
+        | Some ctx -> cleanup ctx
+        | None -> ())
 
 Console.CancelKeyPress.Add
     (fun _ ->
-        cleanup ()
+        match cleanupContext with
+        | Some ctx -> cleanup ctx
+        | None -> ()
+
         Environment.Exit(0))
 
 let queryJobMonitor (context: MissionContext, path: String, endPoint: String) =
@@ -311,6 +374,9 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
 
     nonce <- (MakeNetworkNonce context.tag).ToString()
     LogDebug "nonce: '%s'" nonce
+
+    // Set cleanup context so cleanup handlers can access it
+    cleanupContext <- Some context
 
     installProject (context)
 
@@ -371,7 +437,7 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
                 timeoutLeft <- timeoutLeft - jobMonitorStatusCheckIntervalSecs
                 if timeoutLeft <= 0 then failwith "job monitor not reachable"
         with ex ->
-            cleanup ()
+            cleanup context
             raise ex
 
-    cleanup ()
+    cleanup context
