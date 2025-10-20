@@ -44,6 +44,12 @@ spec:
     metadata:
       labels:
         app: job-monitor
+      annotations:
+        # Add annotations to tell prometheus service discovery to scrape metrics.
+        # In k8s clusters without prometheus the annotations will be dormant
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/prometheus"
     spec:
       containers:
       - name: job-monitor
