@@ -90,12 +90,14 @@ let makeResourceRequirements
     : V1ResourceRequirements =
     makeResourceRequirementsCommon cpuReqMili memReqMebi cpuLimMili memLimMebi 0 0 false
 
+// Creates resource requirements with storage limits.
+// Parameters are ordered as: all requirements first (cpu, memory, storage), then all limits (cpu, memory, storage).
 let makeResourceRequirementsWithStorageLimit
     (cpuReqMili: int)
     (memReqMebi: int)
+    (storageReqGibi: int)
     (cpuLimMili: int)
     (memLimMebi: int)
-    (storageReqGibi: int)
     (storageLimGibi: int)
     : V1ResourceRequirements =
     makeResourceRequirementsCommon cpuReqMili memReqMebi cpuLimMili memLimMebi storageReqGibi storageLimGibi true
@@ -125,7 +127,7 @@ let SimulatePubnetTier1PerfCoreResourceRequirements : V1ResourceRequirements =
 let ParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
     // When doing parallel catchup, we give each container
     // 0.25 vCPUs, 2GB RAM and 35 GB of disk bursting to 2vCPU, 8GB and 40 GB
-    makeResourceRequirementsWithStorageLimit 250 2048 2000 8192 35 40
+    makeResourceRequirementsWithStorageLimit 250 2048 35 2000 8192 40
 
 let NonParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
     // When doing non-parallel catchup, we give each container
