@@ -163,6 +163,19 @@ let SimulatePubnetResources : V1ResourceRequirements =
     // of watchers.
     makeResourceRequirements 650 1500 4000 1500
 
+// Map CoreResources enum to corresponding V1ResourceRequirements
+// This is used by both stellar-core containers and benchmark containers
+let GetCoreResourceRequirements (cr: CoreResources) : V1ResourceRequirements =
+    match cr with
+    | SmallTestResources -> SmallTestCoreResourceRequirements
+    | MediumTestResources -> MediumTestCoreResourceRequirements
+    | AcceptanceTestResources -> AcceptanceTestCoreResourceRequirements
+    | SimulatePubnetResources -> SimulatePubnetResources
+    | SimulatePubnetTier1PerfResources -> SimulatePubnetTier1PerfCoreResourceRequirements
+    | ParallelCatchupResources -> ParallelCatchupCoreResourceRequirements
+    | NonParallelCatchupResources -> NonParallelCatchupCoreResourceRequirements
+    | UpgradeResources -> UpgradeCoreResourceRequirements
+
 let PgContainerVolumeMounts : V1VolumeMount array =
     [| V1VolumeMount(name = CfgVal.dataVolumeName, mountPath = CfgVal.dataVolumePath) |]
 
@@ -315,16 +328,7 @@ let CoreContainerForCommand
                  killPs
                  exit |]
 
-    let res =
-        match cr with
-        | SmallTestResources -> SmallTestCoreResourceRequirements
-        | MediumTestResources -> MediumTestCoreResourceRequirements
-        | AcceptanceTestResources -> AcceptanceTestCoreResourceRequirements
-        | SimulatePubnetResources -> SimulatePubnetResources
-        | SimulatePubnetTier1PerfResources -> SimulatePubnetTier1PerfCoreResourceRequirements
-        | ParallelCatchupResources -> ParallelCatchupCoreResourceRequirements
-        | NonParallelCatchupResources -> NonParallelCatchupCoreResourceRequirements
-        | UpgradeResources -> UpgradeCoreResourceRequirements
+    let res = GetCoreResourceRequirements cr
 
     V1Container(
         name = containerName,

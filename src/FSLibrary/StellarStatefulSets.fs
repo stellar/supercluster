@@ -7,6 +7,7 @@ module StellarStatefulSets
 open k8s
 open k8s.Models
 open Logging
+open ScriptUtils
 open StellarFormation
 open StellarDataDump
 open StellarCoreSet
@@ -14,8 +15,60 @@ open StellarKubeSpecs
 open StellarCorePeer
 open StellarCoreHTTP
 open StellarTransaction
+open StellarNetworkDelays
 open System
 open System.Threading
+
+// Extract the peer topology from stellar-core configuration
+// Returns a map from node name to its peers
+let private extractPeerTopology (nCfg: StellarNetworkCfg.NetworkCfg) : Map<string, string array> =
+    let topology =
+        nCfg.MapAllPeers
+            (fun coreSet i ->
+                let podName = nCfg.PodName coreSet i
+
+                let peerList =
+                    match coreSet.options.preferredPeersMap with
+                    | Some ppMap ->
+                        let nodeKey = coreSet.keys.[i].PublicKey
+
+                        if ppMap.ContainsKey(nodeKey) then
+                            ppMap.[nodeKey]
+                            |> List.map
+                                (fun peerKey ->
+                                    // Find the DNS name for this peer key by searching all peers
+                                    nCfg.MapAllPeers
+                                        (fun cs j ->
+                                            if cs.keys.[j].PublicKey = peerKey then
+                                                Some (nCfg.PeerDnsName cs j).StringName
+                                            else
+                                                None)
+                                    |> Array.tryPick id)
+                            |> List.choose id
+                            |> Array.ofList
+                        else
+                            [||]
+                    | None ->
+                        // If no preferred peers, use default peering logic
+                        nCfg.MapAllPeers
+                            (fun cs j ->
+                                if cs <> coreSet || i <> j then
+                                    Some (nCfg.PeerDnsName cs j).StringName
+                                else
+                                    None)
+                        |> Array.choose id
+
+                (podName.StringName, peerList))
+        |> Array.ofSeq
+
+    Map.ofArray topology
+
+// Calculate average peers per node
+let private getAveragePeerCount (topology: Map<string, string array>) : float =
+    let counts = topology |> Map.toSeq |> Seq.map (fun (_, peers) -> Array.length peers)
+    let total = Seq.sum counts
+    let nodeCount = Map.count topology
+    if nodeCount > 0 then float total / float nodeCount else 0.0
 
 type StellarFormation with
 
@@ -371,3 +424,503 @@ type StellarFormation with
         // Final check after the loop completes
         if List.exists (fun (peer: Peer) -> peer.IsLoadGenComplete() = Failure) loadGenPeers then
             failwith "Loadgen failed!"
+
+    // Deploys TCP tuning DaemonSets to configure node-level network settings if enabled.
+    // We want a DaemonSet here to ensure one pod per node automatically.
+    // Script runs with --daemon flag so that the DaemonSet is marked "Ready" if script is successful.
+    // Settings persist on nodes after DaemonSet deletion, we manually delete the DaemonSet after the run,
+    // or exit with an error code if any were not in the "Ready" state.
+    member self.MaybeDeployTcpTuningDaemonSet() : unit =
+        if self.NetworkCfg.missionContext.enableTcpTuning then
+            let ns = self.NetworkCfg.NamespaceProperty
+
+            LogInfo "Creating TCP tuning ConfigMap..."
+            let configMap = BenchmarkDaemonSet.createTcpTuningConfigMap self.NetworkCfg
+
+            self.Kube.CreateNamespacedConfigMap(body = configMap, namespaceParameter = ns)
+            |> ignore
+
+            self.NamespaceContent.Add(configMap)
+            LogInfo "Setting TCP settings for network performance"
+            let daemonSetName = "tcp-tuning"
+            let daemonSet = BenchmarkDaemonSet.createTcpTuningDaemonSet self.NetworkCfg
+            let actionMsg = "applied"
+
+            // Create and deploy the DaemonSet
+            let ds = self.Kube.CreateNamespacedDaemonSet(body = daemonSet, namespaceParameter = ns)
+            LogInfo "Created %s DaemonSet, waiting for settings to be %s..." daemonSetName actionMsg
+
+            // Wait for DaemonSet to be ready on all nodes
+            let mutable allReady = false
+            let mutable attempts = 0
+            let maxAttempts = 30
+
+            while not allReady && attempts < maxAttempts do
+                System.Threading.Thread.Sleep(2000)
+                attempts <- attempts + 1
+
+                try
+                    let currentDs = self.Kube.ReadNamespacedDaemonSet(name = daemonSetName, namespaceParameter = ns)
+                    let desired = currentDs.Status.DesiredNumberScheduled
+                    let numReady = currentDs.Status.NumberReady
+                    LogInfo "%s DaemonSet: %d/%d nodes ready" daemonSetName numReady desired
+
+                    if desired > 0 && numReady = desired then
+                        allReady <- true
+                        LogInfo "TCP settings %s on all %d nodes" actionMsg desired
+                with ex -> LogWarn "Failed to check %s DaemonSet status: %s" daemonSetName ex.Message
+
+            if not allReady then
+                failwithf
+                    "TCP tuning DaemonSet did not complete on all nodes within timeout (waited %d seconds)"
+                    (maxAttempts * 2)
+            else
+                // Give a bit more time for tuning settings to take effect
+                System.Threading.Thread.Sleep(3000)
+
+            // Delete the DaemonSet - settings will persist on nodes
+            try
+                self.Kube.DeleteNamespacedDaemonSet(name = daemonSetName, namespaceParameter = ns)
+                |> ignore
+            with ex ->
+                LogWarn "Failed to delete %s DaemonSet: %s" daemonSetName ex.Message
+                // Track it for cleanup if deletion failed
+                self.NamespaceContent.Add(ds)
+
+    // Runs a P2P network infrastructure benchmark that mirrors the stellar-core network topology.
+    //
+    // Architecture Overview:
+    // - Creates a benchmark pod for each stellar-core node in the network with same connection topology of the actual stellar-core mission
+    // - Each benchmark pod runs in a StatefulSet (1 replica each) for stable DNS names
+    // - All StatefulSets share a single headless service for DNS resolution
+    // - Pod naming: {runId}-benchmark-{shortName}-0 (e.g., ssc-1234z-benchmark-lo-0-0)
+    //
+    // Pod Structure:
+    // Each benchmark pod contains two containers:
+    // 1. Server container: Runs multiple iperf3 servers
+    //    - One server per incoming connection from other nodes
+    //    - Each server listens on port 5201 + source_node_index (ensures unique ports)
+    // 2. Client container: Runs iperf3 clients
+    //    - Connects to all peer nodes as defined in the stellar-core topology
+    //    - iperf3 sends the maximum possible traffic to each peer node simultaneously
+    //    - Raw results saved to /results/*.json in the container
+    //
+    // Results Collection:
+    // - After tests complete, collects logs and raw iperf3 JSON results from all pods
+    // - parse_benchmark_results.py creates and writes a results summary file
+
+    // Helper function to setup network topology and create node index mappings
+    member private self.SetupBenchmarkTopology() =
+        let topology = extractPeerTopology self.NetworkCfg
+        let avgPeerCount = getAveragePeerCount topology
+
+        LogInfo "Network topology: %d nodes, average %.1f peers per node" (Map.count topology) avgPeerCount
+
+        // Create a global index for all nodes
+        // Maps each node name to a unique integer (0 to N-1) used for port assignment
+        let globalNodeIndex =
+            topology
+            |> Map.toArray
+            |> Array.mapi (fun i (nodeName, _) -> (nodeName, i))
+            |> Map.ofArray
+
+        // Build reverse topology: for each node, who connects to it
+        // Original topology tells clients who to connect to, reverse topology tells servers which ports to open
+        // Note: topology maps pod names to DNS names, so we need to extract pod names from DNS names
+        let reverseTopology =
+            topology
+            |> Map.toArray
+            |> Array.collect
+                (fun (sourceName, targetPeerDnsNames) ->
+                    targetPeerDnsNames
+                    |> Array.map
+                        (fun targetDns ->
+                            let targetPodName = targetDns.Split('.').[0]
+                            (targetPodName, sourceName)))
+            |> Array.groupBy fst
+            |> Array.map (fun (target, sources) -> (target, sources |> Array.map snd))
+            |> Map.ofArray
+
+        (topology, globalNodeIndex, reverseTopology, avgPeerCount)
+
+    member private self.CreateBenchmarkStatefulSets
+        (
+            runId: string,
+            topology: Map<string, string []>,
+            globalNodeIndex: Map<string, int>,
+            reverseTopology: Map<string, string []>,
+            duration: int
+        ) =
+        let ns = self.NetworkCfg.NamespaceProperty
+        let apiRateLimit = self.NetworkCfg.missionContext.apiRateLimit
+
+        // Create headless service for DNS
+        LogInfo "Creating headless service for benchmark StatefulSets..."
+        let headlessService = BenchmarkDaemonSet.createBenchmarkHeadlessService self.NetworkCfg runId
+
+        try
+            ApiRateLimit.sleepUntilNextRateLimitedApiCallTime apiRateLimit
+
+            let svc =
+                self.Kube.CreateNamespacedService(body = headlessService, namespaceParameter = ns)
+
+            LogInfo "Created headless service %s" svc.Metadata.Name
+        with ex -> failwithf "Failed to create headless service: %s" ex.Message
+
+        // Each pod gets a StatefulSet to connect to he DNS service above.
+        LogInfo "Creating StatefulSets for benchmark nodes..."
+
+        let statefulSetDeployments =
+            self.NetworkCfg.MapAllPeers
+                (fun coreSet nodeIndex ->
+                    let nodeName = (self.NetworkCfg.PodName coreSet nodeIndex).StringName
+                    let peers = Map.find nodeName topology
+
+                    // Get the list of nodes that will connect to this node
+                    let sourcePeers =
+                        match Map.tryFind nodeName reverseTopology with
+                        | Some sources -> sources
+                        | None -> [||]
+
+                    // Extract short name for StatefulSet
+                    let parts = nodeName.Split('-')
+                    let coreSetName = if parts.Length >= 3 then parts.[parts.Length - 2] else coreSet.name.StringName
+
+                    // Create the StatefulSet
+                    let statefulSet =
+                        BenchmarkDaemonSet.createBenchmarkStatefulSet
+                            self.NetworkCfg
+                            runId
+                            coreSetName
+                            nodeName
+                            peers
+                            sourcePeers
+                            globalNodeIndex
+                            duration
+                            coreSet
+                            nodeIndex
+
+                    try
+                        ApiRateLimit.sleepUntilNextRateLimitedApiCallTime apiRateLimit
+
+                        let sts =
+                            self.Kube.CreateNamespacedStatefulSet(body = statefulSet, namespaceParameter = ns)
+
+                        LogInfo "Created StatefulSet %s for %s" sts.Metadata.Name nodeName
+                        (nodeName, sts.Metadata.Name)
+                    with ex -> failwithf "Failed to create StatefulSet for %s: %s" nodeName ex.Message)
+
+        let successfulStatefulSets = statefulSetDeployments |> Map.ofArray
+        let totalCreated = Map.count successfulStatefulSets
+        LogInfo "All %d StatefulSets created successfully." totalCreated
+        successfulStatefulSets
+
+    member private self.WaitForBenchmarkPodsReady(statefulSets: Map<string, string>) =
+        let ns = self.NetworkCfg.NamespaceProperty
+        LogInfo "Waiting for pods to be ready..."
+
+        statefulSets
+        |> Map.iter
+            (fun nodeName stsName ->
+                let podName = sprintf "%s-0" stsName // StatefulSet pods have -0 suffix
+                let mutable ready = false
+                let mutable attempts = 0
+
+                while not ready && attempts < 30 do
+                    try
+                        let pod = self.Kube.ReadNamespacedPod(name = podName, namespaceParameter = ns)
+
+                        if pod.Status.Phase = "Running"
+                           && pod.Status.ContainerStatuses <> null
+                           && pod.Status.ContainerStatuses |> Seq.forall (fun cs -> cs.Ready) then
+                            ready <- true
+                            LogInfo "Pod %s is ready" podName
+                        else
+                            System.Threading.Thread.Sleep(2000)
+                            attempts <- attempts + 1
+                    with _ ->
+                        System.Threading.Thread.Sleep(2000)
+                        attempts <- attempts + 1
+
+                if not ready then
+                    LogWarn "Pod %s failed to become ready after %d attempts" podName attempts)
+
+    member private self.CollectBenchmarkResults(runId: string, topology: Map<string, string []>, duration: int) =
+        let ns = self.NetworkCfg.NamespaceProperty
+        let testId = sprintf "benchmark-%s" (System.DateTime.UtcNow.ToString("yyyyMMdd-HHmmss"))
+
+        LogInfo "Collecting benchmark results from pods..."
+
+        // Get all benchmark pods for this specific run
+        let labelSelector = "app=network-benchmark"
+
+        let podList =
+            self.Kube.ListNamespacedPod(namespaceParameter = ns, labelSelector = labelSelector)
+
+        // Check for failed pods
+        let failedPods =
+            podList.Items
+            |> Seq.filter (fun pod -> pod.Metadata.Name.StartsWith(sprintf "%s-benchmark-" runId))
+            |> Seq.filter
+                (fun pod ->
+                    match pod.Status.ContainerStatuses with
+                    | null -> false
+                    | statuses ->
+                        statuses
+                        |> Seq.exists
+                            (fun cs ->
+                                cs.Name = "client"
+                                && cs.State.Terminated <> null
+                                && cs.State.Terminated.ExitCode <> 0))
+            |> Seq.toList
+
+        if not (List.isEmpty failedPods) then
+            LogError "The following benchmark pods failed with non-zero exit codes:"
+
+            for pod in failedPods do
+                let clientStatus = pod.Status.ContainerStatuses |> Seq.tryFind (fun cs -> cs.Name = "client")
+
+                match clientStatus with
+                | Some cs when cs.State.Terminated <> null ->
+                    LogError
+                        "  - %s: exit code %d (reason: %s)"
+                        pod.Metadata.Name
+                        cs.State.Terminated.ExitCode
+                        (if cs.State.Terminated.Reason <> null then
+                             cs.State.Terminated.Reason
+                         else
+                             "unknown")
+                | _ -> LogError "  - %s: unknown failure" pod.Metadata.Name
+
+            failwithf "Benchmark run aborted: %d pods failed with non-zero exit codes" (List.length failedPods)
+
+        // Collect data from each pod
+        let podDataList =
+            podList.Items
+            |> Seq.filter (fun pod -> pod.Metadata.Name.StartsWith(sprintf "%s-benchmark-" runId))
+            |> Seq.filter
+                (fun pod ->
+                    match pod.Status.ContainerStatuses with
+                    | null -> false
+                    | statuses ->
+                        match statuses |> Seq.tryFind (fun cs -> cs.Name = "client") with
+                        | Some cs -> cs.State.Running <> null
+                        | None -> false)
+            |> Seq.choose
+                (fun pod ->
+                    let nodeName = BenchmarkDaemonSet.extractNodeNameFromBenchmarkPod pod.Metadata.Name topology
+
+                    // Get logs from the client container
+                    let logs =
+                        let logStream =
+                            self.Kube.ReadNamespacedPodLog(
+                                name = pod.Metadata.Name,
+                                namespaceParameter = ns,
+                                container = "client"
+                            )
+
+                        use reader = new System.IO.StreamReader(logStream)
+                        reader.ReadToEnd()
+
+                    // Check if tests completed successfully
+                    let testsSucceeded =
+                        let processInfo = System.Diagnostics.ProcessStartInfo()
+                        processInfo.FileName <- "kubectl"
+                        processInfo.WorkingDirectory <- "/"
+
+                        processInfo.Arguments <-
+                            sprintf
+                                "exec %s -n %s -c client -- sh -c \"cat /results/exit_code 2>/dev/null\""
+                                pod.Metadata.Name
+                                ns
+
+                        processInfo.UseShellExecute <- false
+                        processInfo.RedirectStandardOutput <- true
+                        processInfo.RedirectStandardError <- true
+
+                        use proc = System.Diagnostics.Process.Start(processInfo)
+                        let output = proc.StandardOutput.ReadToEnd().Trim()
+                        let stderr = proc.StandardError.ReadToEnd()
+                        proc.WaitForExit()
+
+                        if proc.ExitCode <> 0 then
+                            LogError
+                                "Pod %s: Cannot read exit_code file (kubectl exit code %d): %s"
+                                pod.Metadata.Name
+                                proc.ExitCode
+                                stderr
+
+                            false
+                        else if output = "" then
+                            LogError "Pod %s: exit_code file is empty or doesn't exist yet" pod.Metadata.Name
+                            false
+                        else if output = "0" then
+                            true
+                        else
+                            LogError "Pod %s: Tests failed with exit_code=%s" pod.Metadata.Name output
+                            false
+
+                    if not testsSucceeded then
+                        failwithf "Pod %s: Tests failed or incomplete, aborting benchmark" pod.Metadata.Name
+                    else
+                        // Get the raw iperf3 JSON files from the pod
+                        let kubectlOutput =
+                            let processInfo = System.Diagnostics.ProcessStartInfo()
+                            processInfo.FileName <- "kubectl"
+                            processInfo.WorkingDirectory <- "/"
+
+                            processInfo.Arguments <-
+                                sprintf
+                                    "exec %s -n %s -c client -- sh -c \"cat /results/*.json 2>/dev/null\""
+                                    pod.Metadata.Name
+                                    ns
+
+                            processInfo.UseShellExecute <- false
+                            processInfo.RedirectStandardOutput <- true
+                            processInfo.RedirectStandardError <- true
+
+                            use proc = System.Diagnostics.Process.Start(processInfo)
+                            let output = proc.StandardOutput.ReadToEnd()
+                            let stderr = proc.StandardError.ReadToEnd()
+                            proc.WaitForExit()
+
+                            if proc.ExitCode <> 0 then
+                                if stderr.Contains("container not found") then
+                                    failwithf
+                                        "Cannot retrieve results from terminated container in pod %s"
+                                        pod.Metadata.Name
+                                else
+                                    failwithf
+                                        "Failed to retrieve results from pod %s (kubectl exec failed): %s"
+                                        pod.Metadata.Name
+                                        stderr
+                            else if String.IsNullOrWhiteSpace(output) then
+                                failwithf "No benchmark results found in pod %s (empty output)" pod.Metadata.Name
+                            else
+                                Some output
+
+                        match kubectlOutput with
+                        | None -> failwith "Failed to retrieve kubectl output"
+                        | Some output ->
+                            Some
+                                {| name = pod.Metadata.Name
+                                   node_name = nodeName
+                                   logs = logs
+                                   kubectl_output = output |})
+            |> Array.ofSeq
+
+        (testId, podDataList)
+
+    // Helper function to process results with Python script
+    member private self.ProcessBenchmarkResults
+        (
+            testId: string,
+            podDataList: _ [],
+            topology: Map<string, string []>,
+            duration: int
+        ) =
+        LogInfo "Processing benchmark results..."
+
+        let topologyData = topology |> Map.map (fun nodeName peers -> peers)
+
+        let inputData =
+            {| test_id = testId
+               pods = podDataList
+               topology = topologyData
+               network_delay_enabled = self.NetworkCfg.NeedNetworkDelayScript
+               duration_seconds = duration |}
+
+        let jsonInput = Newtonsoft.Json.JsonConvert.SerializeObject(inputData)
+
+        // Call Python script to process results
+        let pythonScriptPath = GetScriptPath "parse_benchmark_results.py"
+
+        let processInfo = System.Diagnostics.ProcessStartInfo()
+        processInfo.FileName <- "python3"
+        processInfo.Arguments <- pythonScriptPath
+        processInfo.UseShellExecute <- false
+        processInfo.RedirectStandardInput <- true
+        processInfo.RedirectStandardOutput <- true
+        processInfo.RedirectStandardError <- true
+
+        try
+            use proc = System.Diagnostics.Process.Start(processInfo)
+            proc.StandardInput.Write(jsonInput)
+            proc.StandardInput.Close()
+
+            let output = proc.StandardOutput.ReadToEnd()
+            let stderr = proc.StandardError.ReadToEnd()
+            proc.WaitForExit()
+
+            if proc.ExitCode <> 0 then
+                LogError "Python script failed: %s" stderr
+                LogInfo "Falling back to basic results display"
+                LogInfo "Collected data from %d pods" (Array.length podDataList)
+            else
+                LogInfo "%s" output
+
+                if stderr.Contains("RESULTS_FILE:") then
+                    let startIdx = stderr.IndexOf("RESULTS_FILE:") + 13
+                    let resultsFile = stderr.Substring(startIdx).Trim()
+                    LogInfo "Results saved to %s" resultsFile
+        with ex -> failwithf "Failed to run Python script: %s" ex.Message
+
+    member private self.CleanupBenchmarkResources(runId: string, statefulSets: Map<string, string>) =
+        let ns = self.NetworkCfg.NamespaceProperty
+        LogInfo "Cleaning up benchmark resources..."
+
+        // Delete all StatefulSets
+        statefulSets
+        |> Map.iter
+            (fun nodeName stsName ->
+                try
+                    self.Kube.DeleteNamespacedStatefulSet(name = stsName, namespaceParameter = ns)
+                    |> ignore
+
+                    LogInfo "Deleted StatefulSet %s" stsName
+                with ex -> LogWarn "Failed to delete StatefulSet %s: %s" stsName ex.Message)
+
+        // Delete the headless service
+        try
+            let serviceName = sprintf "%s-benchmark" runId
+
+            self.Kube.DeleteNamespacedService(name = serviceName, namespaceParameter = ns)
+            |> ignore
+
+            LogInfo "Deleted headless service %s" serviceName
+        with ex -> LogWarn "Failed to delete headless service: %s" ex.Message
+
+    member self.RunP2PNetworkBenchmark() : unit =
+        assert (self.NetworkCfg.missionContext.benchmarkInfrastructure.IsSome)
+
+        LogInfo "==============================================="
+        LogInfo "Starting P2P Network Infrastructure Benchmark"
+        LogInfo "==============================================="
+
+        let runId = sprintf "ssc-%xz" (System.Random().Next(0x10000))
+        LogInfo "Using run ID: %s" runId
+
+        // Setup network topology
+        let (topology, globalNodeIndex, reverseTopology, avgPeerCount) = self.SetupBenchmarkTopology()
+
+        let duration = self.NetworkCfg.missionContext.benchmarkDurationSeconds.Value
+
+        // Create and deploy benchmark StatefulSets
+        let successfulStatefulSets =
+            self.CreateBenchmarkStatefulSets(runId, topology, globalNodeIndex, reverseTopology, duration)
+
+        self.WaitForBenchmarkPodsReady(successfulStatefulSets)
+        LogInfo "Benchmark tests running for %d seconds..." duration
+
+        // Wait for tests to complete, plus some time for writing results
+        let waitTime = duration + 20
+        LogInfo "Waiting %d seconds for tests to complete..." waitTime
+        System.Threading.Thread.Sleep(waitTime * 1000)
+
+        // Collect benchmark results from pods
+        let (testId, podDataList) = self.CollectBenchmarkResults(runId, topology, duration)
+        self.ProcessBenchmarkResults(testId, podDataList, topology, duration)
+
+        // Cleanup benchmark resources
+        self.CleanupBenchmarkResources(runId, successfulStatefulSets)
+        LogInfo "Network benchmark complete!"
