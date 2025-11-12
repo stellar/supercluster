@@ -232,10 +232,8 @@ let DumpPodInfo (kube: Kubernetes) (apiRateLimit: int) (ns: string) =
 type Kubernetes with
 
     // Creates a minimal formation on which to run Jobs; no StatefulSets,
-    // services, ingresses or anything. Optionally sets up TCP tuning daemonsets.
-    member self.MakeEmptyFormation(nCfg: NetworkCfg, ?skipTcpConfig: bool) : StellarFormation =
-        let skipTcp = defaultArg skipTcpConfig false
-
+    // services, ingresses or anything. Sets up TCP tuning daemonsets if enabled in mission context.
+    member self.MakeEmptyFormation(nCfg: NetworkCfg) : StellarFormation =
         let formation =
             new StellarFormation(
                 networkCfg = nCfg,
@@ -244,7 +242,7 @@ type Kubernetes with
                 namespaceContent = NamespaceContent(self, nCfg.missionContext.apiRateLimit, nCfg.NamespaceProperty)
             )
 
-        if not skipTcp then formation.DeployTcpTuningDaemonSet()
+        formation.MaybeDeployTcpTuningDaemonSet()
 
         formation
 
@@ -300,7 +298,7 @@ type Kubernetes with
                     namespaceContent = namespaceContent
                 )
 
-            formation.DeployTcpTuningDaemonSet()
+            formation.MaybeDeployTcpTuningDaemonSet()
             formation.WaitForAllReplicasOnAllSetsReady()
 
             if nCfg.missionContext.exportToPrometheus then

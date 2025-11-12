@@ -742,7 +742,7 @@ let main argv =
                   enableTcpTuning = false }
 
             let nCfg = MakeNetworkCfg ctx [] None
-            use formation = kube.MakeEmptyFormation(nCfg, skipTcpConfig = true)
+            use formation = kube.MakeEmptyFormation(nCfg)
             formation.CleanNamespace()
             0
 

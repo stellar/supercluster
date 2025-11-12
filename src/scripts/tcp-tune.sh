@@ -28,11 +28,10 @@ sysctl -w net.ipv4.tcp_window_scaling=1
 sysctl -w net.ipv4.tcp_slow_start_after_idle=0
 sysctl -w net.ipv4.tcp_mtu_probing=1
 
-# If running as a DaemonSet pod, keep container running
+# Keep container running in daemon mode so pod is marked "Ready"
+# The orchestrator waits for Ready status to check that the settings were applied,
+# then deletes the DaemonSet
 if [ "$1" = "--daemon" ]; then
-    echo "Running in daemon mode, keeping container alive..."
-    # Keep running for a bit to ensure settings propagate
-    sleep 10
-    echo "TCP settings verification complete on node $(hostname)"
+    echo "TCP settings applied on node $(hostname)"
     sleep infinity
 fi

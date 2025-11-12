@@ -270,58 +270,64 @@ let private createTcpDaemonSet
     (labels: IDictionary<string, string>)
     (nCfg: NetworkCfg)
     =
+    let volumeMount =
+        V1VolumeMount(
+            name = "tcp-tuning-script",
+            mountPath = "/scripts",
+            readOnlyProperty = System.Nullable<bool>(true)
+        )
+
+    let securityContext =
+        V1SecurityContext(
+            privileged = System.Nullable<bool>(true),
+            capabilities = V1Capabilities(add = [| "SYS_ADMIN"; "NET_ADMIN" |])
+        )
+
+    let resources =
+        V1ResourceRequirements(
+            requests =
+                dict [ ("memory", ResourceQuantity("50Mi"))
+                       ("cpu", ResourceQuantity("10m")) ],
+            limits =
+                dict [ ("memory", ResourceQuantity("100Mi"))
+                       ("cpu", ResourceQuantity("50m")) ]
+        )
+
+    let container =
+        V1Container(
+            name = name,
+            image = "busybox:latest",
+            command = [| "/bin/sh" |],
+            args = [| sprintf "/scripts/%s" scriptName; "--daemon" |],
+            volumeMounts = [| volumeMount |],
+            securityContext = securityContext,
+            resources = resources
+        )
+
+    let configMapVolume =
+        V1Volume(
+            name = "tcp-tuning-script",
+            configMap = V1ConfigMapVolumeSource(name = "tcp-tuning-script", defaultMode = System.Nullable<int>(0o755))
+        )
+
+    let podSpec =
+        V1PodSpec(
+            hostNetwork = System.Nullable<bool>(true),
+            hostPID = System.Nullable<bool>(true),
+            containers = [| container |],
+            volumes = [| configMapVolume |],
+            tolerations = [| V1Toleration(operatorProperty = "Exists") |]
+        )
+
+    let podTemplate =
+        V1PodTemplateSpec(metadata = V1ObjectMeta(labels = dict [ ("app", name) ]), spec = podSpec)
+
+    let daemonSetSpec =
+        V1DaemonSetSpec(selector = V1LabelSelector(matchLabels = dict [ ("app", name) ]), template = podTemplate)
+
     V1DaemonSet(
         metadata = V1ObjectMeta(name = name, labels = labels, namespaceProperty = nCfg.NamespaceProperty),
-        spec =
-            V1DaemonSetSpec(
-                selector = V1LabelSelector(matchLabels = dict [ ("app", name) ]),
-                template =
-                    V1PodTemplateSpec(
-                        metadata = V1ObjectMeta(labels = dict [ ("app", name) ]),
-                        spec =
-                            V1PodSpec(
-                                hostNetwork = System.Nullable<bool>(true),
-                                hostPID = System.Nullable<bool>(true),
-                                containers =
-                                    [| V1Container(
-                                           name = name,
-                                           image = "busybox:latest",
-                                           command = [| "/bin/sh" |],
-                                           args = [| sprintf "/scripts/%s" scriptName; "--daemon" |],
-                                           volumeMounts =
-                                               [| V1VolumeMount(
-                                                      name = "tcp-tuning-script",
-                                                      mountPath = "/scripts",
-                                                      readOnlyProperty = System.Nullable<bool>(true)
-                                                  ) |],
-                                           securityContext =
-                                               V1SecurityContext(
-                                                   privileged = System.Nullable<bool>(true),
-                                                   capabilities = V1Capabilities(add = [| "SYS_ADMIN"; "NET_ADMIN" |])
-                                               ),
-                                           resources =
-                                               V1ResourceRequirements(
-                                                   requests =
-                                                       dict [ ("memory", ResourceQuantity("50Mi"))
-                                                              ("cpu", ResourceQuantity("10m")) ],
-                                                   limits =
-                                                       dict [ ("memory", ResourceQuantity("100Mi"))
-                                                              ("cpu", ResourceQuantity("50m")) ]
-                                               )
-                                       ) |],
-                                volumes =
-                                    [| V1Volume(
-                                           name = "tcp-tuning-script",
-                                           configMap =
-                                               V1ConfigMapVolumeSource(
-                                                   name = "tcp-tuning-script",
-                                                   defaultMode = System.Nullable<int>(0o755)
-                                               )
-                                       ) |],
-                                tolerations = [| V1Toleration(operatorProperty = "Exists") |]
-                            )
-                    )
-            )
+        spec = daemonSetSpec
     )
 
 // DaemonSet to apply TCP performance tuning

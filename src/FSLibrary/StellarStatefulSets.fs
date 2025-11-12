@@ -16,8 +16,6 @@ open StellarCorePeer
 open StellarCoreHTTP
 open StellarTransaction
 open StellarNetworkDelays
-open BenchmarkDaemonSet
-open ApiRateLimit
 open System
 open System.Threading
 
@@ -427,21 +425,12 @@ type StellarFormation with
         if List.exists (fun (peer: Peer) -> peer.IsLoadGenComplete() = Failure) loadGenPeers then
             failwith "Loadgen failed!"
 
-    // Deploys TCP tuning DaemonSets to configure node-level network settings.
-    //
-    // How it works:
-    // - DaemonSets run privileged containers on every node in the cluster
-    // - Containers modify kernel TCP parameters via sysctl commands
-    // - Settings persist at the node level even after DaemonSet deletion
-    // - All pods scheduled on tuned nodes benefit from the optimized settings
-    //
-    // After the run finishes, note that the settings remain permanently changed
-    // on those nodes, even for follow up runs. To account for this, we always
-    // set TCP settings at the start of the run, either to our optimized settings
-    // or Linux defaults.
-    //
-    // Scripts are stored in a ConfigMap and mounted into DaemonSet pods at /scripts/
-    member self.DeployTcpTuningDaemonSet() : unit =
+    // Deploys TCP tuning DaemonSets to configure node-level network settings if enabled.
+    // We want a DaemonSet here to ensure one pod per node automatically.
+    // Script runs with --daemon flag so that the DaemonSet is marked "Ready" if script is successful.
+    // Settings persist on nodes after DaemonSet deletion, we manually delete the DaemonSet after the run,
+    // or exit with an error code if any were not in the "Ready" state.
+    member self.MaybeDeployTcpTuningDaemonSet() : unit =
         if self.NetworkCfg.missionContext.enableTcpTuning then
             let ns = self.NetworkCfg.NamespaceProperty
 
