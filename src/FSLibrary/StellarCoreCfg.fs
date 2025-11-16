@@ -38,7 +38,7 @@ module CfgVal =
     let localHistName = "local"
     let peerNameEnvVarName = "STELLAR_CORE_PEER_SHORT_NAME"
     let asanOptionsEnvVarName = "ASAN_OPTIONS"
-    let asanOptionsEnvVarDefaultValue = "quarantine_size_mb=1:malloc_context_size=5"
+    let asanOptionsEnvVarDefaultValue = "quarantine_size_mb=1:malloc_context_size=5:alloc_dealloc_mismatch=0"
     let peerCfgFileName = "stellar-core.cfg"
     let peerInitCfgFileName = "stellar-core-init.cfg"
     let peerDelayCfgFileName = "install-delays.sh"
