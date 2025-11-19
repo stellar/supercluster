@@ -76,26 +76,22 @@ let ConnectToCluster (cfgFile: string) (nsOpt: string option) : (Kubernetes * st
 
     LogInfo "Connecting to cluster using kubeconfig %s" cfgFileExpanded
 
+    let ctx =
+        Seq.tryFind (fun (c: Context) -> c.Name = cfgInit.CurrentContext) cfgInit.Contexts
+
     let ns =
         match nsOpt with
         | Some ns ->
             LogInfo "Using explicit namespace '%s'" ns
             ns
         | None ->
-            (let ctxOpt =
-                Seq.tryFind (fun (c: Context) -> c.Name = cfgInit.CurrentContext) cfgInit.Contexts
-
-             match ctxOpt with
-             | Some c ->
-                 LogInfo "Using namespace '%s' from kubeconfig context '%s'" c.ContextDetails.Namespace c.Name
-                 c.ContextDetails.Namespace
-             | None ->
-                 LogInfo "Using default namespace 'stellar-supercluster'"
-                 "stellar-supercluster")
-
-    let ctxs =
-        cfgInit.Contexts
-        |> Seq.where (fun (c: Context) -> c.ContextDetails.Namespace = ns)
+            match ctx with
+            | Some c ->
+                LogInfo "Using namespace '%s' from kubeconfig context '%s'" c.ContextDetails.Namespace c.Name
+                c.ContextDetails.Namespace
+            | None ->
+                LogInfo "Using default namespace 'stellar-supercluster'"
+                "stellar-supercluster"
 
 
     // Try updating the config if we are using OIDC authentication
@@ -103,38 +99,34 @@ let ConnectToCluster (cfgFile: string) (nsOpt: string option) : (Kubernetes * st
     // little broken
     let newConfig =
         Some()
-        // Find username for selected namespace
+        // Get username from selected context
         |> Option.bind
             (fun _ ->
-                match Seq.length ctxs with
-                | 1 ->
+                match ctx with
+                | Some c ->
                     try
-                        let username = (Seq.exactlyOne ctxs).ContextDetails.User
-                        LogInfo "User is '%s'" username
-                        let users = cfgInit.Users |> Seq.where (fun (u: User) -> u.Name = username)
-                        Some(username, users)
-                    with
-                    | :? NullReferenceException -> None
-                    | :? ArgumentNullException -> None
-                | n ->
-                    LogWarn "Could not determine user for ns '%s' (%d matching contexts found)" ns n
+                        let username = c.ContextDetails.User
+                        LogInfo "Username is '%s'" username
+                        Some username
+                    with :? NullReferenceException ->
+                        LogWarn "No context details for context with name '%s'" cfgInit.CurrentContext
+                        None
+                | None ->
+                    LogWarn "Could not find context with name '%s'" cfgInit.CurrentContext
                     None)
         // Find user block for username
         |> Option.bind
-            (fun state ->
-                let username, users = state
+            (fun username ->
+                let users = cfgInit.Users |> Seq.where (fun (u: User) -> u.Name = username)
 
                 match Seq.length users with
-                | 1 -> Some(username, users)
+                | 1 -> Some(username, Seq.exactlyOne users)
                 | n ->
                     LogWarn "Could not determine user block for '%s' (%d candidates)" username n
                     None)
         // Check that user uses oidc auth; if so, try resetting id-token
         |> Option.bind
-            (fun state ->
-                let username, users = state
-                let user = Seq.exactlyOne users
-
+            (fun (username, user) ->
                 try
                     let provider = user.UserCredentials.AuthProvider
                     let authCfg = provider.Config
