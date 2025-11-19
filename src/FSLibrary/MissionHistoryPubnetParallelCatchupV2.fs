@@ -25,7 +25,6 @@ open k8s
 open CSLibrary
 
 // Constants
-let helmReleaseName = "parallel-catchup"
 let helmChartPath = "/supercluster/src/MissionParallelCatchup/parallel_catchup_helm"
 
 // Comment out the path below for local testing
@@ -46,6 +45,7 @@ let failedJobLogFileLineCount = 10000
 let failedJobLogStreamLineCount = 1000
 
 let mutable nonce : String = ""
+let mutable helmReleaseName : String = ""
 
 let jobMonitorHostName (context: MissionContext) =
     match context.jobMonitorExternalHost with
@@ -111,7 +111,7 @@ let serviceAccountAnnotationsToHelmIndexed (index: int) (key: string, value: str
     sprintf "service_account.annotations[%d].key=%s,service_account.annotations[%d].value=%s" index key index value
 
 let installProject (context: MissionContext) =
-    LogInfo "Installing Helm chart..."
+    LogInfo "Installing Helm chart with release name: %s" helmReleaseName
 
     // install the project with default values from the file and overridden values from the commandline
     let setOptions = ResizeArray<string>()
@@ -302,7 +302,7 @@ let collectLogsFromPods (context: MissionContext) =
 let cleanup (context: MissionContext) =
     if toPerformCleanup then
         toPerformCleanup <- false
-        LogInfo "Cleaning up resources..."
+        LogInfo "Cleaning up resources for release: %s" helmReleaseName
 
         // Try to collect logs from all worker pods before cleanup
         try
@@ -373,12 +373,13 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
     LogInfo "Running parallel catchup v2 ..."
 
     nonce <- (MakeNetworkNonce context.tag).ToString()
-    LogDebug "nonce: '%s'" nonce
+    helmReleaseName <- sprintf "parallel-catchup-%s" nonce
+    LogDebug "nonce: '%s', release name: '%s'" nonce helmReleaseName
 
     // Set cleanup context so cleanup handlers can access it
     cleanupContext <- Some context
 
-    installProject (context)
+    installProject context
 
     let mutable allJobsFinished = false
     let mutable timeoutLeft = jobMonitorStatusCheckTimeOutSecs
