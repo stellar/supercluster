@@ -2,28 +2,28 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: "{{ .Values.redis.hostname}}"
+  name: "{{ .Values.redis.hostname }}"
 spec:
   type: ClusterIP
   ports:
-    - port: {{ .Values.redis.port}}
+    - port: {{ .Values.redis.port }}
       targetPort: 6379
   selector:
-    app: redis
+    app: {{ .Values.redis.hostname }}
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: redis
+  name: {{ .Values.redis.hostname }}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: redis
+      app: {{ .Values.redis.hostname }}
   template:
     metadata:
       labels:
-        app: redis
+        app: {{ .Values.redis.hostname }}
     spec:
       containers:
       - name: redis
@@ -33,5 +33,5 @@ spec:
         command: ["redis-server"]
         resources:
           requests:
-            cpu: "{{ .Values.redis.resources.requests.cpu}}"
-            memory: "{{ .Values.redis.resources.requests.memory}}"
+            cpu: "{{ .Values.redis.resources.requests.cpu }}"
+            memory: "{{ .Values.redis.resources.requests.memory }}"

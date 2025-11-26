@@ -1,5 +1,5 @@
 redis:
-  hostname: "redis"
+  hostname: "" # to be set by the mission
   port: 6379
   job_queue: "ranges"
   success_queue: "succeeded"

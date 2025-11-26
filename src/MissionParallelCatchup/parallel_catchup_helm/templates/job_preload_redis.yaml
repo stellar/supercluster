@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: preload-redis
+  name: {{ .Release.Name }}-preload-redis
 spec:
   template:
     spec:
@@ -9,7 +9,7 @@ spec:
       - name: preload
         image: redis:7
         command: ["/bin/sh", "-c"]
-        args: 
+        args:
          - |-
            case "$STRATEGY" in
              "uniform")
@@ -24,24 +24,24 @@ spec:
            esac
         envFrom:
         - configMapRef:
-            name: range-generator-config
+            name: {{ .Release.Name }}-range-generator-config
         volumeMounts:
         - name: script
           mountPath: /scripts
       initContainers:
       - name: wait-for-redis
         image: redis:7
-        command: ['sh', '-c', "until redis-cli -h {{ .Values.redis.hostname}} -p  {{ .Values.redis.port}} ping; do echo waiting for redis; sleep 2; done;"]
+        command: ['sh', '-c', "until redis-cli -h {{ .Values.redis.hostname }} -p {{ .Values.redis.port }} ping; do echo waiting for redis; sleep 2; done;"]
       restartPolicy: OnFailure
       volumes:
       - name: script
         configMap:
-          name: generator-script
+          name: {{ .Release.Name }}-generator-script
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: generator-script
+  name: {{ .Release.Name }}-generator-script
 data:
   uniform_range_generator.sh: |-
     {{- (.Files.Get "files/uniform_range_generator.sh") | nindent 4 }}
@@ -51,7 +51,7 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: range-generator-config
+  name: {{ .Release.Name }}-range-generator-config
 data:
   STRATEGY: "{{ .Values.range_generator.strategy }}"
   STARTING_LEDGER: "{{ .Values.range_generator.params.starting_ledger }}"
@@ -60,5 +60,5 @@ data:
   LEDGERS_PER_JOB: "{{ .Values.range_generator.params.uniform_ledgers_per_job }}"
   LOGARITHMIC_FLOOR_LEDGERS: "{{ .Values.range_generator.params.logarithmic_floor_ledgers }}"
   NUM_PARALLELISM: "192"
-  REDIS_HOST: "{{ .Values.redis.hostname}}"
-  REDIS_PORT: "{{ .Values.redis.port}}"
+  REDIS_HOST: "{{ .Values.redis.hostname }}"
+  REDIS_PORT: "{{ .Values.redis.port }}"

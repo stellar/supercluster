@@ -1,11 +1,11 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: stellar-core
+  name: {{ .Release.Name }}-stellar-core
 spec:
   clusterIP: None
   selector:
-    app: stellar-core
+    app: {{ .Release.Name }}-stellar-core
   ports:
     - port: 11626
       targetPort: 11626
@@ -13,7 +13,7 @@ spec:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: stellar-supercluster
+  name: {{ .Release.Name }}-sa
   {{- if .Values.service_account.annotations }}
   annotations:
     {{- range .Values.service_account.annotations }}
@@ -24,22 +24,22 @@ metadata:
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: stellar-core
+  name: {{ .Release.Name }}-stellar-core
   labels:
-    app: stellar-core
+    app: {{ .Release.Name }}-stellar-core
 spec:
-  serviceName: "stellar-core"
+  serviceName: "{{ .Release.Name }}-stellar-core"
   podManagementPolicy: Parallel
   replicas: {{ .Values.worker.replicas }}
   selector:
     matchLabels:
-      app: stellar-core
+      app: {{ .Release.Name }}-stellar-core
   template:
     metadata:
       labels:
-        app: stellar-core
+        app: {{ .Release.Name }}-stellar-core
     spec:
-      serviceAccountName: stellar-supercluster
+      serviceAccountName: {{ .Release.Name }}-sa
       {{- if or .Values.worker.requireNodeLabels .Values.worker.avoidNodeLabels }}
       affinity:
         nodeAffinity:
@@ -93,7 +93,7 @@ spec:
           value: {{ .Values.worker.asanOptions | quote }}
         envFrom:
         - configMapRef:
-            name: worker-config
+            name: {{ .Release.Name }}-worker-config
         volumeMounts:
         - name: config
           mountPath: /config
@@ -104,17 +104,17 @@ spec:
       volumes:
       - name: config
         configMap:
-          name: stellar-core-config
+          name: {{ .Release.Name }}-stellar-core-config
       - name: script
         configMap:
-          name: worker-script
+          name: {{ .Release.Name }}-worker-script
       - emptyDir: {}
         name: data-volume
       {{- if not .Values.worker.unevenSched }}
       topologySpreadConstraints:
       - labelSelector:
           matchLabels:
-            app: stellar-core
+            app: {{ .Release.Name }}-stellar-core
         # Note: maxSkew affects dynamic node scheduling with karpenter
         # See https://github.com/stellar/supercluster/issues/330
         maxSkew: 2
@@ -125,7 +125,7 @@ spec:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: worker-script
+  name: {{ .Release.Name }}-worker-script
 data:
   worker.sh: |-
     {{- (.Files.Get "files/worker.sh") | nindent 4 }}
@@ -133,7 +133,7 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: stellar-core-config
+  name: {{ .Release.Name }}-stellar-core-config
 data:
   stellar-core.cfg: |-
     {{- if .Values.worker.catchup_skip_known_results_for_testing }}
@@ -154,10 +154,10 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: worker-config
+  name: {{ .Release.Name }}-worker-config
 data:
-  REDIS_HOST: "{{ .Values.redis.hostname}}"
-  REDIS_PORT: "{{ .Values.redis.port}}"
+  REDIS_HOST: "{{ .Values.redis.hostname }}"
+  REDIS_PORT: "{{ .Values.redis.port }}"
   JOB_QUEUE: "{{ .Values.redis.job_queue }}"
   SUCCESS_QUEUE: "{{ .Values.redis.success_queue }}"
   FAILED_QUEUE: "{{ .Values.redis.failed_queue }}"

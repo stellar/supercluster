@@ -25,7 +25,6 @@ open k8s
 open CSLibrary
 
 // Constants
-let helmReleaseName = "parallel-catchup"
 let helmChartPath = "/supercluster/src/MissionParallelCatchup/parallel_catchup_helm"
 
 // Comment out the path below for local testing
@@ -46,6 +45,7 @@ let failedJobLogFileLineCount = 10000
 let failedJobLogStreamLineCount = 1000
 
 let mutable nonce : String = ""
+let mutable helmReleaseName : String = ""
 
 let jobMonitorHostName (context: MissionContext) =
     match context.jobMonitorExternalHost with
@@ -111,12 +111,16 @@ let serviceAccountAnnotationsToHelmIndexed (index: int) (key: string, value: str
     sprintf "service_account.annotations[%d].key=%s,service_account.annotations[%d].value=%s" index key index value
 
 let installProject (context: MissionContext) =
-    LogInfo "Installing Helm chart..."
+    LogInfo "Installing Helm chart with release name: %s" helmReleaseName
 
     // install the project with default values from the file and overridden values from the commandline
     let setOptions = ResizeArray<string>()
     setOptions.Add(sprintf "worker.stellar_core_image=%s" context.image)
     setOptions.Add(sprintf "worker.replicas=%d" context.pubnetParallelCatchupNumWorkers)
+
+    // Set Redis hostname to be unique per release
+    setOptions.Add(sprintf "redis.hostname=%s-redis" nonce)
+
     setOptions.Add(sprintf "range_generator.params.starting_ledger=%d" context.pubnetParallelCatchupStartingLedger)
 
     let endLedger =
@@ -190,7 +194,7 @@ let installProject (context: MissionContext) =
     | None -> ()
 
     setOptions.Add(sprintf "monitor.hostname=%s" (jobMonitorHostName context))
-    setOptions.Add(sprintf "monitor.path=/%s/(.*)" context.namespaceProperty)
+    setOptions.Add(sprintf "monitor.path=/%s/%s/(.*)" context.namespaceProperty helmReleaseName)
     setOptions.Add(sprintf "monitor.logging_interval_seconds=%d" jobMonitorLoggingIntervalSecs)
 
     // Set ASAN_OPTIONS if provided
@@ -259,10 +263,10 @@ let installProject (context: MissionContext) =
 // 3. Creates a tar.gz archive and copies it to context.destination directory
 let collectLogsFromPods (context: MissionContext) =
     // Generate pod names based on number of workers
-    // Pod names follow the pattern: stellar-core-0, stellar-core-1, etc.
+    // Pod names follow the pattern: <helmReleaseName>-stellar-core-0, <helmReleaseName>-stellar-core-1, etc.
     let podNames =
         [ 0 .. context.pubnetParallelCatchupNumWorkers - 1 ]
-        |> List.map (fun i -> sprintf "stellar-core-%d" i)
+        |> List.map (fun i -> sprintf "%s-stellar-core-%d" helmReleaseName i)
 
     LogInfo "Collecting logs from %d worker pods to directory: %s" (List.length podNames) context.destination.Path
 
@@ -302,7 +306,7 @@ let collectLogsFromPods (context: MissionContext) =
 let cleanup (context: MissionContext) =
     if toPerformCleanup then
         toPerformCleanup <- false
-        LogInfo "Cleaning up resources..."
+        LogInfo "Cleaning up resources for release: %s" helmReleaseName
 
         // Try to collect logs from all worker pods before cleanup
         try
@@ -373,17 +377,18 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
     LogInfo "Running parallel catchup v2 ..."
 
     nonce <- (MakeNetworkNonce context.tag).ToString()
-    LogDebug "nonce: '%s'" nonce
+    helmReleaseName <- sprintf "parallel-catchup-%s" nonce
+    LogDebug "nonce: '%s', release name: '%s'" nonce helmReleaseName
 
     // Set cleanup context so cleanup handlers can access it
     cleanupContext <- Some context
 
-    installProject (context)
+    installProject context
 
     let mutable allJobsFinished = false
     let mutable timeoutLeft = jobMonitorStatusCheckTimeOutSecs
     let mutable timeBeforeNextMetricsCheck = jobMonitorMetricsCheckIntervalSecs
-    let jobMonitorPath = "/" + context.namespaceProperty
+    let jobMonitorPath = "/" + context.namespaceProperty + "/" + helmReleaseName
 
     while not allJobsFinished do
         Thread.Sleep(jobMonitorStatusCheckIntervalSecs * 1000)

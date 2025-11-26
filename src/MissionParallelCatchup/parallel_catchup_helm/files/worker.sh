@@ -69,7 +69,8 @@ if [ $LMOVE_EXIT_CODE -eq 0 ] && [ -n "$JOB_KEY" ]; then
     fi
 
     # Push metrics to redis in a transaction to ensure data consistency. Retry for 5min on failures
-    core_id=$(echo "$POD_NAME" | grep -o '[0-9]\+')
+    # Extract the pod ordinal (last hyphen-separated segment) from pod name like "release-name-stellar-core-0"
+    core_id=$(echo "$POD_NAME" | awk -F'-' '{print $NF}')
     # Validate core_id was extracted successfully
     if [ -z "$core_id" ]; then
         echo "Error: Failed to extract core_id from POD_NAME: $POD_NAME"
@@ -103,6 +104,7 @@ else
     # Either Redis command failed OR queue is empty
     if [ $LMOVE_EXIT_CODE -ne 0 ]; then
         echo "Error: Failed to connect to Redis at $REDIS_HOST:$REDIS_PORT"
+        echo "Exit code=$LMOVE_EXIT_CODE, Output: $JOB_KEY"
     else
         echo "$(date) No more jobs in the queue."
     fi
