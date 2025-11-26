@@ -13,7 +13,7 @@ spec:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: {{ .Release.Name }}-sa
+  name: stellar-supercluster
   {{- if .Values.service_account.annotations }}
   annotations:
     {{- range .Values.service_account.annotations }}
@@ -39,7 +39,7 @@ spec:
       labels:
         app: {{ .Release.Name }}-stellar-core
     spec:
-      serviceAccountName: {{ .Release.Name }}-sa
+      serviceAccountName: stellar-supercluster
       {{- if or .Values.worker.requireNodeLabels .Values.worker.avoidNodeLabels }}
       affinity:
         nodeAffinity:
