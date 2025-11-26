@@ -119,7 +119,7 @@ spec:
         # See https://github.com/stellar/supercluster/issues/330
         maxSkew: 2
         topologyKey: kubernetes.io/hostname
-        whenUnsatisfiable: DoNotSchedule
+        whenUnsatisfiable: ScheduleAnyway
       {{- end }}
 ---
 apiVersion: v1

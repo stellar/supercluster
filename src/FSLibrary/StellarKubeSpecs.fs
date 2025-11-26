@@ -372,7 +372,7 @@ let evenTopologyConstraints : V1TopologySpreadConstraint array =
     [| V1TopologySpreadConstraint(
            maxSkew = 1,
            topologyKey = "kubernetes.io/hostname",
-           whenUnsatisfiable = "DoNotSchedule",
+           whenUnsatisfiable = "ScheduleAnyway",
            labelSelector = V1LabelSelector(matchLabels = CfgVal.labels)
        ) |]
 
@@ -414,18 +414,8 @@ type NetworkCfg with
     member self.Affinity() : V1Affinity option =
         let require = List.map requireNodeLabel self.missionContext.requireNodeLabels
         let avoid = List.map avoidNodeLabel self.missionContext.avoidNodeLabels
-        // If we're trying to do even scheduling, we need to provide extra
-        // anti-affinity from the master nodes, in order to make the even-spread
-        // topology constraint happy. If we're doing uneven scheduling the taint
-        // on the master nodes will suffice to avoid them. This is all fairly
-        // mysterious kubernetes lore, likely subject to change.
         let both = List.append require avoid
-
-        if self.missionContext.unevenSched then
-            affinity both
-        else
-            let nonMaster = avoidNodeLabel ("node-role.kubernetes.io/control-plane", None)
-            affinity (nonMaster :: both)
+        affinity both
 
     member self.TopologyConstraints() : V1TopologySpreadConstraint array =
         if self.missionContext.unevenSched then [||] else evenTopologyConstraints
