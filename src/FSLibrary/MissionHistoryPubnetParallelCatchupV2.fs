@@ -369,7 +369,7 @@ let dumpLogs (context: MissionContext, podName: String) =
     for i in lineStart .. logLines.Count - 1 do
         LogInfo "%s" logLines.[i]
 
-    let filename = sprintf "%s.log" podName
+    let filename = sprintf "FAILED-last%dlines-%s.log" failedJobLogFileLineCount podName
     context.destination.WriteLines filename (logLines.ToArray())
     stream.Close()
 
