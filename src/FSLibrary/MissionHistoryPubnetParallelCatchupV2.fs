@@ -311,7 +311,10 @@ let cleanup (context: MissionContext) =
         // Try to collect logs from all worker pods before cleanup
         try
             LogInfo "Attempting to collect worker logs before cleanup..."
+            let stopwatch = Stopwatch.StartNew()
             collectLogsFromPods context
+            stopwatch.Stop()
+            LogInfo "Log collection completed in %.2f seconds" stopwatch.Elapsed.TotalSeconds
         with ex -> LogWarn "Failed to collect some or all worker logs: %s" ex.Message
 
         runCommand [| "helm"
