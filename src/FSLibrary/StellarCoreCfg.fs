@@ -164,7 +164,7 @@ type StellarCoreCfg =
       localHistory: bool
       maxSlotsToRemember: int
       maxBatchWriteCount: int
-      inMemoryMode: bool
+      emitMeta: bool
       addArtificialDelayUsec: int option // optional delay for testing in microseconds
       surveyPhaseDuration: int option
       containerType: CoreContainerType
@@ -306,7 +306,7 @@ type StellarCoreCfg =
             t.Add("OUTBOUND_TX_QUEUE_BYTE_LIMIT", self.network.missionContext.outboundByteLimit.Value)
             |> ignore
 
-        if self.inMemoryMode then
+        if self.emitMeta then
             t.Add("METADATA_OUTPUT_STREAM", CfgVal.metaStreamPath) |> ignore
 
         match self.network.missionContext.simulateApplyWeight, self.network.missionContext.simulateApplyDuration with
@@ -633,7 +633,7 @@ type NetworkCfg with
           localHistory = opts.localHistory
           maxSlotsToRemember = opts.maxSlotsToRemember
           maxBatchWriteCount = opts.maxBatchWriteCount
-          inMemoryMode = opts.inMemoryMode
+          emitMeta = opts.emitMeta
           addArtificialDelayUsec = opts.addArtificialDelayUsec
           surveyPhaseDuration = opts.surveyPhaseDuration
           containerType = MainCoreContainer
@@ -674,7 +674,7 @@ type NetworkCfg with
           localHistory = c.options.localHistory
           maxSlotsToRemember = c.options.maxSlotsToRemember
           maxBatchWriteCount = c.options.maxBatchWriteCount
-          inMemoryMode = c.options.inMemoryMode
+          emitMeta = c.options.emitMeta
           addArtificialDelayUsec = c.options.addArtificialDelayUsec
           surveyPhaseDuration = c.options.surveyPhaseDuration
           containerType = ctype

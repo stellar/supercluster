@@ -38,7 +38,7 @@
     <Compile Include="MissionSimplePayment.fs" />
     <Compile Include="MissionComplexTopology.fs" />
     <Compile Include="MissionLoadGeneration.fs" />
-    <Compile Include="MissionInMemoryMode.fs" />
+    <Compile Include="MissionEmitMeta.fs" />
     <Compile Include="MissionLoadGenerationWithSpikes.fs" />
     <Compile Include="MissionLoadGenerationWithTxSetLimit.fs" />
     <Compile Include="MissionHistoryGenerateAndCatchup.fs" />

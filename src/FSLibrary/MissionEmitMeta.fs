@@ -2,7 +2,7 @@
 // under the Apache License, Version 2.0. See the COPYING file at the root
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
-module MissionInMemoryMode
+module MissionEmitMeta
 
 open StellarCoreSet
 open StellarMissionContext
@@ -11,7 +11,7 @@ open StellarSupercluster
 open StellarStatefulSets
 open StellarCoreHTTP
 
-let runInMemoryMode (context: MissionContext) =
+let runEmitMeta (context: MissionContext) =
     let coreSet =
         MakeLiveCoreSet
             "core"
@@ -25,7 +25,7 @@ let runInMemoryMode (context: MissionContext) =
             { CoreSetOptions.GetDefault context.image with
                   invariantChecks = AllInvariantsExceptBucketConsistencyChecksAndEvents
                   nodeCount = 1
-                  inMemoryMode = true
+                  emitMeta = true
                   validate = false
                   localHistory = false
                   quorumSet = CoreSetQuorum(CoreSetName "core")

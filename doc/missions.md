@@ -8,9 +8,9 @@ Basic test to complete a payment on a small network of nodes.
 
 Complete basic payment load generation on an asymmetric network topology.
 
-## MissionInMemoryMode
+## MissionEmitMeta
 
-Complete basic payment and Soroban load generation on a network with in-memory watcher nodes.
+Complete basic payment and Soroban load generation on a network with watcher nodes that emit metadata.
 
 ## MissionLoadGeneration
 

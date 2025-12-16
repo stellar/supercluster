@@ -7,7 +7,7 @@ module StellarMission
 open MissionBootAndSync
 open MissionSimplePayment
 open MissionComplexTopology
-open MissionInMemoryMode
+open MissionEmitMeta
 open MissionLoadGeneration
 open MissionLoadGenerationWithSpikes
 open MissionLoadGenerationWithTxSetLimit
@@ -59,7 +59,7 @@ let allMissions : Map<string, Mission> =
                  ("LoadGenerationWithTxSetLimit", loadGenerationWithTxSetLimit)
                  ("MixedImageLoadGenerationWithOldImageMajority", mixedImageLoadGenerationWithOldImageMajority)
                  ("MixedImageLoadGenerationWithNewImageMajority", mixedImageLoadGenerationWithNewImageMajority)
-                 ("InMemoryMode", runInMemoryMode)
+                 ("EmitMeta", runEmitMeta)
                  ("HistoryGenerateAndCatchup", historyGenerateAndCatchup)
                  ("HistoryPubnetMinimumCatchup", historyPubnetMinimumCatchup)
                  ("HistoryPubnetRecentCatchup", historyPubnetRecentCatchup)
