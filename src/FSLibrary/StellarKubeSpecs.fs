@@ -736,12 +736,6 @@ type NetworkCfg with
             else
                 runCmd
 
-        let runCmd =
-            if coreSet.options.inMemoryMode then
-                Array.append runCmd [| "--in-memory" |]
-            else
-                runCmd
-
         let usePostgres = (coreSet.options.dbType = Postgres || self.missionContext.runForMaxTps.IsSome)
         let exportToPrometheus = self.missionContext.exportToPrometheus
 

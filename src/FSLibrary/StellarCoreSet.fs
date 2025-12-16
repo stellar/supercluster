@@ -218,7 +218,7 @@ type CoreSetOptions =
       dumpDatabase: bool
       maxSlotsToRemember: int
       maxBatchWriteCount: int
-      inMemoryMode: bool
+      emitMeta: bool
       addArtificialDelayUsec: int option
       surveyPhaseDuration: int option
       updateSorobanCosts: bool option
@@ -259,7 +259,7 @@ type CoreSetOptions =
           dumpDatabase = true
           maxSlotsToRemember = 12
           maxBatchWriteCount = 1024
-          inMemoryMode = false
+          emitMeta = false
           addArtificialDelayUsec = None
           surveyPhaseDuration = None
           updateSorobanCosts = None

@@ -8,7 +8,6 @@ open StellarCoreSet
 open StellarMissionContext
 open StellarFormation
 open StellarStatefulSets
-open StellarNetworkData
 open StellarSupercluster
 open StellarCoreHTTP
 
@@ -16,41 +15,32 @@ open StellarCoreHTTP
 let sorobanLoadGeneration (context: MissionContext) =
     let rate = 5
 
+    let coreSet =
+        MakeLiveCoreSet
+            "core"
+            { CoreSetOptions.GetDefault context.image with
+                  invariantChecks = AllInvariantsExceptEvents
+                  dumpDatabase = false }
+
     let context =
         { context.WithSmallLoadgenOptions with
-              coreResources = SimulatePubnetTier1PerfResources
-              installNetworkDelay = Some(context.installNetworkDelay |> Option.defaultValue true)
               txRate = rate
               numAccounts = 10000
-              numTxs = rate * 2000
+              numTxs = rate * 200
               skipLowFeeTxs = true
               maxFeeRate = Some 100000000
-              enableTailLogging = false
               updateSorobanCosts = Some(true)
               genesisTestAccountCount = Some 10000 }
 
-    let fullCoreSet = FullPubnetCoreSets context true true
-
-    let sdf =
-        List.find (fun (cs: CoreSet) -> cs.name.StringName = "stellar" || cs.name.StringName = "sdf") fullCoreSet
-
-    let tier1 = List.filter (fun (cs: CoreSet) -> cs.options.tier1 = Some true) fullCoreSet
-
     context.Execute
-        fullCoreSet
+        [ coreSet ]
         None
         (fun (formation: StellarFormation) ->
-            // Setup overlay connections first before manually closing
-            // ledger, which kick off consensus
-            formation.WaitUntilConnected fullCoreSet
-            formation.ManualClose tier1
-
             // Wait until the whole network is synced before proceeding,
             // to fail asap in case of a misconfiguration
-            formation.WaitUntilSynced fullCoreSet
-            formation.UpgradeProtocolToLatest tier1
-            formation.UpgradeMaxTxSetSize tier1 1000000
+            formation.WaitUntilSynced [ coreSet ]
+            formation.UpgradeProtocolToLatest [ coreSet ]
+            formation.UpgradeMaxTxSetSize [ coreSet ] 1000000
 
-            formation.UpgradeSorobanLedgerLimitsWithMultiplier tier1 100
-            formation.RunLoadgen sdf context.GenerateSorobanUploadLoad
-            formation.EnsureAllNodesInSync fullCoreSet)
+            formation.UpgradeSorobanLedgerLimitsWithMultiplier [ coreSet ] 100
+            formation.RunLoadgen coreSet context.GenerateSorobanUploadLoad)
