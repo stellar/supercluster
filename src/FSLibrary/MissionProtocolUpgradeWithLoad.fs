@@ -17,7 +17,7 @@ let protocolUpgradeWithLoad (context: MissionContext) =
         MakeLiveCoreSet
             "core"
             { CoreSetOptions.GetDefault context.image with
-                  invariantChecks = AllInvariantsExceptBucketConsistencyChecksAndEvents
+                  invariantChecks = AllInvariantsExceptEvents
                   dumpDatabase = false
                   updateSorobanCosts = Some(true)
                   // Set `quorumSetConfigType` to `RequireAutoQset` as an extra

@@ -27,7 +27,7 @@ let mixedNominationAlgorithm (oldCount: int) (context: MissionContext) =
             oldName
             { CoreSetOptions.GetDefault context.image with
                   nodeCount = oldNodeCount
-                  invariantChecks = AllInvariantsExceptBucketConsistencyChecksAndEvents
+                  invariantChecks = AllInvariantsExceptEvents
                   accelerateTime = false
                   dumpDatabase = false
                   forceOldStyleLeaderElection = true }
@@ -37,7 +37,7 @@ let mixedNominationAlgorithm (oldCount: int) (context: MissionContext) =
             newName
             { CoreSetOptions.GetDefault context.image with
                   nodeCount = newNodeCount
-                  invariantChecks = AllInvariantsExceptBucketConsistencyChecksAndEvents
+                  invariantChecks = AllInvariantsExceptEvents
                   accelerateTime = false
                   dumpDatabase = false
                   quorumSetConfigType = RequireAutoQset }
