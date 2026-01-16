@@ -43,6 +43,7 @@ open MissionSorobanCatchupWithPrevAndCurr
 open MissionMixedImageNetworkSurvey
 open MissionMaxTPSMixed
 open MissionSimulatePubnetMixedLoad
+open MissionPubnetNetworkLimitsBench
 open MissionMixedNominationLeaderElection
 open MissionUpgradeSCPSettings
 open MissionUpgradeTxClusters
@@ -90,6 +91,7 @@ let allMissions : Map<string, Mission> =
                  ("MixedImageNetworkSurvey", mixedImageNetworkSurvey)
                  ("MaxTPSMixed", maxTPSMixed)
                  ("SimulatePubnetMixedLoad", simulatePubnetMixedLoad)
+                 ("PubnetNetworkLimitsBench", pubnetNetworkLimitsBench)
                  ("MixedNominationLeaderElectionWithOldMajority", mixedNominationLeaderElectionWithOldMajority)
                  ("MixedNominationLeaderElectionWithNewMajority", mixedNominationLeaderElectionWithNewMajority)
                  ("UpgradeSCPSettings", upgradeSCPSettings)

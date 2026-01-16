@@ -159,3 +159,18 @@ Run a network with a mix of nodes running the old and new nomination leader elec
 ## MissionMixedNominationLeaderElectionWithNewMajority
 
 Run a network with a mix of nodes running the old and new nomination leader election algorithms. Contains a majority of nodes running the new algorithm.
+
+## MissionPubnetNetworkLimitsBench
+
+This mission simulates the full pubnet topology and tests how the network performs under specific transaction size limits, currently targeting SLP-4. For future SLP evaluations, adjust mission's SLP_TX_SIZE_LIMIT and SLP_TX_SIZE_MULTIPLIER parameters as needed.
+
+### Required Parameters
+
+- `--tx-size-bytes`: **Required**. Specifies the distribution of transaction sizes to generate.
+- `--tx-size-bytes-weights`: **Required**. Specifies the weights for each transaction size in the distribution.
+- `--tx-rate`: Specifies the transaction rate to generate. 200 TPS will be dedicated to classic, the rest is for Soroban invokes. Default is 230 TPS.
+
+  Examples:
+  - `--tx-size-bytes 120000 --tx-size-bytes-weights 1` - Generate only large transactions (~120KB)
+  - `--tx-size-bytes 40000,120000 --tx-size-bytes-weights 1,1` - Generate a 50/50 mix of medium (~40KB) and large (~120KB) transactions
+  - `--tx-size-bytes 20000,80000,120000 --tx-size-bytes-weights 3,2,1` - Weighted distribution: 50% small, 33% medium, 17% large

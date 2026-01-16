@@ -18,13 +18,13 @@ open StellarSupercluster
 
 // Get the maximum value from a distribution. Returns `None` if `distribution`
 // is the empty list
-let private maxDistributionValue (distribution: (int * int) list) =
+let maxDistributionValue (distribution: (int * int) list) =
     match distribution with
     | [] -> None
     | _ -> Some(fst (List.maxBy fst distribution))
 
 // Get the max of two optional values.
-let private maxOption (x: int option) (y: int option) =
+let maxOption (x: int option) (y: int option) =
     match x, y with
     | Some x, Some y -> Some(max x y)
     | Some x, None -> Some x
