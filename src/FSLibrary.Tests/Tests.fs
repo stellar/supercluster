@@ -34,6 +34,7 @@ let ctx : MissionContext =
     { kube = null
       kubeCfg = ""
       destination = Destination(System.IO.Path.GetTempPath())
+      missionName = "Tests"
       image = "stellar/stellar-core"
       oldImage = None
       netdelayImage = ""

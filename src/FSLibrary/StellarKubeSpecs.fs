@@ -411,6 +411,9 @@ type NetworkCfg with
     member self.NamespacedMeta(name: string) : V1ObjectMeta =
         V1ObjectMeta(name = name, labels = CfgVal.labels, namespaceProperty = self.NamespaceProperty)
 
+    member self.PodLabels() : Map<string, string> =
+        Map.add "mission" self.missionContext.missionName CfgVal.labels
+
     member self.Affinity() : V1Affinity option =
         let require = List.map requireNodeLabel self.missionContext.requireNodeLabels
         let avoid = List.map avoidNodeLabel self.missionContext.avoidNodeLabels
@@ -667,7 +670,7 @@ type NetworkCfg with
                 ),
             metadata =
                 V1ObjectMeta(
-                    labels = CfgVal.labels,
+                    labels = self.PodLabels(),
                     annotations = annotations,
                     namespaceProperty = self.NamespaceProperty
                 )
@@ -778,7 +781,7 @@ type NetworkCfg with
             spec = podSpec,
             metadata =
                 V1ObjectMeta(
-                    labels = CfgVal.labels,
+                    labels = self.PodLabels(),
                     annotations = annotations,
                     namespaceProperty = self.NamespaceProperty
                 )
