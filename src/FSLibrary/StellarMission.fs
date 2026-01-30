@@ -47,6 +47,7 @@ open MissionPubnetNetworkLimitsBench
 open MissionMixedNominationLeaderElection
 open MissionUpgradeSCPSettings
 open MissionUpgradeTxClusters
+open MissionValidatorSetup
 
 type Mission = (MissionContext -> unit)
 
@@ -95,4 +96,5 @@ let allMissions : Map<string, Mission> =
                  ("MixedNominationLeaderElectionWithOldMajority", mixedNominationLeaderElectionWithOldMajority)
                  ("MixedNominationLeaderElectionWithNewMajority", mixedNominationLeaderElectionWithNewMajority)
                  ("UpgradeSCPSettings", upgradeSCPSettings)
-                 ("UpgradeTxClusters", upgradeTxClusters) |]
+                 ("UpgradeTxClusters", upgradeTxClusters)
+                 ("ValidatorSetup", validatorSetup) |]
