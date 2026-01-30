@@ -35,6 +35,7 @@ type MissionContext =
     { kube: Kubernetes
       kubeCfg: string
       destination: Destination
+      missionName: string
       image: string
       oldImage: string option
       netdelayImage: string
