@@ -377,22 +377,28 @@ type Peer with
         let url = self.URL path
         Http.RequestString(url, headers = self.Headers)
 
-    member self.GetState() =
-        WebExceptionRetry DefaultRetry (fun _ -> Info.Parse(self.fetch "info").Info.State)
+    member self.GetState() = self.GetInfo().State
 
     member self.GetStatusOrState() : string =
-        WebExceptionRetry
-            DefaultRetry
-            (fun _ ->
-                let i = Info.Parse(self.fetch "info").Info
-                if i.Status.Length = 0 then i.State else i.Status.[0])
+        let i = self.GetInfo()
+        if i.Status.Length = 0 then i.State else i.Status.[0]
 
     member self.GetMetrics() : Metrics.Metrics =
         WebExceptionRetry DefaultRetry (fun _ -> Metrics.Parse(self.fetch "metrics").Metrics)
 
     member self.GetRawMetrics() = WebExceptionRetry DefaultRetry (fun _ -> self.fetch "metrics")
 
-    member self.GetInfo() : Info.Info = WebExceptionRetry DefaultRetry (fun _ -> Info.Parse(self.fetch "info").Info)
+    member self.GetInfo() : Info.Info =
+        WebExceptionRetry
+            DefaultRetry
+            (fun _ ->
+                let resp = self.fetch "info"
+                let parsed = Info.Parse(resp)
+
+                // stellar-core can respond with {"error":"Core is booting, try again later"}
+                match parsed.JsonValue.TryGetProperty("info") with
+                | Some _ -> parsed.Info
+                | None -> raise (System.Net.WebException("Core is not ready, info property missing")))
 
     member self.GetSorobanInfo() : SorobanInfo.Root =
         WebExceptionRetry DefaultRetry (fun _ -> SorobanInfo.Parse(self.fetch "sorobaninfo"))
