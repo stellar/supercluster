@@ -70,21 +70,21 @@ Supercluster supports running missions with artificially generated network topol
     "peers": [
       1
     ],
-    "sb_homeDomain": "org1"
+    "radar_homeDomain": "org1"
   },
   {
     "publicKey": 1,
     "peers": [
       0
     ],
-    "sb_homeDomain": "org2"
+    "radar_homeDomain": "org2"
   }
 ]
 ```
 - “publicKey” is the ID of the node. It can be an actual public key string, or any unique identifier (in the example above numbers are used as IDs)
 - “Peers“ is the list of other IDs that this node should connect to
-- “sb_homeDomain” is the home domain of the organization this node belongs to
-- To mark nodes as “Tier1”, sb_homeDomain must be any of the following: [“sdf”, “pn”, “lo”, “wx”, “cq”, “sp”, “bd”]. Note: right now the Tier1 orgs are hard-coded, since this is the only Tier1 configuration used currently, but in the future this functionality can be improved by allowing arbitrary nodes to specify whether they are Tier1.
+- “radar_homeDomain” is the home domain of the organization this node belongs to
+- To mark nodes as “Tier1”, radar_homeDomain must be any of the following: [“sdf”, “pn”, “lo”, “wx”, “cq”, “sp”, “bd”]. Note: right now the Tier1 orgs are hard-coded, since this is the only Tier1 configuration used currently, but in the future this functionality can be improved by allowing arbitrary nodes to specify whether they are Tier1.
 
 ## Example command
 
