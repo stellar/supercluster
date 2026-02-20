@@ -7,21 +7,21 @@
             "GDUBKMXWLSQNK33XQNRPSDEYODROPPRM4XLJGXFEZPWCLKIOFOTTCX3B"
         ],
         "publicKey": "GCP7LQUW5UXXDNQI4ENXTUULZOIEIR6UDRC5S3VN6ZGKMOZ6TL3YB6IS",
-        "sb_geoData": {
+        "radar_geoData": {
             "countryCode": "US",
             "countryName": "United States",
             "dateUpdated": "2020-01-01T01:01:01.000Z",
             "latitude": 40.01212121212,
             "longitude": -60.01212121212
         },
-        "sb_homeDomain": "www.someone.org",
-        "sb_index": 1,
-        "sb_ip": "192.168.1.1",
-        "sb_isValidating": true,
-        "sb_isp": "Some Datacenter Inc.",
-        "sb_name": "SomeoneNet-1",
-        "sb_organizationId": "764efa883dda1e11db47671c4a3bbd9e",
-        "sb_quorumSet": {
+        "radar_homeDomain": "www.someone.org",
+        "radar_index": 1,
+        "radar_ip": "192.168.1.1",
+        "radar_isValidating": true,
+        "radar_isp": "Some Datacenter Inc.",
+        "radar_name": "SomeoneNet-1",
+        "radar_organizationId": "764efa883dda1e11db47671c4a3bbd9e",
+        "radar_quorumSet": {
             "hashKey": "MzI3MzUyODNjODk2NzQ2YmQyMzNjOThkNDZkMDM4OThkOGJmNDdjZiAgLQo=",
             "innerQuorumSets": [
                 {
@@ -57,18 +57,18 @@
             "GDQHFKIEF3NPKZVDC2WO5E5P54H3UG3QU2AZZCDINVF4THK5BZV6E4AK"
         ],
         "publicKey": "GBDRGD7ZSIBXYLRHNO2LRI2BLOLOLD4THAMDCMCVK3JX2GFE4KQWABUE",
-        "sb_geoData": {
+        "radar_geoData": {
             "countryCode": "PL",
             "countryName": "Poland",
             "dateUpdated": "2020-01-01T01:01:01.100Z",
             "latitude": 51.012121212,
             "longitude": 17.012121212
         },
-        "sb_index": 0.5,
-        "sb_ip": "192.168.1.1",
-        "sb_isValidating": false,
-        "sb_isp": "Some ISP",
-        "sb_quorumSet": {
+        "radar_index": 0.5,
+        "radar_ip": "192.168.1.1",
+        "radar_isValidating": false,
+        "radar_isp": "Some ISP",
+        "radar_quorumSet": {
             "innerQuorumSets": [],
             "threshold": 9999999,
           "validators": ["GBN5UP5XG2NKBGSBXGV632XFUQYYU62XYWR47GH7KQZUQDTVT7ROGK5C",

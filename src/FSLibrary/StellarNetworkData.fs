@@ -343,7 +343,7 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
         [ for i in 1 .. context.tier1OrgsToAdd * tier1OrgSize ->
               PubnetNode.Parse(
                   sprintf
-                      """ [{ "publicKey": "%s", "sb_homeDomain": "home.domain.%d" }] """
+                      """ [{ "publicKey": "%s", "radar_homeDomain": "home.domain.%d" }] """
                       (KeyPair.Random().Address)
                       ((i - 1) / tier1OrgSize)
               ).[0] ]
@@ -365,7 +365,7 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
         else
             PubnetNode.Load(context.pubnetData.Value)
             // Any node with a home domain is considered tier1.
-            |> Array.filter (fun n -> n.SbHomeDomain.IsSome)
+            |> Array.filter (fun n -> n.RadarHomeDomain.IsSome)
             |> Array.map (fun n -> n.PublicKey)
             |> Set.ofArray
 
@@ -421,7 +421,7 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
     let orgNodes, miscNodes =
         allPubnetNodes
         |> Array.filter (fun (n: PubnetNode.Root) -> minAllowedConnectionCount <= numPeers adjacencyMap n.PublicKey)
-        |> Array.partition (fun (n: PubnetNode.Root) -> n.SbHomeDomain.IsSome)
+        |> Array.partition (fun (n: PubnetNode.Root) -> n.RadarHomeDomain.IsSome)
 
     // We then trim down the set of misc nodes so that they fit within simulation
     // size limit passed. If we can't even fit the org nodes, we fail here.
@@ -451,7 +451,7 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
     let groupedOrgNodes : (HomeDomainName * PubnetNode.Root array) array =
         Array.groupBy
             (fun (n: PubnetNode.Root) ->
-                let domain = n.SbHomeDomain.Value
+                let domain = n.RadarHomeDomain.Value
                 // We turn 'www.stellar.org' into 'stellar'
                 // and 'stellar.blockdaemon.com' into 'blockdaemon'
                 // 'validator.stellar.expert' is a special case
@@ -539,11 +539,11 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
         let tier1Nodes =
             allPubnetNodes
             |> Array.filter
-                (fun (n: PubnetNode.Root) -> (Set.contains n.PublicKey tier1KeySet) && n.SbHomeDomain.IsSome)
+                (fun (n: PubnetNode.Root) -> (Set.contains n.PublicKey tier1KeySet) && n.RadarHomeDomain.IsSome)
 
         let tier1NodesGroupedByHomeDomain : (string array) array =
             tier1Nodes
-            |> Array.groupBy (fun (n: PubnetNode.Root) -> n.SbHomeDomain.Value)
+            |> Array.groupBy (fun (n: PubnetNode.Root) -> n.RadarHomeDomain.Value)
             |> Array.map
                 (fun (_, nodes: PubnetNode.Root []) -> Array.map (fun (n: PubnetNode.Root) -> n.PublicKey) nodes)
 
@@ -596,11 +596,11 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
     // as long as the random function is persistent.
     let geoLocations : GeoLoc array =
         allPubnetNodes
-        |> Array.filter (fun (n: PubnetNode.Root) -> n.SbGeoData.IsSome)
+        |> Array.filter (fun (n: PubnetNode.Root) -> n.RadarGeoData.IsSome)
         |> Array.map
             (fun (n: PubnetNode.Root) ->
-                { lat = float n.SbGeoData.Value.Latitude
-                  lon = float n.SbGeoData.Value.Longitude })
+                { lat = float n.RadarGeoData.Value.Latitude
+                  lon = float n.RadarGeoData.Value.Longitude })
         |> Seq.ofArray
         |> Seq.sortBy (fun x -> x.lat, x.lon)
         |> Array.ofSeq
@@ -612,7 +612,7 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
     // node. This ensures that geolocations persist across runs, even if the
     // total number of nodes changes via the *-orgs-to-add flags.
     let getGeoLocOrDefault (n: PubnetNode.Root) : GeoLoc =
-        match n.SbGeoData with
+        match n.RadarGeoData with
         | Some geoData -> { lat = float geoData.Latitude; lon = float geoData.Longitude }
         | None ->
             let hash = Util.Hash(System.Text.Encoding.UTF8.GetBytes(n.PublicKey))
@@ -663,10 +663,10 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
         let tier1 = Set.contains n.PublicKey tier1KeySet
         let hdn = homeDomainNameForKey n.PublicKey
 
-        match tier1, n.SbIsValidating, defaultQuorum with
+        match tier1, n.RadarIsValidating, defaultQuorum with
         | true, _, _ ->
             // Tier 1 nodes are always validators and have the default tier1
-            // quorum set. This ignores the stellarbeat validator designation
+            // quorum set. This ignores the radar validator designation
             // because the user may have passed the --tier1-keys flag, or may be
             // adding additional tier1 nodes with --tier-1-orgs-to-add.
             true, defaultQuorum
