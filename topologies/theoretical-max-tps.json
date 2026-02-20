@@ -9,7 +9,7 @@
       5,
       6
     ],
-    "sb_homeDomain": "sdf"
+    "radar_homeDomain": "sdf"
   },
   {
     "publicKey": 1,
@@ -21,7 +21,7 @@
       5,
       6
     ],
-    "sb_homeDomain": "lo"
+    "radar_homeDomain": "lo"
   },
   {
     "publicKey": 2,
@@ -33,7 +33,7 @@
       5,
       6
     ],
-    "sb_homeDomain": "pn"
+    "radar_homeDomain": "pn"
   },
   {
     "publicKey": 3,
