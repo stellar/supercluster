@@ -792,9 +792,10 @@ type NetworkCfg with
     // then use to connect the peers to one another in their config files, and
     // hook the per-Pod Services and Ingress up to). Getting all this to work
     // requires that you install the DNS server component on your k8s cluster.
-    member self.ToService() : V1Service =
+    member self.ToService(coreSet: CoreSet) : V1Service =
         let serviceSpec = V1ServiceSpec(clusterIP = "None", selector = CfgVal.labels)
-        V1Service(spec = serviceSpec, metadata = self.NamespacedMeta self.ServiceName)
+        let svcName =self.ServiceName(coreSet)
+        V1Service(spec = serviceSpec, metadata = self.NamespacedMeta svcName)
 
 
     // Returns a StatefulSet object that will build stellar-core Pods named
@@ -803,7 +804,7 @@ type NetworkCfg with
         let statefulSetSpec =
             V1StatefulSetSpec(
                 selector = V1LabelSelector(matchLabels = CfgVal.labels),
-                serviceName = self.ServiceName,
+                serviceName = self.ServiceName(coreSet) , //self.HeadlessServiceName,
                 podManagementPolicy = "Parallel",
                 template = self.ToPodTemplateSpec coreSet,
                 replicas = System.Nullable<int>(coreSet.CurrentCount)

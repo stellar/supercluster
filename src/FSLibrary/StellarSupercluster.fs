@@ -247,10 +247,20 @@ type Kubernetes with
         let rps = nCfg.missionContext.apiRateLimit
 
         try
-            let svc = nCfg.ToService()
-            LogInfo "Creating Service %s" svc.Metadata.Name
-            ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
-            namespaceContent.Add(self.CreateNamespacedService(body = svc, namespaceParameter = nsStr))
+
+            // NB: I *think* this is the correct change for the headless service name. 
+            // Previously it only creates a single service with a fixed name, despite potentially there are more than one coreSet.
+            // The headless service is needed to register local DNS names for each of the Pod names in the StatefulSet, which implies one-per-StatefulSEt.
+            let makePerStsServices coreSet = 
+                let svc = nCfg.ToService(coreSet)
+                LogInfo "Creating Service %s" svc.Metadata.Name
+                ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
+                self.CreateNamespacedService(body = svc, namespaceParameter = nsStr)
+            
+            let headlessSvcs = List.map makePerStsServices nCfg.CoreSetList
+
+            for svc in headlessSvcs do
+                namespaceContent.Add(svc)
 
             for cm in nCfg.ToConfigMaps() do
                 LogInfo "Creating ConfigMap %s" cm.Metadata.Name
@@ -277,10 +287,10 @@ type Kubernetes with
 
             if not (List.isEmpty statefulSets) then
                 let ing = nCfg.ToIngress()
-                LogInfo "Creating Ingress %s" ing.Metadata.Name
+                LogInfo "Skipping creation of Ingress %s" ing.Metadata.Name
                 ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
-                let ingress = self.CreateNamespacedIngress(namespaceParameter = nsStr, body = ing)
-                namespaceContent.Add(ingress)
+                //let ingress = self.CreateNamespacedIngress(namespaceParameter = nsStr, body = ing)
+                //namespaceContent.Add(ingress)
 
             let formation =
                 new StellarFormation(
