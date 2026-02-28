@@ -124,7 +124,12 @@ let upgradeSorobanLedgerLimits
     peer.WaitForLedgerMaxTxCount multiplier
 
 
-let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadGen option) =
+let maxTPSTest
+    (context: MissionContext)
+    (baseLoadGen: LoadGen)
+    (setupCfg: LoadGen option)
+    (enableTriggerTimer: bool)
+    =
     let allNodes =
         if context.pubnetData.IsSome then
             FullPubnetCoreSets context true false
@@ -132,6 +137,14 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
             StableApproximateTier1CoreSets
                 context.image
                 (if context.flatQuorum.IsSome then context.flatQuorum.Value else false)
+
+    let allNodes =
+        if enableTriggerTimer then
+            allNodes
+            |> List.map (fun (cs: CoreSet) ->
+                { cs with options = { cs.options with experimentalTriggerTimer = Some true } })
+        else
+            allNodes
 
     // PayPregenerated requires node restart between failed iterations to ensure validity of the pregenerated transactions
     // However, large-scale simulation restarts can be slow, so for now only use the new mode on small networks

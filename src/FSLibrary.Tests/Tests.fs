@@ -137,7 +137,12 @@ let ctx : MissionContext =
       benchmarkInfrastructure = None
       benchmarkInfrastructureOnly = None
       benchmarkDurationSeconds = None
-      enableTcpTuning = false }
+      enableTcpTuning = false
+      triggerTimerFlagPct = 100
+      uniformDrift = []
+      bimodalDrift = []
+      driftPct = 0
+      enableTriggerTimer = true }
 
 let netdata = __SOURCE_DIRECTORY__ + "/../../../data/public-network-data-2024-08-01.json"
 let pubkeys = __SOURCE_DIRECTORY__ + "/../../../data/tier1keys.json"

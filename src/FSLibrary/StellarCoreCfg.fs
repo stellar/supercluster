@@ -166,6 +166,8 @@ type StellarCoreCfg =
       maxBatchWriteCount: int
       emitMeta: bool
       addArtificialDelayUsec: int option // optional delay for testing in microseconds
+      experimentalTriggerTimer: bool option
+      clockOffsetMs: int option
       surveyPhaseDuration: int option
       containerType: CoreContainerType
       skipHighCriticalValidatorChecks: bool }
@@ -264,6 +266,14 @@ type StellarCoreCfg =
         match self.addArtificialDelayUsec with
         | None -> maybeAddGlobalDelay ()
         | Some sleep -> t.Add("ARTIFICIALLY_SLEEP_MAIN_THREAD_FOR_TESTING", sleep) |> ignore
+
+        match self.experimentalTriggerTimer with
+        | Some v -> t.Add("EXPERIMENTAL_TRIGGER_TIMER", v) |> ignore
+        | None -> ()
+
+        match self.clockOffsetMs with
+        | Some offset -> t.Add("ARTIFICIALLY_SET_SYSTEM_CLOCK_OFFSET_FOR_TESTING", int64 offset) |> ignore
+        | None -> ()
 
         match self.network.missionContext.flowControlSendMoreBatchSize with
         | None -> ()
@@ -635,6 +645,8 @@ type NetworkCfg with
           maxBatchWriteCount = opts.maxBatchWriteCount
           emitMeta = opts.emitMeta
           addArtificialDelayUsec = opts.addArtificialDelayUsec
+          experimentalTriggerTimer = opts.experimentalTriggerTimer
+          clockOffsetMs = None
           surveyPhaseDuration = opts.surveyPhaseDuration
           containerType = MainCoreContainer
           skipHighCriticalValidatorChecks = opts.skipHighCriticalValidatorChecks }
@@ -676,6 +688,14 @@ type NetworkCfg with
           maxBatchWriteCount = c.options.maxBatchWriteCount
           emitMeta = c.options.emitMeta
           addArtificialDelayUsec = c.options.addArtificialDelayUsec
+          experimentalTriggerTimer = c.options.experimentalTriggerTimer
+          clockOffsetMs =
+              match c.options.clockOffsets with
+              | Some offsets ->
+                  if offsets.Length <> c.options.nodeCount then
+                      failwith (sprintf "clockOffsets length %d does not match nodeCount %d" offsets.Length c.options.nodeCount)
+                  Some offsets.[i]
+              | None -> None
           surveyPhaseDuration = c.options.surveyPhaseDuration
           containerType = ctype
           skipHighCriticalValidatorChecks = c.options.skipHighCriticalValidatorChecks }

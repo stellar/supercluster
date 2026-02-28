@@ -131,7 +131,12 @@ type MissionOptions
         benchmarkInfrastructure: bool,
         benchmarkOnly: bool,
         benchmarkDurationSeconds: int,
-        enableTcpTuning: bool
+        enableTcpTuning: bool,
+        triggerTimerFlagPct: int,
+        uniformDrift: seq<int>,
+        bimodalDrift: seq<int>,
+        driftPct: int,
+        disableTriggerTimer: bool
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -597,6 +602,36 @@ type MissionOptions
              Default = false)>]
     member self.EnableTcpTuning = enableTcpTuning
 
+    [<Option("trigger-timer-flag-pct",
+             HelpText = "Percentage (0-100) of nodes with EXPERIMENTAL_TRIGGER_TIMER enabled",
+             Required = false,
+             Default = 100)>]
+    member self.TriggerTimerFlagPct = triggerTimerFlagPct
+
+    [<Option("uniform-drift",
+             Separator = ',',
+             HelpText = "Uniform clock drift range in signed ms: --uniform-drift=lower,upper (e.g. --uniform-drift=-2000,+2000)",
+             Required = false)>]
+    member self.UniformDrift = uniformDrift
+
+    [<Option("bimodal-drift",
+             Separator = ',',
+             HelpText = "Bimodal clock drift ranges in signed ms: --bimodal-drift=min1,max1,min2,max2 (e.g. --bimodal-drift=-5000,-2000,+2000,+5000)",
+             Required = false)>]
+    member self.BimodalDrift = bimodalDrift
+
+    [<Option("drift-pct",
+             HelpText = "Percentage (0-100) of nodes that receive clock drift",
+             Required = false,
+             Default = 0)>]
+    member self.DriftPct = driftPct
+
+    [<Option("disable-trigger-timer",
+             HelpText = "Disable EXPERIMENTAL_TRIGGER_TIMER on all nodes in MaxTPSClassic (default: enabled)",
+             Required = false,
+             Default = false)>]
+    member self.DisableTriggerTimer = disableTriggerTimer
+
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' |> Array.toList with
     | [ x ] -> x, None
@@ -740,7 +775,12 @@ let main argv =
                   benchmarkInfrastructure = Some false
                   benchmarkInfrastructureOnly = Some false
                   benchmarkDurationSeconds = Some 30
-                  enableTcpTuning = false }
+                  enableTcpTuning = false
+                  triggerTimerFlagPct = 100
+                  uniformDrift = []
+                  bimodalDrift = []
+                  driftPct = 0
+                  enableTriggerTimer = true }
 
             let nCfg = MakeNetworkCfg ctx [] None
             use formation = kube.MakeEmptyFormation(nCfg)
@@ -908,7 +948,12 @@ let main argv =
                                benchmarkInfrastructure = Some mission.BenchmarkInfrastructure
                                benchmarkInfrastructureOnly = Some mission.BenchmarkOnly
                                benchmarkDurationSeconds = Some mission.BenchmarkDurationSeconds
-                               enableTcpTuning = mission.EnableTcpTuning }
+                               enableTcpTuning = mission.EnableTcpTuning
+                               triggerTimerFlagPct = mission.TriggerTimerFlagPct
+                               uniformDrift = List.ofSeq mission.UniformDrift
+                               bimodalDrift = List.ofSeq mission.BimodalDrift
+                               driftPct = mission.DriftPct
+                               enableTriggerTimer = not mission.DisableTriggerTimer }
 
                          allMissions.[m] missionContext
 

@@ -27,4 +27,4 @@ let maxTPSClassic (context: MissionContext) =
               maxfeerate = None
               skiplowfeetxs = false }
 
-    maxTPSTest context baseLoadGen None
+    maxTPSTest context baseLoadGen None context.enableTriggerTimer

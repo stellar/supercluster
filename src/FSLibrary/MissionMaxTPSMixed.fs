@@ -47,4 +47,4 @@ let maxTPSMixed (baseContext: MissionContext) =
 
     let invokeSetupCfg = { baseLoadGen with mode = SorobanInvokeSetup }
 
-    maxTPSTest context baseLoadGen (Some invokeSetupCfg)
+    maxTPSTest context baseLoadGen (Some invokeSetupCfg) false

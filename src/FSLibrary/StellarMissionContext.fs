@@ -132,4 +132,9 @@ type MissionContext =
       benchmarkInfrastructure: bool option
       benchmarkInfrastructureOnly: bool option
       benchmarkDurationSeconds: int option
-      enableTcpTuning: bool }
+      enableTcpTuning: bool
+      triggerTimerFlagPct: int
+      uniformDrift: int list
+      bimodalDrift: int list
+      driftPct: int
+      enableTriggerTimer: bool }
