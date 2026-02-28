@@ -119,6 +119,10 @@ Simulate Public Network topology and throughput based on user-supplied distribut
 
 Stress test a network of simulated Tier1 topology with classic traffic and report maximum achieved throughput.
 
+### Parameters
+
+- `--enable-trigger-timer=<true|false>`: Enable or disable `EXPERIMENTAL_TRIGGER_TIMER` on all nodes. Defaults to enabled for this mission.
+
 ## MissionSorobanLoadGeneration
 
 Test heavy Soroban load on a large network of nodes. This mission mostly focuses on high-bandwidth traffic, and its impact on SCP and overlay. Apply time is simulated to avoid noise from database backends.
@@ -151,6 +155,10 @@ Run a network with a mix of fast and slow nodes. This mission allows to test int
 
 Stress test a network of simulated Tier1 topology with a mix of classic and soroban traffic and report maximum achieved throughput.
 
+### Parameters
+
+- `--enable-trigger-timer=<true|false>`: Enable or disable `EXPERIMENTAL_TRIGGER_TIMER` on all nodes. Defaults to enabled for this mission.
+
 ## MissionMinBlockTimeClassic
 
 Find the minimum ledger target close time a simulated Tier1 network can sustain at a fixed TPS while meeting a per-node `ledger.age.closed` latency SLA (P75 within ±20% of target, P99 ≤ 2×), driving classic-payment load. See [Running minimum block time test](measuring-minimum-block-time.md) for details.
@@ -158,6 +166,21 @@ Find the minimum ledger target close time a simulated Tier1 network can sustain 
 ## MissionMinBlockTimeMixed
 
 Same as `MissionMinBlockTimeClassic`, but drives an explicit `MIXED_PREGEN_*` overlay-only loadgen mode with pre-generated classic payments plus a selected synthetic Soroban transaction type.
+
+## MissionTriggerTimerMixConsensus
+
+Tests the `EXPERIMENTAL_TRIGGER_TIMER` feature on a simulated Public Network topology with a configurable mix of nodes that have the flag enabled versus disabled, under configurable clock-drift distributions. It drives the same `MIXED_PREGEN_*` (classic + synthetic Soroban) overlay-only load as `MissionMinBlockTimeMixed`, but instead of binary-searching for a minimum block time it runs a single load pass at a fixed ledger close time and verifies consensus stays healthy (no errors, pairwise-consistent, all nodes in sync). Requires a generated pubnet topology via `--pubnet-data`.
+
+### Parameters
+
+- `--trigger-timer-flag-pct`: Percentage (0-100) of nodes with `EXPERIMENTAL_TRIGGER_TIMER` enabled. Default 100. This mission rejects `--enable-trigger-timer`; use this flag instead.
+- `--drift-pct`: Percentage (0-100) of nodes that receive clock drift. Default 0.
+- `--uniform-drift=lower,upper`: Uniform random clock drift, in signed ms, applied to each drifting node (e.g. `--uniform-drift=-2000,+2000`).
+- `--bimodal-drift=min1,max1,min2,max2`: Bimodal clock drift, in signed ms — the first half of the drifting nodes draw from `[min1,max1]`, the second half from `[min2,max2]` (e.g. `--bimodal-drift=-5000,-2000,+2000,+5000`).
+- `--ledger-close-time-ms`: Target ledger close time in ms, upgraded before load is applied. Default 5000.
+- `--min-block-time-mixed-mode`: The `MIXED_PREGEN_*` loadgen mode to drive. Default `mixed_pregen_sac_payment`.
+- `--classic-tx-rate`: Classic TPS. Defaults to half of `--tx-rate`.
+- `--soroban-tx-rate`: Soroban TPS. Defaults to half of `--tx-rate`.
 
 ## MissionMixedNominationLeaderElectionWithOldMajority
 
