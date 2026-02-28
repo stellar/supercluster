@@ -81,6 +81,7 @@
     <Compile Include="MinBlockTimeTest.fs" />
     <Compile Include="MissionMinBlockTimeClassic.fs" />
     <Compile Include="MissionMinBlockTimeMixed.fs" />
+    <Compile Include="MissionTriggerTimerMixConsensus.fs" />
     <Compile Include="StellarMission.fs" />
   </ItemGroup>
   <ItemGroup>
