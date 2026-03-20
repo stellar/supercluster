@@ -8,6 +8,7 @@ if [ -z "$PROGRESS_QUEUE" ]; then echo "PROGRESS_QUEUE not set"; exit 1; fi
 if [ -z "$FAILED_QUEUE" ]; then echo "FAILED_QUEUE not set"; exit 1; fi
 if [ -z "$SUCCESS_QUEUE" ]; then echo "SUCCESS_QUEUE not set"; exit 1; fi
 if [ -z "$METRICS" ]; then echo "METRICS not set"; exit 1; fi
+if [ -z "$JOB_OWNERS" ]; then echo "JOB_OWNERS not set"; exit 1; fi
 if [ -z "$RELEASE_NAME" ]; then echo "RELEASE_NAME not set"; exit 1; fi
 if [ -z "$POD_NAME" ]; then echo "POD_NAME not set"; exit 1; fi
 
@@ -28,6 +29,9 @@ LMOVE_EXIT_CODE=$?
 
 # Only process a job if the command succeeded AND we got a non-empty job key
 if [ $LMOVE_EXIT_CODE -eq 0 ] && [ -n "$JOB_KEY" ]; then
+    # Register ownership so the monitor knows which worker owns this job
+    redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" HSET "$JOB_OWNERS" "$JOB_KEY" "$POD_NAME"
+
     # Start timer
     START_TIME=$(date +%s)
     echo "Processing job: $JOB_KEY"
@@ -84,6 +88,7 @@ MULTI
 $QUEUE_COMMAND
 LREM "$PROGRESS_QUEUE" -1 "$JOB_KEY"
 SADD "$METRICS" "$JOB_KEY|$core_id|$tx_apply_ms|$DURATION"
+HDEL "$JOB_OWNERS" "$JOB_KEY"
 EXEC
 EOF
         result=$?

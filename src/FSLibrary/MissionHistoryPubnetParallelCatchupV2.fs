@@ -419,18 +419,9 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
                     failwith "Catch up failed, check logs for more info"
 
                 if remainSize = 0 && JobsInProgress.Count = 0 then
-                    // perform a final get for the metrics
+                    // All jobs completed — perform a final query on the metrics
                     queryJobMonitor (context, jobMonitorPath, jobMonitorMetricsEndPoint) |> ignore
-
-                    // check all workers are down
-                    let allWorkersDown =
-                        status.["workers"] :?> JArray
-                        |> Seq.forall (fun w -> (w :?> JObject).["status"].ToString() = "down")
-
-                    if not allWorkersDown then
-                        failwith "No jobs left but some workers are still running."
-
-                    LogInfo "No job left and all workers are down."
+                    LogInfo "All queues empty. Mission complete."
                     allJobsFinished <- true
 
                 // check the metrics
