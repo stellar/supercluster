@@ -31,6 +31,10 @@ LMOVE_EXIT_CODE=$?
 if [ $LMOVE_EXIT_CODE -eq 0 ] && [ -n "$JOB_KEY" ]; then
     # Register ownership so the monitor knows which worker owns this job
     redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" HSET "$JOB_OWNERS" "$JOB_KEY" "$POD_NAME"
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to register job ownership for $JOB_KEY. Exiting."
+        exit 1
+    fi
 
     # Start timer
     START_TIME=$(date +%s)
