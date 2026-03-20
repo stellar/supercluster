@@ -22,10 +22,13 @@ SUCCESS_QUEUE = os.getenv('SUCCESS_QUEUE', 'succeeded')
 FAILED_QUEUE = os.getenv('FAILED_QUEUE', 'failed')
 PROGRESS_QUEUE = os.getenv('PROGRESS_QUEUE', 'in_progress')
 METRICS = os.getenv('METRICS', 'metrics')
+JOB_OWNERS = os.getenv('JOB_OWNERS', 'job_owners')
 WORKER_PREFIX = os.getenv('WORKER_PREFIX', 'stellar-core')
 NAMESPACE = os.getenv('NAMESPACE', 'default')
 WORKER_COUNT = int(os.getenv('WORKER_COUNT', 3))
 LOGGING_INTERVAL_SECONDS = int(os.getenv('LOGGING_INTERVAL_SECONDS', 10))
+STUCK_JOB_PING_RETRIES = 3
+STUCK_JOB_PING_DELAY_SECS = 30
 
 def get_logging_level():
     name_to_level = {
@@ -114,51 +117,81 @@ def retry_jobs_in_progress():
         metric_retries.inc()
         logger.info("moved job %s from %s to %s", job, PROGRESS_QUEUE, JOB_QUEUE)
 
+def ping_worker(pod_name, retries=1):
+    """Ping a worker's /info endpoint. Returns True if reachable within the given number of attempts."""
+    worker_dns = f"{pod_name}.{WORKER_PREFIX}.{NAMESPACE}.svc.cluster.local"
+    for attempt in range(1, retries + 1):
+        try:
+            requests.get(f"http://{worker_dns}:11626/info", timeout=5)
+            return True
+        except requests.exceptions.RequestException:
+            if attempt < retries:
+                logger.info("Worker %s unreachable (attempt %d/%d), retrying in %ds",
+                            pod_name, attempt, retries, STUCK_JOB_PING_DELAY_SECS)
+                time.sleep(STUCK_JOB_PING_DELAY_SECS)
+    return False
+
 def update_status_and_metrics():
     global status
     mission_start_time = time.time()
     while True:
         try:
-            # Ping each worker status
-            worker_statuses = []
-            all_workers_down = True
-            workers_up = 0
-            workers_down = 0
-            logger.info("Starting worker liveness check")
-            workers_refresh_start_time = time.time()
-            for i in range(WORKER_COUNT):
-                worker_name = f"{WORKER_PREFIX}-{i}.{WORKER_PREFIX}.{NAMESPACE}.svc.cluster.local"
-                try:
-                    response = requests.get(f"http://{worker_name}:11626/info")
-                    logger.debug("Worker %s is running, status code %d, response: %s", worker_name, response.status_code, response.json())
-                    worker_statuses.append({'worker_id': i, 'status': 'running', 'info': response.json()['info']['status']})
-                    workers_up += 1
-                    all_workers_down = False
-                except requests.exceptions.RequestException:
-                    logger.debug("Worker %s is down", worker_name)
-                    worker_statuses.append({'worker_id': i, 'status': 'down'})
-                    workers_down += 1
-            workers_refresh_duration = time.time() - workers_refresh_start_time
-            logger.info("Finished workers liveness check")
-            # Retry stuck jobs
-            if all_workers_down and redis_client.llen(PROGRESS_QUEUE) > 0:
-                logger.info("all workers are down but some jobs are stuck in progress")
-                logger.info("moving them from %s to %s queue", PROGRESS_QUEUE, JOB_QUEUE)
-                retry_jobs_in_progress()
-
-            # Check the queue status
-            # For remaining and successful jobs, we just print their count, do not care what they are and who owns it
+            # --- Phase 1: Read queue status from Redis (fast, authoritative) ---
             queue_remain_count = redis_client.llen(JOB_QUEUE)
             queue_succeeded_count = redis_client.llen(SUCCESS_QUEUE)
-            # For failed and in-progress jobs, we retrieve their full content
             jobs_failed = redis_client.lrange(FAILED_QUEUE, 0, -1)
             jobs_in_progress = redis_client.lrange(PROGRESS_QUEUE, 0, -1)
             queue_failed_count = len(jobs_failed)
             queue_in_progress_count = len(jobs_in_progress)
-            # Get run duration
+
+            # --- Phase 2: Quick single-ping check of workers that own in-progress jobs ---
+            job_owners = redis_client.hgetall(JOB_OWNERS)  # {job_key: pod_name}
+            active_workers = set(job_owners.values())
+            worker_statuses = []
+            workers_up = 0
+            workers_down = 0
+
+            logger.info("Starting worker liveness check for %d active workers", len(active_workers))
+            workers_refresh_start_time = time.time()
+            for pod_name in active_workers:
+                if ping_worker(pod_name, retries=1):
+                    worker_statuses.append({'pod': pod_name, 'status': 'running'})
+                    workers_up += 1
+                else:
+                    worker_statuses.append({'pod': pod_name, 'status': 'down'})
+                    workers_down += 1
+            workers_refresh_duration = time.time() - workers_refresh_start_time
+            logger.info("Finished workers liveness check")
+
+            # --- Phase 3: Retry stuck jobs (only if ALL active workers down AND in_progress non-empty) ---
+            # Note: queue_in_progress_count is from Phase 1 and may be stale by this point.
+            # If a job completed during Phase 2 pings, we may enter this block unnecessarily.
+            # This is harmless: retry_jobs_in_progress() will find an empty in_progress queue
+            # and exit immediately. We waste at most 90 seconds (30 secs x 3 pings) per stale worker.
+            if workers_down > 0 and workers_up == 0 and queue_in_progress_count > 0:
+                logger.warning("All %d active workers appear down with %d jobs in progress. "
+                               "Entering retry confirmation.", workers_down, queue_in_progress_count)
+
+                # Re-ping each active worker with retries to confirm they're truly down
+                any_recovered = False
+                for pod_name in active_workers:
+                    if ping_worker(pod_name, retries=STUCK_JOB_PING_RETRIES):
+                        logger.info("Worker %s responded during retry confirmation. Exiting retry block.", pod_name)
+                        any_recovered = True
+                        break
+
+                if not any_recovered:
+                    logger.error("All active workers confirmed down after %d retry attempts. Retrying stuck jobs.",
+                                 STUCK_JOB_PING_RETRIES)
+                    retry_jobs_in_progress()
+                    for job_key in list(job_owners.keys()):
+                        redis_client.hdel(JOB_OWNERS, job_key)
+                else:
+                    logger.info("At least one worker recovered. Skipping job retry.")
+
             mission_duration = time.time() - mission_start_time
 
-            # update the status
+            # Update the status
             with status_lock:
                 status = {
                     'num_remain': queue_remain_count,  # Needed for backwards compatibility with the rest of the code

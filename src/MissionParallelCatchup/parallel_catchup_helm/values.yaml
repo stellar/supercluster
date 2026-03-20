@@ -6,6 +6,7 @@ redis:
   failed_queue: "failed"
   progress_queue: "in_progress"
   metrics: "metrics"
+  job_owners: "job_owners"
   resources:
     requests:
       cpu: "100m"

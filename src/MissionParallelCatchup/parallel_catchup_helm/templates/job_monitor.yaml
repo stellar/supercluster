@@ -94,6 +94,7 @@ data:
   FAILED_QUEUE: "{{ .Values.redis.failed_queue }}"
   PROGRESS_QUEUE: "{{ .Values.redis.progress_queue }}"
   METRICS: "{{ .Values.redis.metrics }}"
+  JOB_OWNERS: "{{ .Values.redis.job_owners }}"
   WORKER_PREFIX: "{{ .Release.Name }}-stellar-core"
   WORKER_COUNT: "{{ .Values.worker.replicas }}"
   LOGGING_INTERVAL_SECONDS: "{{ .Values.monitor.logging_interval_seconds }}"
