@@ -602,15 +602,24 @@ type NetworkCfg with
             let dnsName = self.PeerDnsName coreSet i
 
             // The misc DB backup may not exist if the source peer
-            // predates the main/misc DB split. Restore it only when
-            // the backup is available (curl -sf fails silently on 404).
-            let restoreMiscDb =
-                ShCmd.ShOr [| ShCmd.OfStrs [| "curl"
-                                              "-sf"
-                                              "-o"
-                                              CfgVal.miscDatabasePath
-                                              CfgVal.miscDatabaseBackupURL dnsName |]
-                              ShCmd.OfStr "true" |]
+            // predates the main/misc DB split. Download to a temp path
+            // and move into place on success so a failed curl does not
+            // leave behind a truncated file.
+            let miscDatabaseTempPath = CfgVal.miscDatabasePath + ".tmp"
+
+            let curlMiscDb =
+                ShCmd.OfStrs [| "curl"
+                                "-sf"
+                                "-o"
+                                miscDatabaseTempPath
+                                CfgVal.miscDatabaseBackupURL dnsName |]
+
+            let moveMiscDb =
+                ShCmd.OfStrs [| "mv"
+                                miscDatabaseTempPath
+                                CfgVal.miscDatabasePath |]
+
+            let restoreMiscDb = ShIf(curlMiscDb, moveMiscDb, [||], None)
 
             [| ShCmd.OfStrs [| "curl"
                                "-sf"

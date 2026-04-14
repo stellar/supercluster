@@ -177,20 +177,17 @@ type StellarFormation with
         // The misc DB may not exist if the peer is running an older
         // version that predates the main/misc split. Back it up only
         // when present.
-        let backup_misc_if_exists =
-            ShCmd.ShAnd [| ShCmd.OfStrs [| "test"
-                                           "-f"
-                                           CfgVal.miscDatabasePath |]
-                           backup_misc_sql_cmd |]
+        let misc_db_exists =
+            ShCmd.OfStrs [| "test"
+                            "-f"
+                            CfgVal.miscDatabasePath |]
 
-        let backup_misc_optional =
-            ShCmd.ShOr [| backup_misc_if_exists
-                          ShCmd.OfStr "true" |]
+        let backup_misc_conditional = ShIf(misc_db_exists, backup_misc_sql_cmd, [||], None)
 
         let cmd =
             ShCmd.ShAnd [| stop_cmd
                            backup_sql_cmd
-                           backup_misc_optional
+                           backup_misc_conditional
                            backup_bucket_cmd
                            cont_cmd |]
 
