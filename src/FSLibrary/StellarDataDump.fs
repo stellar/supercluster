@@ -161,6 +161,11 @@ type StellarFormation with
                             CfgVal.databasePath
                             sprintf ".backup \"%s\"" CfgVal.databaseBackupPath |]
 
+        let backup_misc_sql_cmd =
+            ShCmd.OfStrs [| "sqlite3"
+                            CfgVal.miscDatabasePath
+                            sprintf ".backup \"%s\"" CfgVal.miscDatabaseBackupPath |]
+
         let backup_bucket_cmd =
             ShCmd.OfStrs [| "tar"
                             "cf"
@@ -169,9 +174,20 @@ type StellarFormation with
                             CfgVal.dataVolumePath
                             CfgVal.bucketsDir |]
 
+        // The misc DB may not exist if the peer is running an older
+        // version that predates the main/misc split. Back it up only
+        // when present.
+        let misc_db_exists =
+            ShCmd.OfStrs [| "test"
+                            "-f"
+                            CfgVal.miscDatabasePath |]
+
+        let backup_misc_conditional = ShIf(misc_db_exists, backup_misc_sql_cmd, [||], None)
+
         let cmd =
             ShCmd.ShAnd [| stop_cmd
                            backup_sql_cmd
+                           backup_misc_conditional
                            backup_bucket_cmd
                            cont_cmd |]
 

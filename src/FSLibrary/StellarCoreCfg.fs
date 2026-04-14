@@ -32,6 +32,7 @@ module CfgVal =
     let dataVolumeName = "data-volume"
     let dataVolumePath = "/data"
     let databasePath = dataVolumePath + "/stellar.db"
+    let miscDatabasePath = dataVolumePath + "/stellar-misc.db"
     let historyPath = dataVolumePath + "/history"
     let bucketsDir = "buckets"
     let bucketsPath = dataVolumePath + "/" + bucketsDir
@@ -80,8 +81,10 @@ module CfgVal =
     // We very crudely overload the /data/history directory as a general way
     // to transfer files from one peer to another over HTTP via nginx + curl
     let databaseBackupPath = historyPath + "/stellar-backup.db"
+    let miscDatabaseBackupPath = historyPath + "/stellar-misc-backup.db"
     let bucketsBackupPath = historyPath + "/buckets.tar.gz"
     let databaseBackupURL (host: PeerDnsName) = "http://" + host.StringName + "/stellar-backup.db"
+    let miscDatabaseBackupURL (host: PeerDnsName) = "http://" + host.StringName + "/stellar-misc-backup.db"
     let bucketsBackupURL (host: PeerDnsName) = "http://" + host.StringName + "/buckets.tar.gz"
     let bucketsDownloadPath = dataVolumePath + "/buckets.tar.gz"
 
