@@ -758,8 +758,8 @@ let main argv =
                 match s.ToLowerInvariant() with
                 | "true" | "false" -> true
                 | _ ->
-                    let (isNum, _) = System.Double.TryParse(s)
-                    isNum
+                    let (isNumeric, _) = System.Double.TryParse(s)
+                    isNumeric
 
             match Seq.tryFind (allMissions.ContainsKey >> not) mission.Missions with
             | Some e ->
@@ -767,7 +767,7 @@ let main argv =
 
                  if looksLikeFlagValue e then
                      LogError
-                         "Note: '%s' looks like a value for a command-line flag rather than a mission name. You may have passed an argument to a flag that doesn't accept one (e.g. --flag=false instead of --flag)."
+                         "Note: '%s' looks like a value for a command-line flag rather than a mission name. You may have passed an argument to a flag that doesn't accept one (e.g. --catchup-skip-known-results-for-testing=false instead of --catchup-skip-known-results-for-testing)."
                          e
                  elif e.StartsWith("-") then
                      LogError
