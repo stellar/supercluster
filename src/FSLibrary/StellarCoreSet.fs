@@ -70,11 +70,6 @@ type CatchupMode =
     | CatchupComplete
     | CatchupRecent of int
 
-type DBType =
-    | Sqlite
-    | SqliteMemory
-    | Postgres
-
 type EmptyDirType =
     | MemoryBackedEmptyDir
     | DiskBackedEmptyDir
@@ -192,7 +187,6 @@ type QuorumSetConfiguration =
 type CoreSetOptions =
     { nodeCount: int
       nodeLocs: GeoLoc list option
-      dbType: DBType
       emptyDirType: EmptyDirType
       syncStartupDelay: int option
       quorumSet: QuorumSetSpec
@@ -233,7 +227,6 @@ type CoreSetOptions =
     static member GetDefault(image: string) =
         { nodeCount = 3
           nodeLocs = None
-          dbType = Sqlite
           emptyDirType = MemoryBackedEmptyDir
           syncStartupDelay = Some(5)
           quorumSet = AllPeersQuorum

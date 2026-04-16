@@ -13,12 +13,10 @@ open StellarCoreHTTP
 open StellarCorePeer
 open StellarFormation
 open StellarShellCmd
-open System.IO
 open StellarDestination
 open System
 open System.Threading
 open System.Threading.Tasks
-open Microsoft.Rest.Serialization
 open StellarCoreSet
 
 let logName (podOrJob: string) (cmd: string) : string = sprintf "%s-%s.log" podOrJob cmd
@@ -156,16 +154,6 @@ type StellarFormation with
         let stop_cmd = ShCmd.OfStrs [| "killall5"; "-19" |]
         let cont_cmd = ShCmd.OfStrs [| "killall5"; "-18" |]
 
-        let backup_sql_cmd =
-            ShCmd.OfStrs [| "sqlite3"
-                            CfgVal.databasePath
-                            sprintf ".backup \"%s\"" CfgVal.databaseBackupPath |]
-
-        let backup_misc_sql_cmd =
-            ShCmd.OfStrs [| "sqlite3"
-                            CfgVal.miscDatabasePath
-                            sprintf ".backup \"%s\"" CfgVal.miscDatabaseBackupPath |]
-
         let backup_bucket_cmd =
             ShCmd.OfStrs [| "tar"
                             "cf"
@@ -174,20 +162,8 @@ type StellarFormation with
                             CfgVal.dataVolumePath
                             CfgVal.bucketsDir |]
 
-        // The misc DB may not exist if the peer is running an older
-        // version that predates the main/misc split. Back it up only
-        // when present.
-        let misc_db_exists =
-            ShCmd.OfStrs [| "test"
-                            "-f"
-                            CfgVal.miscDatabasePath |]
-
-        let backup_misc_conditional = ShIf(misc_db_exists, backup_misc_sql_cmd, [||], None)
-
         let cmd =
             ShCmd.ShAnd [| stop_cmd
-                           backup_sql_cmd
-                           backup_misc_conditional
                            backup_bucket_cmd
                            cont_cmd |]
 
@@ -203,42 +179,12 @@ type StellarFormation with
             )
 
         if task.GetAwaiter().GetResult() <> 0 then
-            failwith "Failed to back up database and buckets"
+            failwith "Failed to back up buckets"
 
     member self.DumpPeerDatabase(p: Peer) =
-        try
-            let ns = self.NetworkCfg.NamespaceProperty
-            let name = self.NetworkCfg.PodName p.coreSet p.peerNum
-
-            self.sleepUntilNextRateLimitedApiCallTime ()
-
-            let muxedStream =
-                self
-                    .Kube
-                    .MuxedStreamNamespacedPodExecAsync(name = name.StringName,
-                                                       ``namespace`` = ns,
-                                                       command = [| "sqlite3"; CfgVal.databasePath; ".dump" |],
-                                                       container = "stellar-core-run",
-                                                       tty = false,
-                                                       cancellationToken = CancellationToken())
-                    .GetAwaiter()
-                    .GetResult()
-
-            let stdOut =
-                muxedStream.GetStream(Nullable<ChannelIndex>(ChannelIndex.StdOut), Nullable<ChannelIndex>())
-
-            let error =
-                muxedStream.GetStream(Nullable<ChannelIndex>(ChannelIndex.Error), Nullable<ChannelIndex>())
-
-            let errorReader = new StreamReader(error)
-
-            LogInfo "Dumping SQL database of peer %s" name.StringName
-            muxedStream.Start()
-            self.Destination.WriteStream(sprintf "%s.sql" name.StringName) stdOut
-            let errors = errorReader.ReadToEndAsync().GetAwaiter().GetResult()
-            let returnMessage = SafeJsonConvert.DeserializeObject<V1Status>(errors)
-            Kubernetes.GetExitCodeOrThrow(returnMessage) |> ignore
-        with x -> ()
+        // SQL database dump is no longer supported since stellar-core
+        // now uses BucketListDB exclusively for ledger state.
+        ()
 
     member self.DumpPeerMetrics(p: Peer) =
         let destination = self.NetworkCfg.missionContext.destination

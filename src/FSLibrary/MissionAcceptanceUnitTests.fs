@@ -14,7 +14,6 @@ let acceptanceUnitTests (context: MissionContext) =
 
     let opts =
         { CoreSetOptions.GetDefault context.image with
-              dbType = Postgres
               localHistory = false
               nodeCount = 1
               initialization = CoreSetInitialization.NoInitCmds }

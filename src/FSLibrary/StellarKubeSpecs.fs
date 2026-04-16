@@ -102,10 +102,6 @@ let makeResourceRequirementsWithStorageLimit
     : V1ResourceRequirements =
     makeResourceRequirementsCommon cpuReqMili memReqMebi cpuLimMili memLimMebi storageReqGibi storageLimGibi true
 
-let PgResourceRequirements : V1ResourceRequirements =
-    // Postgres needs 1 vCPU and 1GB RAM.
-    makeResourceRequirements 1000 1024 1000 1024
-
 let HistoryResourceRequirements : V1ResourceRequirements =
     // Nginx needs 0.05 vCPU and 32MB RAM. It's small.
     makeResourceRequirements 10 32 50 32
@@ -176,9 +172,6 @@ let GetCoreResourceRequirements (cr: CoreResources) : V1ResourceRequirements =
     | NonParallelCatchupResources -> NonParallelCatchupCoreResourceRequirements
     | UpgradeResources -> UpgradeCoreResourceRequirements
 
-let PgContainerVolumeMounts : V1VolumeMount array =
-    [| V1VolumeMount(name = CfgVal.dataVolumeName, mountPath = CfgVal.dataVolumePath) |]
-
 let HistoryContainerVolumeMounts : V1VolumeMount array =
     [| V1VolumeMount(name = CfgVal.historyCfgVolumeName, mountPath = CfgVal.historyCfgVolumePath)
        V1VolumeMount(name = CfgVal.dataVolumeName, mountPath = CfgVal.dataVolumePath) |]
@@ -191,18 +184,6 @@ let HistoryContainer (nginxImage: string) =
         args = [| "-c"; CfgVal.historyCfgFilePath |],
         resources = HistoryResourceRequirements,
         volumeMounts = HistoryContainerVolumeMounts
-    )
-
-let PostgresContainer (postgresImage: string) =
-    let passwordEnvVar = V1EnvVar(name = "POSTGRES_PASSWORD", value = CfgVal.pgPassword)
-
-    V1Container(
-        name = "postgres",
-        env = [| passwordEnvVar |],
-        ports = [| V1ContainerPort(containerPort = 5432, name = "postgres") |],
-        image = postgresImage,
-        resources = PgResourceRequirements,
-        volumeMounts = PgContainerVolumeMounts
     )
 
 let PrometheusExporterSidecarContainer (prometheusExporterImage: string) =
@@ -512,34 +493,6 @@ type NetworkCfg with
                 let t = ShCmd.OfStr "true"
                 Some(ShCmd.ShOr [| cmd; t |])
 
-        let setPgHost : ShCmd Option =
-            match opts.dbType with
-            | Postgres -> Some(ShCmd.ExDefVar "PGHOST" CfgVal.pgHost)
-            | _ -> None
-
-        let setPgUser : ShCmd Option =
-            match opts.dbType with
-            | Postgres -> Some(ShCmd.ExDefVar "PGUSER" CfgVal.pgUser)
-            | _ -> None
-
-        let createDbs : ShCmd Option array =
-            match opts.dbType with
-            | Postgres ->
-                [| for i in 0 .. 9 ->
-                       Some(
-                           ShCmd.OfStrs [| "createdb"
-                                           "test" + i.ToString() |]
-                       )
-                       |> ignoreError |]
-            | _ -> [||]
-
-        let waitForDB : ShCmd Option =
-            match opts.dbType with
-            | Postgres ->
-                let pgIsReady = [| "pg_isready"; "-h"; CfgVal.pgHost; "-d"; CfgVal.pgDb; "-U"; CfgVal.pgUser |]
-                let sleep2 = [| "sleep"; "2" |]
-                Some(ShCmd.Until pgIsReady sleep2)
-            | _ -> None
 
         let waitForTime : ShCmd Option =
             match opts.syncStartupDelay with
@@ -587,47 +540,16 @@ type NetworkCfg with
         let cmds =
             Array.choose
                 id
-                (Array.append
-                    ([| waitForDB
-                        setPgUser
-                        setPgHost
-                        waitForTime
-                        newDb
-                        pregenerate
-                        newHistIgnoreError
-                        initialCatchup |])
-                    createDbs)
+                [| waitForTime
+                   newDb
+                   pregenerate
+                   newHistIgnoreError
+                   initialCatchup |]
 
-        let restoreDBStep coreSet i : ShCmd array =
+        let restoreBucketsStep coreSet i : ShCmd array =
             let dnsName = self.PeerDnsName coreSet i
 
-            // The misc DB backup may not exist if the source peer
-            // predates the main/misc DB split. Download to a temp path
-            // and move into place on success so a failed curl does not
-            // leave behind a truncated file.
-            let miscDatabaseTempPath = CfgVal.miscDatabasePath + ".tmp"
-
-            let curlMiscDb =
-                ShCmd.OfStrs [| "curl"
-                                "-sf"
-                                "-o"
-                                miscDatabaseTempPath
-                                CfgVal.miscDatabaseBackupURL dnsName |]
-
-            let moveMiscDb =
-                ShCmd.OfStrs [| "mv"
-                                miscDatabaseTempPath
-                                CfgVal.miscDatabasePath |]
-
-            let restoreMiscDb = ShIf(curlMiscDb, moveMiscDb, [||], None)
-
             [| ShCmd.OfStrs [| "curl"
-                               "-sf"
-                               "-o"
-                               CfgVal.databasePath
-                               CfgVal.databaseBackupURL dnsName |]
-               restoreMiscDb
-               ShCmd.OfStrs [| "curl"
                                "-sf"
                                "-o"
                                CfgVal.bucketsDownloadPath
@@ -642,10 +564,8 @@ type NetworkCfg with
         | None -> cmds
         | Some (coreSet, i) ->
             let coreSet = self.FindCoreSet coreSet
+            Array.append cmds (restoreBucketsStep coreSet i)
 
-            match coreSet.options.dbType with
-            | Postgres -> cmds // PG does not support that yet
-            | _ -> Array.append cmds (restoreDBStep coreSet i)
 
     member self.GetJobPodTemplateSpec
         (jobName: string)
@@ -668,11 +588,7 @@ type NetworkCfg with
             | None -> [| CoreContainerForCommand image cfgOpt asan res command [||] [| jobName |] |]
             | Some (opts) ->
                 let initCmds = self.getInitCommands cfgOpt opts
-                let coreContainer = CoreContainerForCommand image cfgOpt asan res command initCmds [| jobName |]
-
-                match opts.dbType with
-                | Postgres -> [| coreContainer; PostgresContainer self.missionContext.postgresImage |]
-                | _ -> [| coreContainer |]
+                [| CoreContainerForCommand image cfgOpt asan res command initCmds [| jobName |] |]
 
         let containers = TryAddPrometheusContainer self.missionContext containers
         let annotations = TryGetPrometheusAnnotation self.missionContext
@@ -706,9 +622,9 @@ type NetworkCfg with
         )
 
     // Returns a PodTemplate that mounts the ConfigMap on /cfg and an empty data
-    // volume on /data. Then initializes a local stellar-core database in
-    // /data/stellar.db with buckets in /data/buckets and history archive in
-    // /data/history, optionally does offline catchup, and runs.
+    // volume on /data. Then initializes a local stellar-core database with
+    // buckets in /data/buckets and history archive in /data/history, optionally
+    // does offline catchup, and runs.
     member self.ToPodTemplateSpec(coreSet: CoreSet) : V1PodTemplateSpec =
 
         // We cannot limit _individual_ peers within a CoreSet to only mount
@@ -759,7 +675,6 @@ type NetworkCfg with
             else
                 runCmd
 
-        let usePostgres = (coreSet.options.dbType = Postgres || self.missionContext.runForMaxTps.IsSome)
         let exportToPrometheus = self.missionContext.exportToPrometheus
 
         let res = self.missionContext.coreResources
@@ -770,12 +685,6 @@ type NetworkCfg with
                 (CoreContainerForCommand imageName cfgOpt asan res runCmd initCommands peerNames)
                 self.missionContext.probeTimeout
                HistoryContainer self.missionContext.nginxImage |]
-
-        let containers =
-            if usePostgres then
-                Array.append containers [| PostgresContainer self.missionContext.postgresImage |]
-            else
-                containers
 
         let containers =
             if self.NeedNetworkDelayScript then

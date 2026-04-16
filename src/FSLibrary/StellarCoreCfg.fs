@@ -31,8 +31,6 @@ module CfgVal =
 
     let dataVolumeName = "data-volume"
     let dataVolumePath = "/data"
-    let databasePath = dataVolumePath + "/stellar.db"
-    let miscDatabasePath = dataVolumePath + "/stellar-misc.db"
     let historyPath = dataVolumePath + "/history"
     let bucketsDir = "buckets"
     let bucketsPath = dataVolumePath + "/" + bucketsDir
@@ -72,19 +70,12 @@ module CfgVal =
     let historyCfgFileName = "nginx.conf"
     let historyCfgFilePath = historyCfgVolumePath + "/" + historyCfgFileName
 
-    // pg configs
-    let pgDb = "postgres"
-    let pgUser = "postgres"
-    let pgPassword = "password"
-    let pgHost = "localhost"
+    // pg configs are no longer needed since SQL DB backend support has been dropped.
+    // stellar-core now uses BucketListDB exclusively for ledger state.
 
     // We very crudely overload the /data/history directory as a general way
     // to transfer files from one peer to another over HTTP via nginx + curl
-    let databaseBackupPath = historyPath + "/stellar-backup.db"
-    let miscDatabaseBackupPath = historyPath + "/stellar-misc-backup.db"
     let bucketsBackupPath = historyPath + "/buckets.tar.gz"
-    let databaseBackupURL (host: PeerDnsName) = "http://" + host.StringName + "/stellar-backup.db"
-    let miscDatabaseBackupURL (host: PeerDnsName) = "http://" + host.StringName + "/stellar-misc-backup.db"
     let bucketsBackupURL (host: PeerDnsName) = "http://" + host.StringName + "/buckets.tar.gz"
     let bucketsDownloadPath = dataVolumePath + "/buckets.tar.gz"
 
@@ -97,19 +88,6 @@ let thresholdOfPercent (sz: int) (pct: int) : int = 1 + (((sz * pct) - 1) / 100)
 
 // And this is (hopefully) its inverse!
 let percentOfThreshold (sz: int) (thr: int) : int = 1 + ((100 * (thr - 1)) / sz)
-
-// Symbolic type of the different sorts of DATABASE that can show up in a
-// stellar-core.cfg. Usually use SQLite3File of some path in a Pod's local
-// volume.
-type DatabaseURL =
-    | SQLite3Memory
-    | SQLite3File of path: string
-    | PostgreSQL of database: string * user: string * pass: string * host: string
-    override self.ToString() : string =
-        match self with
-        | SQLite3Memory -> "sqlite3://:memory:"
-        | SQLite3File s -> sprintf "sqlite3://%s" s
-        | PostgreSQL (d, u, p, h) -> sprintf "postgresql://dbname=%s user=%s password=%s host=%s" d u p h
 
 let curlGetCmd (uri: System.Uri) : string = sprintf "curl -sf %s{0} -o {1}" (uri.ToString())
 
@@ -140,7 +118,6 @@ let distributionToToml (d: (int * int) list) (name: string) (t: TomlTable) : uni
 // write it out to TOML.
 type StellarCoreCfg =
     { network: NetworkCfg
-      database: DatabaseURL
       networkPassphrase: NetworkPassphrase
       nodeSeed: KeyPair
       nodeIsValidator: bool
@@ -194,13 +171,6 @@ type StellarCoreCfg =
 
         let logLevelCommands = List.append debugLevelCommands traceLevelCommands
         let preferredPeers = List.map (fun (x: PeerDnsName) -> x.StringName) self.preferredPeers
-
-        match self.network.missionContext.runForMaxTps with
-        | Some _ ->
-            // parallel apply feature is only supported on Postgres (for now)
-            let url = PostgreSQL(CfgVal.pgDb, CfgVal.pgUser, CfgVal.pgPassword, CfgVal.pgHost)
-            t.Add("DATABASE", url.ToString()) |> ignore
-        | None -> t.Add("DATABASE", self.database.ToString()) |> ignore
 
         t.Add("METADATA_DEBUG_LEDGERS", 0) |> ignore
 
@@ -601,15 +571,8 @@ type NetworkCfg with
             List.map (fun key -> self.pubKeyToPeerDnsNameMap.[key]) preferredPeers
         | None -> failwith "Unable to create preferredPeers without preferredPeersMap"
 
-    member self.getDbUrl(o: CoreSetOptions) : DatabaseURL =
-        match o.dbType with
-        | Postgres -> PostgreSQL(CfgVal.pgDb, CfgVal.pgUser, CfgVal.pgPassword, CfgVal.pgHost)
-        | Sqlite -> SQLite3File CfgVal.databasePath
-        | SqliteMemory -> SQLite3Memory
-
     member self.StellarCoreCfgForJob(opts: CoreSetOptions) : StellarCoreCfg =
         { network = self
-          database = self.getDbUrl opts
           networkPassphrase = self.networkPassphrase
           nodeSeed = KeyPair.Random()
           nodeIsValidator = false
@@ -644,7 +607,6 @@ type NetworkCfg with
 
     member self.StellarCoreCfg(c: CoreSet, i: int, ctype: CoreContainerType) : StellarCoreCfg =
         { network = self
-          database = self.getDbUrl c.options
           networkPassphrase = self.networkPassphrase
           nodeSeed = c.keys.[i]
           nodeIsValidator = c.options.validate

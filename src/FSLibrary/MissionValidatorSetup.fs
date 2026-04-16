@@ -13,14 +13,12 @@ open StellarStatefulSets
 open StellarCoreHTTP
 
 // This mission creates a network with validator configurations that closely
-// mirror how tier 1 validators are actually configured. It uses both Postgres
-// and has history archives enabled. This is a smoke test that spins up the
-// network, runs for ~70 ledgers with load generation, verifies history
-// publishing works, then spins it down.
+// mirror how tier 1 validators are actually configured. It has history archives
+// enabled. This is a smoke test that spins up the network, runs for ~70 ledgers
+// with load generation, verifies history publishing works, then spins it down.
 let validatorSetup (context: MissionContext) =
     let opts =
         { CoreSetOptions.GetDefault context.image with
-              dbType = Postgres
               // Use disk-backed storage like production validators
               emptyDirType = DiskBackedEmptyDir
               localHistory = true

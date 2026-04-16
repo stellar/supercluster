@@ -39,7 +39,6 @@ type MissionContext =
       image: string
       oldImage: string option
       netdelayImage: string
-      postgresImage: string
       nginxImage: string
       prometheusExporterImage: string
       txRate: int

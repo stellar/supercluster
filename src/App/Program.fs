@@ -52,7 +52,6 @@ type MissionOptions
         image: string,
         oldImage: string option,
         netdelayImage: string,
-        postgresImage: string,
         nginxImage: string,
         prometheusExporterImage: string,
         txRate: int,
@@ -199,12 +198,6 @@ type MissionOptions
              Required = false,
              Default = "stellar/sdf-netdelay:latest")>]
     member self.netdelayImage = netdelayImage
-
-    [<Option("postgres-image",
-             HelpText = "Postgres server image to use",
-             Required = false,
-             Default = "index.docker.io/library/postgres:9.5.22")>]
-    member self.postgresImage = postgresImage
 
     [<Option("nginx-image",
              HelpText = "Nginx server image to use",
@@ -653,7 +646,6 @@ let main argv =
                   image = "stellar/stellar-core"
                   oldImage = None
                   netdelayImage = ""
-                  postgresImage = ""
                   nginxImage = ""
                   prometheusExporterImage = ""
                   txRate = 100
@@ -804,7 +796,6 @@ let main argv =
                                image = mission.Image
                                oldImage = mission.OldImage
                                netdelayImage = mission.netdelayImage
-                               postgresImage = mission.postgresImage
                                nginxImage = mission.nginxImage
                                prometheusExporterImage = mission.prometheusExporterImage
                                txRate = mission.TxRate

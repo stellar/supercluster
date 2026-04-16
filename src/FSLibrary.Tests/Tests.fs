@@ -39,7 +39,6 @@ let ctx : MissionContext =
       oldImage = None
       netdelayImage = ""
       nginxImage = ""
-      postgresImage = ""
       prometheusExporterImage = ""
       txRate = 10
       maxTxRate = 10
@@ -159,7 +158,7 @@ type Tests(output: ITestOutputHelper) =
         Assert.Equal(nonceStr + "-sts-test-0." + domain, peer0DNS)
         Assert.Equal(nonceStr + "-sts-test-1." + domain, peer1DNS)
         Assert.Equal(nonceStr + "-sts-test-2." + domain, peer2DNS)
-        Assert.Contains("DATABASE = \"sqlite3:///data/stellar.db\"", toml)
+        Assert.DoesNotContain("DATABASE", toml)
         Assert.Contains("BUCKET_DIR_PATH = \"/data/buckets\"", toml)
 
         Assert.Contains(
