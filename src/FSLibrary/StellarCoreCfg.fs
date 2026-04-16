@@ -70,9 +70,6 @@ module CfgVal =
     let historyCfgFileName = "nginx.conf"
     let historyCfgFilePath = historyCfgVolumePath + "/" + historyCfgFileName
 
-    // pg configs are no longer needed since SQL DB backend support has been dropped.
-    // stellar-core now uses BucketListDB exclusively for ledger state.
-
     // We very crudely overload the /data/history directory as a general way
     // to transfer files from one peer to another over HTTP via nginx + curl
     let bucketsBackupPath = historyPath + "/buckets.tar.gz"
