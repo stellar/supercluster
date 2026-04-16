@@ -177,14 +177,12 @@ type InvariantChecksSpec =
 // Determines how quorum set configurations should be generated
 type QuorumSetConfiguration =
     // Prefer automatic quorum set configuration. Fall back on explicit quorum
-    // set configuration if automatic configuration is not possible, or if
-    // --enable-relaxed-auto-qset-config is not set.
+    // set configuration if automatic configuration is not possible.
     | PreferAutoQset
     // Require automatic quorum set configuration. Fail if automatic
-    // configuration is not possible. Uses automatic configuration even if
-    // --enable-relaxed-auto-qset-config is not set, so missions using this
-    // option *must* satisfy the HIGH quality validator checks present in
-    // stellar-core.
+    // configuration is not possible. Missions using this option *must* satisfy
+    // the HIGH quality validator checks present in stellar-core, or set
+    // `skipHighCriticalValidatorChecks` to `true`.
     | RequireAutoQset
     // Require explicit quorum set configuration.
     | RequireExplicitQset
@@ -222,9 +220,9 @@ type CoreSetOptions =
       addArtificialDelayUsec: int option
       surveyPhaseDuration: int option
       updateSorobanCosts: bool option
-      // `skipHighCriticalValidatorChecks` exists to allow supercluster to
-      // remain compatible with older stellar-core images that do not have the
-      // ability to turn of validator checks for HIGH and CRITICAL validators
+      // `skipHighCriticalValidatorChecks` controls whether to set
+      // SKIP_HIGH_CRITICAL_VALIDATOR_CHECKS_FOR_TESTING in stellar-core config,
+      // which disables validator checks for HIGH and CRITICAL validators.
       skipHighCriticalValidatorChecks: bool }
 
     member self.WithWaitForConsensus(w: bool) =
