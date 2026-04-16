@@ -41,7 +41,8 @@ let versionMixConsensus (context: MissionContext) =
             { CoreSetOptions.GetDefault newImage with
                   nodeCount = 2
                   historyNodes = Some([])
-                  quorumSet = CoreSetQuorumList([ CoreSetName "new-core"; CoreSetName "old-core" ])
+                  quorumSet = CoreSetQuorumListWithThreshold([ CoreSetName "new-core"; CoreSetName "old-core" ], 100)
+                  quorumSetConfigType = RequireExplicitQset
                   initialization =
                       { newDb = true
                         newHist = true
@@ -56,7 +57,7 @@ let versionMixConsensus (context: MissionContext) =
             { CoreSetOptions.GetDefault oldImage with
                   nodeCount = 2
                   historyNodes = Some([])
-                  quorumSet = CoreSetQuorumList([ CoreSetName "new-core"; CoreSetName "old-core" ])
+                  quorumSet = CoreSetQuorumListWithThreshold([ CoreSetName "new-core"; CoreSetName "old-core" ], 100)
                   // FIXME: Remove these options once the stable (old) image in
                   // CI supports skipping validator quality checks
                   skipHighCriticalValidatorChecks = false
