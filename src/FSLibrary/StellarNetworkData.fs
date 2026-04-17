@@ -811,7 +811,7 @@ let PubnetGetCommands =
     |> Map.ofList
 
 let PubnetQuorum : ExplicitQuorumSet =
-    { thresholdPercent = None
+    { thresholdPercent = Some 51
       validators =
           [ PeerShortName "core_live_001",
             KeyPair.FromAccountId("GCGB2S2KGYARPVIA37HYZXVRM2YZUEXA6S33ZU5BUDC6THSB62LZSTYH")
@@ -847,7 +847,7 @@ let TestnetGetCommands =
     |> Map.ofList
 
 let TestnetQuorum : ExplicitQuorumSet =
-    { thresholdPercent = None
+    { thresholdPercent = Some 51
       validators =
           [ PeerShortName "core_testnet_001",
             KeyPair.FromAccountId("GDKXE2OZMJIPOSLNA6N6F2BVCI3O777I2OOC4BV7VOYUEHYX7RTRYA7Y")
