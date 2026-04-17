@@ -151,6 +151,14 @@ Run a network with a mix of fast and slow nodes. This mission allows to test int
 
 Stress test a network of simulated Tier1 topology with a mix of classic and soroban traffic and report maximum achieved throughput.
 
+## MissionMinBlockTimeClassic
+
+Find the minimum ledger target close time a simulated Tier1 network can sustain at a fixed TPS while meeting a per-node `ledger.age.closed` latency SLA (P50 within ±5% of target, P99 ≤ 2×, P99.9 ≤ 3×), driving classic-payment load. See [Running minimum block time test](measuring-minimum-block-time.md) for details.
+
+## MissionMinBlockTimeMixed
+
+Same as `MissionMinBlockTimeClassic`, but drives a configurable mix of classic payments plus Soroban invoke and upload transactions.
+
 ## MissionMixedNominationLeaderElectionWithOldMajority
 
 Run a network with a mix of nodes running the old and new nomination leader election algorithms. Contains a majority of nodes running the old algorithm.
