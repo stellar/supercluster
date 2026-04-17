@@ -131,7 +131,9 @@ type MissionOptions
         benchmarkInfrastructure: bool,
         benchmarkOnly: bool,
         benchmarkDurationSeconds: int,
-        enableTcpTuning: bool
+        enableTcpTuning: bool,
+        minBlockTimeMs: int,
+        maxBlockTimeMs: int
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -597,6 +599,18 @@ type MissionOptions
              Default = false)>]
     member self.EnableTcpTuning = enableTcpTuning
 
+    [<Option("min-block-time-ms",
+             HelpText = "Lower bound (ms) of the ledger target close time range searched by MinBlockTime missions",
+             Required = false,
+             Default = 4000)>]
+    member self.MinBlockTimeMs = minBlockTimeMs
+
+    [<Option("max-block-time-ms",
+             HelpText = "Upper bound (ms) of the ledger target close time range searched by MinBlockTime missions. Must not exceed the protocol cap (5000).",
+             Required = false,
+             Default = 5000)>]
+    member self.MaxBlockTimeMs = maxBlockTimeMs
+
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' |> Array.toList with
     | [ x ] -> x, None
@@ -740,7 +754,9 @@ let main argv =
                   benchmarkInfrastructure = Some false
                   benchmarkInfrastructureOnly = Some false
                   benchmarkDurationSeconds = Some 30
-                  enableTcpTuning = false }
+                  enableTcpTuning = false
+                  minBlockTimeMs = 4000
+                  maxBlockTimeMs = 5000 }
 
             let nCfg = MakeNetworkCfg ctx [] None
             use formation = kube.MakeEmptyFormation(nCfg)
@@ -908,7 +924,9 @@ let main argv =
                                benchmarkInfrastructure = Some mission.BenchmarkInfrastructure
                                benchmarkInfrastructureOnly = Some mission.BenchmarkOnly
                                benchmarkDurationSeconds = Some mission.BenchmarkDurationSeconds
-                               enableTcpTuning = mission.EnableTcpTuning }
+                               enableTcpTuning = mission.EnableTcpTuning
+                               minBlockTimeMs = mission.MinBlockTimeMs
+                               maxBlockTimeMs = mission.MaxBlockTimeMs }
 
                          allMissions.[m] missionContext
 
