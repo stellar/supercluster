@@ -5,8 +5,8 @@
 module MinBlockTimeTest
 
 // Binary-searches for the minimum ledger target close time the network can
-// sustain at a fixed TPS, using stellar-core's `ledger.age.closed` timer
-// metric as the SLA signal.
+// sustain at a fixed TPS, using stellar-core's
+// `ledger.age.closed-histogram` metric as the SLA signal.
 
 open Logging
 open StellarCoreHTTP
@@ -185,7 +185,8 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                     { baseLoadGen with
                           accounts = numAccounts
                           // ~5 min measurement window at fixed TPS. Enough for a
-                          // stable P99/P99.9 read without draining the tx source.
+                          // stable read of the SLA metric without draining the
+                          // tx source.
                           txs = fixedTxRate * 300
                           txrate = fixedTxRate }
 
