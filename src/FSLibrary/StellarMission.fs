@@ -48,6 +48,8 @@ open MissionMixedNominationLeaderElection
 open MissionUpgradeSCPSettings
 open MissionUpgradeTxClusters
 open MissionValidatorSetup
+open MissionMinBlockTimeClassic
+open MissionMinBlockTimeMixed
 
 type Mission = (MissionContext -> unit)
 
@@ -97,4 +99,6 @@ let allMissions : Map<string, Mission> =
                  ("MixedNominationLeaderElectionWithNewMajority", mixedNominationLeaderElectionWithNewMajority)
                  ("UpgradeSCPSettings", upgradeSCPSettings)
                  ("UpgradeTxClusters", upgradeTxClusters)
-                 ("ValidatorSetup", validatorSetup) |]
+                 ("ValidatorSetup", validatorSetup)
+                 ("MinBlockTimeClassic", minBlockTimeClassic)
+                 ("MinBlockTimeMixed", minBlockTimeMixed) |]
