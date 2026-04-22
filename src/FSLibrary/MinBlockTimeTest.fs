@@ -28,13 +28,13 @@ let private timeoutsFor (targetMs: int) : int = max 500 (targetMs / 5)
 
 let private readLedgerAgePercentiles (peer: Peer) : float * float =
     let h = peer.GetMetrics().LedgerAgeClosedHistogram
-    float h.Median, float h.``99``
+    float h.``75``, float h.``99``
 
 // Returns true iff every peer's ledger.age.closed-histogram satisfies:
-//   P50 in [0.80*T, 1.20*T)
+//   P75 in [0.80*T, 1.20*T)
 //   P99 <= 2*T
 //
-// FIXME: the P50 tolerance is temporarily widened to +/-20% because
+// FIXME: the P75 tolerance is temporarily widened to +/-20% because
 // stellar-core currently has perf regressions that prevent the intended
 // +/-5% band from being achievable. Tighten this back to 0.95/1.05 (or
 // lower) once those regressions are fixed.
@@ -48,14 +48,14 @@ let private checkLedgerAgeSLA (formation: StellarFormation) (coreSets: CoreSet l
     formation.NetworkCfg.EachPeerInSets
         (List.toArray coreSets)
         (fun peer ->
-            let p50, p99 = readLedgerAgePercentiles peer
-            let peerOk = p50 >= tLo && p50 < tHi && p99 <= p99Max
+            let p75, p99 = readLedgerAgePercentiles peer
+            let peerOk = p75 >= tLo && p75 < tHi && p99 <= p99Max
 
             LogInfo
-                "peer=%s T=%dms p50=%.0f p99=%.0f -> %s"
+                "peer=%s T=%dms p75=%.0f p99=%.0f -> %s"
                 peer.ShortName.StringName
                 targetMs
-                p50
+                p75
                 p99
                 (if peerOk then "PASS" else "FAIL")
 

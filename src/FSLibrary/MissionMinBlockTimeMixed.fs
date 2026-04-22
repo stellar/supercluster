@@ -6,7 +6,7 @@ module MissionMinBlockTimeMixed
 
 // Mirror of MissionMaxTPSMixed for the minimum-block-time search: mixed
 // classic + Soroban workload at a fixed TPS, binary-searches for the smallest
-// ledger target close time that still keeps ledger.age.closed within SLA.
+// ledger target close time that still keeps ledger.age.closed-histogram within SLA.
 
 open MinBlockTimeTest
 open PubnetData

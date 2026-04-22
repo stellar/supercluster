@@ -6,9 +6,9 @@ module MissionMinBlockTimeClassic
 
 // Mirror of MissionMaxTPSClassic for the minimum-block-time search: fixes the
 // TPS at --tx-rate and binary-searches for the smallest ledger target close
-// time (in [--min-block-time-ms, 6000] ms) that still keeps ledger.age.closed
-// within the currently enforced SLA checks (P50 within a widened band around
-// T, and P99 <= 2T; no P99.9 bound is currently enforced here).
+// time (in [--min-block-time-ms, --max-block-time-ms] ms) that still keeps
+// ledger.age.closed-histogram within the currently enforced SLA checks (P75
+// within a widened band around T, and P99 <= 2T).
 
 open MinBlockTimeTest
 open StellarMissionContext
