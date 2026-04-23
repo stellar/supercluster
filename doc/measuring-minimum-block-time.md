@@ -13,10 +13,10 @@ The missions perform the binary search to find the minimum sustainable block tim
 
 A candidate close time `T` is considered a **pass** if and only if, **on every node in the network**, the stellar-core `ledger.age.closed-histogram` metric satisfies **both** of the following:
 
-* **P50** (median) is in the range `[0.80·T, 1.20·T)` ms  *(temporary; see note below)*
+* **P75** is in the range `[0.80·T, 1.20·T)` ms  *(temporary; see note below)*
 * **P99** is `≤ 2·T` ms
 
-> **FIXME (P50 tolerance):** the intended P50 band is `[0.95·T, 1.05·T)` (±5%), but stellar-core currently has performance regressions that prevent the stricter band from being achievable under load. The tolerance has been temporarily widened to ±20% so the test can exercise the rest of the pipeline; tighten it back to ±5% (or narrower) once those regressions are fixed.
+> **FIXME (P75 tolerance):** the intended P75 band is `[0.95·T, 1.05·T)` (±5%), but stellar-core currently has performance regressions that prevent the stricter band from being achievable under load. The tolerance has been temporarily widened to ±20% so the test can exercise the rest of the pipeline; tighten it back to ±5% (or narrower) once those regressions are fixed.
 
 If any node violates any of these bounds, `T` is considered a **fail** and the binary search raises its lower bound. The same is true if the load run itself errors (e.g., stellar-core's internal `loadgen-run-failed` counter increments, nodes fall out of sync, or peers report inconsistent ledger hashes) — in that case the mission treats the iteration as a fail and the search continues upward.
 

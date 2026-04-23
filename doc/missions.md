@@ -153,7 +153,7 @@ Stress test a network of simulated Tier1 topology with a mix of classic and soro
 
 ## MissionMinBlockTimeClassic
 
-Find the minimum ledger target close time a simulated Tier1 network can sustain at a fixed TPS while meeting a per-node `ledger.age.closed` latency SLA (P50 within ±20% of target, P99 ≤ 2×), driving classic-payment load. See [Running minimum block time test](measuring-minimum-block-time.md) for details.
+Find the minimum ledger target close time a simulated Tier1 network can sustain at a fixed TPS while meeting a per-node `ledger.age.closed` latency SLA (P75 within ±20% of target, P99 ≤ 2×), driving classic-payment load. See [Running minimum block time test](measuring-minimum-block-time.md) for details.
 
 ## MissionMinBlockTimeMixed
 
