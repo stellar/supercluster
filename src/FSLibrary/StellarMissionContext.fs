@@ -134,4 +134,5 @@ type MissionContext =
       benchmarkDurationSeconds: int option
       enableTcpTuning: bool
       minBlockTimeMs: int
-      maxBlockTimeMs: int }
+      maxBlockTimeMs: int
+      runForMinBlockTime: bool }

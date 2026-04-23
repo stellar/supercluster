@@ -139,7 +139,8 @@ let ctx : MissionContext =
       benchmarkDurationSeconds = None
       enableTcpTuning = false
       minBlockTimeMs = 4000
-      maxBlockTimeMs = 5000 }
+      maxBlockTimeMs = 5000
+      runForMinBlockTime = false }
 
 let netdata = __SOURCE_DIRECTORY__ + "/../../../data/public-network-data-2024-08-01.json"
 let pubkeys = __SOURCE_DIRECTORY__ + "/../../../data/tier1keys.json"
