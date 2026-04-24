@@ -222,6 +222,7 @@ type StellarCoreCfg =
         t.Add("NODE_IS_VALIDATOR", self.nodeIsValidator) |> ignore
         t.Add("RUN_STANDALONE", self.runStandalone) |> ignore
         t.Add("PREFERRED_PEERS", preferredPeers) |> ignore
+        t.Add("KNOWN_PEERS", preferredPeers) |> ignore
         t.Add("PREFERRED_PEERS_ONLY", self.preferredPeersOnly) |> ignore
         t.Add("COMMANDS", logLevelCommands) |> ignore
         t.Add("CATCHUP_COMPLETE", self.catchupMode = CatchupComplete) |> ignore
@@ -330,6 +331,9 @@ type StellarCoreCfg =
         distributionToToml self.network.missionContext.instructionsDistribution "INSTRUCTIONS" t
 
         t.Add("TARGET_PEER_CONNECTIONS", self.targetPeerConnections) |> ignore
+        t.Add("OVERLAY_BINARY_PATH", "/usr/bin/stellar-overlay") |> ignore
+        t.Add("OVERLAY_SOCKET_PATH", "/etc/stellar/stellar-overlay.sock") |> ignore
+        // t.Add("ITEM_FETCH_INITIAL_DELAY_MS", 1000) |> ignore
 
         t.Add("MAX_ADDITIONAL_PEER_CONNECTIONS", self.targetPeerConnections * 3)
         |> ignore
