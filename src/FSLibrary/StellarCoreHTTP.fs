@@ -349,7 +349,7 @@ let MeterCountOr (def: int) (m: Option<Metrics.GenericMeter>) : int =
     | None -> def
 
 
-let ConsistencyCheckIterationCount : int = 5
+let ConsistencyCheckIterationCount : int = 10
 
 exception PeerRejectedUpgradesException of string
 exception InconsistentPeersException of (Peer * Peer)
