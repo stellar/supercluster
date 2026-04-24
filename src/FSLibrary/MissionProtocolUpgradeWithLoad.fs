@@ -17,6 +17,7 @@ let protocolUpgradeWithLoad (context: MissionContext) =
         MakeLiveCoreSet
             "core"
             { CoreSetOptions.GetDefault context.image with
+                  nodeCount = context.numNodes
                   invariantChecks = AllInvariantsExceptEvents
                   dumpDatabase = false
                   updateSorobanCosts = Some(true)

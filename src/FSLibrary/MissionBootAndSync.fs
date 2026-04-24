@@ -11,7 +11,11 @@ open StellarFormation
 open StellarStatefulSets
 
 let bootAndSync (context: MissionContext) =
-    let coreSet = MakeLiveCoreSet "core" (CoreSetOptions.GetDefault context.image)
+    let coreSet =
+        MakeLiveCoreSet
+            "core"
+            { CoreSetOptions.GetDefault context.image with
+                  nodeCount = context.numNodes }
 
     context.Execute
         [ coreSet ]

@@ -24,7 +24,11 @@ let databaseInplaceUpgrade (context: MissionContext) =
     let quorumSet = CoreSetQuorum(CoreSetName("core"))
 
     let coreSet =
-        MakeLiveCoreSet "core" { CoreSetOptions.GetDefault newImage with quorumSet = quorumSet }
+        MakeLiveCoreSet
+            "core"
+            { CoreSetOptions.GetDefault newImage with
+                  nodeCount = context.numNodes
+                  quorumSet = quorumSet }
 
     let beforeUpgradeCoreSet =
         MakeLiveCoreSet

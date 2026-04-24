@@ -139,7 +139,7 @@ type MissionOptions
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
     member self.KubeConfig = kubeConfig
 
-    [<Option('n', "num-nodes", HelpText = "Number of nodes in config", Required = false, Default = 5)>]
+    [<Option('n', "num-nodes", HelpText = "Number of nodes in config", Required = false, Default = 3)>]
     member self.NumNodes = numNodes
 
     [<Option("debug", HelpText = "Log-partitions to set to 'debug' level")>]
