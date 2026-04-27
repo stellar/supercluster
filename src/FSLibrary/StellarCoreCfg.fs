@@ -226,6 +226,9 @@ type StellarCoreCfg =
         t.Add("COMMANDS", logLevelCommands) |> ignore
         t.Add("CATCHUP_COMPLETE", self.catchupMode = CatchupComplete) |> ignore
 
+        if self.network.missionContext.runForMinBlockTime then
+            t.Add("TESTING_IGNORE_LEDGER_TIME_UPGRADE_BOUNDS", true) |> ignore
+
         match self.network.missionContext.runForMaxTps with
         | Some "classic" ->
             t.Add("TESTING_MAX_CLASSIC_BYTE_ALLOWANCE", 1024 * 1024 * 9) |> ignore

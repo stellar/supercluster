@@ -756,7 +756,8 @@ let main argv =
                   benchmarkDurationSeconds = Some 30
                   enableTcpTuning = false
                   minBlockTimeMs = 4000
-                  maxBlockTimeMs = 5000 }
+                  maxBlockTimeMs = 5000
+                  runForMinBlockTime = false }
 
             let nCfg = MakeNetworkCfg ctx [] None
             use formation = kube.MakeEmptyFormation(nCfg)
@@ -926,7 +927,8 @@ let main argv =
                                benchmarkDurationSeconds = Some mission.BenchmarkDurationSeconds
                                enableTcpTuning = mission.EnableTcpTuning
                                minBlockTimeMs = mission.MinBlockTimeMs
-                               maxBlockTimeMs = mission.MaxBlockTimeMs }
+                               maxBlockTimeMs = mission.MaxBlockTimeMs
+                               runForMinBlockTime = false }
 
                          allMissions.[m] missionContext
 

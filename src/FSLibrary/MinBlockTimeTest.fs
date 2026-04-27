@@ -84,6 +84,7 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
 
     let context =
         { context with
+              runForMinBlockTime = true
               genesisTestAccountCount = Some(context.genesisTestAccountCount |> Option.defaultValue 100000)
               numPregeneratedTxs =
                   if baseLoadGen.mode = PayPregenerated then
