@@ -62,11 +62,20 @@ let ConnectToCluster (cfgFile: string) (nsOpt: string option) : (Kubernetes * st
                     with :? ComponentModel.Win32Exception -> false
 
                 if started then
-                    if proc.WaitForExit(TimeSpan(0, 1, 0)) then
-                        if proc.ExitCode = 0 then RanSuccess else RanWithError proc.ExitCode
-                    else
-                        proc.Kill()
-                        DidNotComplete(proc.WaitForExit(TimeSpan(0, 1, 0)))
+                    // Swallow Ctrl+C in the parent while kubectl is running, so the
+                    // SIGINT delivered to the foreground process group only stops
+                    // kubectl and lets us decide what to do next.
+                    let cancelHandler = ConsoleCancelEventHandler(fun _ e -> e.Cancel <- true)
+                    Console.CancelKeyPress.AddHandler cancelHandler
+
+                    try
+                        if proc.WaitForExit(TimeSpan(0, 1, 0)) then
+                            if proc.ExitCode = 0 then RanSuccess else RanWithError proc.ExitCode
+                        else
+                            proc.Kill()
+                            DidNotComplete(proc.WaitForExit(TimeSpan(0, 1, 0)))
+                    finally
+                        Console.CancelKeyPress.RemoveHandler cancelHandler
                 else
                     DidNotRun)
 
