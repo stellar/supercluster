@@ -3,7 +3,7 @@
 Supercluster provides two missions that measure the minimum ledger target close time (a.k.a. "block time") stellar-core can sustain at a fixed transaction rate while still meeting a latency SLA:
 
 * `MinBlockTimeClassic` measures the minimum block time using exclusively classic payments.
-* `MinBlockTimeMixed` measures the minimum block time using a configurable mix of soroban invoke, soroban upload, and classic pay transactions.
+* `MinBlockTimeMixed` measures the minimum block time using one explicit `MIXED_PREGEN_*` overlay-only loadgen mode: pre-generated classic payments plus the selected synthetic Soroban transaction type.
 
 Other than the type of load generated, these two missions are identical. They both spin up a configurable network of stellar-core nodes, then search for the smallest `ledgerTargetCloseTimeMilliseconds` value that the network can sustain, using a binary search over the range `[--min-block-time-ms, --max-block-time-ms]`. For each candidate close time `T`, the missions upgrade the network's SCP timing settings to `T` (with proportionally scaled ballot and nomination timeouts), run ~5 minutes of load at the fixed transaction rate, then check the `ledger.age.closed-histogram` metric on every node against the SLA. If the SLA is met, the missions try again with a smaller `T`; otherwise, they try with a larger `T`.
 
@@ -36,26 +36,24 @@ Parameter settings also have a large impact on run time. Each iteration of the b
 
 These parameters affect both `MinBlockTimeClassic` and `MinBlockTimeMixed` missions:
 
-* `--tx-rate`: The fixed transaction rate (TPS) used for every iteration of the search. The mission answers the question "what is the smallest block time the network can sustain at this TPS?" so choosing a TPS the network clearly cannot sustain (e.g., above the network's max TPS at default block time) will result in the mission failing with no block time satisfying the SLA.
+* `--tx-rate`: The fixed transaction rate (TPS) used for every iteration of the search. For `MinBlockTimeMixed`, this is used only when neither `--classic-tx-rate` nor `--soroban-tx-rate` is set, in which case the mission splits it evenly between classic and Soroban streams. The mission answers the question "what is the smallest block time the network can sustain at this TPS?" so choosing a TPS the network clearly cannot sustain (e.g., above the network's max TPS at default block time) will result in the mission failing with no block time satisfying the SLA.
 * `--min-block-time-ms`: Binary search lower bound, in milliseconds. Defaults to `4000`.
 * `--max-block-time-ms`: Binary search upper bound, in milliseconds. Defaults to `5000`, which is also the protocol's maximum allowed ledger target close time — setting this higher will cause the mission to fail at startup, since validators reject upgrades above the protocol cap. Must be strictly greater than `--min-block-time-ms`.
-* `--num-pregenerated-txs`: On small networks (≤30 nodes), the mission automatically switches classic payment load to `PayPregenerated` mode, which requires pregenerating signed transactions at each node. Defaults to `2500000`; lower this if you hit pod boot / liveness-probe issues while pregeneration runs.
+* `--num-pregenerated-txs`: Number of pre-generated signed classic transactions to create per loadgen node. `MinBlockTimeClassic` uses these on small networks (≤30 nodes) when it automatically switches classic payment load to `PayPregenerated`; `MinBlockTimeMixed` always uses them for the classic stream in its `MIXED_PREGEN_*` mode. Defaults to `2500000`
 * `--pubnet-data`: Network topology to use. Defaults to a topology of tier 1 validators. See [Specifying network topologies](#specifying-network-topologies) for details on how to specify a custom topology.
 * `--netdelay-image`: Helper image providing simulated network delay for latency simulation. SDF provides a public image on dockerhub at `stellar/sdf-netdelay`.
 
-### Additional options for mixed soroban and classic traffic
+### Additional options for mixed pre-generated classic and synthetic Soroban traffic
 
-In addition to the parameters in the previous section, `MinBlockTimeMixed` supports the following options to adjust the distribution of various transaction types:
+In addition to the parameters in the previous section, `MinBlockTimeMixed` supports:
 
-* `--pay-weight`: Weight of pay transactions. Defaults to 50.
-* `--soroban-upload-weight`: Weight of soroban upload transactions. Defaults to 5.
-* `--soroban-invoke-weight`: Weight of soroban invoke transactions. Defaults to 45.
+* `--min-block-time-mixed-mode`: Exact stellar-core loadgen mode. Must be one of `mixed_pregen_sac_payment`, `mixed_pregen_oz_token_transfer`, or `mixed_pregen_soroswap_swap`. Defaults to `mixed_pregen_sac_payment`.
+* `--classic-tx-rate`: Classic payment TPS for the pre-generated classic stream.
+* `--soroban-tx-rate`: Soroban TPS for the selected synthetic Soroban stream.
 
-That is, the default distribution produces 50% pay transactions, 5% soroban upload transactions, and 45% soroban invoke transactions.
+If neither stream-specific TPS is set, `--tx-rate` is split evenly between classic and Soroban traffic. If either stream-specific TPS is set, any omitted stream defaults to `0`, and the fixed TPS for the mission is the sum of `--classic-tx-rate` and `--soroban-tx-rate`.
 
-#### Specifying soroban transaction distributions
-
-As with `MaxTPSMixed`, `MinBlockTimeMixed` also allows customization of various low-level transaction details, and defaults to distributions based on real-world data. See the [Specifying soroban transaction distributions](measuring-transaction-throughput.md#specifying-soroban-transaction-distributions) section of the max TPS documentation for the available parameters (`--wasm-bytes` / `--wasm-bytes-weights`, `--data-entries` / `--data-entries-weights`, `--total-kilobytes` / `--total-kilobytes-weights`, `--tx-size-bytes` / `--tx-size-bytes-weights`, `--instructions` / `--instructions-weights`).
+Before enabling overlay-only mode, the mission upgrades classic max tx set size from `--classic-tx-rate * 15`, and Soroban network limits from the selected transaction type's per-transaction resources multiplied by `--soroban-tx-rate * 15` (~15 seconds of throughput as leeway).
 
 ### More parameters
 
@@ -89,4 +87,10 @@ To run a mission that searches for the minimum block time at 1000 TPS, with the 
 
 ```bash
 dotnet run --project src/App/App.fsproj --configuration Release -- mission MinBlockTimeClassic --image=stellar/unsafe-stellar-core:<stellar-core-perftest-build> --netdelay-image=stellar/sdf-netdelay:latest --tx-rate=1000 --min-block-time-ms=4000 --max-block-time-ms=5000
+```
+
+To run the mixed overlay-only mode at 600 total TPS with Soroswap synthetic Soroban swaps:
+
+```bash
+dotnet run --project src/App/App.fsproj --configuration Release -- mission MinBlockTimeMixed --image=stellar/unsafe-stellar-core:<stellar-core-perftest> --netdelay-image=stellar/sdf-netdelay:latest --min-block-time-mixed-mode=mixed_pregen_soroswap_swap --classic-tx-rate=300 --soroban-tx-rate=300 --min-block-time-ms=4000 --max-block-time-ms=5000
 ```

@@ -380,6 +380,26 @@ type StellarFormation with
             (List.toArray coreSetList)
             (fun peer -> peer.UpgradeNetworkSetting contractKey upgradeTime)
 
+    member self.DeployUpgradeEntriesAndArmAfter
+        (coreSetList: CoreSet list)
+        (loadGen: LoadGen)
+        (delay: System.TimeSpan)
+        =
+        let peer = self.NetworkCfg.GetPeer coreSetList.[0] 0
+        let resStr = peer.GenerateLoad loadGen
+
+        let contractKey = Loadgen.Parse(resStr).ConfigUpgradeSetKey
+
+        LogInfo "Loadgen: %s" resStr
+        peer.WaitForLoadGenComplete loadGen
+
+        let upgradeTime = System.DateTime.UtcNow.Add(delay)
+
+        // Arm upgrades on each peer in the core set
+        self.NetworkCfg.EachPeerInSets
+            (List.toArray coreSetList)
+            (fun peer -> peer.UpgradeNetworkSetting contractKey upgradeTime)
+
     member self.clearMetrics(coreSets: CoreSet list) =
         self.NetworkCfg.EachPeerInSets(coreSets |> List.toArray) (fun peer -> peer.ClearMetrics())
 
@@ -390,39 +410,60 @@ type StellarFormation with
 
         let fractionalLoadGen (i: int) : LoadGen =
             let getFraction attr = if i + 1 = n then (attr / n + attr % n) else attr / n
+            let getOptionalFraction attr = Option.map getFraction attr
 
             { fullLoadGen with
                   accounts = fullLoadGen.accounts / n
                   txs = fullLoadGen.txs / n
                   spikesize = getFraction fullLoadGen.spikesize
-                  txrate = getFraction fullLoadGen.txrate }
+                  txrate = getFraction fullLoadGen.txrate
+                  classicTxRate = getOptionalFraction fullLoadGen.classicTxRate
+                  sorobanTxRate = getOptionalFraction fullLoadGen.sorobanTxRate }
+
+        let hasNonZeroRate (loadGen: LoadGen) =
+            match loadGen.classicTxRate, loadGen.sorobanTxRate with
+            | Some classicRate, Some sorobanRate -> classicRate <> 0 || sorobanRate <> 0
+            | Some classicRate, None -> classicRate <> 0
+            | None, Some sorobanRate -> sorobanRate <> 0
+            | None, None -> true
 
         let loadGenPeers = List.map (fun cs -> self.NetworkCfg.GetPeer cs 0) coreSets
 
-        for (i, peer) in (List.indexed loadGenPeers) do
-            let loadGen = fractionalLoadGen i
-            let offset = loadGen.accounts * i
-            let peerSpecificLoadgen = { loadGen with offset = offset }
+        let peerLoadGens =
+            loadGenPeers
+            |> List.indexed
+            |> List.map
+                (fun (i, peer) ->
+                    let loadGen = fractionalLoadGen i
+                    let offset = loadGen.accounts * i
+                    (peer, { loadGen with offset = offset }, offset))
+            |> List.filter (fun (_, loadGen, _) -> hasNonZeroRate loadGen)
+
+        if List.isEmpty peerLoadGens then
+            failwith "Loadgen failed: no peer has a non-zero tx rate"
+
+        for (peer, peerSpecificLoadgen, offset) in peerLoadGens do
             LogInfo "Loadgen: %s with offset %d" (peer.GenerateLoad peerSpecificLoadgen) offset
 
         while List.exists
-                  (fun (peer: Peer) -> not (peer.IsLoadGenComplete() = Success || peer.IsLoadGenComplete() = Failure))
-                  loadGenPeers do
+                  (fun (peer: Peer, _, _) ->
+                      not (peer.IsLoadGenComplete() = Success || peer.IsLoadGenComplete() = Failure))
+                  peerLoadGens do
             Thread.Sleep(millisecondsTimeout = 3000)
 
-            for (i, peer) in (List.indexed loadGenPeers) do
-                peer.LogLoadGenProgressTowards(fractionalLoadGen i)
+            for (peer, loadGen, _) in peerLoadGens do
+                peer.LogLoadGenProgressTowards(loadGen)
 
             // Check if any loadGen has failed
-            if List.exists (fun (peer: Peer) -> peer.IsLoadGenComplete() = Failure) loadGenPeers then
+            if List.exists (fun (peer: Peer, _, _) -> peer.IsLoadGenComplete() = Failure) peerLoadGens then
                 // Stop all runs
-                for peer in loadGenPeers do
+                for (peer, _, _) in peerLoadGens do
                     LogInfo "%s  loadgen: %s" (peer.ShortName.ToString()) (peer.StopLoadGen())
 
                 failwith "Loadgen failed!"
 
         // Final check after the loop completes
-        if List.exists (fun (peer: Peer) -> peer.IsLoadGenComplete() = Failure) loadGenPeers then
+        if List.exists (fun (peer: Peer, _, _) -> peer.IsLoadGenComplete() = Failure) peerLoadGens then
             failwith "Loadgen failed!"
 
     // Deploys TCP tuning DaemonSets to configure node-level network settings if enabled.

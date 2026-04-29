@@ -157,7 +157,7 @@ Find the minimum ledger target close time a simulated Tier1 network can sustain 
 
 ## MissionMinBlockTimeMixed
 
-Same as `MissionMinBlockTimeClassic`, but drives a configurable mix of classic payments plus Soroban invoke and upload transactions.
+Same as `MissionMinBlockTimeClassic`, but drives an explicit `MIXED_PREGEN_*` overlay-only loadgen mode with pre-generated classic payments plus a selected synthetic Soroban transaction type.
 
 ## MissionMixedNominationLeaderElectionWithOldMajority
 
