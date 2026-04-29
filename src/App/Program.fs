@@ -133,7 +133,10 @@ type MissionOptions
         benchmarkDurationSeconds: int,
         enableTcpTuning: bool,
         minBlockTimeMs: int,
-        maxBlockTimeMs: int
+        maxBlockTimeMs: int,
+        minBlockTimeMixedMode: string,
+        minBlockTimeMixedClassicTxRate: int option,
+        minBlockTimeMixedSorobanTxRate: int option
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -177,7 +180,7 @@ type MissionOptions
     [<Option("export-to-prometheus", HelpText = "Whether to export core metrics to prometheus")>]
     member self.ExportToPrometheus : bool = exportToPrometheus
 
-    [<Option("probe-timeout", HelpText = "Timeout for liveness probe", Required = false, Default = 30)>]
+    [<Option("probe-timeout", HelpText = "Timeout for liveness probe", Required = false, Default = 120)>]
     member self.ProbeTimeout = probeTimeout
 
     [<Value(0, Required = true)>]
@@ -611,6 +614,22 @@ type MissionOptions
              Default = 5000)>]
     member self.MaxBlockTimeMs = maxBlockTimeMs
 
+    [<Option("min-block-time-mixed-mode",
+             HelpText = "Exact stellar-core MIXED_PREGEN_* loadgen mode used by MinBlockTimeMixed. Values: mixed_pregen_sac_payment, mixed_pregen_oz_token_transfer, mixed_pregen_soroswap_swap.",
+             Required = false,
+             Default = "mixed_pregen_sac_payment")>]
+    member self.MinBlockTimeMixedMode = minBlockTimeMixedMode
+
+    [<Option("classic-tx-rate",
+             HelpText = "Classic TPS for MinBlockTimeMixed MIXED_PREGEN_* load. If neither classic nor soroban TPS is set, --tx-rate is split evenly.",
+             Required = false)>]
+    member self.MinBlockTimeMixedClassicTxRate = minBlockTimeMixedClassicTxRate
+
+    [<Option("soroban-tx-rate",
+             HelpText = "Soroban TPS for MinBlockTimeMixed MIXED_PREGEN_* load. Network limits are scaled from this TPS before overlay-only mode is enabled.",
+             Required = false)>]
+    member self.MinBlockTimeMixedSorobanTxRate = minBlockTimeMixedSorobanTxRate
+
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' |> Array.toList with
     | [ x ] -> x, None
@@ -757,6 +776,9 @@ let main argv =
                   enableTcpTuning = false
                   minBlockTimeMs = 4000
                   maxBlockTimeMs = 5000
+                  minBlockTimeMixedMode = "mixed_pregen_sac_payment"
+                  minBlockTimeMixedClassicTxRate = None
+                  minBlockTimeMixedSorobanTxRate = None
                   runForMinBlockTime = false }
 
             let nCfg = MakeNetworkCfg ctx [] None
@@ -928,6 +950,9 @@ let main argv =
                                enableTcpTuning = mission.EnableTcpTuning
                                minBlockTimeMs = mission.MinBlockTimeMs
                                maxBlockTimeMs = mission.MaxBlockTimeMs
+                               minBlockTimeMixedMode = mission.MinBlockTimeMixedMode
+                               minBlockTimeMixedClassicTxRate = mission.MinBlockTimeMixedClassicTxRate
+                               minBlockTimeMixedSorobanTxRate = mission.MinBlockTimeMixedSorobanTxRate
                                runForMinBlockTime = false }
 
                          allMissions.[m] missionContext

@@ -4,45 +4,47 @@
 
 module MissionMinBlockTimeMixed
 
-// Mirror of MissionMaxTPSMixed for the minimum-block-time search: mixed
-// classic + Soroban workload at a fixed TPS, binary-searches for the smallest
-// ledger target close time that still keeps ledger.age.closed-histogram within SLA.
+// Minimum-block-time search for the new overlay-only mixed-pregen loadgen modes:
+// pre-generated classic payments plus one explicit synthetic Soroban tx type.
 
 open MinBlockTimeTest
-open PubnetData
 open StellarMissionContext
 open StellarCoreHTTP
 
 let minBlockTimeMixed (baseContext: MissionContext) =
+    let mode = parseMixedPregenMode baseContext.minBlockTimeMixedMode
+
+    let classicTxRate, sorobanTxRate =
+        match baseContext.minBlockTimeMixedClassicTxRate, baseContext.minBlockTimeMixedSorobanTxRate with
+        | None, None ->
+            let soroban = baseContext.txRate / 2
+            baseContext.txRate - soroban, soroban
+        | Some classic, None -> classic, 0
+        | None, Some soroban -> 0, soroban
+        | Some classic, Some soroban -> classic, soroban
+
+    if classicTxRate < 0 || sorobanTxRate < 0 then
+        failwith "--classic-tx-rate and --soroban-tx-rate must be non-negative"
+
+    if classicTxRate = 0 && sorobanTxRate = 0 then
+        failwith "At least one of --classic-tx-rate or --soroban-tx-rate must be non-zero"
+
     let context =
         { baseContext with
               coreResources = SimulatePubnetTier1PerfResources
               installNetworkDelay = Some(baseContext.installNetworkDelay |> Option.defaultValue true)
               enableTailLogging = false
-              wasmBytesDistribution = defaultListValue pubnetWasmBytes baseContext.wasmBytesDistribution
-              dataEntriesDistribution = defaultListValue pubnetDataEntries baseContext.dataEntriesDistribution
-              totalKiloBytesDistribution = defaultListValue pubnetTotalKiloBytes baseContext.totalKiloBytesDistribution
-              txSizeBytesDistribution = defaultListValue pubnetTxSizeBytes baseContext.txSizeBytesDistribution
-              instructionsDistribution = defaultListValue pubnetInstructions baseContext.instructionsDistribution }
+              txRate = classicTxRate + sorobanTxRate }
 
     let baseLoadGen =
         { LoadGen.GetDefault() with
-              mode = MixedClassicSoroban
+              mode = mode
               spikesize = context.spikeSize
               spikeinterval = context.spikeInterval
               offset = 0
               maxfeerate = None
               skiplowfeetxs = false
+              classicTxRate = Some classicTxRate
+              sorobanTxRate = Some sorobanTxRate }
 
-              wasms = context.numWasms
-              instances = context.numInstances
-
-              payWeight = Some(baseContext.payWeight |> Option.defaultValue 50)
-              sorobanUploadWeight = Some(baseContext.sorobanUploadWeight |> Option.defaultValue 5)
-              sorobanInvokeWeight = Some(baseContext.sorobanInvokeWeight |> Option.defaultValue 45)
-
-              minSorobanPercentSuccess = Some(baseContext.minSorobanPercentSuccess |> Option.defaultValue 60) }
-
-    let invokeSetupCfg = { baseLoadGen with mode = SorobanInvokeSetup }
-
-    minBlockTimeTest context baseLoadGen (Some invokeSetupCfg)
+    minBlockTimeTest context baseLoadGen None

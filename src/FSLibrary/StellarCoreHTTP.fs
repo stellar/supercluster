@@ -50,6 +50,9 @@ type LoadGenMode =
     | MixedClassicSoroban
     | StopRun
     | PayPregenerated
+    | MixedPregenSACPayment
+    | MixedPregenOZTokenTransfer
+    | MixedPregenSoroswapSwap
 
     override self.ToString() =
         match self with
@@ -62,6 +65,26 @@ type LoadGenMode =
         | MixedClassicSoroban -> "mixed_classic_soroban"
         | StopRun -> "stop"
         | PayPregenerated -> "pay_pregenerated"
+        | MixedPregenSACPayment -> "mixed_pregen_sac_payment"
+        | MixedPregenOZTokenTransfer -> "mixed_pregen_oz_token_transfer"
+        | MixedPregenSoroswapSwap -> "mixed_pregen_soroswap_swap"
+
+let isMixedPregenMode (mode: LoadGenMode) =
+    match mode with
+    | MixedPregenSACPayment
+    | MixedPregenOZTokenTransfer
+    | MixedPregenSoroswapSwap -> true
+    | _ -> false
+
+let parseMixedPregenMode (mode: string) =
+    match mode.Trim().ToLowerInvariant() with
+    | "mixed_pregen_sac_payment" -> MixedPregenSACPayment
+    | "mixed_pregen_oz_token_transfer" -> MixedPregenOZTokenTransfer
+    | "mixed_pregen_soroswap_swap" -> MixedPregenSoroswapSwap
+    | _ ->
+        failwithf
+            "Unsupported mixed pregen mode '%s'. Expected one of: mixed_pregen_sac_payment, mixed_pregen_oz_token_transfer, mixed_pregen_soroswap_swap"
+            mode
 
 type LoadGen =
     { mode: LoadGenMode
@@ -108,6 +131,10 @@ type LoadGen =
       sorobanUploadWeight: int option
       sorobanInvokeWeight: int option
 
+      // Fields for MIXED_PREGEN_* modes
+      classicTxRate: int option
+      sorobanTxRate: int option
+
       // Fields for SCP timing configuration
       ledgerTargetCloseTimeMilliseconds: int option
       ballotTimeoutIncrementMilliseconds: int option
@@ -133,57 +160,43 @@ type LoadGen =
             | None -> []
 
         let optionalParams =
-            optionalParam "maxfeerate" self.maxfeerate
-            @ optionalParam "wasms" self.wasms
-              @ optionalParam "instances" self.instances
-                @ optionalParam "minpercentsuccess" self.minSorobanPercentSuccess
-                  @ optionalParam "mxcntrctsz" self.maxContractSizeBytes
-                    @ optionalParam "mxcntrctkeysz" self.maxContractDataKeySizeBytes
-                      @ optionalParam "mxcntrctdatasz" self.maxContractDataEntrySizeBytes
-                        @ optionalParam "ldgrmxinstrc" self.ledgerMaxInstructions
-                          @ optionalParam "txmxinstrc" self.txMaxInstructions
-                            @ optionalParam "txmemlim" self.txMemoryLimit
-                              @ optionalParam "ldgrmxrdntry" self.ledgerMaxReadLedgerEntries
-                                @ optionalParam "ldgrmxrdbyt" self.ledgerMaxReadBytes
-                                  @ optionalParam "ldgrmxwrntry" self.ledgerMaxWriteLedgerEntries
-                                    @ optionalParam "ldgrmxwrbyt" self.ledgerMaxWriteBytes
-                                      @ optionalParam "ldgrmxtxcnt" self.ledgerMaxTxCount
-                                        @ optionalParam "txmxrdntry" self.txMaxReadLedgerEntries
-                                          @ optionalParam "txmxrdbyt" self.txMaxReadBytes
-                                            @ optionalParam "txmxwrntry" self.txMaxWriteLedgerEntries
-                                              @ optionalParam "txmxwrbyt" self.txMaxWriteBytes
-                                                @ optionalParam "txmxevntsz" self.txMaxContractEventsSizeBytes
-                                                  @ optionalParam "ldgrmxtxsz" self.ledgerMaxTransactionsSizeBytes
-                                                    @ optionalParam "txmxsz" self.txMaxSizeBytes
-                                                      @ optionalParam "wndowsz" self.bucketListSizeWindowSampleSize
-                                                        @ optionalParam "evctsz" self.evictionScanSize
-                                                          @ optionalParam "evctlvl" self.startingEvictionScanLevel
-                                                            @ optionalParam "payweight" self.payWeight
-                                                              @ optionalParam
-                                                                  "sorobanuploadweight"
-                                                                  self.sorobanUploadWeight
-                                                                @ optionalParam
-                                                                    "sorobaninvokeweight"
-                                                                    self.sorobanInvokeWeight
-                                                                  @ optionalParam "txmxftprnt" self.txMaxFootprintSize
-                                                                    @ optionalParam
-                                                                        "ldgrclse"
-                                                                        self.ledgerTargetCloseTimeMilliseconds
-                                                                      @ optionalParam
-                                                                          "balinc"
-                                                                          self.ballotTimeoutIncrementMilliseconds
-                                                                        @ optionalParam
-                                                                            "balinit"
-                                                                            self.ballotTimeoutInitialMilliseconds
-                                                                          @ optionalParam
-                                                                              "nominit"
-                                                                              self.nominationTimeoutInitialMilliseconds
-                                                                            @ optionalParam
-                                                                                "nominc"
-                                                                                self.nominationTimeoutIncrementMilliseconds
-                                                                              @ optionalParam
-                                                                                  "maxtxclstrs"
-                                                                                  self.ledgerMaxDependentTxClusters
+            List.concat [ optionalParam "maxfeerate" self.maxfeerate
+                          optionalParam "wasms" self.wasms
+                          optionalParam "instances" self.instances
+                          optionalParam "minpercentsuccess" self.minSorobanPercentSuccess
+                          optionalParam "mxcntrctsz" self.maxContractSizeBytes
+                          optionalParam "mxcntrctkeysz" self.maxContractDataKeySizeBytes
+                          optionalParam "mxcntrctdatasz" self.maxContractDataEntrySizeBytes
+                          optionalParam "ldgrmxinstrc" self.ledgerMaxInstructions
+                          optionalParam "txmxinstrc" self.txMaxInstructions
+                          optionalParam "txmemlim" self.txMemoryLimit
+                          optionalParam "ldgrmxrdntry" self.ledgerMaxReadLedgerEntries
+                          optionalParam "ldgrmxrdbyt" self.ledgerMaxReadBytes
+                          optionalParam "ldgrmxwrntry" self.ledgerMaxWriteLedgerEntries
+                          optionalParam "ldgrmxwrbyt" self.ledgerMaxWriteBytes
+                          optionalParam "ldgrmxtxcnt" self.ledgerMaxTxCount
+                          optionalParam "txmxrdntry" self.txMaxReadLedgerEntries
+                          optionalParam "txmxrdbyt" self.txMaxReadBytes
+                          optionalParam "txmxwrntry" self.txMaxWriteLedgerEntries
+                          optionalParam "txmxwrbyt" self.txMaxWriteBytes
+                          optionalParam "txmxevntsz" self.txMaxContractEventsSizeBytes
+                          optionalParam "ldgrmxtxsz" self.ledgerMaxTransactionsSizeBytes
+                          optionalParam "txmxsz" self.txMaxSizeBytes
+                          optionalParam "wndowsz" self.bucketListSizeWindowSampleSize
+                          optionalParam "evctsz" self.evictionScanSize
+                          optionalParam "evctlvl" self.startingEvictionScanLevel
+                          optionalParam "payweight" self.payWeight
+                          optionalParam "sorobanuploadweight" self.sorobanUploadWeight
+                          optionalParam "sorobaninvokeweight" self.sorobanInvokeWeight
+                          optionalParam "txmxftprnt" self.txMaxFootprintSize
+                          optionalParam "ldgrclse" self.ledgerTargetCloseTimeMilliseconds
+                          optionalParam "balinc" self.ballotTimeoutIncrementMilliseconds
+                          optionalParam "balinit" self.ballotTimeoutInitialMilliseconds
+                          optionalParam "nominit" self.nominationTimeoutInitialMilliseconds
+                          optionalParam "nominc" self.nominationTimeoutIncrementMilliseconds
+                          optionalParam "maxtxclstrs" self.ledgerMaxDependentTxClusters
+                          optionalParam "classictxrate" self.classicTxRate
+                          optionalParam "sorobantxrate" self.sorobanTxRate ]
 
         mandatoryParams @ optionalParams
 
@@ -225,6 +238,8 @@ type LoadGen =
           payWeight = None
           sorobanUploadWeight = None
           sorobanInvokeWeight = None
+          classicTxRate = None
+          sorobanTxRate = None
           ledgerTargetCloseTimeMilliseconds = None
           ballotTimeoutIncrementMilliseconds = None
           ballotTimeoutInitialMilliseconds = None
@@ -673,6 +688,12 @@ type Peer with
             DefaultRetry
             (fun _ -> Http.RequestString(httpMethod = "GET", headers = self.Headers, url = self.URL "clearmetrics"))
         |> ignore
+
+    member self.ToggleOverlayOnlyMode() =
+        WebExceptionRetry
+            DefaultRetry
+            (fun _ ->
+                Http.RequestString(httpMethod = "GET", headers = self.Headers, url = self.URL "toggleoverlayonlymode"))
 
     member self.GetTestAcc(accName: string) : TestAcc.Root =
         // NB: work around buggy JSON parser upstream, see

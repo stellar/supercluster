@@ -140,6 +140,9 @@ let ctx : MissionContext =
       enableTcpTuning = false
       minBlockTimeMs = 4000
       maxBlockTimeMs = 5000
+      minBlockTimeMixedMode = "mixed_pregen_sac_payment"
+      minBlockTimeMixedClassicTxRate = None
+      minBlockTimeMixedSorobanTxRate = None
       runForMinBlockTime = false }
 
 let netdata = __SOURCE_DIRECTORY__ + "/../../../data/public-network-data-2024-08-01.json"

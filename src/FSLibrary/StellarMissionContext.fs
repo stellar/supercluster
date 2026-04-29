@@ -135,4 +135,7 @@ type MissionContext =
       enableTcpTuning: bool
       minBlockTimeMs: int
       maxBlockTimeMs: int
+      minBlockTimeMixedMode: string
+      minBlockTimeMixedClassicTxRate: int option
+      minBlockTimeMixedSorobanTxRate: int option
       runForMinBlockTime: bool }
