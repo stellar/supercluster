@@ -22,8 +22,6 @@ let private smallNetworkSize = 10
 
 let private searchThresholdMs = 100
 
-let private protocolMaxBlockTimeMs = 5000
-
 let private timeoutsFor (targetMs: int) : int = max 500 (targetMs / 5)
 
 let private mixedPregenLedgerMultiplier = 15
@@ -315,7 +313,7 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                 formation.ManualClose coreSets
                 formation.WaitUntilSynced coreSets
                 formation.UpgradeProtocolToLatest coreSets
-                formation.UpgradeMaxTxSetSize coreSets (classicTxRateForLimits * 10)
+                formation.UpgradeMaxTxSetSize coreSets (max (classicTxRateForLimits * mixedPregenLedgerMultiplier) 100)
 
                 if isMixedPregenMode baseLoadGen.mode then
                     upgradeMixedPregenSorobanLimits formation coreSets baseLoadGen
@@ -363,14 +361,14 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                           txs = fixedTxRate * 300
                           txrate = fixedTxRate }
 
-                // Both the SCP upgrade (which runs a small arming loadgen) and
-                // the measurement load can fail when the network is still
-                // degraded from a previous iteration; either case is an SLA
-                // miss, not a crash.
-                try
-                    applySCPUpgrade targetMs
-                    formation.clearMetrics allNodes
+                applySCPUpgrade targetMs
+                formation.clearMetrics allNodes
 
+                // A loadgen failure is not an SLA signal — it usually means the
+                // requested TPS is too high for the network, or that loadgen
+                // itself lost a tx in the pipeline. Treating it as "SLA missed"
+                // would mislead the binary search, so fail the mission loudly.
+                try
                     if isMixedPregenMode baseLoadGen.mode then
                         withOverlayOnlyMode
                             formation
@@ -378,19 +376,11 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                             (fun () -> formation.RunMultiLoadgen activeLoadGenNodes loadGen)
                     else
                         formation.RunMultiLoadgen activeLoadGenNodes loadGen
+                with e -> failwithf "Loadgen failed at T=%dms; TPS might be too high (%s)" targetMs e.Message
 
-                    formation.CheckNoErrorsAndPairwiseConsistency()
-                    formation.EnsureAllNodesInSync allNodes
-                    checkLedgerAgeSLA formation allNodes targetMs
-                with e ->
-                    LogInfo "Run errored at T=%dms: %s" targetMs e.Message
-                    false
-
-            if context.maxBlockTimeMs > protocolMaxBlockTimeMs then
-                failwithf
-                    "--max-block-time-ms=%d exceeds the protocol cap (%d ms); validators will reject such upgrades"
-                    context.maxBlockTimeMs
-                    protocolMaxBlockTimeMs
+                formation.CheckNoErrorsAndPairwiseConsistency()
+                formation.EnsureAllNodesInSync allNodes
+                checkLedgerAgeSLA formation allNodes targetMs
 
             if context.minBlockTimeMs >= context.maxBlockTimeMs then
                 failwithf
