@@ -20,6 +20,7 @@ open StellarCoreHTTP
 let validatorSetup (context: MissionContext) =
     let opts =
         { CoreSetOptions.GetDefault context.image with
+              nodeCount = context.numNodes
               dbType = Postgres
               // Use disk-backed storage like production validators
               emptyDirType = DiskBackedEmptyDir
