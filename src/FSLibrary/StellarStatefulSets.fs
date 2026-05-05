@@ -409,16 +409,35 @@ type StellarFormation with
         let n = List.length coreSets
 
         let fractionalLoadGen (i: int) : LoadGen =
-            let getFraction attr = if i + 1 = n then (attr / n + attr % n) else attr / n
+            // Spread remainder across the first r nodes instead of dumping it
+            // entirely on the last one, so per-node load stays even.
+            let getFraction attr =
+                let q = attr / n
+                let r = attr % n
+                if i < r then q + 1 else q
+
             let getOptionalFraction attr = Option.map getFraction attr
+
+            let classicShare = getOptionalFraction fullLoadGen.classicTxRate
+            let sorobanShare = getOptionalFraction fullLoadGen.sorobanTxRate
+
+            // In mixed mode derive txrate from the component rates so that
+            // txrate, classicTxRate, and sorobanTxRate stay consistent on
+            // every peer (independent splits would diverge by 1 per slice).
+            let txrateShare =
+                match classicShare, sorobanShare with
+                | Some c, Some s -> c + s
+                | Some c, None -> c
+                | None, Some s -> s
+                | None, None -> getFraction fullLoadGen.txrate
 
             { fullLoadGen with
                   accounts = fullLoadGen.accounts / n
                   txs = fullLoadGen.txs / n
                   spikesize = getFraction fullLoadGen.spikesize
-                  txrate = getFraction fullLoadGen.txrate
-                  classicTxRate = getOptionalFraction fullLoadGen.classicTxRate
-                  sorobanTxRate = getOptionalFraction fullLoadGen.sorobanTxRate }
+                  txrate = txrateShare
+                  classicTxRate = classicShare
+                  sorobanTxRate = sorobanShare }
 
         let hasNonZeroRate (loadGen: LoadGen) =
             match loadGen.classicTxRate, loadGen.sorobanTxRate with
