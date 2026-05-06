@@ -228,6 +228,7 @@ type StellarCoreCfg =
 
         if self.network.missionContext.runForMinBlockTime then
             t.Add("TESTING_IGNORE_LEDGER_TIME_UPGRADE_BOUNDS", true) |> ignore
+            t.Add("FLOOD_DEMAND_BACKOFF_DELAY_MS", 1000) |> ignore
 
         match self.network.missionContext.runForMaxTps with
         | Some "classic" ->
