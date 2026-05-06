@@ -22,7 +22,8 @@ let private smallNetworkSize = 10
 
 let private searchThresholdMs = 100
 
-let private timeoutsFor (targetMs: int) : int = max 500 (targetMs / 5)
+// For the purposes of min block test, use high value to avoid noise from SCP timeouts
+let private timeout = 2000
 
 let private mixedPregenLedgerMultiplier = 15
 
@@ -333,8 +334,6 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
             // Apply an SCP-timing upgrade for target T; waits for the peer
             // to observe the new ledger_close_time_ms before returning.
             let applySCPUpgrade (targetMs: int) =
-                let t = timeoutsFor targetMs
-
                 formation.SetupUpgradeContract allNodes.Head
 
                 formation.DeployUpgradeEntriesAndArm
@@ -342,10 +341,10 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                     { LoadGen.GetDefault() with
                           mode = CreateSorobanUpgrade
                           ledgerTargetCloseTimeMilliseconds = Some targetMs
-                          ballotTimeoutInitialMilliseconds = Some t
-                          ballotTimeoutIncrementMilliseconds = Some t
-                          nominationTimeoutInitialMilliseconds = Some t
-                          nominationTimeoutIncrementMilliseconds = Some t }
+                          ballotTimeoutInitialMilliseconds = Some timeout
+                          ballotTimeoutIncrementMilliseconds = Some timeout
+                          nominationTimeoutInitialMilliseconds = Some timeout
+                          nominationTimeoutIncrementMilliseconds = Some timeout }
                     (System.DateTime.UtcNow.AddSeconds(20.0))
 
                 let peer = formation.NetworkCfg.GetPeer allNodes.Head 0
