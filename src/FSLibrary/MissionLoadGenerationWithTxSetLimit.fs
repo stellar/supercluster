@@ -23,11 +23,11 @@ let loadGenerationWithTxSetLimit (context: MissionContext) =
     let context =
         { context.WithSmallLoadgenOptions with
               coreResources = MediumTestResources
-              numAccounts = 20000
+              numAccounts = 50000
               numTxs = 50000
               txRate = 1000
               skipLowFeeTxs = true
-              genesisTestAccountCount = Some 20000 }
+              genesisTestAccountCount = Some 50000 }
 
     context.Execute
         [ coreSet ]
