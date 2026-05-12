@@ -29,10 +29,6 @@ type KubeOption(kubeConfig: string, namespaceProperty: string option) =
 type PollOptions(kubeConfig: string, namespaceProperty: string option) =
     inherit KubeOption(kubeConfig, namespaceProperty)
 
-[<Verb("clean", HelpText = "Clean all resources in a namespace")>]
-type CleanOptions(kubeConfig: string, namespaceProperty: string option) =
-    inherit KubeOption(kubeConfig, namespaceProperty)
-
 [<Verb("mission", HelpText = "Run one or more named missions")>]
 type MissionOptions
     (
@@ -659,8 +655,7 @@ let main argv =
 
     AuxClass.CheckCSharpWorksToo()
 
-    let result =
-        CommandLine.Parser.Default.ParseArguments<PollOptions, CleanOptions, MissionOptions>(argv)
+    let result = CommandLine.Parser.Default.ParseArguments<PollOptions, MissionOptions>(argv)
 
     match result with
 
@@ -671,119 +666,6 @@ let main argv =
             let _ = logToConsoleOnly ()
             let (kube, ns) = ConnectToCluster poll.KubeConfig poll.NamespaceProperty
             PollCluster kube ns
-            0
-
-        | :? CleanOptions as clean ->
-            let _ = logToConsoleOnly ()
-            let (kube, ns) = ConnectToCluster clean.KubeConfig clean.NamespaceProperty
-            let ll = { LogDebugPartitions = []; LogTracePartitions = [] }
-
-            let ctx =
-                { kube = kube
-                  kubeCfg = clean.KubeConfig
-                  destination = Destination("destination")
-                  missionName = "Clean"
-                  image = "stellar/stellar-core"
-                  oldImage = None
-                  netdelayImage = ""
-                  postgresImage = ""
-                  nginxImage = ""
-                  prometheusExporterImage = ""
-                  txRate = 100
-                  maxTxRate = 300
-                  numAccounts = 100000
-                  numTxs = 100000
-                  spikeSize = 100000
-                  spikeInterval = 0
-                  numWasms = None
-                  numInstances = None
-                  maxFeeRate = Some(1000)
-                  skipLowFeeTxs = false
-                  numNodes = 3
-                  namespaceProperty = ns
-                  logLevels = ll
-                  ingressClass = "ingress-private"
-                  ingressInternalDomain = "local"
-                  ingressExternalHost = None
-                  ingressExternalPort = 80
-                  exportToPrometheus = false
-                  probeTimeout = 5
-                  coreResources = SmallTestResources
-                  keepData = false
-                  unevenSched = true
-                  requireNodeLabels = []
-                  avoidNodeLabels = []
-                  tolerateNodeTaints = []
-                  apiRateLimit = 30
-                  pubnetData = None
-                  flatQuorum = None
-                  tier1Keys = None
-                  maxConnections = None
-                  fullyConnectTier1 = false
-                  byteCountDistribution = []
-                  wasmBytesDistribution = []
-                  dataEntriesDistribution = []
-                  totalKiloBytesDistribution = []
-                  txSizeBytesDistribution = []
-                  instructionsDistribution = []
-                  payWeight = None
-                  sorobanUploadWeight = None
-                  sorobanInvokeWeight = None
-                  minSorobanPercentSuccess = None
-                  installNetworkDelay = None
-                  flatNetworkDelay = None
-                  simulateApplyDuration = None
-                  simulateApplyWeight = None
-                  peerFloodCapacity = None
-                  peerReadingCapacity = None
-                  enableBackgroundSigValidation = false
-                  enableParallelApply = false
-                  enableInMemoryBuckets = false
-                  peerFloodCapacityBytes = None
-                  outboundByteLimit = None
-                  sleepMainThread = None
-                  flowControlSendMoreBatchSize = None
-                  flowControlSendMoreBatchSizeBytes = None
-                  tier1OrgsToAdd = 0
-                  nonTier1NodesToAdd = 0
-                  randomSeed = 0
-                  networkSizeLimit = 0
-                  pubnetParallelCatchupStartingLedger = 0
-                  pubnetParallelCatchupEndLedger = None
-                  pubnetParallelCatchupLedgersPerJob = 16000
-                  pubnetParallelCatchupNumWorkers = 192
-                  tag = None
-                  numPregeneratedTxs = None
-                  genesisTestAccountCount = None
-                  asanOptions = None
-                  enableTailLogging = true
-                  catchupSkipKnownResultsForTesting = None
-                  checkEventsAreConsistentWithEntryDiffs = None
-                  updateSorobanCosts = None
-                  enableRelaxedAutoQsetConfig = false
-                  jobMonitorExternalHost = None
-                  txBatchMaxSize = None
-                  runForMaxTps = None
-                  requireNodeLabelsPcV2 = []
-                  avoidNodeLabelsPcV2 = []
-                  tolerateNodeTaintsPcV2 = []
-                  serviceAccountAnnotationsPcV2 = []
-                  s3HistoryMirrorOverridePcV2 = None
-                  s3HistoryMirrorRegionPcV2 = "us-east-1"
-                  benchmarkInfrastructure = Some false
-                  benchmarkInfrastructureOnly = Some false
-                  benchmarkDurationSeconds = Some 30
-                  enableTcpTuning = false
-                  minBlockTimeMs = 4000
-                  maxBlockTimeMs = 5000
-                  minBlockTimeMixedMode = "mixed_pregen_sac_payment"
-                  minBlockTimeMixedClassicTxRate = None
-                  minBlockTimeMixedSorobanTxRate = None
-                  runForMinBlockTime = false }
-
-            let nCfg = MakeNetworkCfg ctx [] None
-            use formation = kube.MakeEmptyFormation(nCfg)
-            formation.CleanNamespace()
             0
 
         | :? MissionOptions as mission ->
@@ -807,6 +689,15 @@ let main argv =
                  LogInfo "-----------------------------------"
 
                  let (kube, ns) = ConnectToCluster mission.KubeConfig mission.NamespaceProperty
+
+                 // Reap any orphan resources left by previously-killed mission
+                 // processes before we start creating new ones. Safe under
+                 // concurrent runs because the age threshold is well above any
+                 // healthy mission's runtime.
+                 try
+                     StellarOrphanSweep.sweep kube ns StellarOrphanSweep.defaultMaxAgeDays
+                 with ex -> LogWarn "Orphan sweep failed (continuing anyway): %s" ex.Message
+
                  let destination = Destination(mission.Destination)
 
                  let podLogger _ =

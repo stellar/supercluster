@@ -32,6 +32,7 @@
     <Compile Include="StellarStatefulSets.fs" />
     <Compile Include="StellarJobExec.fs" />
     <Compile Include="StellarSupercluster.fs" />
+    <Compile Include="StellarOrphanSweep.fs" />
     <Compile Include="MaxTPSTest.fs" />
     <Compile Include="MissionCatchupHelpers.fs" />
     <Compile Include="MissionBootAndSync.fs" />

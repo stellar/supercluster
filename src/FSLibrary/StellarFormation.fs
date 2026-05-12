@@ -68,11 +68,6 @@ type StellarFormation
     member self.StatefulSets = statefulSets
     member self.SetStatefulSets(s: V1StatefulSet list) = statefulSets <- s
 
-    member self.CleanNamespace() =
-        LogInfo "Cleaning all resources from namespace '%s'" networkCfg.NamespaceProperty
-        namespaceContent.AddAll()
-        namespaceContent.Cleanup()
-
     member self.ForceCleanup() =
         LogInfo
             "Cleaning run '%s' resources from namespace '%s'"

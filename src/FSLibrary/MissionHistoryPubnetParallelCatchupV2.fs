@@ -5,6 +5,7 @@
 module MissionHistoryPubnetParallelCatchupV2
 
 open Logging
+open ScriptUtils
 open StellarKubeSpecs
 open StellarMissionContext
 open StellarNetworkData
@@ -51,31 +52,6 @@ let jobMonitorHostName (context: MissionContext) =
     match context.jobMonitorExternalHost with
     | Some host -> host
     | None -> defaultJobMonitorHostName // TODO: append it with a nounce to make it session specific
-
-let runCommand (command: string []) =
-    try
-        let psi = ProcessStartInfo()
-        psi.FileName <- command.[0]
-        psi.Arguments <- String.Join(" ", command.[1..])
-        psi.RedirectStandardOutput <- true
-        psi.RedirectStandardError <- true
-        psi.UseShellExecute <- false
-        psi.CreateNoWindow <- true
-
-        use ps = Process.Start(psi)
-        ps.WaitForExit()
-
-        let output = ps.StandardOutput.ReadToEnd()
-        let error = ps.StandardError.ReadToEnd()
-
-        if ps.ExitCode <> 0 then
-            LogError "Command '%s' failed with error: %s" (String.Join(" ", command)) error
-            None
-        else
-            Some(output)
-    with ex ->
-        LogError "Command execution failed: %s" ex.Message
-        None
 
 // Helper functions to convert label/taint tuples to Helm-compatible format using indexed notation
 let requireNodeLabelToHelmIndexed (index: int) ((key: string), (value: string option)) =
@@ -239,20 +215,20 @@ let installProject (context: MissionContext) =
     let expandedKubeCfg = ExpandHomeDirTilde context.kubeCfg
     Environment.SetEnvironmentVariable("KUBECONFIG", expandedKubeCfg)
 
-    runCommand [| "helm"
-                  "install"
-                  helmReleaseName
-                  helmChartPath
-                  "--values"
-                  valuesFilePath
-                  "--set"
-                  String.Join(",", setOptions) |]
+    RunShellCommand [| "helm"
+                       "install"
+                       helmReleaseName
+                       helmChartPath
+                       "--values"
+                       valuesFilePath
+                       "--set"
+                       String.Join(",", setOptions) |]
     |> ignore
 
-    match runCommand [| "helm"
-                        "get"
-                        "values"
-                        helmReleaseName |] with
+    match RunShellCommand [| "helm"
+                             "get"
+                             "values"
+                             helmReleaseName |] with
     | Some valuesOutput -> LogInfo "%s" valuesOutput
     | _ -> ()
 
@@ -317,9 +293,9 @@ let cleanup (context: MissionContext) =
             LogInfo "Log collection completed in %.2f seconds" stopwatch.Elapsed.TotalSeconds
         with ex -> LogWarn "Failed to collect some or all worker logs: %s" ex.Message
 
-        runCommand [| "helm"
-                      "uninstall"
-                      helmReleaseName |]
+        RunShellCommand [| "helm"
+                           "uninstall"
+                           helmReleaseName |]
         |> ignore
 
 let mutable cleanupContext : MissionContext option = None
