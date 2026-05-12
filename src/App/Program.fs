@@ -29,6 +29,11 @@ type KubeOption(kubeConfig: string, namespaceProperty: string option) =
 type PollOptions(kubeConfig: string, namespaceProperty: string option) =
     inherit KubeOption(kubeConfig, namespaceProperty)
 
+[<Verb("force-clean-namespace",
+       HelpText = "Delete every Service/ConfigMap/StatefulSet/Ingress/Job/DaemonSet/Deployment in the namespace and helm-uninstall any parallel-catchup-* releases. Destructive: meant for explicit recovery of a shared namespace, not for routine use.")>]
+type ForceCleanNamespaceOptions(kubeConfig: string, namespaceProperty: string option) =
+    inherit KubeOption(kubeConfig, namespaceProperty)
+
 [<Verb("mission", HelpText = "Run one or more named missions")>]
 type MissionOptions
     (
@@ -655,7 +660,8 @@ let main argv =
 
     AuxClass.CheckCSharpWorksToo()
 
-    let result = CommandLine.Parser.Default.ParseArguments<PollOptions, MissionOptions>(argv)
+    let result =
+        CommandLine.Parser.Default.ParseArguments<PollOptions, ForceCleanNamespaceOptions, MissionOptions>(argv)
 
     match result with
 
@@ -666,6 +672,20 @@ let main argv =
             let _ = logToConsoleOnly ()
             let (kube, ns) = ConnectToCluster poll.KubeConfig poll.NamespaceProperty
             PollCluster kube ns
+            0
+
+        | :? ForceCleanNamespaceOptions as fc ->
+            let _ = logToConsoleOnly ()
+            let (kube, ns) = ConnectToCluster fc.KubeConfig fc.NamespaceProperty
+
+            // Point helm shell-outs (PCv2 release teardown) at the same cluster
+            // the F# k8s client connected to.
+            System.Environment.SetEnvironmentVariable("KUBECONFIG", ExpandHomeDirTilde fc.KubeConfig)
+
+            // Hardcoded apiRateLimit: this verb is invoked manually and the
+            // throttling is just for politeness with the kube API server.
+            let apiRateLimit = 30
+            StellarOrphanSweep.forceCleanNamespace kube ns apiRateLimit
             0
 
         | :? MissionOptions as mission ->

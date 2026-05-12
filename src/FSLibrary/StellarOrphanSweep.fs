@@ -41,27 +41,24 @@ let private sweepKind
                 delete meta.Name
             with ex -> LogWarn "Orphan sweep: failed to delete %s/%s: %s" kind meta.Name ex.Message
 
-// Reap supercluster resources older than maxAgeDays in the given namespace.
+// Delete resources older than `cutoff` in the given namespace. Targets the same
+// resource type set the retired `clean` verb did (Service, ConfigMap,
+// StatefulSet, Ingress, Job, DaemonSet, Deployment) and also helm-uninstalls
+// any `parallel-catchup-*` releases (PCv2) so helm's release secrets get
+// tidied along with the workloads.
 //
-// This is a best-effort backstop for the rare cases where a mission's normal
-// cleanup didn't run (SIGKILL, OOM-kill, runner power loss, mid-Dispose crash).
-// It targets the same resource type set the retired `clean` verb did:
-//   Service, ConfigMap, StatefulSet, Ingress, Job, DaemonSet, Deployment.
-// It also helm-uninstalls stale `parallel-catchup-*` releases (PCv2) so that
-// helm's release secrets get tidied along with the workloads.
-//
-// The age threshold needs to be greater than the longest realistic mission
-// runtime so an in-flight run is never reaped. PCv2 has historically taken
-// up to ~48 hours; 7 days leaves plenty of margin.
-let sweep (kube: Kubernetes) (ns: string) (apiRateLimit: int) (maxAgeDays: int) : unit =
-    let cutoff = DateTime.UtcNow.AddDays(-(float maxAgeDays))
-    LogInfo "Orphan sweep starting: namespace=%s cutoff=%s (%d days)" ns (cutoff.ToString("o")) maxAgeDays
+// Used by both the automatic on-startup orphan sweep (cutoff = now - 7 days)
+// and the explicit `force-clean-namespace` verb (cutoff = DateTime.MaxValue,
+// i.e. everything).
+let private sweepWithCutoff (cutoff: DateTime) (kube: Kubernetes) (ns: string) (apiRateLimit: int) : unit =
+    LogInfo "Orphan sweep starting: namespace=%s cutoff=%s" ns (cutoff.ToString("o"))
 
     // 1. helm-uninstall PCv2 releases whose StatefulSet is older than the cutoff.
     //    Done before the kubectl-style deletes so helm's release secrets get
     //    cleaned up properly, rather than left dangling pointing at deleted
     //    resources.
     ApiRateLimit.sleepUntilNextRateLimitedApiCallTime apiRateLimit
+
     let stsItems = kube.ListNamespacedStatefulSet(namespaceParameter = ns).Items
 
     for sts in stsItems do
@@ -159,3 +156,21 @@ let sweep (kube: Kubernetes) (ns: string) (apiRateLimit: int) (maxAgeDays: int) 
         cutoff
 
     LogInfo "Orphan sweep complete"
+
+// Age-filtered sweep: reap resources older than `maxAgeDays`.
+//
+// This is a best-effort backstop for the rare cases where a mission's normal
+// cleanup didn't run (SIGKILL, OOM-kill, runner power loss, mid-Dispose
+// crash). The age threshold needs to be greater than the longest realistic
+// mission runtime so an in-flight run is never reaped. PCv2 has historically
+// taken up to ~48 hours; 7 days leaves plenty of margin.
+let sweep (kube: Kubernetes) (ns: string) (apiRateLimit: int) (maxAgeDays: int) : unit =
+    let cutoff = DateTime.UtcNow.AddDays(-(float maxAgeDays))
+    sweepWithCutoff cutoff kube ns apiRateLimit
+
+// Unconditional namespace wipe: delete every supercluster-targeted resource
+// type in the namespace regardless of age. Equivalent to the retired `clean`
+// verb. Exposed via the `force-clean-namespace` CLI verb for explicit recovery
+// when ops want to reset a namespace without waiting for the next mission run.
+let forceCleanNamespace (kube: Kubernetes) (ns: string) (apiRateLimit: int) : unit =
+    sweepWithCutoff DateTime.MaxValue kube ns apiRateLimit
