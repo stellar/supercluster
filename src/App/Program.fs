@@ -690,12 +690,17 @@ let main argv =
 
                  let (kube, ns) = ConnectToCluster mission.KubeConfig mission.NamespaceProperty
 
+                 // Point any helm shell-outs (used by the orphan sweep for
+                 // PCv2 release teardown) at the same cluster the F# k8s
+                 // client connected to.
+                 System.Environment.SetEnvironmentVariable("KUBECONFIG", ExpandHomeDirTilde mission.KubeConfig)
+
                  // Reap any orphan resources left by previously-killed mission
                  // processes before we start creating new ones. Safe under
                  // concurrent runs because the age threshold is well above any
                  // healthy mission's runtime.
                  try
-                     StellarOrphanSweep.sweep kube ns StellarOrphanSweep.defaultMaxAgeDays
+                     StellarOrphanSweep.sweep kube ns mission.ApiRateLimit StellarOrphanSweep.defaultMaxAgeDays
                  with ex -> LogWarn "Orphan sweep failed (continuing anyway): %s" ex.Message
 
                  let destination = Destination(mission.Destination)

@@ -20,11 +20,14 @@ let private isOlderThan (cutoff: DateTime) (meta: V1ObjectMeta) : bool =
     meta.CreationTimestamp.HasValue && meta.CreationTimestamp.Value < cutoff
 
 let private sweepKind
+    (apiRateLimit: int)
     (kind: string)
     (list: unit -> seq<V1ObjectMeta>)
     (delete: string -> unit)
     (cutoff: DateTime)
     : unit =
+    ApiRateLimit.sleepUntilNextRateLimitedApiCallTime apiRateLimit
+
     for meta in list () do
         if isOlderThan cutoff meta then
             try
@@ -34,6 +37,7 @@ let private sweepKind
                     meta.Name
                     (meta.CreationTimestamp.Value.ToString("o"))
 
+                ApiRateLimit.sleepUntilNextRateLimitedApiCallTime apiRateLimit
                 delete meta.Name
             with ex -> LogWarn "Orphan sweep: failed to delete %s/%s: %s" kind meta.Name ex.Message
 
@@ -49,7 +53,7 @@ let private sweepKind
 // The age threshold needs to be greater than the longest realistic mission
 // runtime so an in-flight run is never reaped. PCv2 has historically taken
 // up to ~48 hours; 7 days leaves plenty of margin.
-let sweep (kube: Kubernetes) (ns: string) (maxAgeDays: int) : unit =
+let sweep (kube: Kubernetes) (ns: string) (apiRateLimit: int) (maxAgeDays: int) : unit =
     let cutoff = DateTime.UtcNow.AddDays(-(float maxAgeDays))
     LogInfo "Orphan sweep starting: namespace=%s cutoff=%s (%d days)" ns (cutoff.ToString("o")) maxAgeDays
 
@@ -57,6 +61,7 @@ let sweep (kube: Kubernetes) (ns: string) (maxAgeDays: int) : unit =
     //    Done before the kubectl-style deletes so helm's release secrets get
     //    cleaned up properly, rather than left dangling pointing at deleted
     //    resources.
+    ApiRateLimit.sleepUntilNextRateLimitedApiCallTime apiRateLimit
     let stsItems = kube.ListNamespacedStatefulSet(namespaceParameter = ns).Items
 
     for sts in stsItems do
@@ -79,6 +84,7 @@ let sweep (kube: Kubernetes) (ns: string) (maxAgeDays: int) : unit =
     //    resources (e.g. service before statefulset) are removed in a sensible
     //    sequence, but k8s GC handles correctness either way.
     sweepKind
+        apiRateLimit
         "Service"
         (fun () ->
             kube.ListNamespacedService(namespaceParameter = ns).Items
@@ -89,6 +95,7 @@ let sweep (kube: Kubernetes) (ns: string) (maxAgeDays: int) : unit =
         cutoff
 
     sweepKind
+        apiRateLimit
         "StatefulSet"
         (fun () -> stsItems |> Seq.map (fun s -> s.Metadata))
         (fun n ->
@@ -97,6 +104,7 @@ let sweep (kube: Kubernetes) (ns: string) (maxAgeDays: int) : unit =
         cutoff
 
     sweepKind
+        apiRateLimit
         "Deployment"
         (fun () ->
             kube.ListNamespacedDeployment(namespaceParameter = ns).Items
@@ -107,6 +115,7 @@ let sweep (kube: Kubernetes) (ns: string) (maxAgeDays: int) : unit =
         cutoff
 
     sweepKind
+        apiRateLimit
         "ConfigMap"
         (fun () ->
             kube.ListNamespacedConfigMap(namespaceParameter = ns).Items
@@ -117,6 +126,7 @@ let sweep (kube: Kubernetes) (ns: string) (maxAgeDays: int) : unit =
         cutoff
 
     sweepKind
+        apiRateLimit
         "Ingress"
         (fun () ->
             kube.ListNamespacedIngress(namespaceParameter = ns).Items
@@ -127,6 +137,7 @@ let sweep (kube: Kubernetes) (ns: string) (maxAgeDays: int) : unit =
         cutoff
 
     sweepKind
+        apiRateLimit
         "Job"
         (fun () ->
             kube.ListNamespacedJob(namespaceParameter = ns).Items
@@ -137,6 +148,7 @@ let sweep (kube: Kubernetes) (ns: string) (maxAgeDays: int) : unit =
         cutoff
 
     sweepKind
+        apiRateLimit
         "DaemonSet"
         (fun () ->
             kube.ListNamespacedDaemonSet(namespaceParameter = ns).Items
