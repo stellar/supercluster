@@ -42,11 +42,12 @@ let extractNodeNameFromBenchmarkPod (podName: string) (topology: Map<string, str
 let createBenchmarkHeadlessService (nCfg: NetworkCfg) (runId: string) : V1Service =
     V1Service(
         metadata =
-            V1ObjectMeta(
+            (V1ObjectMeta(
                 name = sprintf "%s-benchmark" runId,
                 labels = benchmarkLabels,
                 namespaceProperty = nCfg.NamespaceProperty
-            ),
+             )
+             |> applyAnchorOwner nCfg),
         spec =
             V1ServiceSpec(
                 clusterIP = "None",
@@ -251,7 +252,9 @@ let createBenchmarkStatefulSet
         )
 
     V1StatefulSet(
-        metadata = V1ObjectMeta(name = stsName, labels = benchmarkLabels, namespaceProperty = nCfg.NamespaceProperty),
+        metadata =
+            (V1ObjectMeta(name = stsName, labels = benchmarkLabels, namespaceProperty = nCfg.NamespaceProperty)
+             |> applyAnchorOwner nCfg),
         spec = statefulSetSpec
     )
 

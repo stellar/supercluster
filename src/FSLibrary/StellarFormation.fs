@@ -74,7 +74,29 @@ type StellarFormation
             (networkCfg.networkNonce.ToString())
             networkCfg.NamespaceProperty
 
-        namespaceContent.Cleanup()
+        // Single anchor delete first: Kubernetes' garbage collector will
+        // cascade to every resource that has the anchor in its
+        // ownerReferences, even if this process is killed before the rest of
+        // Cleanup() runs. Background propagation means the API call returns
+        // immediately and the cluster handles the cascade asynchronously.
+        match networkCfg.anchorOwnerRef with
+        | Some _ ->
+            try
+                LogInfo "Deleting anchor ConfigMap %s (Background propagation)" networkCfg.AnchorConfigMapName
+
+                kube.DeleteNamespacedConfigMap(
+                    name = networkCfg.AnchorConfigMapName,
+                    namespaceParameter = networkCfg.NamespaceProperty,
+                    propagationPolicy = "Background"
+                )
+                |> ignore
+            with ex -> LogWarn "Anchor delete failed (k8s GC won't help; continuing): %s" ex.Message
+        | None -> ()
+
+    // Best-effort speed-up pass: if we still have time, explicitly delete
+    // the tracked resources rather than waiting for k8s GC. Idempotent
+    // against anything the anchor cascade has already removed.
+    //namespaceContent.Cleanup()
 
     member self.Cleanup(disposing: bool) =
         if not disposed then
