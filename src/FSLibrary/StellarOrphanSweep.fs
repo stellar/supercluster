@@ -14,7 +14,7 @@ open ScriptUtils
 // Resources that look this old must belong to a failed prior run — no healthy
 // mission runs anywhere near this long, and the Jenkins lock serializes CI
 // jobs, so anything older than this threshold is presumed orphaned.
-let defaultMaxAgeDays = 7
+let defaultMaxAgeDays = 2
 
 let private isOlderThan (cutoff: DateTime) (meta: V1ObjectMeta) : bool =
     meta.CreationTimestamp.HasValue && meta.CreationTimestamp.Value < cutoff
@@ -47,7 +47,7 @@ let private sweepKind
 // any `parallel-catchup-*` releases (PCv2) so helm's release secrets get
 // tidied along with the workloads.
 //
-// Used by both the automatic on-startup orphan sweep (cutoff = now - 7 days)
+// Used by both the automatic on-startup orphan sweep (cutoff = now - 2 days)
 // and the explicit `force-clean-namespace` verb (cutoff = DateTime.MaxValue,
 // i.e. everything).
 let private sweepWithCutoff (cutoff: DateTime) (kube: Kubernetes) (ns: string) (apiRateLimit: int) : unit =
@@ -162,8 +162,9 @@ let private sweepWithCutoff (cutoff: DateTime) (kube: Kubernetes) (ns: string) (
 // This is a best-effort backstop for the rare cases where a mission's normal
 // cleanup didn't run (SIGKILL, OOM-kill, runner power loss, mid-Dispose
 // crash). The age threshold needs to be greater than the longest realistic
-// mission runtime so an in-flight run is never reaped. PCv2 has historically
-// taken up to ~48 hours; 7 days leaves plenty of margin.
+// mission runtime so an in-flight run is never reaped. PCv2 (the longest
+// mission) is expected to finish in under a day; 2 days leaves comfortable
+// margin.
 let sweep (kube: Kubernetes) (ns: string) (apiRateLimit: int) (maxAgeDays: int) : unit =
     let cutoff = DateTime.UtcNow.AddDays(-(float maxAgeDays))
     sweepWithCutoff cutoff kube ns apiRateLimit
