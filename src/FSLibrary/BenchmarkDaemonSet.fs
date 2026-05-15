@@ -263,7 +263,9 @@ let createTcpTuningConfigMap (nCfg: NetworkCfg) : V1ConfigMap =
     let scriptPath = GetScriptPath "tcp-tune.sh"
 
     V1ConfigMap(
-        metadata = V1ObjectMeta(name = "tcp-tuning-script", namespaceProperty = nCfg.NamespaceProperty),
+        metadata =
+            (V1ObjectMeta(name = "tcp-tuning-script", namespaceProperty = nCfg.NamespaceProperty)
+             |> applyAnchorOwner nCfg),
         data = dict [ ("tcp-tune.sh", System.IO.File.ReadAllText(scriptPath)) ]
     )
 
@@ -329,7 +331,9 @@ let private createTcpDaemonSet
         V1DaemonSetSpec(selector = V1LabelSelector(matchLabels = dict [ ("app", name) ]), template = podTemplate)
 
     V1DaemonSet(
-        metadata = V1ObjectMeta(name = name, labels = labels, namespaceProperty = nCfg.NamespaceProperty),
+        metadata =
+            (V1ObjectMeta(name = name, labels = labels, namespaceProperty = nCfg.NamespaceProperty)
+             |> applyAnchorOwner nCfg),
         spec = daemonSetSpec
     )
 
