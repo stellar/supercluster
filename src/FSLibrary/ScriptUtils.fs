@@ -5,7 +5,36 @@
 module ScriptUtils
 
 open System
+open System.Diagnostics
 open System.IO
+open Logging
+
+// Run an external command (e.g. helm) and return its stdout on success, None on failure.
+// Failures are logged but do not throw.
+let RunShellCommand (command: string []) : string option =
+    try
+        let psi = ProcessStartInfo()
+        psi.FileName <- command.[0]
+        psi.Arguments <- String.Join(" ", command.[1..])
+        psi.RedirectStandardOutput <- true
+        psi.RedirectStandardError <- true
+        psi.UseShellExecute <- false
+        psi.CreateNoWindow <- true
+
+        use ps = Process.Start(psi)
+        ps.WaitForExit()
+
+        let output = ps.StandardOutput.ReadToEnd()
+        let error = ps.StandardError.ReadToEnd()
+
+        if ps.ExitCode <> 0 then
+            LogError "Command '%s' failed with error: %s" (String.Join(" ", command)) error
+            None
+        else
+            Some(output)
+    with ex ->
+        LogError "Command execution failed: %s" ex.Message
+        None
 
 // Helper to resolve script paths that works both in development and deployment
 let GetScriptPath (scriptName: string) : string =

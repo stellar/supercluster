@@ -39,7 +39,7 @@ type StellarFormation
         kube: Kubernetes,
         statefulSets: V1StatefulSet list,
         namespaceContent: NamespaceContent
-    ) =
+    ) as self =
 
     let mutable networkCfg = networkCfg
     let kube = kube
@@ -48,6 +48,32 @@ type StellarFormation
     let namespaceContent = namespaceContent
     let mutable disposed = false
     let mutable jobNumber = 0
+
+    // SIGTERM (Jenkins timeout, docker stop, OOM-kill grace) and SIGINT
+    // (Ctrl+C in a local dev run) both bypass the `use formation = ...`
+    // binding's Dispose, so without an explicit handler the anchor delete
+    // would never fire and resources would leak. Registering handlers here
+    // means Jenkins-induced timeouts cleanly trigger the same anchor delete
+    // path as a normal exit; Dispose unregisters them so the formation is
+    // collectable after a clean shutdown.
+    let processExitHandler =
+        EventHandler
+            (fun _ _ ->
+                LogInfo "ProcessExit received; running formation cleanup"
+                self.Cleanup(true))
+
+    let cancelKeyHandler =
+        ConsoleCancelEventHandler
+            (fun _ e ->
+                // Suppress the default abort so cleanup can finish before exit.
+                e.Cancel <- true
+                LogInfo "SIGINT received; running formation cleanup"
+                self.Cleanup(true)
+                Environment.Exit(130))
+
+    do
+        AppDomain.CurrentDomain.ProcessExit.AddHandler(processExitHandler)
+        Console.CancelKeyPress.AddHandler(cancelKeyHandler)
 
     member self.sleepUntilNextRateLimitedApiCallTime() =
         ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (networkCfg.missionContext.apiRateLimit)
@@ -68,17 +94,34 @@ type StellarFormation
     member self.StatefulSets = statefulSets
     member self.SetStatefulSets(s: V1StatefulSet list) = statefulSets <- s
 
-    member self.CleanNamespace() =
-        LogInfo "Cleaning all resources from namespace '%s'" networkCfg.NamespaceProperty
-        namespaceContent.AddAll()
-        namespaceContent.Cleanup()
-
     member self.ForceCleanup() =
         LogInfo
             "Cleaning run '%s' resources from namespace '%s'"
             (networkCfg.networkNonce.ToString())
             networkCfg.NamespaceProperty
 
+        // Single anchor delete first: Kubernetes' garbage collector will
+        // cascade to every resource that has the anchor in its
+        // ownerReferences, even if this process is killed before the rest of
+        // Cleanup() runs. Background propagation means the API call returns
+        // immediately and the cluster handles the cascade asynchronously.
+        match networkCfg.anchorOwnerRef with
+        | Some _ ->
+            try
+                LogInfo "Deleting anchor ConfigMap %s (Background propagation)" networkCfg.AnchorConfigMapName
+
+                kube.DeleteNamespacedConfigMap(
+                    name = networkCfg.AnchorConfigMapName,
+                    namespaceParameter = networkCfg.NamespaceProperty,
+                    propagationPolicy = "Background"
+                )
+                |> ignore
+            with ex -> LogWarn "Anchor delete failed (k8s GC won't help; continuing): %s" ex.Message
+        | None -> ()
+
+        // Best-effort speed-up pass: if we still have time, explicitly delete
+        // the tracked resources rather than waiting for k8s GC. Idempotent
+        // against anything the anchor cascade has already removed.
         namespaceContent.Cleanup()
 
     member self.Cleanup(disposing: bool) =
@@ -121,6 +164,11 @@ type StellarFormation
     // implementation of IDisposable
     interface System.IDisposable with
         member self.Dispose() =
+            // Drop the signal handlers first so the cleanup path runs at most
+            // once via Dispose on a clean exit, and so the handler closures
+            // stop pinning `self` after we're done.
+            AppDomain.CurrentDomain.ProcessExit.RemoveHandler(processExitHandler)
+            Console.CancelKeyPress.RemoveHandler(cancelKeyHandler)
             self.Cleanup(true)
             System.GC.SuppressFinalize(self)
 

@@ -402,6 +402,20 @@ let affinity (requirements: V1NodeSelectorRequirement list) : V1Affinity option 
         Some(V1Affinity(nodeAffinity = na))
 
 
+// Apply the per-run anchor owner reference to `meta` if one has been set on
+// `nCfg`. Pre-anchor (e.g. the anchor itself), this is a no-op. Once the
+// anchor exists every subsequent resource picks this up automatically, which
+// is what wires them into Kubernetes' built-in cascading deletion: a single
+// delete of the anchor GCs everything that points back at it.
+let applyAnchorOwner (nCfg: NetworkCfg) (meta: V1ObjectMeta) : V1ObjectMeta =
+    match nCfg.anchorOwnerRef with
+    | Some owner ->
+        meta.OwnerReferences <-
+            ResizeArray<V1OwnerReference>([| owner |]) :> System.Collections.Generic.IList<V1OwnerReference>
+    | None -> ()
+
+    meta
+
 // Extend NetworkCfg type with methods for producing various Kubernetes objects.
 type NetworkCfg with
 
@@ -410,6 +424,7 @@ type NetworkCfg with
 
     member self.NamespacedMeta(name: string) : V1ObjectMeta =
         V1ObjectMeta(name = name, labels = CfgVal.labels, namespaceProperty = self.NamespaceProperty)
+        |> applyAnchorOwner self
 
     member self.PodLabels() : Map<string, string> = Map.add "mission" self.missionContext.missionName CfgVal.labels
 
@@ -919,5 +934,6 @@ type NetworkCfg with
 
         let meta =
             V1ObjectMeta(name = self.IngressName, namespaceProperty = self.NamespaceProperty, annotations = annotation)
+            |> applyAnchorOwner self
 
         V1Ingress(spec = spec, metadata = meta)

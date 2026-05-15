@@ -227,6 +227,40 @@ let DumpPodInfo (kube: Kubernetes) (apiRateLimit: int) (ns: string) =
 
             LogInfo "Pod: name=%s phase=%s age=%s (hr:min)" p.Metadata.Name p.Status.Phase age
 
+// Create a per-run "anchor" ConfigMap and stash an owner reference to it on
+// `nCfg.anchorOwnerRef` so every subsequent resource the mission creates will
+// be wired into Kubernetes' cascading-deletion graph. Deleting this single
+// anchor at cleanup time lets k8s' built-in GC reap the rest, which keeps
+// shutdown work inside Jenkins' SIGTERM grace window.
+let private createAnchor (kube: Kubernetes) (nCfg: NetworkCfg) (namespaceContent: NamespaceContent) : unit =
+    let nsStr = nCfg.NamespaceProperty
+    let rps = nCfg.missionContext.apiRateLimit
+    let name = nCfg.AnchorConfigMapName
+
+    LogInfo "Creating anchor ConfigMap %s" name
+    ApiRateLimit.sleepUntilNextRateLimitedApiCallTime rps
+
+    let body = V1ConfigMap(metadata = V1ObjectMeta(name = name, namespaceProperty = nsStr))
+
+    let created = kube.CreateNamespacedConfigMap(body = body, namespaceParameter = nsStr)
+    namespaceContent.Add(created)
+
+    // controller=false: leave the "controller" slot free for the natural owner
+    // (e.g. a StatefulSet owns its own pods as controller). blockOwnerDeletion
+    // off: we want the anchor delete to return without waiting on finalizers.
+    nCfg.anchorOwnerRef <-
+        Some(
+            V1OwnerReference(
+                apiVersion = "v1",
+                kind = "ConfigMap",
+                name = name,
+                uid = created.Metadata.Uid,
+                blockOwnerDeletion = System.Nullable<bool>(false),
+                controller = System.Nullable<bool>(false)
+            )
+        )
+
+
 // Typically one starts with `ConnectToCluster` above to get a `Kubernetes`
 // object, and then calls one of these `Kubernetes` extension methods to
 // establish a `StellarFormation` object to run tests against.
@@ -235,13 +269,12 @@ type Kubernetes with
     // Creates a minimal formation on which to run Jobs; no StatefulSets,
     // services, ingresses or anything. Sets up TCP tuning daemonsets if enabled in mission context.
     member self.MakeEmptyFormation(nCfg: NetworkCfg) : StellarFormation =
+        let namespaceContent = NamespaceContent(self, nCfg.missionContext.apiRateLimit, nCfg.NamespaceProperty)
+
+        createAnchor self nCfg namespaceContent
+
         let formation =
-            new StellarFormation(
-                networkCfg = nCfg,
-                kube = self,
-                statefulSets = [],
-                namespaceContent = NamespaceContent(self, nCfg.missionContext.apiRateLimit, nCfg.NamespaceProperty)
-            )
+            new StellarFormation(networkCfg = nCfg, kube = self, statefulSets = [], namespaceContent = namespaceContent)
 
         formation.MaybeDeployTcpTuningDaemonSet()
 
@@ -254,6 +287,8 @@ type Kubernetes with
         let nsStr = nCfg.NamespaceProperty
         let namespaceContent = NamespaceContent(self, nCfg.missionContext.apiRateLimit, nsStr)
         let rps = nCfg.missionContext.apiRateLimit
+
+        createAnchor self nCfg namespaceContent
 
         try
             let svc = nCfg.ToService()

@@ -4,6 +4,7 @@
 
 module StellarNetworkCfg
 
+open k8s.Models
 open StellarMissionContext
 open StellarCoreSet
 open StellarDotnetSdk
@@ -68,7 +69,15 @@ type NetworkCfg =
       networkNonce: NetworkNonce
       networkPassphrase: NetworkPassphrase
       coreSets: Map<CoreSetName, CoreSet>
-      jobCoreSetOptions: CoreSetOptions option }
+      jobCoreSetOptions: CoreSetOptions option
+      // Owner reference to the per-run "anchor" ConfigMap. Set once,
+      // immediately after the anchor is created (in MakeFormation /
+      // MakeEmptyFormation). Every k8s resource produced by this mission
+      // gets this set as one of its ownerReferences, so a single delete
+      // of the anchor lets Kubernetes' built-in GC cascade the rest
+      // — which is what makes per-run cleanup fit in Jenkins' SIGTERM
+      // grace window.
+      mutable anchorOwnerRef: V1OwnerReference option }
 
     member self.FindCoreSet(n: CoreSetName) : CoreSet = Map.find n self.coreSets
 
@@ -124,6 +133,8 @@ type NetworkCfg =
 
     member self.IsJobMode : bool = if self.jobCoreSetOptions = None then false else true
 
+    member self.AnchorConfigMapName : string = sprintf "%s-anchor" self.Nonce
+
 // Generates a fresh network of size n, with fresh keypairs for each node, and a
 // random nonce to isolate the network.
 let MakeNetworkCfg
@@ -140,4 +151,5 @@ let MakeNetworkCfg
           | None -> PrivateNet nonce
           | Some (x) -> x
       coreSets = List.map (fun cs -> (cs.name, cs)) coreSetList |> Map.ofList
-      jobCoreSetOptions = None }
+      jobCoreSetOptions = None
+      anchorOwnerRef = None }
