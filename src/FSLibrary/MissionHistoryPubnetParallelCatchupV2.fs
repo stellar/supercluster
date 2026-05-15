@@ -278,38 +278,64 @@ let collectLogsFromPods (context: MissionContext) =
         with ex ->
             LogWarn "Could not collect logs from pod %s (this is expected if pod doesn't exist): %s" podName ex.Message
 
-// Cleanup on exit
-let cleanup (context: MissionContext) =
+// Cleanup on exit. `signalTriggered` indicates we're running under a hard
+// deadline (Jenkins' SoftKillWaitSeconds, ~5s by default, before SIGKILL).
+// In that case we have to prioritize getting `helm uninstall` issued ahead
+// of the much-slower log collection — otherwise we get SIGKILLed mid-
+// collection and leak every worker pod, which is what we saw in practice
+// with a 1024-worker run aborted from Jenkins.
+let cleanup (signalTriggered: bool) (context: MissionContext) =
     if toPerformCleanup then
         toPerformCleanup <- false
-        LogInfo "Cleaning up resources for release: %s" helmReleaseName
 
-        // Try to collect logs from all worker pods before cleanup
-        try
-            LogInfo "Attempting to collect worker logs before cleanup..."
-            let stopwatch = Stopwatch.StartNew()
-            collectLogsFromPods context
-            stopwatch.Stop()
-            LogInfo "Log collection completed in %.2f seconds" stopwatch.Elapsed.TotalSeconds
-        with ex -> LogWarn "Failed to collect some or all worker logs: %s" ex.Message
+        if signalTriggered then
+            // Abort path: resources first, logs are nice-to-have.
+            // Skip log collection entirely — even parallelized it can't beat
+            // Jenkins' ~5s grace before SIGKILL, and it can't beat the per-pod
+            // terminationGracePeriodSeconds (default 30s) when scaled to 1024
+            // workers. Whatever logs were captured inline by the failure
+            // handler in the main loop are still on disk.
+            LogInfo "Signal-triggered cleanup: uninstalling release %s" helmReleaseName
 
-        RunShellCommand [| "helm"
-                           "uninstall"
-                           helmReleaseName |]
-        |> ignore
+            RunShellCommand [| "helm"
+                               "uninstall"
+                               helmReleaseName |]
+            |> ignore
+        else
+            // Normal / legitimate-failure path: pods are still alive through
+            // this entire window, so we can collect all logs before deleting.
+            LogInfo "Cleaning up resources for release: %s" helmReleaseName
+
+            try
+                LogInfo "Attempting to collect worker logs before cleanup..."
+                let stopwatch = Stopwatch.StartNew()
+                collectLogsFromPods context
+                stopwatch.Stop()
+                LogInfo "Log collection completed in %.2f seconds" stopwatch.Elapsed.TotalSeconds
+            with ex -> LogWarn "Failed to collect some or all worker logs: %s" ex.Message
+
+            RunShellCommand [| "helm"
+                               "uninstall"
+                               helmReleaseName |]
+            |> ignore
 
 let mutable cleanupContext : MissionContext option = None
 
+// NOTE: AppDomain.ProcessExit handlers have a soft ~2-second runtime budget
+// before .NET force-exits the process. If we ever observe that this budget is insufficient, switch to
+// `PosixSignalRegistration.Create(PosixSignal.SIGTERM, ...)`
+// which has no such budget and lets the handler run to completion within
+// Jenkins' full SoftKillWaitSeconds window (~5s default).
 System.AppDomain.CurrentDomain.ProcessExit.Add
     (fun _ ->
         match cleanupContext with
-        | Some ctx -> cleanup ctx
+        | Some ctx -> cleanup true ctx
         | None -> ())
 
 Console.CancelKeyPress.Add
     (fun _ ->
         match cleanupContext with
-        | Some ctx -> cleanup ctx
+        | Some ctx -> cleanup true ctx
         | None -> ()
 
         Environment.Exit(0))
@@ -412,7 +438,7 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
                 timeoutLeft <- timeoutLeft - jobMonitorStatusCheckIntervalSecs
                 if timeoutLeft <= 0 then failwith "job monitor not reachable"
         with ex ->
-            cleanup context
+            cleanup false context
             raise ex
 
-    cleanup context
+    cleanup false context
