@@ -373,35 +373,39 @@ type StellarFormation with
         let peer = self.NetworkCfg.GetPeer coreSetList.[0] 0
         let resStr = peer.GenerateLoad loadGen
 
-        let contractKey = Loadgen.Parse(resStr).ConfigUpgradeSetKey
+        let configUpgradeSetKey = Loadgen.Parse(resStr).ConfigUpgradeSetKey
 
         LogInfo "Loadgen: %s" resStr
         peer.WaitForLoadGenComplete loadGen
-        contractKey
+        configUpgradeSetKey
 
-    // Arm a previously-deployed upgrade-set (identified by contractKey) on each peer
+    // Arm a previously-deployed upgrade-set (identified by configUpgradeSetKey) on each peer
     // in the given core sets, to take effect at upgradeTime.
-    member self.ArmUpgradeEntries (coreSetList: CoreSet list) (contractKey: string) (upgradeTime: System.DateTime) =
+    member self.ArmUpgradeEntries
+        (coreSetList: CoreSet list)
+        (configUpgradeSetKey: string)
+        (upgradeTime: System.DateTime)
+        =
         self.NetworkCfg.EachPeerInSets
             (List.toArray coreSetList)
-            (fun peer -> peer.UpgradeNetworkSetting contractKey upgradeTime)
+            (fun peer -> peer.UpgradeNetworkSetting configUpgradeSetKey upgradeTime)
 
     member self.DeployUpgradeEntriesAndArm
         (coreSetList: CoreSet list)
         (loadGen: LoadGen)
         (upgradeTime: System.DateTime)
         =
-        let contractKey = self.DeployUpgradeEntries coreSetList loadGen
-        self.ArmUpgradeEntries coreSetList contractKey upgradeTime
+        let configUpgradeSetKey = self.DeployUpgradeEntries coreSetList loadGen
+        self.ArmUpgradeEntries coreSetList configUpgradeSetKey upgradeTime
 
     member self.DeployUpgradeEntriesAndArmAfter
         (coreSetList: CoreSet list)
         (loadGen: LoadGen)
         (delay: System.TimeSpan)
         =
-        let contractKey = self.DeployUpgradeEntries coreSetList loadGen
+        let configUpgradeSetKey = self.DeployUpgradeEntries coreSetList loadGen
         let upgradeTime = System.DateTime.UtcNow.Add(delay)
-        self.ArmUpgradeEntries coreSetList contractKey upgradeTime
+        self.ArmUpgradeEntries coreSetList configUpgradeSetKey upgradeTime
 
     member self.clearMetrics(coreSets: CoreSet list) =
         self.NetworkCfg.EachPeerInSets(coreSets |> List.toArray) (fun peer -> peer.ClearMetrics())
