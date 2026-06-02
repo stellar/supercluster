@@ -171,18 +171,18 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
 
             List.map
                 (fun (cs: CoreSet) ->
-                    if isLoadGenNode cs then
-                        let i = j
-                        j <- j + 1
+                    let pregenerateTxs =
+                        if isLoadGenNode cs then
+                            let i = j
+                            j <- j + 1
+                            Some(txs, accountsPerNode, accountsPerNode * i)
+                        else
+                            Some(0, 1, 0)
 
-                        { cs with
-                              options =
-                                  { cs.options with
-                                        initialization =
-                                            { cs.options.initialization with
-                                                  pregenerateTxs = Some(txs, accountsPerNode, accountsPerNode * i) } } }
-                    else
-                        cs)
+                    { cs with
+                          options =
+                              { cs.options with
+                                    initialization = { cs.options.initialization with pregenerateTxs = pregenerateTxs } } })
                 allNodes
         | _ -> allNodes
 

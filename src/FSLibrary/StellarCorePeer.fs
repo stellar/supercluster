@@ -27,7 +27,10 @@ type NetworkCfg with
             for i in 0 .. (coreSet.CurrentCount - 1) do
                 f (self.GetPeer coreSet i)
 
+    member self.PeersInSets(coreSetArray: CoreSet array) : Peer list =
+        [ for coreSet in coreSetArray do
+              for i in 0 .. (coreSet.CurrentCount - 1) do
+                  self.GetPeer coreSet i ]
+
     member self.EachPeerInSets (coreSetArray: CoreSet array) (f: Peer -> unit) : unit =
-        for coreSet in coreSetArray do
-            for i in 0 .. (coreSet.CurrentCount - 1) do
-                f (self.GetPeer coreSet i)
+        self.PeersInSets coreSetArray |> List.iter f

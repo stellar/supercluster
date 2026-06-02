@@ -316,15 +316,19 @@ type StellarCoreCfg =
         if self.emitMeta then
             t.Add("METADATA_OUTPUT_STREAM", CfgVal.metaStreamPath) |> ignore
 
-        match self.network.missionContext.simulateApplyWeight, self.network.missionContext.simulateApplyDuration with
-        | None, None -> ()
-        | Some weight, Some duration ->
-            t.Add("OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING", duration) |> ignore
-            t.Add("OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING", weight) |> ignore
-        | _, _ ->
-            raise (
-                System.ArgumentException "simulate-apply-weight and simulate-apply-duration must be defined together"
-            )
+        match self.containerType with
+        | InitCoreContainer -> ()
+        | MainCoreContainer ->
+            match self.network.missionContext.simulateApplyWeight, self.network.missionContext.simulateApplyDuration with
+            | None, None -> ()
+            | Some weight, Some duration ->
+                t.Add("OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING", duration) |> ignore
+                t.Add("OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING", weight) |> ignore
+            | _, _ ->
+                raise (
+                    System.ArgumentException
+                        "simulate-apply-weight and simulate-apply-duration must be defined together"
+                )
 
         distributionToToml self.network.missionContext.byteCountDistribution "BYTE_COUNT" t
         distributionToToml self.network.missionContext.wasmBytesDistribution "WASM_BYTES" t
@@ -451,13 +455,11 @@ type StellarCoreCfg =
             let validators = List.filter (fun (v: AutoValidator) -> v.keys <> self.nodeSeed) qs.validators
             List.iter (fun v -> validatorsTab.Add(autoValidatorToTable v) |> ignore) validators
 
-        // When simulateApplyWeight = Some _, stellar-core sets MODE_STORES_HISTORY
-        // which is used for simulations that only test consensus.
-        // In such cases, we should not pass put and mkdir commands.
         if self.localHistory then
             localTab.Add(
                 CfgVal.localHistName,
-                if self.network.missionContext.simulateApplyWeight.IsSome then
+                if self.containerType = MainCoreContainer
+                   && self.network.missionContext.simulateApplyWeight.IsSome then
                     histGetOnly
                 else
                     defaultHist
