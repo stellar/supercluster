@@ -226,6 +226,13 @@ let private checkLedgerAgeSLA (percentiles: (Peer * float * float) list) (target
     let tHi = tf * 1.20
     let p99Max = tf * 2.0
     let mutable ok = true
+    let formatDeviation value =
+        let deviation = (value - tf) / tf * 100.0
+
+        if deviation >= 0.0 then
+            sprintf "+%.1f%%" deviation
+        else
+            sprintf "%.1f%%" deviation
 
     for peer, p75, p99 in percentiles do
         let peerOk = p75 >= tLo && p75 < tHi && p99 <= p99Max
@@ -239,6 +246,18 @@ let private checkLedgerAgeSLA (percentiles: (Peer * float * float) list) (target
             (if peerOk then "PASS" else "FAIL")
 
         if not peerOk then ok <- false
+
+    if not percentiles.IsEmpty then
+        let avgP75 = percentiles |> List.averageBy (fun (_, p75, _) -> p75)
+        let avgP99 = percentiles |> List.averageBy (fun (_, _, p99) -> p99)
+
+        LogInfo
+            "all peers T=%dms avg-p75=%.0f (%s vs target) avg-p99=%.0f (%s vs target)"
+            targetMs
+            avgP75
+            (formatDeviation avgP75)
+            avgP99
+            (formatDeviation avgP99)
 
     ok
 
