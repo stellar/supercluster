@@ -25,7 +25,23 @@ let private searchThresholdMs = 100
 // For the purposes of min block test, use high value to avoid noise from SCP timeouts
 let private timeout = 2000
 
-let private mixedPregenLedgerMultiplier = 15
+let private txSetSizeBufferMultiplier = 2
+
+let private maxTxSetSizeForTarget (kind: string) (targetMs: int) (txRate: int) =
+    let scaled = int64 targetMs * int64 txRate * int64 txSetSizeBufferMultiplier
+
+    let txSetSize = (scaled + 999L) / 1000L
+
+    if txSetSize > int64 System.Int32.MaxValue then
+        failwithf "%s MaxTxSetSize %d exceeds supported int range" kind txSetSize
+
+    max (int txSetSize) 100
+
+let private classicMaxTxSetSizeForTarget (targetMs: int) (classicTxRate: int) =
+    maxTxSetSizeForTarget "Classic" targetMs classicTxRate
+
+let private sorobanMaxTxSetSizeForTarget (targetMs: int) (sorobanTxRate: int) =
+    maxTxSetSizeForTarget "Soroban" targetMs sorobanTxRate
 
 type private MixedPregenSorobanResources =
     { instructions: int64
@@ -46,7 +62,7 @@ let private mixedPregenSorobanResources (mode: LoadGenMode) =
           writeBytes = 800
           readOnlyEntries = 2
           readWriteEntries = 2
-          txSizeBytes = 350
+          txSizeBytes = 1000
           contractEventBytes = 200 }
     | MixedPregenOZTokenTransfer ->
         { instructions = 5000000L
@@ -66,8 +82,8 @@ let private mixedPregenSorobanResources (mode: LoadGenMode) =
           contractEventBytes = 200 }
     | _ -> failwithf "Mode %s is not a MIXED_PREGEN_* mode" (mode.ToString())
 
-let private scaleLedgerLimit (name: string) (value: int) (sorobanTxRate: int) =
-    let scaled = int64 value * int64 sorobanTxRate * int64 mixedPregenLedgerMultiplier
+let private scaleLedgerLimit (name: string) (value: int) (ledgerMaxTxCount: int) =
+    let scaled = int64 value * int64 ledgerMaxTxCount
 
     if scaled > int64 System.Int32.MaxValue then
         failwithf "Scaled %s limit %d exceeds supported int range" name scaled
@@ -78,47 +94,56 @@ let private upgradeMixedPregenSorobanLimits
     (formation: StellarFormation)
     (coreSets: CoreSet list)
     (baseLoadGen: LoadGen)
+    (targetMs: int)
     =
     let sorobanTxRate = baseLoadGen.sorobanTxRate |> Option.defaultValue 0
 
     if sorobanTxRate > 0 then
         let resources = mixedPregenSorobanResources baseLoadGen.mode
         let footprintEntries = resources.readOnlyEntries + resources.readWriteEntries
+        let targetMaxTxSetSize = sorobanMaxTxSetSizeForTarget targetMs sorobanTxRate
 
         LogInfo
-            "Upgrading MIXED_PREGEN_* Soroban limits for %s: soroban TPS=%d, ledger multiplier=%d"
+            "Upgrading MIXED_PREGEN_* Soroban limits for %s: Soroban MaxTxSetSize=%d for T=%dms, soroban TPS=%d, buffer=%dx"
             (baseLoadGen.mode.ToString())
+            targetMaxTxSetSize
+            targetMs
             sorobanTxRate
-            mixedPregenLedgerMultiplier
+            txSetSizeBufferMultiplier
 
+        formation.UpgradeSorobanMaxTxSetSize coreSets targetMaxTxSetSize
         formation.SetupUpgradeContract coreSets.Head
         let peer = formation.NetworkCfg.GetPeer coreSets.Head 0
 
-        let scaledLedgerMaxTxCount = sorobanTxRate * mixedPregenLedgerMultiplier
-
         let ledgerMaxInstructions =
-            max (peer.GetLedgerMaxInstructions()) (resources.instructions * int64 scaledLedgerMaxTxCount)
+            max (peer.GetLedgerMaxInstructions()) (resources.instructions * int64 targetMaxTxSetSize)
 
         let ledgerMaxReadBytes =
-            max (peer.GetLedgerReadBytes()) (scaleLedgerLimit "ledger read bytes" resources.readBytes sorobanTxRate)
+            max
+                (peer.GetLedgerReadBytes())
+                (scaleLedgerLimit "ledger read bytes" resources.readBytes targetMaxTxSetSize)
 
         let ledgerMaxWriteBytes =
-            max (peer.GetLedgerWriteBytes()) (scaleLedgerLimit "ledger write bytes" resources.writeBytes sorobanTxRate)
+            max
+                (peer.GetLedgerWriteBytes())
+                (scaleLedgerLimit "ledger write bytes" resources.writeBytes targetMaxTxSetSize)
 
         let ledgerMaxReadEntries =
-            max (peer.GetLedgerReadEntries()) (scaleLedgerLimit "ledger read entries" footprintEntries sorobanTxRate)
+            max
+                (peer.GetLedgerReadEntries())
+                (scaleLedgerLimit "ledger read entries" footprintEntries targetMaxTxSetSize)
 
         let ledgerMaxWriteEntries =
             max
                 (peer.GetLedgerWriteEntries())
-                (scaleLedgerLimit "ledger write entries" resources.readWriteEntries sorobanTxRate)
+                (scaleLedgerLimit "ledger write entries" resources.readWriteEntries targetMaxTxSetSize)
 
-        let ledgerMaxTxCount = max (peer.GetLedgerMaxTxCount()) scaledLedgerMaxTxCount
+        let ledgerMaxTxCount = max (peer.GetLedgerMaxTxCount()) targetMaxTxSetSize
 
         let ledgerMaxTransactionsSizeBytes =
             max
                 (peer.GetLedgerMaxTransactionsSizeBytes())
-                (scaleLedgerLimit "ledger tx bytes" resources.txSizeBytes sorobanTxRate)
+                (scaleLedgerLimit "ledger tx bytes" resources.txSizeBytes targetMaxTxSetSize)
 
         let txMaxInstructions = max (peer.GetTxMaxInstructions()) resources.instructions
         let txMaxReadBytes = max (peer.GetTxReadBytes()) resources.readBytes
@@ -272,19 +297,19 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
 
             List.map
                 (fun (cs: CoreSet) ->
-                    if isLoadGenNode cs then
-                        let i = if isMixedPregenMode mode then j % partitionCount else j
+                    let pregenerateTxs =
+                        if isLoadGenNode cs then
+                            let i = if isMixedPregenMode mode then j % partitionCount else j
 
-                        j <- j + 1
+                            j <- j + 1
+                            Some(txs, accountsPerNode, accountsPerNode * i)
+                        else
+                            Some(0, 1, 0)
 
-                        { cs with
-                              options =
-                                  { cs.options with
-                                        initialization =
-                                            { cs.options.initialization with
-                                                  pregenerateTxs = Some(txs, accountsPerNode, accountsPerNode * i) } } }
-                    else
-                        cs)
+                    { cs with
+                          options =
+                              { cs.options with
+                                    initialization = { cs.options.initialization with pregenerateTxs = pregenerateTxs } } })
                 allNodes
         | _ -> allNodes
 
@@ -298,15 +323,14 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
             let fixedTxRate = context.txRate
 
             let classicTxRateForLimits =
-                if isMixedPregenMode baseLoadGen.mode then
-                    baseLoadGen.classicTxRate |> Option.defaultValue 0
-                else
-                    fixedTxRate
+                match baseLoadGen.classicTxRate, context.minBlockTimeMixedClassicTxRate with
+                | Some rate, _ -> rate
+                | None, Some rate -> rate
+                | None, None -> fixedTxRate
 
-            // Headroom factor matches MaxTPSTest's `limitMultiplier = 5 * 2`:
-            // 5x for ledgers-per-second at the default 5s close time, 2x for
-            // spike margin. Applied at every (re)boot because pod restart
-            // resets the network to genesis defaults.
+            if classicTxRateForLimits < 0 then
+                failwith "--classic-tx-rate must be non-negative"
+
             let isPaymentOnly = baseLoadGen.mode = GeneratePaymentLoad || baseLoadGen.mode = PayPregenerated
 
             let setupCoreSets (coreSets: CoreSet list) =
@@ -314,11 +338,8 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                 formation.ManualClose coreSets
                 formation.WaitUntilSynced coreSets
                 formation.UpgradeProtocolToLatest coreSets
-                formation.UpgradeMaxTxSetSize coreSets (max (classicTxRateForLimits * mixedPregenLedgerMultiplier) 100)
 
-                if isMixedPregenMode baseLoadGen.mode then
-                    upgradeMixedPregenSorobanLimits formation coreSets baseLoadGen
-                elif not isPaymentOnly then
+                if not (isMixedPregenMode baseLoadGen.mode) && not isPaymentOnly then
                     MaxTPSTest.upgradeSorobanLedgerLimits context formation coreSets fixedTxRate
                     MaxTPSTest.upgradeSorobanTxLimits context formation coreSets
 
@@ -350,6 +371,22 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                 let peer = formation.NetworkCfg.GetPeer allNodes.Head 0
                 peer.WaitForScpLedgerCloseTime targetMs |> ignore
 
+            let upgradeClassicMaxTxSetSize (targetMs: int) =
+                let maxTxSetSize = classicMaxTxSetSizeForTarget targetMs classicTxRateForLimits
+
+                LogInfo
+                    "Upgrading classic MaxTxSetSize to %d for T=%dms, classic TPS=%d, buffer=%dx"
+                    maxTxSetSize
+                    targetMs
+                    classicTxRateForLimits
+                    txSetSizeBufferMultiplier
+
+                formation.UpgradeMaxTxSetSize allNodes maxTxSetSize
+
+            let upgradeSorobanMaxTxSetSize (targetMs: int) =
+                if isMixedPregenMode baseLoadGen.mode then
+                    upgradeMixedPregenSorobanLimits formation allNodes baseLoadGen targetMs
+
             let evaluateAt (targetMs: int) : bool =
                 let loadGen =
                     { baseLoadGen with
@@ -361,6 +398,8 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                           txrate = fixedTxRate }
 
                 applySCPUpgrade targetMs
+                upgradeClassicMaxTxSetSize targetMs
+                upgradeSorobanMaxTxSetSize targetMs
                 formation.clearMetrics allNodes
 
                 // A loadgen failure is not an SLA signal — it usually means the

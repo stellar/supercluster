@@ -349,7 +349,7 @@ let WithProbes (container: V1Container) (probeTimeout: int) : V1Container =
             periodSeconds = System.Nullable<int>(1),
             failureThreshold = System.Nullable<int>(60),
             timeoutSeconds = System.Nullable<int>(probeTimeout),
-            initialDelaySeconds = System.Nullable<int>(60),
+            initialDelaySeconds = System.Nullable<int>(120),
             httpGet = V1HTTPGetAction(path = "/info", port = httpPortStr)
         )
 
@@ -517,8 +517,7 @@ type NetworkCfg with
             let cmdAndArgs = (Array.map ShWord.OfStr (Array.append [| CfgVal.stellarCoreBinPath |] args))
             ShCmd(Array.append cmdAndArgs cfgWords)
 
-        let nonSimulation = self.missionContext.simulateApplyWeight.IsNone
-        let runCoreIf flag args = if flag && nonSimulation then Some(runCore args) else None
+        let runCoreIf flag args = if flag then Some(runCore args) else None
 
         let ignoreError cmd : ShCmd Option =
             match cmd with
