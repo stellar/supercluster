@@ -206,7 +206,6 @@ type Tests(output: ITestOutputHelper) =
 
         let cmds = nCfg.getInitCommands PeerSpecificConfigFile coreSet.options
         let cmdStr = ShAnd(cmds).ToString()
-        let exp = "{ ; }"
         Assert.Equal(exp, cmdStr)
 
     [<Fact>]
