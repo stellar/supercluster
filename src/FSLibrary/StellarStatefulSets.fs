@@ -362,43 +362,50 @@ type StellarFormation with
 
         self.RunLoadgen coreSet loadgen
 
+    // Deploy upgrade-set entries by running a CreateSorobanUpgrade loadgen on node 0
+    // of the first core set, and return the resulting ConfigUpgradeSetKey so the
+    // caller can arm it later. Keeping deploy separate from arm lets a caller create
+    // the upgrade-set entry while the network is quiet: deploying it takes a single
+    // Soroban transaction, and once concurrent load saturates the
+    // (instruction-limited) Soroban lane that transaction can be starved and never
+    // make it into a ledger, leaving the entry unwritten.
+    member self.DeployUpgradeEntries (coreSetList: CoreSet list) (loadGen: LoadGen) : string =
+        let peer = self.NetworkCfg.GetPeer coreSetList.[0] 0
+        let resStr = peer.GenerateLoad loadGen
+
+        let configUpgradeSetKey = Loadgen.Parse(resStr).ConfigUpgradeSetKey
+
+        LogInfo "Loadgen: %s" resStr
+        peer.WaitForLoadGenComplete loadGen
+        configUpgradeSetKey
+
+    // Arm a previously-deployed upgrade-set (identified by configUpgradeSetKey) on each peer
+    // in the given core sets, to take effect at upgradeTime.
+    member self.ArmUpgradeEntries
+        (coreSetList: CoreSet list)
+        (configUpgradeSetKey: string)
+        (upgradeTime: System.DateTime)
+        =
+        self.NetworkCfg.EachPeerInSets
+            (List.toArray coreSetList)
+            (fun peer -> peer.UpgradeNetworkSetting configUpgradeSetKey upgradeTime)
+
     member self.DeployUpgradeEntriesAndArm
         (coreSetList: CoreSet list)
         (loadGen: LoadGen)
         (upgradeTime: System.DateTime)
         =
-        let peer = self.NetworkCfg.GetPeer coreSetList.[0] 0
-        let resStr = peer.GenerateLoad loadGen
-
-        let contractKey = Loadgen.Parse(resStr).ConfigUpgradeSetKey
-
-        LogInfo "Loadgen: %s" resStr
-        peer.WaitForLoadGenComplete loadGen
-
-        // Arm upgrades on each peer in the core set
-        self.NetworkCfg.EachPeerInSets
-            (List.toArray coreSetList)
-            (fun peer -> peer.UpgradeNetworkSetting contractKey upgradeTime)
+        let configUpgradeSetKey = self.DeployUpgradeEntries coreSetList loadGen
+        self.ArmUpgradeEntries coreSetList configUpgradeSetKey upgradeTime
 
     member self.DeployUpgradeEntriesAndArmAfter
         (coreSetList: CoreSet list)
         (loadGen: LoadGen)
         (delay: System.TimeSpan)
         =
-        let peer = self.NetworkCfg.GetPeer coreSetList.[0] 0
-        let resStr = peer.GenerateLoad loadGen
-
-        let contractKey = Loadgen.Parse(resStr).ConfigUpgradeSetKey
-
-        LogInfo "Loadgen: %s" resStr
-        peer.WaitForLoadGenComplete loadGen
-
+        let configUpgradeSetKey = self.DeployUpgradeEntries coreSetList loadGen
         let upgradeTime = System.DateTime.UtcNow.Add(delay)
-
-        // Arm upgrades on each peer in the core set
-        self.NetworkCfg.EachPeerInSets
-            (List.toArray coreSetList)
-            (fun peer -> peer.UpgradeNetworkSetting contractKey upgradeTime)
+        self.ArmUpgradeEntries coreSetList configUpgradeSetKey upgradeTime
 
     member self.clearMetrics(coreSets: CoreSet list) =
         self.NetworkCfg.EachPeerInSets(coreSets |> List.toArray) (fun peer -> peer.ClearMetrics())

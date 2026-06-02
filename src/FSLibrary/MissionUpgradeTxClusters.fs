@@ -65,21 +65,33 @@ let upgradeTxClusters (context: MissionContext) =
             let peer0 = formation.NetworkCfg.GetPeer coreSet 0
             peer0.WaitForMaxDependentTxClusters 8
 
-            // Don't use peer 0. This will let us run soroban_invoke on peer 1
-            // and then do the settings upgrade on peer 0.
+            // Don't use peer 0. This will let us run soroban_invoke on peer 1 and
+            // then arm the settings upgrade on peer 0 while the load is running.
             let peer1 = formation.NetworkCfg.GetPeer coreSet 1
             LogInfo "Loadgen: %s" (peer1.GenerateLoad context.SetupSorobanInvoke)
             peer1.WaitForLoadGenComplete context.SetupSorobanInvoke
-            // 1500 txs at a rate of 15 txs/sec should take ~100 seconds, so we'll have enough time to do both settings upgrades
+
+            // Deploy (but do not yet arm) the entry that lowers
+            // ledgerMaxDependentTxClusters to 4, while the network is still quiet --
+            // i.e. before starting the long-running soroban load. Deploying the
+            // upgrade-set entry takes a single Soroban transaction, and once loadgen
+            // saturates the (instruction-limited) Soroban lane that transaction gets
+            // starved and never makes it into a ledger, so the entry would never be
+            // written and the upgrade could never be armed or applied.
+            let clusterDowngradeKey =
+                formation.DeployUpgradeEntries
+                    [ coreSet ]
+                    { LoadGen.GetDefault() with
+                          mode = CreateSorobanUpgrade
+                          ledgerMaxDependentTxClusters = Some(4)
+                          minSorobanPercentSuccess = Some 100 }
+
+            // 1500 txs at a rate of 15 txs/sec should take ~100 seconds, giving us
+            // time to arm the cluster downgrade while the load is running.
             LogInfo "Loadgen: %s" (peer1.GenerateLoad context.GenerateSorobanInvokeLoad)
 
-            formation.DeployUpgradeEntriesAndArm
-                [ coreSet ]
-                { LoadGen.GetDefault() with
-                      mode = CreateSorobanUpgrade
-                      ledgerMaxDependentTxClusters = Some(4)
-                      minSorobanPercentSuccess = Some 100 }
-                (System.DateTime.UtcNow.AddSeconds(20.0))
+            // Arm the already-deployed downgrade while the load is in flight.
+            formation.ArmUpgradeEntries [ coreSet ] clusterDowngradeKey (System.DateTime.UtcNow.AddSeconds(20.0))
 
             peer0.WaitForMaxDependentTxClusters 4
 
