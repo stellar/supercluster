@@ -1,5 +1,41 @@
 #!/bin/sh
 
+# SLP mixed-load evaluation wrapper.
+#
+# This script runs the MinBlockTimeMixed mission against a stellar-core image
+# using the 2025-06-24 pubnet topology data and the fixed benchmark parameters
+# below. It is intended to answer: "does this image sustain the selected mixed
+# classic/Soroban load at the normal 5s ledger close target?"
+#
+# Benchmark setup:
+# - One mission run is started for each selected Soroban load flag:
+#   --sac, --oz, and/or --soroswap. Passing multiple flags runs them
+#   sequentially, not as one combined Soroban workload.
+# - Every run includes CLASSIC_TX_RATE pre-generated classic payment TPS to
+#   match current network conditions. The flag value supplies only the Soroban
+#   TPS for that run, so total TPS is CLASSIC_TX_RATE + selected Soroban TPS.
+# - The mission uses MinBlockTimeMixed's MIXED_PREGEN_* overlay-only loadgen
+#   mode, simulated pubnet network delay, with NETWORK_SIZE_LIMIT nodes.
+# - The block-time search range is intentionally narrow:
+#   [MIN_BLOCK_TIME_MS, MAX_BLOCK_TIME_MS] = [4900, 5100]. With the mission's
+#   100ms binary-search threshold, this effectively evaluates the 5s target
+#   to match the current network close time.
+# - simulate-apply-duration is derived from SIMULATE_APPLY_BUDGET_MS and the
+#   total TPS so the synthetic apply sleep budget remains roughly constant as
+#   the requested Soroban rate changes.
+#
+# Result interpretation:
+# - A zero exit and a "Minimum sustainable block time: ..." log line means the
+#   run passed the mission SLA for the tested target: on every node,
+#   ledger.age.closed-histogram P75 was within the configured band around T and
+#   P99 was <= 2*T, and the network stayed synced/consistent.
+# - Because this wrapper uses a narrow range around 5s, interpret a successful
+#   result as "the image passed this workload at the normal 5s close time", not
+#   as a precise minimum block-time measurement.
+# - A non-zero exit, "No block time ... satisfied the SLA", loadgen failure, or
+#   sync/consistency failure means the image/setup did not pass this benchmark
+#   configuration.
+
 DATA_ROOT="$(pwd)"
 STELLAR_CORE_IMAGE=
 SAC_TX_RATE=
@@ -23,7 +59,7 @@ AVOID_NODE_LABELS="purpose:ssc"
 CLASSIC_TX_RATE=200
 MIN_BLOCK_TIME_MS=4900
 MAX_BLOCK_TIME_MS=5100
-BLOCK_TIME_MS=$(( (MIN_BLOCK_TIME_MS + MAX_BLOCK_TIME_MS) / 2 ))
+BLOCK_TIME_MS=$(((MIN_BLOCK_TIME_MS + MAX_BLOCK_TIME_MS) / 2))
 NUM_PREGENERATED_TXS=1000000
 GENESIS_TEST_ACCOUNT_COUNT=1000000
 SIMULATE_APPLY_WEIGHT=100
@@ -34,13 +70,34 @@ usage() {
 	cat <<EOF
 Usage: $0 --stellar-core-image IMAGE [--data-root PATH] [--sac RATE] [--oz RATE] [--soroswap RATE]
 
+Runs one MinBlockTimeMixed mission per selected load flag against IMAGE.
+Each run always generates ${CLASSIC_TX_RATE} classic payment TPS plus the
+selected Soroban TPS. For example, "--sac 50" tests ${CLASSIC_TX_RATE} classic
+TPS + 50 SAC Soroban TPS; "--sac 50 --oz 25" runs two separate benchmarks.
+
 Options:
   --stellar-core-image, --image IMAGE   Stellar Core image to evaluate. Required.
   --data-root, --supercluster-root PATH Root containing data/. Defaults to pwd.
   --sac RATE                            Run SAC load with the given Soroban tx rate.
+                                        Can be supplied with other load flags to run benchmarks sequentially.
   --oz RATE                             Run OZ load with the given Soroban tx rate.
+                                        Can be supplied with other load flags to run benchmarks sequentially.
   --soroswap RATE                       Run Soroswap load with the given Soroban tx rate.
+                                        Can be supplied with other load flags to run benchmarks sequentially.
   -h, --help                            Show this help.
+
+Benchmark constants:
+  Classic TPS:        ${CLASSIC_TX_RATE}
+  Target close time:  ${BLOCK_TIME_MS}ms, evaluated via [${MIN_BLOCK_TIME_MS}, ${MAX_BLOCK_TIME_MS}]
+  Network size limit: ${NETWORK_SIZE_LIMIT}
+  Data set:           data/public-network-data-2025-06-24.json
+
+Results:
+  PASS: command exits 0 and logs "Minimum sustainable block time: ...".
+        With this wrapper, treat that as passing the workload at the normal
+        5s target close time.
+  FAIL: command exits non-zero, reports no satisfying block time, or reports
+        loadgen/sync/consistency failures.
 EOF
 }
 
