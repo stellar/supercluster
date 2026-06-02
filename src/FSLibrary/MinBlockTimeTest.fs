@@ -195,40 +195,50 @@ let private withOverlayOnlyMode (formation: StellarFormation) (coreSets: CoreSet
         LogInfo "Disabling overlay-only mode"
         toggleOverlayOnlyMode formation coreSets
 
-let private readLedgerAgePercentiles (peer: Peer) : float * float =
+let private readLedgerAgePercentiles (peer: Peer) : Peer * float * float =
     let h = peer.GetMetrics().LedgerAgeClosedHistogram
-    float h.``75``, float h.``99``
+    peer, float h.``75``, float h.``99``
+
+let private collectLedgerAgePercentiles
+    (formation: StellarFormation)
+    (coreSets: CoreSet list)
+    : (Peer * float * float) list =
+    formation.NetworkCfg.PeersInSets(List.toArray coreSets)
+    |> List.map (fun peer -> async { return readLedgerAgePercentiles peer })
+    |> Async.Parallel
+    |> Async.RunSynchronously
+    |> Array.toList
 
 // Returns true iff every peer's ledger.age.closed-histogram satisfies:
 //   P75 in [0.80*T, 1.20*T)
 //   P99 <= 2*T
 //
+// Evaluate a pre-collected snapshot. Core keeps closing ledgers after loadgen
+// exits, so delaying metric collection skews SLA reads.
+//
 // FIXME: the P75 tolerance is temporarily widened to +/-20% because
 // stellar-core currently has perf regressions that prevent the intended
 // +/-5% band from being achievable. Tighten this back to 0.95/1.05 (or
 // lower) once those regressions are fixed.
-let private checkLedgerAgeSLA (formation: StellarFormation) (coreSets: CoreSet list) (targetMs: int) : bool =
+let private checkLedgerAgeSLA (percentiles: (Peer * float * float) list) (targetMs: int) : bool =
     let tf = float targetMs
     let tLo = tf * 0.80
     let tHi = tf * 1.20
     let p99Max = tf * 2.0
     let mutable ok = true
 
-    formation.NetworkCfg.EachPeerInSets
-        (List.toArray coreSets)
-        (fun peer ->
-            let p75, p99 = readLedgerAgePercentiles peer
-            let peerOk = p75 >= tLo && p75 < tHi && p99 <= p99Max
+    for peer, p75, p99 in percentiles do
+        let peerOk = p75 >= tLo && p75 < tHi && p99 <= p99Max
 
-            LogInfo
-                "peer=%s T=%dms p75=%.0f p99=%.0f -> %s"
-                peer.ShortName.StringName
-                targetMs
-                p75
-                p99
-                (if peerOk then "PASS" else "FAIL")
+        LogInfo
+            "peer=%s T=%dms p75=%.0f p99=%.0f -> %s"
+            peer.ShortName.StringName
+            targetMs
+            p75
+            p99
+            (if peerOk then "PASS" else "FAIL")
 
-            if not peerOk then ok <- false)
+        if not peerOk then ok <- false
 
     ok
 
@@ -416,9 +426,13 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                         formation.RunMultiLoadgen activeLoadGenNodes loadGen
                 with e -> failwithf "Loadgen failed at T=%dms; TPS might be too high (%s)" targetMs e.Message
 
+                // Snapshot SLA metrics before consistency checks; those can take
+                // long enough to skew the ledger age percentiles.
+                let ledgerAgePercentiles = collectLedgerAgePercentiles formation allNodes
+
                 formation.CheckNoErrorsAndPairwiseConsistency()
                 formation.EnsureAllNodesInSync allNodes
-                checkLedgerAgeSLA formation allNodes targetMs
+                checkLedgerAgeSLA ledgerAgePercentiles targetMs
 
             if context.minBlockTimeMs >= context.maxBlockTimeMs then
                 failwithf

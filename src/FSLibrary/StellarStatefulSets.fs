@@ -408,7 +408,11 @@ type StellarFormation with
         self.ArmUpgradeEntries coreSetList configUpgradeSetKey upgradeTime
 
     member self.clearMetrics(coreSets: CoreSet list) =
-        self.NetworkCfg.EachPeerInSets(coreSets |> List.toArray) (fun peer -> peer.ClearMetrics())
+        self.NetworkCfg.PeersInSets(coreSets |> List.toArray)
+        |> List.map (fun peer -> async { peer.ClearMetrics() })
+        |> Async.Parallel
+        |> Async.RunSynchronously
+        |> ignore
 
     // This is similar to RunLoadgen but runs a 1/N fractional portion of a
     // given LoadGen on node 0 of each of N CoreSets.
