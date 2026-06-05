@@ -8,7 +8,9 @@ module MinBlockTimeTest
 // sustain at a fixed TPS, using stellar-core's
 // `ledger.age.closed-histogram` metric as the SLA signal.
 
+open FSharp.Data
 open Logging
+open PollRetry
 open StellarCoreHTTP
 open StellarCorePeer
 open StellarCoreSet
@@ -90,6 +92,53 @@ let private scaleLedgerLimit (name: string) (value: int) (ledgerMaxTxCount: int)
 
     int scaled
 
+type private MixedPregenSorobanLimits =
+    { ledgerMaxInstructions: int64
+      ledgerMaxReadBytes: int
+      ledgerMaxWriteBytes: int
+      ledgerMaxReadEntries: int
+      ledgerMaxWriteEntries: int
+      ledgerMaxTxCount: int
+      ledgerMaxTransactionsSizeBytes: int
+      txMaxInstructions: int64
+      txMaxReadBytes: int
+      txMaxWriteBytes: int
+      txMaxReadEntries: int
+      txMaxWriteEntries: int
+      txMaxFootprintSize: int option
+      txMaxSizeBytes: int
+      txMaxContractEventsSizeBytes: int }
+
+let private waitForMixedPregenSorobanLimits (peer: Peer) (limits: MixedPregenSorobanLimits) =
+    RetryUntilTrue
+        (fun _ ->
+            let info = peer.GetSorobanInfo()
+
+            let txMaxFootprintOk =
+                match limits.txMaxFootprintSize with
+                | Some expected ->
+                    match info.Tx.JsonValue.TryGetProperty("max_footprint_size") with
+                    | Some value -> value.AsInteger() = expected
+                    | None -> false
+                | None -> true
+
+            info.Ledger.MaxInstructions = limits.ledgerMaxInstructions
+            && info.Ledger.MaxReadBytes = limits.ledgerMaxReadBytes
+            && info.Ledger.MaxWriteBytes = limits.ledgerMaxWriteBytes
+            && info.Ledger.MaxReadLedgerEntries = limits.ledgerMaxReadEntries
+            && info.Ledger.MaxWriteLedgerEntries = limits.ledgerMaxWriteEntries
+            && info.Ledger.MaxTxCount = limits.ledgerMaxTxCount
+            && info.Ledger.MaxTxSizeBytes = limits.ledgerMaxTransactionsSizeBytes
+            && info.Tx.MaxInstructions = limits.txMaxInstructions
+            && info.Tx.MaxReadBytes = limits.txMaxReadBytes
+            && info.Tx.MaxWriteBytes = limits.txMaxWriteBytes
+            && info.Tx.MaxReadLedgerEntries = limits.txMaxReadEntries
+            && info.Tx.MaxWriteLedgerEntries = limits.txMaxWriteEntries
+            && txMaxFootprintOk
+            && info.Tx.MaxSizeBytes = limits.txMaxSizeBytes
+            && info.Tx.MaxContractEventsSizeBytes = limits.txMaxContractEventsSizeBytes)
+        (fun _ -> LogInfo "Waiting for MIXED_PREGEN_* Soroban limits on %s" peer.ShortName.StringName)
+
 let private upgradeMixedPregenSorobanLimits
     (formation: StellarFormation)
     (coreSets: CoreSet list)
@@ -115,68 +164,61 @@ let private upgradeMixedPregenSorobanLimits
         formation.SetupUpgradeContract coreSets.Head
         let peer = formation.NetworkCfg.GetPeer coreSets.Head 0
 
-        let ledgerMaxInstructions =
-            max (peer.GetLedgerMaxInstructions()) (resources.instructions * int64 targetMaxTxSetSize)
-
-        let ledgerMaxReadBytes =
-            max
-                (peer.GetLedgerReadBytes())
-                (scaleLedgerLimit "ledger read bytes" resources.readBytes targetMaxTxSetSize)
-
-        let ledgerMaxWriteBytes =
-            max
-                (peer.GetLedgerWriteBytes())
-                (scaleLedgerLimit "ledger write bytes" resources.writeBytes targetMaxTxSetSize)
-
-        let ledgerMaxReadEntries =
-            max
-                (peer.GetLedgerReadEntries())
-                (scaleLedgerLimit "ledger read entries" footprintEntries targetMaxTxSetSize)
-
-        let ledgerMaxWriteEntries =
-            max
-                (peer.GetLedgerWriteEntries())
-                (scaleLedgerLimit "ledger write entries" resources.readWriteEntries targetMaxTxSetSize)
-
-        let ledgerMaxTxCount = max (peer.GetLedgerMaxTxCount()) targetMaxTxSetSize
-
-        let ledgerMaxTransactionsSizeBytes =
-            max
-                (peer.GetLedgerMaxTransactionsSizeBytes())
-                (scaleLedgerLimit "ledger tx bytes" resources.txSizeBytes targetMaxTxSetSize)
-
-        let txMaxInstructions = max (peer.GetTxMaxInstructions()) resources.instructions
-        let txMaxReadBytes = max (peer.GetTxReadBytes()) resources.readBytes
-        let txMaxWriteBytes = max (peer.GetTxWriteBytes()) resources.writeBytes
-        let txMaxReadEntries = max (peer.GetTxReadEntries()) footprintEntries
-        let txMaxWriteEntries = max (peer.GetTxWriteEntries()) resources.readWriteEntries
-        let txMaxFootprintSize = peer.GetTxMaxFootprintSize() |> Option.map (max footprintEntries)
-        let txMaxSizeBytes = max (peer.GetMaxTxSize()) resources.txSizeBytes
-        let txMaxContractEventsSizeBytes = max (peer.GetTxMaxContractEventsSize()) resources.contractEventBytes
+        let limits =
+            { ledgerMaxInstructions =
+                  max (peer.GetLedgerMaxInstructions()) (resources.instructions * int64 targetMaxTxSetSize)
+              ledgerMaxReadBytes =
+                  max
+                      (peer.GetLedgerReadBytes())
+                      (scaleLedgerLimit "ledger read bytes" resources.readBytes targetMaxTxSetSize)
+              ledgerMaxWriteBytes =
+                  max
+                      (peer.GetLedgerWriteBytes())
+                      (scaleLedgerLimit "ledger write bytes" resources.writeBytes targetMaxTxSetSize)
+              ledgerMaxReadEntries =
+                  max
+                      (peer.GetLedgerReadEntries())
+                      (scaleLedgerLimit "ledger read entries" footprintEntries targetMaxTxSetSize)
+              ledgerMaxWriteEntries =
+                  max
+                      (peer.GetLedgerWriteEntries())
+                      (scaleLedgerLimit "ledger write entries" resources.readWriteEntries targetMaxTxSetSize)
+              ledgerMaxTxCount = max (peer.GetLedgerMaxTxCount()) targetMaxTxSetSize
+              ledgerMaxTransactionsSizeBytes =
+                  max
+                      (peer.GetLedgerMaxTransactionsSizeBytes())
+                      (scaleLedgerLimit "ledger tx bytes" resources.txSizeBytes targetMaxTxSetSize)
+              txMaxInstructions = max (peer.GetTxMaxInstructions()) resources.instructions
+              txMaxReadBytes = max (peer.GetTxReadBytes()) resources.readBytes
+              txMaxWriteBytes = max (peer.GetTxWriteBytes()) resources.writeBytes
+              txMaxReadEntries = max (peer.GetTxReadEntries()) footprintEntries
+              txMaxWriteEntries = max (peer.GetTxWriteEntries()) resources.readWriteEntries
+              txMaxFootprintSize = peer.GetTxMaxFootprintSize() |> Option.map (max footprintEntries)
+              txMaxSizeBytes = max (peer.GetMaxTxSize()) resources.txSizeBytes
+              txMaxContractEventsSizeBytes = max (peer.GetTxMaxContractEventsSize()) resources.contractEventBytes }
 
         formation.DeployUpgradeEntriesAndArmAfter
             coreSets
             { LoadGen.GetDefault() with
                   mode = CreateSorobanUpgrade
-                  ledgerMaxInstructions = Some ledgerMaxInstructions
-                  ledgerMaxReadBytes = Some ledgerMaxReadBytes
-                  ledgerMaxWriteBytes = Some ledgerMaxWriteBytes
-                  ledgerMaxReadLedgerEntries = Some ledgerMaxReadEntries
-                  ledgerMaxWriteLedgerEntries = Some ledgerMaxWriteEntries
-                  ledgerMaxTxCount = Some ledgerMaxTxCount
-                  ledgerMaxTransactionsSizeBytes = Some ledgerMaxTransactionsSizeBytes
-                  txMaxInstructions = Some txMaxInstructions
-                  txMaxReadBytes = Some txMaxReadBytes
-                  txMaxWriteBytes = Some txMaxWriteBytes
-                  txMaxReadLedgerEntries = Some txMaxReadEntries
-                  txMaxWriteLedgerEntries = Some txMaxWriteEntries
-                  txMaxFootprintSize = txMaxFootprintSize
-                  txMaxSizeBytes = Some txMaxSizeBytes
-                  txMaxContractEventsSizeBytes = Some txMaxContractEventsSizeBytes }
+                  ledgerMaxInstructions = Some limits.ledgerMaxInstructions
+                  ledgerMaxReadBytes = Some limits.ledgerMaxReadBytes
+                  ledgerMaxWriteBytes = Some limits.ledgerMaxWriteBytes
+                  ledgerMaxReadLedgerEntries = Some limits.ledgerMaxReadEntries
+                  ledgerMaxWriteLedgerEntries = Some limits.ledgerMaxWriteEntries
+                  ledgerMaxTxCount = Some limits.ledgerMaxTxCount
+                  ledgerMaxTransactionsSizeBytes = Some limits.ledgerMaxTransactionsSizeBytes
+                  txMaxInstructions = Some limits.txMaxInstructions
+                  txMaxReadBytes = Some limits.txMaxReadBytes
+                  txMaxWriteBytes = Some limits.txMaxWriteBytes
+                  txMaxReadLedgerEntries = Some limits.txMaxReadEntries
+                  txMaxWriteLedgerEntries = Some limits.txMaxWriteEntries
+                  txMaxFootprintSize = limits.txMaxFootprintSize
+                  txMaxSizeBytes = Some limits.txMaxSizeBytes
+                  txMaxContractEventsSizeBytes = Some limits.txMaxContractEventsSizeBytes }
             (System.TimeSpan.FromSeconds(20.0))
 
-        peer.WaitForLedgerMaxTxCount ledgerMaxTxCount
-        peer.WaitForTxMaxInstructions txMaxInstructions
+        waitForMixedPregenSorobanLimits peer limits
 
 let private toggleOverlayOnlyMode (formation: StellarFormation) (coreSets: CoreSet list) =
     formation.NetworkCfg.EachPeerInSets
@@ -226,6 +268,7 @@ let private checkLedgerAgeSLA (percentiles: (Peer * float * float) list) (target
     let tHi = tf * 1.20
     let p99Max = tf * 2.0
     let mutable ok = true
+
     let formatDeviation value =
         let deviation = (value - tf) / tf * 100.0
 
