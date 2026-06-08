@@ -119,11 +119,7 @@ let mixedImageNetworkSurvey (context: MissionContext) =
               { CoreSetOptions.GetDefault oldImage with
                     nodeCount = oldKeys.Length
                     accelerateTime = false
-                    surveyPhaseDuration = Some surveyPhaseDurationMinutes
-                    // FIXME: Remove these options once the stable (old) image
-                    // in CI supports skipping validator quality checks
-                    skipHighCriticalValidatorChecks = false
-                    quorumSetConfigType = RequireExplicitQset } }
+                    surveyPhaseDuration = Some surveyPhaseDurationMinutes } }
 
     let newCoreSet =
         { name = CoreSetName newName

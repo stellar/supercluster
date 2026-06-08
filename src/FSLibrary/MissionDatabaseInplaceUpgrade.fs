@@ -37,11 +37,7 @@ let databaseInplaceUpgrade (context: MissionContext) =
                   // force-SCP) keeps it from falsely reporting "Synced!" at
                   // ledger 1 when pod scheduling delays let the core nodes get
                   // ahead of it.
-                  initialization = CoreSetInitialization.DefaultNoForceSCP
-                  // FIXME: Remove these options once the stable (old) image in
-                  // CI supports skipping validator quality checks
-                  skipHighCriticalValidatorChecks = false
-                  quorumSetConfigType = RequireExplicitQset }
+                  initialization = CoreSetInitialization.DefaultNoForceSCP }
 
     let fetchFromPeer = Some(CoreSetName("before-upgrade"), 0)
 
