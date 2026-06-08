@@ -308,6 +308,8 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
     let allNodes =
         if context.pubnetData.IsSome then
             FullPubnetCoreSets context true false
+        else if context.pubnetDataDelay.IsSome then
+            FullPubnetCoreSetsDelay context
         else
             StableApproximateTier1CoreSets
                 context.image

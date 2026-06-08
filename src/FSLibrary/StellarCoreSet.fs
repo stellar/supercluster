@@ -192,6 +192,8 @@ type QuorumSetConfiguration =
 type CoreSetOptions =
     { nodeCount: int
       nodeLocs: GeoLoc list option
+      // logically, this should probably live in NetworkCfg, but there are fewer callers to update if we put it here
+      nodeRTTs: Map<byte [], Map<byte [], int>> option
       dbType: DBType
       emptyDirType: EmptyDirType
       syncStartupDelay: int option
@@ -233,6 +235,7 @@ type CoreSetOptions =
     static member GetDefault(image: string) =
         { nodeCount = 3
           nodeLocs = None
+          nodeRTTs = None
           dbType = Sqlite
           emptyDirType = MemoryBackedEmptyDir
           syncStartupDelay = Some(5)

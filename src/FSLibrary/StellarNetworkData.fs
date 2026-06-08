@@ -21,6 +21,10 @@ let TestnetLatestHistoryArchiveState =
     "http://history.stellar.org/prd/core-testnet/core_testnet_001/.well-known/stellar-history.json"
 
 type PubnetNode = JsonProvider<"json-type-samples/sample-network-data.json", SampleIsList=false, ResolutionFolder=cwd>
+
+type PubnetNodeDelay =
+    JsonProvider<"json-type-samples/sample-network-data-delay.json", SampleIsList=false, ResolutionFolder=cwd>
+
 type Tier1PublicKey = JsonProvider<"json-type-samples/sample-keys.json", SampleIsList=false, ResolutionFolder=cwd>
 
 // Adjacency map for peers
@@ -152,6 +156,14 @@ let extractEdges (graph: PubnetNode.Root array) : (string * string) array =
         node.Peers
         |> Array.filter (fun peer -> peer < node.PublicKey) // This filter ensures that we add each edge exactly once.
         |> Array.map (fun peer -> (peer, node.PublicKey))
+
+    graph |> Array.map getEdgesFromNode |> Array.reduce Array.append
+
+let extractEdgesDelay (graph: PubnetNodeDelay.Root array) : (string * string) array =
+    let getEdgesFromNode (node: PubnetNodeDelay.Root) : (string * string) array =
+        node.Peers
+        |> Array.filter (fun peer -> peer.Key < node.PublicKey) // This filter ensures that we add each edge exactly once.
+        |> Array.map (fun peer -> (peer.Key, node.PublicKey))
 
     graph |> Array.map getEdgesFromNode |> Array.reduce Array.append
 
@@ -329,10 +341,434 @@ let addEdges
 
     createAdjacencyMap (Set.toList edgeSet)
 
+let FullPubnetCoreSetsDelay (context: MissionContext) : CoreSet list =
+
+    if context.pubnetDataDelay.IsNone then
+        failwith "pubnet simulation requires --pubnet-data[-delay]=<filename.json>"
+
+    if context.tier1OrgsToAdd > 0 then
+        failwith "Adding tier 1 orgs is not supported in pubnet delay simulation"
+
+    if context.nonTier1NodesToAdd > 0 then
+        failwith "Adding non-tier 1 orgs is not supported in pubnet delay simulation"
+
+    if context.tier1Keys.IsSome then
+        failwith "Specifying tier 1 keys is not supported in pubnet delay simulation"
+
+    if context.fullyConnectTier1 then
+        failwith "Fully connecting tier 1 is not supported in pubnet delay simulation"
+
+    if context.flatNetworkDelay.IsSome then
+        failwith "Specifying flat network delay is not supported in pubnet delay simulation"
+
+    let allPubnetNodes : PubnetNodeDelay.Root array = PubnetNodeDelay.Load context.pubnetDataDelay.Value
+
+    let tier1KeySet : Set<string> =
+        allPubnetNodes
+        |> Array.filter
+            (fun n ->
+                match n.IsTier1 with
+                | Some true ->
+                    if n.RadarHomeDomain.IsNone then
+                        failwithf "Tier 1 node %s does not have a radar home domain" n.PublicKey
+                    else
+                        true
+                | _ -> false)
+        |> Array.map (fun n -> n.PublicKey)
+        |> Set.ofArray
+
+
+    // For each pubkey in the pubnet, we map it to an actual KeyPair (with a private
+    // key) to use in the simulation. It's important to keep these straight! The keys
+    // in the pubnet are _not_ used in the simulation. They are used as node identities
+    // throughout the rest of this function, as strings called "pubkey", but should not
+    // appear in the final CoreSets we're building.
+    let mutable pubnetKeyToSimKey : Map<string, KeyPair> =
+        Array.map (fun (n: PubnetNodeDelay.Root) -> (n.PublicKey, KeyPair.Random())) allPubnetNodes
+        |> Map.ofArray
+
+    // Not every pubkey used in the qsets is represented in the base set of pubnet nodes,
+    // so we lazily extend the set here with new mappings as we discover new pubkeys.
+    let getSimKey (pubkey: string) : KeyPair =
+        match pubnetKeyToSimKey.TryFind pubkey with
+        | Some (k) -> k
+        | None ->
+            let k = KeyPair.Random()
+            pubnetKeyToSimKey <- pubnetKeyToSimKey.Add(pubkey, k)
+            k
+
+    let nodeRTTs : Map<byte [], Map<byte [], int>> =
+        allPubnetNodes
+        |> Array.map
+            (fun n ->
+                let rtts = n.Peers |> Array.map (fun peer -> getSimKey(peer.Key).PublicKey, peer.RttMs)
+                ((getSimKey n.PublicKey).PublicKey, Map.ofArray rtts))
+        |> Map.ofArray
+
+    // It is important that we add edges before trimming using `networkSizeLimit`.
+    // This is because `networkSizeLimit` may be smaller than the degree of some new node
+    // and cause an issue to the scaling algorithm.
+    let adjacencyMap =
+        extractEdgesDelay allPubnetNodes
+        |> Set.ofArray
+        |> Set.toList
+        |> createAdjacencyMap
+        |> match context.maxConnections with
+           | Some maxConnections ->
+               // Prune map to ensure that no node has more than
+               // `maxConnections` connections.
+               pruneAdjacencyMap maxConnections Set.empty
+           | None -> id
+
+    // We partition nodes in the network into those that have home domains and
+    // those that do not. We call the former "org" nodes and the latter "misc" nodes.
+    let orgNodes, miscNodes =
+        allPubnetNodes
+        |> Array.partition (fun (n: PubnetNodeDelay.Root) -> n.RadarHomeDomain.IsSome)
+
+    // We then trim down the set of misc nodes so that they fit within simulation
+    // size limit passed. If we can't even fit the org nodes, we fail here.
+    let miscNodes =
+        (let numOrgNodes = Array.length orgNodes
+         let numMiscNodes = Array.length miscNodes
+
+         let _ =
+             if numOrgNodes > context.networkSizeLimit then
+                 failwith "simulated network size limit too small to fit org nodes"
+
+         let takeMiscNodes = min (context.networkSizeLimit - numOrgNodes) numMiscNodes
+         Array.take takeMiscNodes miscNodes)
+
+    let allPubnetNodes = Array.append orgNodes miscNodes
+    let _ = assert ((Array.length allPubnetNodes) <= context.networkSizeLimit)
+
+    let allPubnetNodeKeys =
+        Array.map (fun (n: PubnetNodeDelay.Root) -> n.PublicKey) allPubnetNodes
+        |> Set.ofArray
+
+    LogInfo "SimulatePubnet will run with %d nodes" (Array.length allPubnetNodes)
+
+    // We then group the org nodes by their home domains. The domain names are drawn
+    // from the HomeDomains of the public network but with periods replaced with dashes,
+    // and lowercased, so for example keybase.io turns into keybase-io.
+    let groupedOrgNodes : (HomeDomainName * PubnetNodeDelay.Root array) array =
+        Array.groupBy
+            (fun (n: PubnetNodeDelay.Root) ->
+                let domain = n.RadarHomeDomain.Value
+                // We turn 'www.stellar.org' into 'stellar'
+                // and 'stellar.blockdaemon.com' into 'blockdaemon'
+                // 'validator.stellar.expert' is a special case
+                // since it would also turn into 'stellar'.
+                // As a slightly hacky fix, we will call it 'exert'.
+                let cleanOrgName =
+                    if domain = "validator.stellar.expert" then "expert"
+                    else if domain.Contains('.') then ((Array.rev (domain.Split('.'))).[1])
+                    else domain
+
+                // Some orgs have both tier1 and non-tier1 nodes in them (such
+                // as Public Node). To avoid marking all of those nodes as tier1
+                // or not tier 1, we split them into separate orgs by appending
+                // "-non-tier1" to the home domain of any non-tier1 node in an
+                // org.
+                let withTierInfo =
+                    if not (Set.contains n.PublicKey tier1KeySet) then
+                        cleanOrgName + "-non-tier1"
+                    else
+                        cleanOrgName
+
+
+                let lowercase = withTierInfo.ToLower()
+                HomeDomainName lowercase)
+            orgNodes
+
+    // Then build a map from accountID to HomeDomainName and index-within-domain
+    // for each org node.
+    let orgNodeHomeDomains : Map<string, (HomeDomainName * int)> =
+        Array.collect
+            (fun (hdn: HomeDomainName, nodes: PubnetNodeDelay.Root array) ->
+                Array.mapi (fun (i: int) (n: PubnetNodeDelay.Root) -> (n.PublicKey, (hdn, i))) nodes)
+            groupedOrgNodes
+        |> Map.ofArray
+
+    // When we don't have real HomeDomainNames (eg. for misc nodes) we use a
+    // node-# name with unique numbers for each node.
+    let mutable anonNodeNums : Map<string, int> = Map.empty
+
+    let anonymousNodeName (pubkey: string) : string =
+        let nodeNum =
+            match anonNodeNums.TryFind pubkey with
+            | Some n -> n
+            | None ->
+                let n = anonNodeNums.Count
+                anonNodeNums <- anonNodeNums.Add(pubkey, n)
+                n
+
+        "node-" + nodeNum.ToString()
+
+    // Return either HomeDomainName name or a node-# name if no home domain
+    // exists
+    let homeDomainNameForKey (pubkey: string) : HomeDomainName =
+        match orgNodeHomeDomains.TryFind pubkey with
+        | Some (s, _) -> s
+        | None -> HomeDomainName(anonymousNodeName pubkey)
+
+    // Return either HomeDomainName-$i name or a node-#-0 name if no home domain
+    // exists
+    let peerShortNameForKey (pubkey: string) : PeerShortName =
+        match orgNodeHomeDomains.TryFind pubkey with
+        | Some (s, i) -> PeerShortName(sprintf "%s-%d" s.StringName i)
+        | None -> PeerShortName((anonymousNodeName pubkey) + "-0")
+
+    let pubKeysToValidators (pubKeys: string array) : Map<PeerShortName, KeyPair> =
+        pubKeys
+        |> Array.map (fun k -> (peerShortNameForKey k, getSimKey k))
+        |> Map.ofArray
+
+    let pubKeysToAutoValidators (pubKeys: string array) : AutoValidator list =
+        pubKeys
+        |> Array.map
+            (fun k ->
+                { name = peerShortNameForKey k
+                  homeDomain = (homeDomainNameForKey k).StringName
+                  keys = getSimKey k })
+        |> Array.toList
+
+
+    // A full-tier-1 qset.
+    // This contains all tier-1 nodes with
+    // * 3f + 1 for cross organization thresholds (top level).
+    // * 2f + 1 for thresholds within each organization.
+    let defaultQuorum : QuorumSetSpec =
+        let tier1Nodes =
+            allPubnetNodes
+            |> Array.filter
+                (fun (n: PubnetNodeDelay.Root) -> (Set.contains n.PublicKey tier1KeySet) && n.RadarHomeDomain.IsSome)
+
+        let tier1NodesGroupedByHomeDomain : (string array) array =
+            tier1Nodes
+            |> Array.groupBy (fun (n: PubnetNodeDelay.Root) -> n.RadarHomeDomain.Value)
+            |> Array.map
+                (fun (_, nodes: PubnetNodeDelay.Root []) ->
+                    Array.map (fun (n: PubnetNodeDelay.Root) -> n.PublicKey) nodes)
+
+        let orgToExplicitQSet (org: string array) : ExplicitQuorumSet =
+            { thresholdPercent = Some(51) // Simple majority
+              validators = pubKeysToValidators org
+              innerQuorumSets = Array.empty }
+
+        let tier1Orgs =
+            tier1Nodes
+            |> Array.map
+                (fun (n: PubnetNodeDelay.Root) ->
+                    { name = (homeDomainNameForKey n.PublicKey).StringName; quality = High })
+            |> Set.ofArray
+
+        let flatQset =
+            { thresholdPercent = Some(100)
+              validators = pubKeysToValidators (Set.fold (fun l se -> se :: l) [] tier1KeySet |> Array.ofList)
+              innerQuorumSets = Array.empty }
+
+        if context.flatQuorum.IsSome && context.flatQuorum.Value then
+            ExplicitQuorum flatQset
+        else if context.enableRelaxedAutoQsetConfig then
+            let validators = Array.map pubKeysToAutoValidators tier1NodesGroupedByHomeDomain |> Array.toList
+            AutoQuorum { homeDomains = Set.toList tier1Orgs; validators = List.fold (@) [] validators }
+        else
+            ExplicitQuorum
+                { thresholdPercent = Some(67) // 3f + 1
+                  validators = Map.empty
+                  innerQuorumSets = Array.map orgToExplicitQSet tier1NodesGroupedByHomeDomain }
+
+    let pubnetOpts =
+        { CoreSetOptions.GetDefault context.image with
+              accelerateTime = false
+              historyNodes = Some([])
+              emptyDirType = DiskBackedEmptyDir
+              // We need to use a synchronized startup delay
+              // for networks as large as this, otherwise it loses
+              // sync before all the nodes are online.
+              syncStartupDelay = Some(30)
+              invariantChecks = AllInvariantsExceptBucketConsistencyChecksAndEvents
+              dumpDatabase = false
+              updateSorobanCosts = context.updateSorobanCosts }
+
+    let makeCoreSetWithExplicitKeys (hdn: HomeDomainName) (options: CoreSetOptions) (keys: KeyPair array) =
+        { name = CoreSetName(hdn.StringName)
+          options = options
+          keys = keys
+          live = true }
+
+    let preferredPeersMapForAllNodes : Map<byte [], byte [] list> =
+        let getSimPubKey (k: string) = (getSimKey k).PublicKey
+
+        allPubnetNodes
+        |> Array.map
+            (fun (n: PubnetNodeDelay.Root) ->
+                let key = getSimPubKey n.PublicKey
+
+                let peers =
+                    Map.find n.PublicKey adjacencyMap
+                    |>
+                    // This filtering is necessary since we intentionally remove some nodes
+                    // using networkSizeLimit.
+                    Set.filter (fun (k: string) -> Set.contains k allPubnetNodeKeys)
+                    |> Set.map getSimPubKey
+                    |> Set.toList
+
+                (key, peers))
+        |> Map.ofArray
+
+    let keysToPreferredPeersMap (keys: KeyPair array) =
+        keys
+        |> Array.map (fun (k: KeyPair) -> (k.PublicKey, Map.find k.PublicKey preferredPeersMapForAllNodes))
+        |> Map.ofArray
+
+    // Given a node, returns a tuple where the first element is a boolean
+    // indicating whether the node is a validator, and the second element is an
+    // appropriate quorum set configuration for that node.
+    let computeQset (n: PubnetNodeDelay.Root) =
+        let tier1 = Set.contains n.PublicKey tier1KeySet
+        let hdn = homeDomainNameForKey n.PublicKey
+
+        match tier1, n.RadarIsValidating, defaultQuorum with
+        | true, _, _ ->
+            // Tier 1 nodes are always validators and have the default tier1
+            // quorum set. This ignores the radar validator designation
+            // because the user may have passed the --tier1-keys flag, or may be
+            // adding additional tier1 nodes with --tier-1-orgs-to-add.
+            true, defaultQuorum
+        | false, Some true, ExplicitQuorum _ ->
+            // Non-tier 1 validators can use the default tier1 quorum set if
+            // it's an ExplicitQuorum.
+            true, defaultQuorum
+        | false, Some true, AutoQuorum q ->
+            // Non-tier 1 validators with auto quorum set configuration must
+            // have a HOME_DOMAIN section for themselves in their quorum set
+            // config. Mark the validator as LOW quality so that it never elects
+            // itself as a leader.
+            let homeDomain = { name = hdn.StringName; quality = Low }
+
+            let validator =
+                { name = peerShortNameForKey n.PublicKey
+                  homeDomain = hdn.StringName
+                  keys = getSimKey n.PublicKey }
+
+            true,
+            AutoQuorum
+                { homeDomains = homeDomain :: q.homeDomains
+                  validators = validator :: q.validators }
+        | false, Some true, _ -> failwith "Unexpected quorum set type"
+        | (_, _, _) ->
+            // All else are non-validators who get the default config.
+            false, defaultQuorum
+
+    // Given a list of quorum sets generated by the `computeQset` function,
+    // merge into a single boolean indicating whether all nodes are validators
+    // and a quorum set for the group of validators.
+    let mergeQSets (qsets: (bool * QuorumSetSpec) list) =
+        // First, check whether all nodes are validators
+        let allValidators = List.forall (fun (v, _) -> v) qsets
+        // Then, check whether all nodes are using automatic quorum sets
+        let allUsingAutomatic =
+            List.forall
+                (fun (_, qset) ->
+                    match qset with
+                    | AutoQuorum _ -> true
+                    | _ -> false)
+                qsets
+
+        match allValidators, allUsingAutomatic with
+        | true, true ->
+            // Merge the quorum sets by combining all home domains and
+            // validators from all quorum sets.
+            let mergedQSet =
+                qsets
+                |> List.map
+                    (fun (_, qset) ->
+                        match qset with
+                        | AutoQuorum q -> q
+                        | _ -> failwith "Unexpected quorum set type")
+                |> List.fold
+                    (fun acc q ->
+                        { acc with
+                              validators = acc.validators @ q.validators
+                              homeDomains = acc.homeDomains @ q.homeDomains })
+                    { homeDomains = []; validators = [] }
+            // Simplify by removing duplicates
+            let simplifedMergedQSet =
+                { mergedQSet with
+                      validators = mergedQSet.validators |> List.distinct
+                      homeDomains = mergedQSet.homeDomains |> List.distinct }
+            // Return the merged quorum set
+            true, AutoQuorum simplifedMergedQSet
+        | true, false ->
+            // If all nodes are validators but not all are using automatic
+            // quorum sets, then all must be using explicit quorum sets. Return
+            // the default set in this case.
+            true, defaultQuorum
+        | false, _ ->
+            // Not all nodes are validators. Mark as non-validators and return
+            // the default quorum set.
+            false, defaultQuorum
+
+    let miscCoreSets : CoreSet array =
+        Array.mapi
+            (fun (_: int) (n: PubnetNodeDelay.Root) ->
+                let hdn = homeDomainNameForKey n.PublicKey
+                let keys = [| getSimKey n.PublicKey |]
+                let tier1 = Set.contains n.PublicKey tier1KeySet
+
+                let validate, qset = computeQset n
+
+                let coreSetOpts =
+                    { pubnetOpts with
+                          nodeCount = 1
+                          quorumSet = qset
+                          tier1 = Some tier1
+                          validate = validate
+                          homeDomain = if validate then Some hdn.StringName else None
+                          nodeLocs = None
+                          nodeRTTs = Some nodeRTTs
+                          preferredPeersMap = Some(keysToPreferredPeersMap keys) }
+
+                let shouldWaitForConsensus = true
+                let coreSetOpts = coreSetOpts.WithWaitForConsensus shouldWaitForConsensus
+                makeCoreSetWithExplicitKeys hdn coreSetOpts keys)
+            miscNodes
+
+    let orgCoreSets : CoreSet array =
+        Array.map
+            (fun (hdn: HomeDomainName, nodes: PubnetNodeDelay.Root array) ->
+                assert (nodes.Length <> 0)
+                let nodeList = List.ofArray nodes
+                let keys = Array.map (fun (n: PubnetNodeDelay.Root) -> getSimKey n.PublicKey) nodes
+                let tier1 = Set.contains nodes.[0].PublicKey tier1KeySet
+
+                let validate, qset = mergeQSets (List.map computeQset nodeList)
+
+                let coreSetOpts =
+                    { pubnetOpts with
+                          nodeCount = Array.length nodes
+                          quorumSet = qset
+                          tier1 = Some tier1
+                          validate = validate
+                          homeDomain = if validate then Some hdn.StringName else None
+                          nodeLocs = None
+                          nodeRTTs = Some nodeRTTs
+                          preferredPeersMap = Some(keysToPreferredPeersMap keys) }
+
+                let shouldWaitForConsensus = true
+                let coreSetOpts = coreSetOpts.WithWaitForConsensus shouldWaitForConsensus
+                makeCoreSetWithExplicitKeys hdn coreSetOpts keys)
+            groupedOrgNodes
+
+    Array.append miscCoreSets orgCoreSets |> List.ofArray
+
+
 let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMinConnectionCount: bool) : CoreSet list =
 
     if context.pubnetData.IsNone then
-        failwith "pubnet simulation requires --pubnet-data=<filename.json>"
+        failwith "pubnet simulation requires --pubnet-data[-delay]=<filename.json>"
 
     let allPubnetNodes : PubnetNode.Root array = PubnetNode.Load(context.pubnetData.Value)
 
