@@ -69,6 +69,7 @@
         "peers": [
             {"key": "GBN5UP5XG2NKBGSBXGV632XFUQYYU62XYWR47GH7KQZUQDTVT7ROGK5C", "rttMs": 9}
         ],
+        "radar_homeDomain": "horizon",
         "generatesLoad": true,
         "publicKey": "GATTOMMXJ4TITUGIP4MQ635Z6FJYK57WOWGDQ7AM6DUWYBM5TUJ2BLFV",
         "version": "v15.0.0"

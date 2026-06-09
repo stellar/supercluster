@@ -377,6 +377,27 @@ let FullPubnetCoreSetsDelay (context: MissionContext) : CoreSet list =
         |> Array.map (fun n -> n.PublicKey)
         |> Set.ofArray
 
+    let loadGeneratorKeySet : Set<string> =
+        allPubnetNodes
+        |> Array.filter
+            (fun n ->
+                match n.GeneratesLoad with
+                | Some true ->
+                    if n.RadarHomeDomain.IsNone then
+                        failwithf "Load generating node %s does not have a radar home domain" n.PublicKey
+                    else if n.IsTier1 = Some true then
+                        failwithf "Node %s cannot be both a load generator and a tier 1 node" n.PublicKey
+                    else
+                        true
+                | _ -> false)
+        |> Array.map (fun n -> n.PublicKey)
+        |> Set.ofArray
+
+    if tier1KeySet.Count = 0 then
+        failwith "At least one tier 1 node is required for pubnet delay simulation"
+
+    if loadGeneratorKeySet.Count = 0 then
+        failwith "At least one load generating node is required for pubnet delay simulation"
 
     // For each pubkey in the pubnet, we map it to an actual KeyPair (with a private
     // key) to use in the simulation. It's important to keep these straight! The keys
@@ -485,7 +506,9 @@ let FullPubnetCoreSetsDelay (context: MissionContext) : CoreSet list =
                 // "-non-tier1" to the home domain of any non-tier1 node in an
                 // org.
                 let withTierInfo =
-                    if not (Set.contains n.PublicKey tier1KeySet) then
+                    if Set.contains n.PublicKey loadGeneratorKeySet then
+                        cleanOrgName + "-load-generator"
+                    else if not (Set.contains n.PublicKey tier1KeySet) then
                         cleanOrgName + "-non-tier1"
                     else
                         cleanOrgName
@@ -757,6 +780,7 @@ let FullPubnetCoreSetsDelay (context: MissionContext) : CoreSet list =
                 let nodeList = List.ofArray nodes
                 let keys = Array.map (fun (n: PubnetNodeDelay.Root) -> getSimKey n.PublicKey) nodes
                 let tier1 = Set.contains nodes.[0].PublicKey tier1KeySet
+                let loadgen = Set.contains nodes.[0].PublicKey loadGeneratorKeySet
 
                 let validate, qset = mergeQSets (List.map computeQset nodeList)
 
@@ -765,6 +789,7 @@ let FullPubnetCoreSetsDelay (context: MissionContext) : CoreSet list =
                           nodeCount = Array.length nodes
                           quorumSet = qset
                           tier1 = Some tier1
+                          generatesLoad = Some loadgen
                           validate = validate
                           homeDomain = if validate then Some hdn.StringName else None
                           nodeLocs = None
