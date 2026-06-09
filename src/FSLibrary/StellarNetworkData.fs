@@ -405,6 +405,20 @@ let FullPubnetCoreSetsDelay (context: MissionContext) : CoreSet list =
                 ((getSimKey n.PublicKey).PublicKey, Map.ofArray rtts))
         |> Map.ofArray
 
+    // Check that every edge has its reverse appear in nodeRTTs. Note that we do allow the
+    // RTT to differ between sides.
+    for stringKey, peers in allPubnetNodes |> Seq.map (fun n -> (n.PublicKey, n.Peers)) do
+        let key = (getSimKey stringKey).PublicKey
+
+        for stringKey2 in peers |> Seq.map (fun p -> p.Key) do
+            let key2 = (getSimKey stringKey2).PublicKey
+
+            if not (nodeRTTs.ContainsKey key2) then
+                failwithf "Node %A has peer %A which is not present in the pubnet data" stringKey stringKey2
+
+            if not (nodeRTTs.[key2].ContainsKey key) then
+                failwithf "Node %A has peer %A, but the RTT is not reciprocated in the pubnet data" stringKey stringKey2
+
     // It is important that we add edges before trimming using `networkSizeLimit`.
     // This is because `networkSizeLimit` may be smaller than the degree of some new node
     // and cause an issue to the scaling algorithm.
