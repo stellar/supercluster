@@ -68,6 +68,7 @@ let ctx : MissionContext =
       tolerateNodeTaints = []
       apiRateLimit = 10
       pubnetData = None
+      pubnetDataDelay = None
       flatQuorum = None
       tier1Keys = None
       maxConnections = None

@@ -308,6 +308,8 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
     let allNodes =
         if context.pubnetData.IsSome then
             FullPubnetCoreSets context true false
+        else if context.pubnetDataDelay.IsSome then
+            FullPubnetCoreSetsDelay context
         else
             StableApproximateTier1CoreSets
                 context.image
@@ -333,8 +335,13 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                       None }
 
     let tier1 = List.filter (fun (cs: CoreSet) -> cs.options.tier1 = Some true) allNodes
+    let loadGenNodes = List.filter (fun (cs: CoreSet) -> cs.options.generatesLoad = Some true) allNodes
 
-    let loadGenNodes = if List.length allNodes > smallNetworkSize then tier1 else allNodes
+    let loadGenNodes =
+        if List.isEmpty loadGenNodes then
+            if List.length allNodes > smallNetworkSize then tier1 else allNodes
+        else
+            loadGenNodes
 
     let isLoadGenNode cs = List.exists (fun (cs': CoreSet) -> cs' = cs) loadGenNodes
 

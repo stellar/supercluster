@@ -302,6 +302,212 @@ let getNetworkDelayCommands (loc1: GeoLoc) (locsAndNames: (GeoLoc * PeerDnsName)
 
     ShSeq seq
 
+// specify the owd, not the rtt
+let getNetworkDelayCommandsDelays (delaysAndNames: (int * PeerDnsName) array) : ShCmd =
+    let setDeviceTxQlen : ShCmd =
+        // the txqlen on eth0 is 0-sized on container virtual devs; this makes
+        // subsequent qdiscs attached to it drop packets far more than they
+        // should.  See https://bugzilla.redhat.com/show_bug.cgi?id=1152231
+        ShCmd.OfStrs [| "ip"
+                        "link"
+                        "set"
+                        "eth0"
+                        "qlen"
+                        "1000" |]
+
+    let clearRootQdisc : ShCmd =
+        // The root qdisc may or may not exist; clearing it might or might not
+        // fail, so we absorb failure here with an OR-true.
+        let c =
+            ShCmd.OfStrs [| "tc"
+                            "qdisc"
+                            "del"
+                            "dev"
+                            "eth0"
+                            "root" |]
+
+        let t = ShCmd.OfStr "true"
+        ShCmd.ShOr [| c; t |]
+
+    let addRootQdisc : ShCmd =
+        ShCmd.OfStrs [| "tc"
+                        "qdisc"
+                        "add"
+                        "dev"
+                        "eth0"
+                        "root"
+                        "handle"
+                        "1:0"
+                        "htb" |]
+
+    // Queue sizing parameters
+    let netemLimit = 4096
+    let fqFlowLimit = 4096
+    let fqLimit = 32768
+    let quantum = 1514
+
+    let addClass (n: int) : ShCmd =
+        ShCmd.OfStrs [| "tc"
+                        "class"
+                        "add"
+                        "dev"
+                        "eth0"
+                        "parent"
+                        "1:0"
+                        "classid"
+                        sprintf "1:%d" n
+                        "htb"
+                        "rate"
+                        "10gbit"
+                        "ceil"
+                        "10gbit" |]
+
+    let peerVar (n: int) : string = sprintf "PEER%d" n
+
+    let resolveName (n: int) (dns: PeerDnsName) : ShCmd =
+        let tmpFile = "tmp.txt"
+        let varName = peerVar n
+        let pv : ShPiece = ShVar(ShName varName)
+        let z : ShPiece = ShBare "z"
+
+        let test : ShCmd =
+            ShCmd [| ShWord.OfStr "test"
+                     ShPieces [| z; pv |]
+                     ShWord.OfStr "="
+                     ShPieces [| z |] |]
+
+        let probe : ShCmd =
+            ShCmd.OfStrs [| "host"
+                            "-t"
+                            "A"
+                            dns.StringName |]
+
+        let probe : ShCmd = probe.StdOutTo tmpFile
+
+        let probe : ShCmd =
+            probe.OrElse [| "echo"
+                            "temporary failure" |]
+
+        let grep : ShCmd =
+            ShCmd.OfStrs [| "grep"
+                            "address"
+                            tmpFile |]
+
+        let sed : ShCmd =
+            ShCmd.OfStrs [| "sed"
+                            "-i"
+                            "-e"
+                            "s/.*address//"
+                            tmpFile |]
+
+        let defSub : ShCmd = ShCmd.DefVarSub varName [| "cat"; tmpFile |]
+        let then_ = ShSeq [| sed; defSub |]
+        let elif_ = [||]
+        let else_ = Some(ShCmd.OfStrs [| "sleep"; "1" |])
+        let defIf : ShCmd = ShIf(grep, then_, elif_, else_)
+        let body : ShCmd = ShSeq [| probe; defIf |]
+        let loop : ShCmd = ShWhile(test, body)
+
+        ShSeq [| ShCmd.OfStrs [| "rm"; "-f"; tmpFile |]
+                 loop |]
+
+    let peerVarRef (n: int) : string = "${" + (peerVar n) + "}"
+
+    let addFilter (n: int) : ShCmd =
+        ShCmd.OfStrs [| "tc"
+                        "filter"
+                        "add"
+                        "dev"
+                        "eth0"
+                        "parent"
+                        "1:0"
+                        "protocol"
+                        "ip"
+                        "prio"
+                        "1"
+                        "u32"
+                        "match"
+                        "ip"
+                        "dst"
+                        peerVarRef n
+                        "classid"
+                        sprintf "1:%d" n |]
+
+    // Helper to compute a unique handle major for the Nth netem qdisc
+    // Handles must be unique and not conflict with root (1:0)
+    // We start at 100 to leave room for system qdiscs
+    let netemHandle (n: int) : int = 100 + n
+
+    // Creates a netem (network emulation) qdisc for artificial delay
+    // This preserves the geographic latency simulation while adding a handle
+    // so we can attach an fq leaf underneath for better pacing
+    let addNetemQdisc (n: int) (msDelay: int) : ShCmd =
+        ShCmd.OfStrs [| "tc"
+                        "qdisc"
+                        "replace"
+                        "dev"
+                        "eth0"
+                        "parent"
+                        sprintf "1:%d" n // Parent is HTB class 1:N
+                        "handle"
+                        sprintf "%d:" (netemHandle n) // Unique handle for this netem
+                        "netem"
+                        "delay"
+                        sprintf "%dms" msDelay
+                        "limit"
+                        string netemLimit |]
+
+    // Adds Fair Queue (fq) schedulerg
+    let addFqLeaf (n: int) : ShCmd =
+        ShCmd.OfStrs [| "tc"
+                        "qdisc"
+                        "replace"
+                        "dev"
+                        "eth0"
+                        "parent"
+                        sprintf "%d:" (netemHandle n) // Parent is the netem qdisc
+                        "fq"
+                        "flow_limit"
+                        string fqFlowLimit
+                        "limit"
+                        string fqLimit
+                        "quantum"
+                        string quantum |]
+
+    let perPeerResolveCmds : ShCmd array =
+        Array.mapi
+            (fun (i: int) (_, peer: PeerDnsName) ->
+                let classNo = 1 + i
+                [| resolveName classNo peer |])
+            delaysAndNames
+        |> Array.concat
+
+    let perPeerCmds : ShCmd array =
+        Array.mapi
+            (fun (i: int) (msDelay: int, peer: PeerDnsName) ->
+                let classNo = 1 + i
+
+                [| addClass classNo
+                   addFilter classNo
+                   addNetemQdisc classNo msDelay
+                   addFqLeaf classNo |])
+            delaysAndNames
+        |> Array.concat
+
+    let seq =
+        Array.concat [| [| setDeviceTxQlen |]
+                        perPeerResolveCmds
+                        [| clearRootQdisc; addRootQdisc |]
+                        perPeerCmds
+                        [| ShCmd.OfStrs [| "tc"; "qdisc" |]
+                           // End in an infinite sleep-loop, so k8s don't
+                           // exit-restart the container endlessly.
+                           ShCmd.While [| "true" |] [|
+                               "sleep"
+                               "1000"
+                           |] |] |]
+
+    ShSeq seq
 
 type NetworkCfg with
 
@@ -315,31 +521,75 @@ type NetworkCfg with
             id
             (self.MapAllPeers(fun cs i -> if cs.keys.[i].PublicKey = k then self.LocAndDnsName cs i else None))
 
+    member self.KeyAndDnsName (cs: CoreSet) (i: int) : byte [] * PeerDnsName =
+        cs.keys.[i].PublicKey, self.PeerDnsName cs i
+
+    // TODO: this can probably be cleaned up
+    member self.KeyAndDnsNameForKey(k: byte []) : byte [] * PeerDnsName =
+        match Array.tryPick
+                  id
+                  (self.MapAllPeers
+                      (fun cs i -> if cs.keys.[i].PublicKey = k then Some(self.KeyAndDnsName cs i) else None)) with
+        | Some x -> x
+        | None -> failwith "Key not found in config"
+
     member self.NeedNetworkDelayScript : bool =
         match self.missionContext.installNetworkDelay with
         | Some true ->
             let atLeastOneLocation = Map.exists (fun _ cs -> cs.options.nodeLocs.IsSome) self.coreSets
+            let haveRtts = Map.forall (fun _ cs -> cs.options.nodeRTTs.IsSome) self.coreSets
 
-            if atLeastOneLocation then
-                true
-            else
-                // If there's _some_ geo info, we can extrapolate.
-                // However, if there's _no_ geo info, we can't really do anything.
-                // Don't install network delay if your topology has no geo info.
-                failwith "Network delays can't be installed if no geo info provided."
+            match self.missionContext.pubnetDataDelay with
+            | Some _ ->
+                if haveRtts then
+                    true
+                else
+                    failwith "Mission context requires pubnetDataDelay but not all core sets have nodeRTTs"
+            | None ->
+                if atLeastOneLocation then
+                    true
+                else
+                    // If there's _some_ geo info, we can extrapolate.
+                    // However, if there's _no_ geo info, we can't really do anything.
+                    // Don't install network delay if your topology has no geo info.
+                    failwith "Network delays can't be installed if no geo info provided."
         | _ -> false
 
     member self.NetworkDelayScript (cs: CoreSet) (i: int) : ShCmd =
-        match cs.options.nodeLocs with
-        | None -> ShCmd.True()
-        | Some (locs) ->
-            let selfLoc = locs.[i]
-
-            let otherLocsAndNames : (GeoLoc * PeerDnsName) array =
+        match self.missionContext.pubnetDataDelay with
+        | Some _ ->
+            let otherKeysAndNames : (byte [] * PeerDnsName) array =
                 match cs.options.preferredPeersMap with
                 | Some (otherMap) ->
                     let otherKeys = Array.ofList otherMap.[cs.keys.[i].PublicKey]
-                    Array.choose self.LocAndDnsNameForKey otherKeys
-                | None -> Array.choose id (self.MapAllPeers self.LocAndDnsName)
+                    Array.map self.KeyAndDnsNameForKey otherKeys
+                | None -> self.MapAllPeers self.KeyAndDnsName
 
-            getNetworkDelayCommands selfLoc otherLocsAndNames self.missionContext.flatNetworkDelay
+            let rtts = cs.options.nodeRTTs.Value
+            // use .[] since fantomas 4 doesn't support just using []
+            let selfRtt = rtts.[cs.keys.[i].PublicKey]
+
+            let otherDelaysAndNames : (int * PeerDnsName) array =
+                Array.map
+                    (fun (key, name) ->
+                        // Set one-way-delay to ceil(rtt / 2)
+                        // We intentionally use throwing lookup since the data file should have symmetric edges
+                        let owd = (selfRtt.[key] + 1) / 2
+                        owd, name)
+                    otherKeysAndNames
+
+            getNetworkDelayCommandsDelays otherDelaysAndNames
+        | None ->
+            match cs.options.nodeLocs with
+            | None -> ShCmd.True()
+            | Some (locs) ->
+                let selfLoc = locs.[i]
+
+                let otherLocsAndNames : (GeoLoc * PeerDnsName) array =
+                    match cs.options.preferredPeersMap with
+                    | Some (otherMap) ->
+                        let otherKeys = Array.ofList otherMap.[cs.keys.[i].PublicKey]
+                        Array.choose self.LocAndDnsNameForKey otherKeys
+                    | None -> Array.choose id (self.MapAllPeers self.LocAndDnsName)
+
+                getNetworkDelayCommands selfLoc otherLocsAndNames self.missionContext.flatNetworkDelay

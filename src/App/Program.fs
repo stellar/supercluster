@@ -71,6 +71,7 @@ type MissionOptions
         tolerateNodeTaints: seq<string>,
         apiRateLimit: int,
         pubnetData: string option,
+        pubnetDataDelay: string option,
         flatQuorum: bool option,
         tier1Keys: string option,
         maxConnections: int option,
@@ -297,6 +298,11 @@ type MissionOptions
 
     [<Option("pubnet-data", HelpText = "JSON file containing pubnet connectivity graph data", Required = false)>]
     member self.PubnetData = pubnetData
+
+    [<Option("pubnet-data-delay",
+             HelpText = "JSON file containing pubnet connectivity graph data and explicit delays",
+             Required = false)>]
+    member self.PubnetDataDelay = pubnetDataDelay
 
     [<Option("flat-quorum", HelpText = "Use flat Tier1 quorum", Required = false)>]
     member self.FlatQuorum = flatQuorum
@@ -689,6 +695,9 @@ let main argv =
             0
 
         | :? MissionOptions as mission ->
+            if mission.PubnetData.IsSome && mission.PubnetDataDelay.IsSome then
+                failwith "Cannot specify both --pubnet-data and --pubnet-data-delay"
+
             let _ = logToConsoleAndFile (sprintf "%s/stellar-supercluster.log" mission.Destination)
 
             let ll =
@@ -789,6 +798,7 @@ let main argv =
                                tolerateNodeTaints = List.map splitLabel (List.ofSeq mission.TolerateNodeTaints)
                                apiRateLimit = mission.ApiRateLimit
                                pubnetData = mission.PubnetData
+                               pubnetDataDelay = mission.PubnetDataDelay
                                flatQuorum = mission.FlatQuorum
                                tier1Keys = mission.Tier1Keys
                                maxConnections = mission.MaxConnections
