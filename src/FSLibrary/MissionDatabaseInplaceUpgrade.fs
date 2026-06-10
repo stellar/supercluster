@@ -32,6 +32,12 @@ let databaseInplaceUpgrade (context: MissionContext) =
             { CoreSetOptions.GetDefault oldImage with
                   nodeCount = 1
                   quorumSet = quorumSet
+                  // This core set is not in the quorum set, so it is not needed to
+                  // bootstrap the network. Joining via consensus (rather than
+                  // force-SCP) keeps it from falsely reporting "Synced!" at
+                  // ledger 1 when pod scheduling delays let the core nodes get
+                  // ahead of it.
+                  initialization = CoreSetInitialization.DefaultNoForceSCP
                   // FIXME: Remove these options once the stable (old) image in
                   // CI supports skipping validator quality checks
                   skipHighCriticalValidatorChecks = false
