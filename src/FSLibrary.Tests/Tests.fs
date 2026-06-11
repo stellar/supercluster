@@ -143,7 +143,12 @@ let ctx : MissionContext =
       minBlockTimeMixedMode = "mixed_pregen_sac_payment"
       minBlockTimeMixedClassicTxRate = None
       minBlockTimeMixedSorobanTxRate = None
-      runForMinBlockTime = false }
+      runForMinBlockTime = false
+      triggerTimerFlagPct = 100
+      uniformDrift = []
+      bimodalDrift = []
+      driftPct = 0
+      enableTriggerTimer = true }
 
 let netdata = __SOURCE_DIRECTORY__ + "/../../../data/public-network-data-2024-08-01.json"
 let pubkeys = __SOURCE_DIRECTORY__ + "/../../../data/tier1keys.json"

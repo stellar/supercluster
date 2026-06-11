@@ -138,4 +138,9 @@ type MissionContext =
       minBlockTimeMixedMode: string
       minBlockTimeMixedClassicTxRate: int option
       minBlockTimeMixedSorobanTxRate: int option
-      runForMinBlockTime: bool }
+      runForMinBlockTime: bool
+      triggerTimerFlagPct: int
+      uniformDrift: int list
+      bimodalDrift: int list
+      driftPct: int
+      enableTriggerTimer: bool }
