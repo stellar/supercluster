@@ -119,7 +119,6 @@ type MissionOptions
         asanOptions: string option,
         catchupSkipKnownResultsForTesting: bool option,
         checkEventsAreConsistentWithEntryDiffs: bool option,
-        enableRelaxedAutoQsetConfig: bool,
         jobMonitorExternalHost: string option,
         txBatchMaxSize: int option,
         runForMaxTps: string option,
@@ -527,12 +526,6 @@ type MissionOptions
              Required = false)>]
     member self.CheckEventsAreConsistentWithEntryDiffs = checkEventsAreConsistentWithEntryDiffs
 
-    [<Option("enable-relaxed-auto-qset-config",
-             HelpText = "Enables the use of automatic quorum set configuration on missions that may create core sets that do not satisfy the redundancy and history requirements placed on pubnet validators.  Requires a stellar-core version that supports the SKIP_HIGH_CRITICAL_VALIDATOR_CHECKS_FOR_TESTING config option.",
-             Required = false,
-             Default = false)>]
-    member self.EnableRelaxedAutoQsetConfig = enableRelaxedAutoQsetConfig
-
     [<Option("job-monitor-external-host",
              HelpText = "Cluster-external hostname to connect to for access to job monitor",
              Required = false)>]
@@ -847,7 +840,6 @@ let main argv =
                                updateSorobanCosts = None
                                genesisTestAccountCount = mission.GenesisTestAccountCount
                                asanOptions = mission.asanOptions
-                               enableRelaxedAutoQsetConfig = mission.EnableRelaxedAutoQsetConfig
                                jobMonitorExternalHost = mission.JobMonitorExternalHost
                                txBatchMaxSize = mission.TxBatchMaxSize
                                runForMaxTps = mission.RunForMaxTps
