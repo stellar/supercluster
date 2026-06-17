@@ -822,7 +822,7 @@ type NetworkCfg with
     // hook the per-Pod Services and Ingress up to). Getting all this to work
     // requires that you install the DNS server component on your k8s cluster.
     member self.ToService() : V1Service =
-        let serviceSpec = V1ServiceSpec(clusterIP = "None", selector = CfgVal.labels)
+        let serviceSpec = V1ServiceSpec(clusterIP = "None", selector = CfgVal.labels, publishNotReadyAddresses = true)
         V1Service(spec = serviceSpec, metadata = self.NamespacedMeta self.ServiceName)
 
 
