@@ -124,6 +124,7 @@ let ctx : MissionContext =
       updateSorobanCosts = None
       genesisTestAccountCount = None
       asanOptions = None
+      coreEnv = []
       enableRelaxedAutoQsetConfig = false
       jobMonitorExternalHost = None
       txBatchMaxSize = None

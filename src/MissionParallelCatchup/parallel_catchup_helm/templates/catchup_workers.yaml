@@ -91,6 +91,10 @@ spec:
               fieldPath: metadata.name
         - name: ASAN_OPTIONS
           value: {{ .Values.worker.asanOptions | quote }}
+        {{- range .Values.worker.coreEnv }}
+        - name: {{ .name }}
+          value: {{ .value | quote }}
+        {{- end }}
         envFrom:
         - configMapRef:
             name: {{ .Release.Name }}-worker-config

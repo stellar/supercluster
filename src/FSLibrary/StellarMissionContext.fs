@@ -108,8 +108,8 @@ type MissionContext =
       pubnetParallelCatchupLedgersPerJob: int
       pubnetParallelCatchupNumWorkers: int
       genesisTestAccountCount: int option
-
       asanOptions: string option
+      coreEnv: (string * string) list
 
       // Tail logging can cause the pubnet simulation missions like SorobanLoadGeneration
       // and SimulatePubnet to fail on the heartbeat handler due to what looks like a

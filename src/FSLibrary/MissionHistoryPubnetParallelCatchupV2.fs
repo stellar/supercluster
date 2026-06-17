@@ -110,6 +110,9 @@ let tolerateTaintToHelmIndexed (index: int) ((key: string), (effect: string opti
 let serviceAccountAnnotationsToHelmIndexed (index: int) (key: string, value: string) =
     sprintf "service_account.annotations[%d].key=%s,service_account.annotations[%d].value=%s" index key index value
 
+let coreEnvToHelmIndexed (index: int) (name: string, value: string) =
+    sprintf "worker.coreEnv[%d].name=%s,worker.coreEnv[%d].value=\"%s\"" index name index value
+
 let installProject (context: MissionContext) =
     LogInfo "Installing Helm chart with release name: %s" helmReleaseName
 
@@ -201,6 +204,14 @@ let installProject (context: MissionContext) =
     match context.asanOptions with
     | Some asanOpts -> setOptions.Add(sprintf "worker.asanOptions=%s" asanOpts)
     | None -> ()
+
+    if not (List.isEmpty context.coreEnv) then
+        let coreEnvHelm =
+            context.coreEnv
+            |> List.mapi coreEnvToHelmIndexed
+            |> String.concat ","
+
+        setOptions.Add(coreEnvHelm)
 
     // Convert labels and taints to Helm array format
     if not (List.isEmpty context.requireNodeLabelsPcV2) then

@@ -116,6 +116,7 @@ type MissionOptions
         numPregeneratedTxs: int option,
         genesisTestAccountCount: int option,
         asanOptions: string option,
+        coreEnv: string option,
         catchupSkipKnownResultsForTesting: bool option,
         checkEventsAreConsistentWithEntryDiffs: bool option,
         enableRelaxedAutoQsetConfig: bool,
@@ -516,6 +517,9 @@ type MissionOptions
     [<Option("asan-options", HelpText = "Value for ASAN_OPTIONS environment variable", Required = false)>]
     member self.asanOptions = asanOptions
 
+    [<Option("core-env", HelpText = "Comma-separated environment variables to set on stellar-core containers, formatted as NAME=VALUE,NAME2=VALUE2.", Required = false)>]
+    member self.CoreEnv = coreEnv
+
     [<Option("catchup-skip-known-results-for-testing",
              HelpText = "when this flag is provided, pubnet parallel catchup workers will run with CATCHUP_SKIP_KNOWN_RESULTS_FOR_TESTING = true, resulting in skipping application of failed transaction and signature verification",
              Required = false)>]
@@ -635,6 +639,23 @@ let splitLabel (lab: string) : (string * string option) =
     | [ x ] -> x, None
     | head :: tail -> head, Some(System.String.Join(":", tail))
     | _ -> failwith ("unexpected label '" + lab + "', need string of form 'key' or 'key:value'")
+
+let splitEnvVar (envVar: string) : (string * string) =
+    let separatorIndex = envVar.IndexOf('=')
+
+    if separatorIndex <= 0 then
+        failwithf "Could not parse environment variable '%s'. Expected NAME=VALUE." envVar
+
+    envVar.Substring(0, separatorIndex), envVar.Substring(separatorIndex + 1)
+
+let splitEnvVars (envVars: string option) : (string * string) list =
+    match envVars with
+    | None -> []
+    | Some value ->
+        value.Split(',', System.StringSplitOptions.RemoveEmptyEntries)
+        |> Array.map (fun envVar -> envVar.Trim())
+        |> Array.map splitEnvVar
+        |> Array.toList
 
 // Given a (key, value option) output form `splitLabel`, return (key, value) or
 // fail if value is None
@@ -756,6 +777,7 @@ let main argv =
                   numPregeneratedTxs = None
                   genesisTestAccountCount = None
                   asanOptions = None
+                  coreEnv = []
                   enableTailLogging = true
                   catchupSkipKnownResultsForTesting = None
                   checkEventsAreConsistentWithEntryDiffs = None
@@ -931,6 +953,7 @@ let main argv =
                                updateSorobanCosts = None
                                genesisTestAccountCount = mission.GenesisTestAccountCount
                                asanOptions = mission.asanOptions
+                               coreEnv = splitEnvVars mission.CoreEnv
                                enableRelaxedAutoQsetConfig = mission.EnableRelaxedAutoQsetConfig
                                jobMonitorExternalHost = mission.JobMonitorExternalHost
                                txBatchMaxSize = mission.TxBatchMaxSize

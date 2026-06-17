@@ -281,6 +281,7 @@ let CoreContainerForCommand
     (imageName: string)
     (configOpt: ConfigOption)
     (asanOptions: string option)
+    (coreEnv: (string * string) list)
     (cr: CoreResources)
     (command: string array)
     (initCommands: ShCmd array)
@@ -296,6 +297,11 @@ let CoreContainerForCommand
             name = CfgVal.asanOptionsEnvVarName,
             value = defaultArg asanOptions CfgVal.asanOptionsEnvVarDefaultValue
         )
+
+    let coreEnvVars =
+        coreEnv
+        |> List.map (fun (name, value) -> V1EnvVar(name = name, value = value))
+        |> Array.ofList
 
     let cfgWords = cfgFileArgs configOpt MainCoreContainer
     let containerName = CfgVal.stellarCoreContainerName (Array.get command 0)
@@ -335,7 +341,7 @@ let CoreContainerForCommand
         image = imageName,
         command = [| "/bin/sh" |],
         args = [| "-x"; "-c"; allCmdsAndCleanup.ToString() |],
-        env = [| peerNameEnvVar; asanOptionsEnvVar |],
+        env = Array.concat [ [| peerNameEnvVar; asanOptionsEnvVar |]; coreEnvVars ],
         resources = res,
         securityContext = V1SecurityContext(capabilities = V1Capabilities(add = [| "NET_ADMIN" |])),
         volumeMounts = CoreContainerVolumeMounts peerOrJobNames configOpt
@@ -662,13 +668,14 @@ type NetworkCfg with
 
         let res = self.missionContext.coreResources
         let asan = self.missionContext.asanOptions
+        let coreEnv = self.missionContext.coreEnv
 
         let containers =
             match self.jobCoreSetOptions with
-            | None -> [| CoreContainerForCommand image cfgOpt asan res command [||] [| jobName |] |]
+            | None -> [| CoreContainerForCommand image cfgOpt asan coreEnv res command [||] [| jobName |] |]
             | Some (opts) ->
                 let initCmds = self.getInitCommands cfgOpt opts
-                let coreContainer = CoreContainerForCommand image cfgOpt asan res command initCmds [| jobName |]
+                let coreContainer = CoreContainerForCommand image cfgOpt asan coreEnv res command initCmds [| jobName |]
 
                 match opts.dbType with
                 | Postgres -> [| coreContainer; PostgresContainer self.missionContext.postgresImage |]
@@ -764,10 +771,11 @@ type NetworkCfg with
 
         let res = self.missionContext.coreResources
         let asan = self.missionContext.asanOptions
+        let coreEnv = self.missionContext.coreEnv
 
         let containers =
             [| WithProbes
-                (CoreContainerForCommand imageName cfgOpt asan res runCmd initCommands peerNames)
+                (CoreContainerForCommand imageName cfgOpt asan coreEnv res runCmd initCommands peerNames)
                 self.missionContext.probeTimeout
                HistoryContainer self.missionContext.nginxImage |]
 
