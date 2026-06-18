@@ -46,6 +46,7 @@ type MissionOptions
         ingressInternalDomain: string,
         ingressExternalHost: string option,
         ingressExternalPort: int,
+        metricsViaClusterDns: bool,
         exportToPrometheus: bool,
         probeTimeout: int,
         missions: string seq,
@@ -177,6 +178,15 @@ type MissionOptions
              Required = false,
              Default = 80)>]
     member self.IngressExternalPort = ingressExternalPort
+
+    [<Option("metrics-via-cluster-dns",
+             HelpText =
+                 "Scrape post-mission metrics directly from the per-pod svc.cluster.local DNS name "
+                 + "instead of through the ingress hostname. Use when the ingress hostname (e.g. "
+                 + "<nonce>.local) does not resolve from where SSC runs but cluster DNS does.",
+             Required = false,
+             Default = false)>]
+    member self.MetricsViaClusterDns = metricsViaClusterDns
 
     [<Option("export-to-prometheus", HelpText = "Whether to export core metrics to prometheus")>]
     member self.ExportToPrometheus : bool = exportToPrometheus
@@ -779,6 +789,7 @@ let main argv =
                                ingressInternalDomain = mission.IngressInternalDomain
                                ingressExternalHost = mission.IngressExternalHost
                                ingressExternalPort = mission.IngressExternalPort
+                               metricsViaClusterDns = mission.MetricsViaClusterDns
                                exportToPrometheus = mission.ExportToPrometheus
                                probeTimeout = mission.ProbeTimeout
                                coreResources = SmallTestResources

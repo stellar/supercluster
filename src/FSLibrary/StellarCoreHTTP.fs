@@ -412,11 +412,16 @@ type Peer with
     member self.GetMetrics() : Metrics.Metrics =
         WebExceptionRetry DefaultRetry (fun _ -> Metrics.Parse(self.fetch "metrics").Metrics)
 
-    // Post-mission metrics are scraped directly from the per-pod
-    // svc.cluster.local DNS name (see ClusterDnsURL) rather than through the
-    // ingress, so the teardown dump succeeds even when the ingress hostname is
-    // not resolvable from where SSC runs.
-    member self.GetRawMetrics() = WebExceptionRetry DefaultRetry (fun _ -> self.fetchFromClusterDns "metrics")
+    // Post-mission metrics are scraped through the ingress by default. When
+    // --metrics-via-cluster-dns is set they are instead scraped directly from
+    // the per-pod svc.cluster.local DNS name (see ClusterDnsURL), so the
+    // teardown dump succeeds in environments where the ingress hostname (e.g.
+    // <nonce>.local) does not resolve from where SSC runs but cluster DNS does.
+    member self.GetRawMetrics() =
+        if self.networkCfg.missionContext.metricsViaClusterDns then
+            WebExceptionRetry DefaultRetry (fun _ -> self.fetchFromClusterDns "metrics")
+        else
+            WebExceptionRetry DefaultRetry (fun _ -> self.fetch "metrics")
 
     member self.GetInfo() : Info.Info =
         WebExceptionRetry
