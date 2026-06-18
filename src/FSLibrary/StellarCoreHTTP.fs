@@ -392,6 +392,17 @@ type Peer with
         let url = self.URL path
         Http.RequestString(url, headers = self.Headers)
 
+    // URL that reaches stellar-core's admin HTTP endpoint directly via the
+    // per-pod svc.cluster.local DNS name, bypassing the ingress. The ingress
+    // hostname (<nonce>.<ingress-internal-domain>, e.g. <nonce>.local) does not
+    // resolve in all cluster-DNS environments (for example non-SDF k3s
+    // clusters), whereas the per-pod service DNS name resolves wherever cluster
+    // DNS is reachable. See https://github.com/stellar/supercluster/issues/399.
+    member self.ClusterDnsURL(path: string) : string =
+        sprintf "http://%s:%d/%s" self.DnsName.StringName StellarCoreCfg.CfgVal.httpPort path
+
+    member self.fetchFromClusterDns(path: string) : string = Http.RequestString(self.ClusterDnsURL path)
+
     member self.GetState() = self.GetInfo().State
 
     member self.GetStatusOrState() : string =
@@ -401,7 +412,11 @@ type Peer with
     member self.GetMetrics() : Metrics.Metrics =
         WebExceptionRetry DefaultRetry (fun _ -> Metrics.Parse(self.fetch "metrics").Metrics)
 
-    member self.GetRawMetrics() = WebExceptionRetry DefaultRetry (fun _ -> self.fetch "metrics")
+    // Post-mission metrics are scraped directly from the per-pod
+    // svc.cluster.local DNS name (see ClusterDnsURL) rather than through the
+    // ingress, so the teardown dump succeeds even when the ingress hostname is
+    // not resolvable from where SSC runs.
+    member self.GetRawMetrics() = WebExceptionRetry DefaultRetry (fun _ -> self.fetchFromClusterDns "metrics")
 
     member self.GetInfo() : Info.Info =
         WebExceptionRetry
