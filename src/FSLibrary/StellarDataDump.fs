@@ -240,10 +240,49 @@ type StellarFormation with
             Kubernetes.GetExitCodeOrThrow(returnMessage) |> ignore
         with x -> ()
 
+    // Scrape post-mission metrics by exec'ing `curl` against stellar-core's
+    // admin HTTP endpoint on the pod loopback, rather than fetching through the
+    // ingress. The ingress hostname (e.g. <nonce>.local) is not resolvable from
+    // every environment SSC runs in (for example a runner outside a non-SDF k3s
+    // cluster), whereas pod exec only needs the Kubernetes API that SSC already
+    // uses to manage the cluster. Best-effort: a failure here must not fail an
+    // otherwise-successful mission. See
+    // https://github.com/stellar/supercluster/issues/399.
     member self.DumpPeerMetrics(p: Peer) =
-        let destination = self.NetworkCfg.missionContext.destination
-        let name = p.PodName
-        destination.WriteString(sprintf "%s.metrics.json" name.StringName) (p.GetRawMetrics())
+        try
+            let ns = self.NetworkCfg.NamespaceProperty
+            let name = self.NetworkCfg.PodName p.coreSet p.peerNum
+            let metricsUrl = sprintf "http://localhost:%d/metrics" CfgVal.httpPort
+
+            self.sleepUntilNextRateLimitedApiCallTime ()
+
+            let muxedStream =
+                self
+                    .Kube
+                    .MuxedStreamNamespacedPodExecAsync(name = name.StringName,
+                                                       ``namespace`` = ns,
+                                                       command = [| "curl"; "-sf"; metricsUrl |],
+                                                       container = "stellar-core-run",
+                                                       tty = false,
+                                                       cancellationToken = CancellationToken())
+                    .GetAwaiter()
+                    .GetResult()
+
+            let stdOut =
+                muxedStream.GetStream(Nullable<ChannelIndex>(ChannelIndex.StdOut), Nullable<ChannelIndex>())
+
+            let error =
+                muxedStream.GetStream(Nullable<ChannelIndex>(ChannelIndex.Error), Nullable<ChannelIndex>())
+
+            let errorReader = new StreamReader(error)
+
+            LogInfo "Dumping metrics of peer %s" name.StringName
+            muxedStream.Start()
+            self.Destination.WriteStream(sprintf "%s.metrics.json" name.StringName) stdOut
+            let errors = errorReader.ReadToEndAsync().GetAwaiter().GetResult()
+            let returnMessage = SafeJsonConvert.DeserializeObject<V1Status>(errors)
+            Kubernetes.GetExitCodeOrThrow(returnMessage) |> ignore
+        with x -> LogWarn "Failed to dump metrics of peer %s: %s" p.PodName.StringName x.Message
 
     member self.DumpPeerData(p: Peer) =
         self.DumpPeerLogs p

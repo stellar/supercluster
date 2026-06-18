@@ -59,7 +59,6 @@ type MissionContext =
       ingressInternalDomain: string
       ingressExternalHost: string option
       ingressExternalPort: int
-      metricsViaClusterDns: bool
       exportToPrometheus: bool
       probeTimeout: int
       coreResources: CoreResources
