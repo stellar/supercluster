@@ -246,7 +246,7 @@ type StellarFormation with
     // GetRawMetrics based on the --core-http-via-pod-exec flag.
     member self.DumpPeerMetrics(p: Peer) =
         try
-            self.Destination.WriteString (sprintf "%s.metrics.json" p.PodName.StringName) (p.GetRawMetrics())
+            self.Destination.WriteString(sprintf "%s.metrics.json" p.PodName.StringName) (p.GetRawMetrics())
         with x -> LogWarn "Failed to dump metrics of peer %s: %s" p.PodName.StringName x.Message
 
     member self.DumpPeerData(p: Peer) =

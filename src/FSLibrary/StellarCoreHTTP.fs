@@ -416,7 +416,8 @@ type Peer with
                 |> String.concat "&"
                 |> sprintf "?%s"
 
-        let url = sprintf "http://localhost:%d/%s%s" StellarCoreCfg.CfgVal.httpPort path queryString
+        let url =
+            sprintf "http://localhost:%d/%s%s" StellarCoreCfg.CfgVal.httpPort path queryString
 
         try
             let muxedStream =
@@ -431,10 +432,16 @@ type Peer with
                     .GetResult()
 
             let stdOut =
-                muxedStream.GetStream(System.Nullable<ChannelIndex>(ChannelIndex.StdOut), System.Nullable<ChannelIndex>())
+                muxedStream.GetStream(
+                    System.Nullable<ChannelIndex>(ChannelIndex.StdOut),
+                    System.Nullable<ChannelIndex>()
+                )
 
             let error =
-                muxedStream.GetStream(System.Nullable<ChannelIndex>(ChannelIndex.Error), System.Nullable<ChannelIndex>())
+                muxedStream.GetStream(
+                    System.Nullable<ChannelIndex>(ChannelIndex.Error),
+                    System.Nullable<ChannelIndex>()
+                )
 
             let outReader = new StreamReader(stdOut)
             let errReader = new StreamReader(error)
@@ -772,8 +779,7 @@ type Peer with
                       ("inboundpeerindex", inboundPeersIndex.ToString())
                       ("outboundpeerindex", outboundPeersIndex.ToString()) ])
 
-    member self.GetSurveyResult() =
-        WebExceptionRetry DefaultRetry (fun _ -> self.httpGet "getsurveyresult" [])
+    member self.GetSurveyResult() = WebExceptionRetry DefaultRetry (fun _ -> self.httpGet "getsurveyresult" [])
 
     member self.GetTestAccBalance(accName: string) : int64 =
         RetryUntilSome
