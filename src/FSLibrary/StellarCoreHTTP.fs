@@ -450,6 +450,15 @@ type Peer with
             let errStr = errReader.ReadToEndAsync().GetAwaiter().GetResult()
             let returnMessage = SafeJsonConvert.DeserializeObject<V1Status>(errStr)
             Kubernetes.GetExitCodeOrThrow(returnMessage) |> ignore
+
+            // While core is still booting its admin HTTP server can answer with
+            // an empty body (curl exits 0). Treat that like a transient HTTP
+            // error so WebExceptionRetry retries rather than handing an empty
+            // string to a JSON parser. No core admin endpoint returns an empty
+            // body on success.
+            if System.String.IsNullOrEmpty outStr then
+                raise (System.Net.WebException(sprintf "pod-exec fetch of /%s returned an empty response" path))
+
             outStr
         with
         | :? System.Net.WebException -> reraise ()
