@@ -180,10 +180,7 @@ type MissionOptions
     member self.IngressExternalPort = ingressExternalPort
 
     [<Option("metrics-via-cluster-dns",
-             HelpText =
-                 "Scrape post-mission metrics directly from the per-pod svc.cluster.local DNS name "
-                 + "instead of through the ingress hostname. Use when the ingress hostname (e.g. "
-                 + "<nonce>.local) does not resolve from where SSC runs but cluster DNS does.",
+             HelpText = "Scrape post-mission metrics directly from the per-pod svc.cluster.local DNS name instead of through the ingress hostname. Use when the ingress hostname (e.g. <nonce>.local) does not resolve from where SSC runs but cluster DNS does.",
              Required = false,
              Default = false)>]
     member self.MetricsViaClusterDns = metricsViaClusterDns
