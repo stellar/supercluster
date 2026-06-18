@@ -450,15 +450,6 @@ type Peer with
             let errStr = errReader.ReadToEndAsync().GetAwaiter().GetResult()
             let returnMessage = SafeJsonConvert.DeserializeObject<V1Status>(errStr)
             Kubernetes.GetExitCodeOrThrow(returnMessage) |> ignore
-
-            // While core is still booting its admin HTTP server can answer with
-            // an empty body (curl exits 0). Treat that like a transient HTTP
-            // error so WebExceptionRetry retries rather than handing an empty
-            // string to a JSON parser. No core admin endpoint returns an empty
-            // body on success.
-            if System.String.IsNullOrEmpty outStr then
-                raise (System.Net.WebException(sprintf "pod-exec fetch of /%s returned an empty response" path))
-
             outStr
         with
         | :? System.Net.WebException -> reraise ()
@@ -474,6 +465,20 @@ type Peer with
 
     member self.fetch(path: string) : string = self.httpGet path []
 
+    // For endpoints that must return a (JSON) body. While core is still booting,
+    // its admin HTTP server can answer with an empty body (and curl exits 0);
+    // surface that as a WebException so the JSON-parsing callers' retry loops
+    // wait for core rather than feeding an empty string to a parser. Endpoints
+    // that legitimately return an empty body on success (e.g. upgrades) keep
+    // using fetch/httpGet directly.
+    member self.fetchNonEmpty(path: string) : string =
+        let resp = self.fetch path
+
+        if System.String.IsNullOrEmpty resp then
+            raise (System.Net.WebException(sprintf "core returned an empty response for /%s, not ready yet" path))
+
+        resp
+
     member self.GetState() = self.GetInfo().State
 
     member self.GetStatusOrState() : string =
@@ -481,15 +486,15 @@ type Peer with
         if i.Status.Length = 0 then i.State else i.Status.[0]
 
     member self.GetMetrics() : Metrics.Metrics =
-        WebExceptionRetry DefaultRetry (fun _ -> Metrics.Parse(self.fetch "metrics").Metrics)
+        WebExceptionRetry DefaultRetry (fun _ -> Metrics.Parse(self.fetchNonEmpty "metrics").Metrics)
 
-    member self.GetRawMetrics() = WebExceptionRetry DefaultRetry (fun _ -> self.fetch "metrics")
+    member self.GetRawMetrics() = WebExceptionRetry DefaultRetry (fun _ -> self.fetchNonEmpty "metrics")
 
     member self.GetInfo() : Info.Info =
         WebExceptionRetry
             DefaultRetry
             (fun _ ->
-                let resp = self.fetch "info"
+                let resp = self.fetchNonEmpty "info"
                 let parsed = Info.Parse(resp)
 
                 // stellar-core can respond with {"error":"Core is booting, try again later"}
@@ -498,7 +503,7 @@ type Peer with
                 | None -> raise (System.Net.WebException("Core is not ready, info property missing")))
 
     member self.GetSorobanInfo() : SorobanInfo.Root =
-        WebExceptionRetry DefaultRetry (fun _ -> SorobanInfo.Parse(self.fetch "sorobaninfo"))
+        WebExceptionRetry DefaultRetry (fun _ -> SorobanInfo.Parse(self.fetchNonEmpty "sorobaninfo"))
 
     member self.GetLedgerNum() : int = self.GetInfo().Ledger.Num
 
