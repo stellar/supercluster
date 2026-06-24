@@ -192,6 +192,7 @@ type QuorumSetConfiguration =
 type CoreSetOptions =
     { nodeCount: int
       nodeLocs: GeoLoc list option
+      edgeDelays: Map<byte [] * byte [], int> option
       dbType: DBType
       emptyDirType: EmptyDirType
       syncStartupDelay: int option
@@ -211,6 +212,8 @@ type CoreSetOptions =
       validate: bool
       homeDomain: string option
       tier1: bool option
+      // This should only be set in the pubnet data with delay case
+      generatesLoad: bool option
       catchupMode: CatchupMode
       image: string
       initialization: CoreSetInitialization
@@ -235,6 +238,7 @@ type CoreSetOptions =
     static member GetDefault(image: string) =
         { nodeCount = 3
           nodeLocs = None
+          edgeDelays = None
           dbType = Sqlite
           emptyDirType = MemoryBackedEmptyDir
           syncStartupDelay = Some(5)
@@ -254,6 +258,7 @@ type CoreSetOptions =
           validate = true
           homeDomain = Some "stellar.org"
           tier1 = None
+          generatesLoad = None
           catchupMode = CatchupComplete
           image = image
           initialization = CoreSetInitialization.Default

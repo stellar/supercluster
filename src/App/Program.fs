@@ -73,6 +73,7 @@ type MissionOptions
         apiRateLimit: int,
         httpProxyReplicas: int,
         pubnetData: string option,
+        pubnetDataDelay: bool,
         flatQuorum: bool option,
         tier1Keys: string option,
         maxConnections: int option,
@@ -317,6 +318,12 @@ type MissionOptions
 
     [<Option("pubnet-data", HelpText = "JSON file containing pubnet connectivity graph data", Required = false)>]
     member self.PubnetData = pubnetData
+
+    [<Option("pubnet-data-delay",
+             HelpText = "Set to use the new style format for --pubnet-data",
+             Required = false,
+             Default = false)>]
+    member self.PubnetDataDelay = pubnetDataDelay
 
     [<Option("flat-quorum", HelpText = "Use flat Tier1 quorum", Required = false)>]
     member self.FlatQuorum = flatQuorum
@@ -743,6 +750,9 @@ let main argv =
             0
 
         | :? MissionOptions as mission ->
+            if mission.PubnetData.IsNone && mission.PubnetDataDelay then
+                failwith "Error: --pubnet-data-delay requires --pubnet-data to be set"
+
             let _ = logToConsoleAndFile (sprintf "%s/stellar-supercluster.log" mission.Destination)
 
             let ll =
@@ -848,6 +858,7 @@ let main argv =
                                apiRateLimit = mission.ApiRateLimit
                                httpProxyReplicas = mission.HttpProxyReplicas
                                pubnetData = mission.PubnetData
+                               pubnetDataDelay = mission.PubnetDataDelay
                                flatQuorum = mission.FlatQuorum
                                tier1Keys = mission.Tier1Keys
                                maxConnections = mission.MaxConnections
