@@ -369,6 +369,10 @@ type StellarCoreCfg =
         t.Add("MAX_ADDITIONAL_PEER_CONNECTIONS", self.targetPeerConnections * 3)
         |> ignore
 
+        match self.network.missionContext.peerAuthenticationTimeout with
+        | Some timeout -> t.Add("PEER_AUTHENTICATION_TIMEOUT", timeout) |> ignore
+        | None -> ()
+
         t.Add("QUORUM_INTERSECTION_CHECKER", false) |> ignore
         t.Add("MANUAL_CLOSE", self.manualClose) |> ignore
 

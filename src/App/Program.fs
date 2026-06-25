@@ -75,6 +75,7 @@ type MissionOptions
         pubnetData: string option,
         pubnetDataDelay: bool,
         measureE2eLatency: bool,
+        peerAuthenticationTimeout: int option,
         flatQuorum: bool option,
         tier1Keys: string option,
         maxConnections: int option,
@@ -331,6 +332,11 @@ type MissionOptions
              Required = false,
              Default = false)>]
     member self.MeasureE2eLatency = measureE2eLatency
+
+    [<Option("peer-authentication-timeout",
+             HelpText = "Maximum time overlay waits for a peer to authenticate before dropping",
+             Required = false)>]
+    member self.PeerAuthenticationTimeout = peerAuthenticationTimeout
 
     [<Option("flat-quorum", HelpText = "Use flat Tier1 quorum", Required = false)>]
     member self.FlatQuorum = flatQuorum
@@ -870,6 +876,7 @@ let main argv =
                                pubnetData = mission.PubnetData
                                pubnetDataDelay = mission.PubnetDataDelay
                                measureE2eLatency = mission.MeasureE2eLatency
+                               peerAuthenticationTimeout = mission.PeerAuthenticationTimeout
                                flatQuorum = mission.FlatQuorum
                                tier1Keys = mission.Tier1Keys
                                maxConnections = mission.MaxConnections

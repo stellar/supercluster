@@ -73,6 +73,7 @@ let ctx : MissionContext =
       pubnetData = None
       pubnetDataDelay = false
       measureE2eLatency = false
+      peerAuthenticationTimeout = None
       flatQuorum = None
       tier1Keys = None
       maxConnections = None

@@ -83,6 +83,7 @@ type MissionContext =
       pubnetData: string option
       pubnetDataDelay: bool
       measureE2eLatency: bool
+      peerAuthenticationTimeout: int option
       flatQuorum: bool option
       tier1Keys: string option
       maxConnections: int option
