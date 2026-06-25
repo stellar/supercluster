@@ -72,6 +72,7 @@ let ctx : MissionContext =
       httpProxyReplicas = 2
       pubnetData = None
       pubnetDataDelay = false
+      measureE2eLatency = false
       flatQuorum = None
       tier1Keys = None
       maxConnections = None

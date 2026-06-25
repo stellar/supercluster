@@ -82,6 +82,7 @@ type MissionContext =
       httpProxyReplicas: int
       pubnetData: string option
       pubnetDataDelay: bool
+      measureE2eLatency: bool
       flatQuorum: bool option
       tier1Keys: string option
       maxConnections: int option

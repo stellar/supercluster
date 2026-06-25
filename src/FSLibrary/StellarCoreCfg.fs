@@ -166,6 +166,7 @@ type StellarCoreCfg =
       automaticMaintenanceCount: int
       accelerateTime: bool
       generateLoad: bool
+      measureE2eLatency: bool
       updateSorobanCosts: bool option
       manualClose: bool
       invariantChecks: InvariantChecksSpec
@@ -316,6 +317,9 @@ type StellarCoreCfg =
         t.Add("AUTOMATIC_MAINTENANCE_COUNT", self.automaticMaintenanceCount) |> ignore
         t.Add("ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING", self.accelerateTime) |> ignore
         t.Add("ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING", self.generateLoad) |> ignore
+
+        if self.measureE2eLatency && self.network.missionContext.measureE2eLatency then
+            t.Add("LOADGEN_MEASURE_TX_LATENCY_FOR_TESTING", true) |> ignore
 
         if self.updateSorobanCosts.IsSome then
             t.Add("UPDATE_SOROBAN_COSTS_DURING_PROTOCOL_UPGRADE_FOR_TESTING", self.updateSorobanCosts.Value)
@@ -653,6 +657,7 @@ type NetworkCfg with
           automaticMaintenanceCount = if opts.performMaintenance then 50000 else 0
           accelerateTime = opts.accelerateTime
           generateLoad = true
+          measureE2eLatency = opts.generatesLoad = Some true
           updateSorobanCosts = opts.updateSorobanCosts
           manualClose = false
           invariantChecks = opts.invariantChecks
@@ -698,6 +703,7 @@ type NetworkCfg with
           automaticMaintenanceCount = if c.options.performMaintenance then 50000 else 0
           accelerateTime = c.options.accelerateTime
           generateLoad = true
+          measureE2eLatency = c.options.generatesLoad = Some true
           updateSorobanCosts = c.options.updateSorobanCosts
           manualClose = false
           invariantChecks = c.options.invariantChecks

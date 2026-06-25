@@ -74,6 +74,7 @@ type MissionOptions
         httpProxyReplicas: int,
         pubnetData: string option,
         pubnetDataDelay: bool,
+        measureE2eLatency: bool,
         flatQuorum: bool option,
         tier1Keys: string option,
         maxConnections: int option,
@@ -324,6 +325,12 @@ type MissionOptions
              Required = false,
              Default = false)>]
     member self.PubnetDataDelay = pubnetDataDelay
+
+    [<Option("measure-e2e-latency",
+             HelpText = "Set to enable the loadgen e2e metrics",
+             Required = false,
+             Default = false)>]
+    member self.MeasureE2eLatency = measureE2eLatency
 
     [<Option("flat-quorum", HelpText = "Use flat Tier1 quorum", Required = false)>]
     member self.FlatQuorum = flatQuorum
@@ -753,6 +760,9 @@ let main argv =
             if mission.PubnetData.IsNone && mission.PubnetDataDelay then
                 failwith "Error: --pubnet-data-delay requires --pubnet-data to be set"
 
+            if mission.MeasureE2eLatency && not mission.PubnetDataDelay then
+                failwith "Error: --measure-e2e-latency requires --pubnet-data-delay to be set"
+
             let _ = logToConsoleAndFile (sprintf "%s/stellar-supercluster.log" mission.Destination)
 
             let ll =
@@ -859,6 +869,7 @@ let main argv =
                                httpProxyReplicas = mission.HttpProxyReplicas
                                pubnetData = mission.PubnetData
                                pubnetDataDelay = mission.PubnetDataDelay
+                               measureE2eLatency = mission.MeasureE2eLatency
                                flatQuorum = mission.FlatQuorum
                                tier1Keys = mission.Tier1Keys
                                maxConnections = mission.MaxConnections
