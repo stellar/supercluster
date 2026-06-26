@@ -368,7 +368,7 @@ type NetworkCfg with
                         failwith
                             "Failed to construct network delay script: no preferred peers map or flat network delay"
                     else
-                        self.MapAllPeers (fun cs i -> 0, self.PeerDnsName cs i)
+                        self.MapAllPeers(fun cs i -> 0, self.PeerDnsName cs i)
 
             getNetworkDelayCommands otherDelaysAndNames self.missionContext.flatNetworkDelay
         | false ->
