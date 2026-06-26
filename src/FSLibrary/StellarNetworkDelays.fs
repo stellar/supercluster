@@ -56,7 +56,7 @@ let networkPingInMs (loc1: GeoLoc) (loc2: GeoLoc) : double =
     2.0 * (networkDelayInMs loc1 loc2)
 
 let getPeerDelays (loc1: GeoLoc) (locsAndNames: (GeoLoc * PeerDnsName) array) : (int * PeerDnsName) array =
-    // Get the one way delays from loc1 to the locationss in locsAndNames
+    // Get the one way delays from loc1 to the locations in locsAndNames
     locsAndNames
     |> Array.map (fun (loc2, name) -> int (networkDelayInMs loc1 loc2), name)
 
@@ -368,7 +368,7 @@ type NetworkCfg with
                         failwith
                             "Failed to construct network delay script: no preferred peers map or flat network delay"
                     else
-                        [||]
+                        self.MapAllPeers (fun cs i -> 0, self.PeerDnsName cs i)
 
             getNetworkDelayCommands otherDelaysAndNames self.missionContext.flatNetworkDelay
         | false ->
