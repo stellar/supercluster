@@ -1,0 +1,103 @@
+# Socket reachability scan for supercluster.
+# For general Socket reachability documentation, see https://docs.socket.dev/docs/full-application-reachability
+# .NET project (src/CSLibrary/CSLibrary.csproj + StellarSupercluster.sln).
+#
+# Schedule: Sun 23:12 UTC weekly. Use workflow_dispatch to run on demand.
+#
+# ----------------------------------------------------------------------------
+# Day-one YELLOW (expected, not a regression):
+#   Pre-install of `xunit.core` fails inside the scan container with a NuGet
+#   "no compatible RID" error (Coana's pre-install uses `dotnet add package`
+#   which surfaces missing runtime asset variants for some xunit transitive
+#   deps — runtime.native.system.security.cryptography.apple, opensuse-x64,
+#   fedora-x64, etc.). 1 of the 3 vulnerabilities falls back to Tier 2
+#   (precomputed) reachability as a result; the other 2 are analyzed fully.
+#
+#   Fix attempted (2026-05-28, not effective): added
+#   `dotnet restore --runtime linux-x64` as a scan-step pre-step to pre-populate
+#   the local NuGet cache with linux-x64-only assets. Coana's pre-install
+#   re-runs `dotnet add package` which does a fresh resolution call ignoring
+#   the cache, so it still tries to pull the macOS / opensuse / fedora
+#   runtime asset variants and fails identically. Reverted.
+#
+#   Likely real fix is upstream (Coana respecting an explicit RID, or the
+#   project pinning `<RuntimeIdentifiers>linux-x64</RuntimeIdentifiers>` in
+#   the .csproj). File with Socket support if the xunit.core CVE matters.
+# ----------------------------------------------------------------------------
+#
+# ============================================================================
+# Socket scan — reading the job status. (The scan step below produces this: an
+# exit code + an optional ::warning:: annotation, which GitHub Actions renders
+# as the job's state.)
+# ============================================================================
+# GREEN  (exit 0, no warning): scan completed and every analyzed vulnerability
+#        got full Tier 1 reachability (precise, your-code-aware). Nothing to do.
+# YELLOW (exit 0 + "::warning:: Socket scan completed with Tier 2 fallbacks"):
+#        scan completed, but Tier 1 could NOT be computed for some/all
+#        vulnerabilities, which fell back to Tier 2 (precomputed) reachability.
+#        You still get CVE detection + Tier 2 results, just reduced precision
+#        for the affected CVEs. The job is NOT failing.
+# RED    (non-zero exit): scan did not complete. Do not assume any part
+#        succeeded — could be reachability hard-failing, a missing language
+#        toolchain, the runner out of memory, a network/API error, or even the
+#        underlying CVE/SBOM detection failing. Check the logs and fix before
+#        relying on results.
+# ============================================================================
+
+name: Socket reachability scan
+
+on:
+  schedule:
+    - cron: '12 23 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Force JS-based GitHub actions (actions/checkout, actions/setup-*, etc.) to
+  # use Node 24 instead of the soon-to-be-deprecated Node 20. Safe to remove
+  # after 2026-06-16 (when Node 24 becomes the default and this becomes a no-op).
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  socket-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5.3.0
+        with:
+          dotnet-version: "8.0.28"
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24.18.0"
+      - name: Enable Corepack (yarn/pnpm per repo packageManager)
+        run: corepack enable
+
+      - name: Install Socket CLI
+        run: npm install -g socket
+
+      - name: Run Socket reachability scan
+        env:
+          SOCKET_SECURITY_API_TOKEN: ${{ secrets.SOCKET_SECURITY_API_TOKEN }}
+        run: |
+          # Stream the scan output through tee so the run log captures it AND
+          # we can grep it for Tier-2-fallback markers; capture the scan's
+          # exit code via ${PIPESTATUS[0]} (tee always exits 0). If the scan
+          # succeeded but logged a Tier 2 fallback, emit a ::warning::
+          # annotation that GitHub Actions renders as a yellow run-level
+          # warning without failing the job.
+          set +e
+          socket scan create --reach \
+            --org=stellar \
+            --no-interactive \
+            --reach-continue-on-no-source-files \
+            --reach-continue-on-analysis-errors \
+            --reach-continue-on-install-errors \
+            --reach-continue-on-missing-lock-files \
+            . 2>&1 | tee /tmp/scan.log
+          rc=${PIPESTATUS[0]}
+          if [ $rc -eq 0 ] && grep -qE "Reachability falls back to Tier 2|fallback to the results from the pre-computed|Reachability falls back to precomputed" /tmp/scan.log; then
+            echo "::warning::Socket scan completed with Tier 2 fallbacks - some vulnerabilities used precomputed reachability instead of full Tier 1"
+          fi
+          exit $rc
