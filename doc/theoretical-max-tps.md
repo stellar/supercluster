@@ -39,6 +39,9 @@ stellar-core release. The columns are as follows:
 
 | Core Version | Core Image | Core Compiler Flags | Core Configure Flags | Supercluster Commit | Extra Supercluster Options | Max TPS | Notes |
 |--------------|------------|---------------------|----------------------|---------------------|----------------------------|---------|-------|
+| 27.1.0 | `stellar/unsafe-stellar-core:27.1.1-3379.3589a696b.jammy-tmtps-perftests` | `-ggdb -O3 -fstack-protector-strong` | | `870c6357f4519c20c2be37fdd25463fe03a804fc` | `--run-for-max-tps=classic --enable-relaxed-auto-qset-config` | 3351 | |
+| 27.0.0 | `stellar/unsafe-stellar-core:27.1.1-3378.7696c069d.jammy-tmtps-perftests` | `-ggdb -O3 -fstack-protector-strong` | | `870c6357f4519c20c2be37fdd25463fe03a804fc` | `--run-for-max-tps=classic --enable-relaxed-auto-qset-config` | 3437 | |
+| 26.0.0 | `stellar/unsafe-stellar-core:27.1.1-3377.8e43a2d3b.jammy-tmtps-perftests` | `-ggdb -O3 -fstack-protector-strong` | | `870c6357f4519c20c2be37fdd25463fe03a804fc` | `--run-for-max-tps=classic --enable-relaxed-auto-qset-config` | 3406 | |
 | 26.0.0 | `stellar/unsafe-stellar-core:26.1.1-3282.8e43a2d3b.jammy-tmtps-perftests` | `-ggdb -O3 -fstack-protector-strong` | | `abc77be18888cd0bd23197f860f86ef1eaeddf5f` | `--run-for-max-tps=classic --enable-relaxed-auto-qset-config` | 3421 | Performance improvement largely due to [switching allocator to TCMalloc](https://github.com/stellar/stellar-core/pull/5101) |
 | 25.1.0 | `stellar/unsafe-stellar-core:26.1.1-3281.414a5e53d.jammy-tmtps-perftests` | `-ggdb -O3 -fstack-protector-strong` | | `abc77be18888cd0bd23197f860f86ef1eaeddf5f` | `--run-for-max-tps=classic --enable-relaxed-auto-qset-config` | 2851 | |
 | 25.1.0 | `stellar/unsafe-stellar-core:25.1.1-3003.414a5e53d.jammy-tmtps-perftests` | `-ggdb -O3 -fstack-protector-strong` | | `7082b15b4c526e13adee10a2aeee34a197994109` | `--run-for-max-tps=classic --enable-relaxed-auto-qset-config` | 2968 | |
