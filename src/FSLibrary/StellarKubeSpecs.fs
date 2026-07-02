@@ -867,7 +867,6 @@ type NetworkCfg with
     member self.ToPerPodServices() : V1Service array =
         let perPodService (coreSet: CoreSet) i =
             let name = self.PodName coreSet i
-            let dnsName = self.PeerDnsName coreSet i
 
             let ports =
                 [| V1ServicePort(name = "core", port = CfgVal.httpPort)
@@ -879,8 +878,13 @@ type NetworkCfg with
                 else
                     ports
 
-            let spec =
-                V1ServiceSpec(``type`` = "ExternalName", ports = ports, externalName = dnsName.StringName)
+            // ClusterIP service selecting the single pod by its StatefulSet pod-name label.
+            // (Previously ExternalName -> pod DNS, which the traefik Gateway provider rejects
+            // as an HTTPRoute backend.)
+            let selector =
+                CfgVal.labels |> Map.add "statefulset.kubernetes.io/pod-name" name.StringName
+
+            let spec = V1ServiceSpec(selector = selector, ports = ports)
 
             V1Service(metadata = self.NamespacedMeta name.StringName, spec = spec)
 
