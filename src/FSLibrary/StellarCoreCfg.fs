@@ -661,7 +661,7 @@ type NetworkCfg with
           automaticMaintenanceCount = if opts.performMaintenance then 50000 else 0
           accelerateTime = opts.accelerateTime
           generateLoad = true
-          measureE2eLatency = opts.generatesLoad = Some true
+          measureE2eLatency = opts.generatesLoad
           updateSorobanCosts = opts.updateSorobanCosts
           manualClose = false
           invariantChecks = opts.invariantChecks
@@ -707,7 +707,7 @@ type NetworkCfg with
           automaticMaintenanceCount = if c.options.performMaintenance then 50000 else 0
           accelerateTime = c.options.accelerateTime
           generateLoad = true
-          measureE2eLatency = c.options.generatesLoad = Some true
+          measureE2eLatency = c.options.generatesLoad
           updateSorobanCosts = c.options.updateSorobanCosts
           manualClose = false
           invariantChecks = c.options.invariantChecks

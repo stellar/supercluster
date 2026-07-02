@@ -165,7 +165,7 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
         List.find (fun (cs: CoreSet) -> cs.name.StringName = "stellar" || cs.name.StringName = "sdf") allNodes
 
     let tier1 = List.filter (fun (cs: CoreSet) -> cs.options.tier1 = Some true) allNodes
-    let loadGenNodes = List.filter (fun (cs: CoreSet) -> cs.options.generatesLoad = Some true) allNodes
+    let loadGenNodes = List.filter (fun (cs: CoreSet) -> cs.options.generatesLoad) allNodes
 
     let loadGenNodes =
         if List.isEmpty loadGenNodes then

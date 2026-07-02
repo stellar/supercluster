@@ -337,7 +337,7 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                       None }
 
     let tier1 = List.filter (fun (cs: CoreSet) -> cs.options.tier1 = Some true) allNodes
-    let loadGenNodes = List.filter (fun (cs: CoreSet) -> cs.options.generatesLoad = Some true) allNodes
+    let loadGenNodes = List.filter (fun (cs: CoreSet) -> cs.options.generatesLoad) allNodes
 
     let loadGenNodes =
         if List.isEmpty loadGenNodes then

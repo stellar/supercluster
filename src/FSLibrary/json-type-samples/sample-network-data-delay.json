@@ -62,7 +62,6 @@
                          "GDQHFKIEF3NPKZVDC2WO5E5P54H3UG3QU2AZZCDINVF4THK5BZV6E4AK"
           ]
         },
-        "generatesLoad": false,
         "version": "stellar-core 15.0.0 (8d6e6d74cfae65943211bdcc5ba083976d525a04)"
     },
     {
@@ -70,7 +69,6 @@
             {"key": "GBN5UP5XG2NKBGSBXGV632XFUQYYU62XYWR47GH7KQZUQDTVT7ROGK5C", "owdMs": 9}
         ],
         "radar_homeDomain": "horizon",
-        "generatesLoad": true,
         "publicKey": "GATTOMMXJ4TITUGIP4MQ635Z6FJYK57WOWGDQ7AM6DUWYBM5TUJ2BLFV",
         "version": "v15.0.0"
     }

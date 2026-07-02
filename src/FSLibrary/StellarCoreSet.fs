@@ -212,8 +212,7 @@ type CoreSetOptions =
       validate: bool
       homeDomain: string option
       tier1: bool option
-      // This should only be set in the pubnet data with delay case
-      generatesLoad: bool option
+      generatesLoad: bool
       catchupMode: CatchupMode
       image: string
       initialization: CoreSetInitialization
@@ -258,7 +257,7 @@ type CoreSetOptions =
           validate = true
           homeDomain = Some "stellar.org"
           tier1 = None
-          generatesLoad = None
+          generatesLoad = false
           catchupMode = CatchupComplete
           image = image
           initialization = CoreSetInitialization.Default

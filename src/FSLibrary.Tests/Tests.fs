@@ -76,6 +76,7 @@ let ctx : MissionContext =
       peerAuthenticationTimeout = None
       flatQuorum = None
       tier1Keys = None
+      loadgenKeys = None
       maxConnections = None
       fullyConnectTier1 = false
       peerReadingCapacity = None

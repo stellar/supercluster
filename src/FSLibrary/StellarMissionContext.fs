@@ -86,6 +86,7 @@ type MissionContext =
       peerAuthenticationTimeout: int option
       flatQuorum: bool option
       tier1Keys: string option
+      loadgenKeys: string option
       maxConnections: int option
       fullyConnectTier1: bool
       byteCountDistribution: ((int * int) list)

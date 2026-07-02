@@ -29,7 +29,6 @@ type PubnetNodeDelayJSON =
 type PubnetNode =
     { PublicKey: string
       Peers: string array
-      GeneratesLoad: bool option
       RadarHomeDomain: string option
       RadarIsValidating: bool option
       RadarGeoData: {| Latitude: decimal; Longitude: decimal |} option
@@ -38,7 +37,6 @@ type PubnetNode =
     static member ofJSON(node: PubnetNodeJSON.Root) : PubnetNode =
         { PublicKey = node.PublicKey
           Peers = node.Peers
-          GeneratesLoad = None
           RadarHomeDomain = node.RadarHomeDomain
           RadarIsValidating = node.RadarIsValidating
           RadarGeoData =
@@ -50,7 +48,6 @@ type PubnetNode =
     static member ofJSONDelay(node: PubnetNodeDelayJSON.Root) : PubnetNode =
         { PublicKey = node.PublicKey
           Peers = node.Peers |> Array.map (fun p -> p.Key)
-          GeneratesLoad = node.GeneratesLoad
           RadarHomeDomain = node.RadarHomeDomain
           RadarIsValidating = node.RadarIsValidating
           RadarGeoData = None
@@ -402,6 +399,19 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
             |> Array.map (fun n -> n.PublicKey)
             |> Set.ofArray
 
+    let loadgenKeySet : Set<string> =
+        if context.loadgenKeys.IsSome then
+            Tier1PublicKey.Load(context.loadgenKeys.Value)
+            |> Array.map (fun n -> n.PublicKey)
+            |> Set.ofArray
+        else
+            Set.empty
+
+    // Check that there is no overlap between tier1 and loadgen keys
+    let overlap = Set.intersect tier1KeySet loadgenKeySet
+
+    if not (Set.isEmpty overlap) then
+        failwithf "Overlap between tier1 and loadgen keys: %A" overlap
 
     // Shuffle the nodes to ensure that the order will
     // not affect the outcome of the scaling algorithm.
@@ -432,10 +442,6 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
                         key1
 
             let nodes = nodes |> Array.map PubnetNode.ofJSONDelay
-            // Check that all load-generating nodes have a home domain.
-            for n in nodes do
-                if n.GeneratesLoad = Some true && n.RadarHomeDomain.IsNone then
-                    failwithf "Load generator node %s does not have a home domain" n.PublicKey
 
             nodes, Some edgeDelays
         else
@@ -443,6 +449,16 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
             |> Array.append newNodes
             |> Array.map PubnetNode.ofJSON,
             None
+
+    // Ensure that each load-generator has a home domain
+    let allPubnetNodes : PubnetNode array =
+        allPubnetNodes
+        |> Array.map
+            (fun n ->
+                if Set.contains n.PublicKey loadgenKeySet && n.RadarHomeDomain.IsNone then
+                    { n with RadarHomeDomain = Some "loadgennode" }
+                else
+                    n)
 
     // For each pubkey in the pubnet, we map it to an actual KeyPair (with a private
     // key) to use in the simulation. It's important to keep these straight! The keys
@@ -513,6 +529,18 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
 
     let allPubnetNodeKeys = Array.map (fun (n: PubnetNode) -> n.PublicKey) allPubnetNodes |> Set.ofArray
 
+    // Check if we removed any tier1 or loadgen nodes.
+    let keptNodes : Set<string> =
+        allPubnetNodeKeys
+        |> Seq.filter (fun (n: string) -> Set.contains n tier1KeySet || Set.contains n loadgenKeySet)
+        |> Set.ofSeq
+
+    for removedNode in Set.difference tier1KeySet keptNodes do
+        LogWarn "Removed tier1 node %s from simulation" removedNode
+
+    for removedNode in Set.difference loadgenKeySet keptNodes do
+        LogWarn "Removed loadgen node %s from simulation" removedNode
+
     LogInfo "SimulatePubnet will run with %d nodes" (Array.length allPubnetNodes)
 
     let edgeDelays : Map<byte [] * byte [], int> option =
@@ -529,6 +557,11 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
     // We then group the org nodes by their home domains. The domain names are drawn
     // from the HomeDomains of the public network but with periods replaced with dashes,
     // and lowercased, so for example keybase.io turns into keybase-io.
+    // Additionally, each load generator needs to exist in a size-1 org (because
+    // the downstream only generates load on one node per CoreSet). So, we add a
+    // loadgen-%d suffix to each load generator.
+    let loadgenNumber : Map<string, int> = loadgenKeySet |> Seq.mapi (fun i key -> key, i) |> Map.ofSeq
+
     let groupedOrgNodes : (HomeDomainName * PubnetNode array) array =
         Array.groupBy
             (fun (n: PubnetNode) ->
@@ -548,20 +581,22 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
                 // or not tier 1, we split them into separate orgs by appending
                 // "-non-tier1" to the home domain of any non-tier1 node in an
                 // org.
-                let withTierInfo =
-                    if not (Set.contains n.PublicKey tier1KeySet) then
+                let withNodeInfo =
+                    if Set.contains n.PublicKey loadgenKeySet then
+                        cleanOrgName + "-loadgen-" + loadgenNumber.[n.PublicKey].ToString()
+                    elif not (Set.contains n.PublicKey tier1KeySet) then
                         cleanOrgName + "-non-tier1"
                     else
                         cleanOrgName
 
 
-                let lowercase = withTierInfo.ToLower()
+                let lowercase = withNodeInfo.ToLower()
                 HomeDomainName lowercase)
             orgNodes
 
     // Check that load generators each exist in size-1 orgs
     for hdn, nodes in groupedOrgNodes do
-        let loadGenerators = nodes |> Array.filter (fun n -> n.GeneratesLoad = Some true)
+        let loadGenerators = nodes |> Array.filter (fun n -> Set.contains n.PublicKey loadgenKeySet)
 
         if loadGenerators.Length > 0 && nodes.Length > 1 then
             failwithf
@@ -849,7 +884,7 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
                           tier1 = Some tier1
                           validate = validate
                           homeDomain = if validate then Some hdn.StringName else None
-                          generatesLoad = None
+                          generatesLoad = false
                           nodeLocs = Some [ getGeoLocOrDefault n ]
                           edgeDelays = edgeDelays
                           preferredPeersMap = Some(keysToPreferredPeersMap keys) }
@@ -866,7 +901,7 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
                 let nodeList = List.ofArray nodes
                 let keys = Array.map (fun (n: PubnetNode) -> getSimKey n.PublicKey) nodes
                 let tier1 = Set.contains nodes.[0].PublicKey tier1KeySet
-                let generatesLoad = nodes.[0].GeneratesLoad
+                let generatesLoad = Set.contains nodes.[0].PublicKey loadgenKeySet
 
                 let validate, qset = mergeQSets (List.map computeQset nodeList)
 
