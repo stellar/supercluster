@@ -939,7 +939,7 @@ type NetworkCfg with
             )
 
         let meta =
-            V1ObjectMeta(name = self.IngressName, namespaceProperty = self.NamespaceProperty)
+            V1ObjectMeta(name = self.HttpRouteName, namespaceProperty = self.NamespaceProperty)
             |> applyAnchorOwner self
 
         HTTPRoute(Metadata = meta, Spec = spec)

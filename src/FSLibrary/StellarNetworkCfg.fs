@@ -102,7 +102,7 @@ type NetworkCfg =
 
     member self.ServiceName : string = sprintf "%s-stellar-core" self.Nonce
 
-    member self.IngressName : string = sprintf "%s-stellar-core-ingress" self.Nonce
+    member self.HttpRouteName : string = sprintf "%s-stellar-core-http-route" self.Nonce
 
     member self.JobName(i: int) : string = sprintf "%s-stellar-core-job-%d" self.Nonce i
 
