@@ -10,6 +10,7 @@ open k8s.Models
 
 open Logging
 open ScriptUtils
+open GatewayApiModels
 
 // Resources that look this old must belong to a failed prior run — no healthy
 // mission runs anywhere near this long, and the Jenkins lock serializes CI
@@ -124,12 +125,25 @@ let private sweepWithCutoff (cutoff: DateTime) (kube: Kubernetes) (ns: string) (
 
     sweepKind
         apiRateLimit
-        "Ingress"
+        "HTTPRoute"
         (fun () ->
-            kube.ListNamespacedIngress(namespaceParameter = ns).Items
-            |> Seq.map (fun i -> i.Metadata))
+            let gc = GenericClient(kube, "gateway.networking.k8s.io", "v1", "httproutes")
+
+            gc
+                .ListNamespacedAsync<HTTPRouteList>(ns)
+                .GetAwaiter()
+                .GetResult()
+                .Items
+            |> Seq.map (fun r -> r.Metadata))
         (fun n ->
-            kube.DeleteNamespacedIngress(namespaceParameter = ns, name = n, propagationPolicy = "Foreground")
+            kube.DeleteNamespacedCustomObject(
+                group = "gateway.networking.k8s.io",
+                version = "v1",
+                namespaceParameter = ns,
+                plural = "httproutes",
+                name = n,
+                propagationPolicy = "Foreground"
+            )
             |> ignore)
         cutoff
 

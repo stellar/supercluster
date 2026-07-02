@@ -14,6 +14,7 @@ open StellarNetworkDelays
 open System.Text.RegularExpressions
 open System.Collections.Generic
 open Logging
+open GatewayApiModels
 
 // Containers that run stellar-core may or may-not have a final '--conf'
 // argument appended to their command-line. The argument is specified one of 3
@@ -885,54 +886,56 @@ type NetworkCfg with
 
         self.MapAllPeers perPodService
 
-    // Returns an Ingress object with rules that map URLs http://$ingressHost/peer-N/foo
-    // to the per-Pod Service within the current networkCfg named peer-N (which then, via
-    // DNS mapping, goes to the Pod itself). Exposing this to external traffic
-    // requires that you enable the nginx Ingress controller on your k8s
-    // cluster.
-    member self.ToIngress() : V1Ingress =
-        let coreBackend (pn: PodName) : V1IngressBackend =
-            let port = V1ServiceBackendPort(number = CfgVal.httpPort)
-            let service = V1IngressServiceBackend(pn.StringName, port = port)
-            V1IngressBackend(service = service)
+    // Returns an HTTPRoute (gateway.networking.k8s.io/v1) mapping
+    // http://$ingressHost/<pod>/core|history/... to the per-Pod Service <pod>, attached to
+    // the shared private traefik gateway. Each pod gets a core rule (-> httpPort) and a
+    // history rule (-> historyPort); the /<pod>/core|history prefix is stripped via a
+    // ReplacePrefixMatch URLRewrite (equivalent to the old nginx rewrite-target /$2).
+    // Replaces the former nginx Ingress.
+    member self.ToHttpRoute() : HTTPRoute =
+        let parentRef =
+            ParentReference(
+                Group = "gateway.networking.k8s.io",
+                Kind = "Gateway",
+                Namespace = CfgVal.gatewayNamespace,
+                Name = CfgVal.gatewayName
+            )
 
-        let historyBackend (pn: PodName) : V1IngressBackend =
-            let port = V1ServiceBackendPort(number = 80)
-            let service = V1IngressServiceBackend(pn.StringName, port = port)
-            V1IngressBackend(service = service)
+        let rewriteFilter =
+            HTTPRouteFilter(
+                Type = "URLRewrite",
+                UrlRewrite = HTTPURLRewriteFilter(Path = HTTPPathModifier(Type = "ReplacePrefixMatch", ReplacePrefixMatch = "/"))
+            )
 
-        let corePath (coreSet: CoreSet) (i: int) : V1HTTPIngressPath =
-            let pn = self.PodName coreSet i
-            let ingressPath = V1HTTPIngressPath()
-            ingressPath.Backend <- coreBackend pn
-            ingressPath.Path <- sprintf "/%s/core(/|$)(.*)" pn.StringName
-            ingressPath.PathType <- "ImplementationSpecific"
-            ingressPath
+        let ruleFor (pn: PodName) (suffix: string) (port: int) : HTTPRouteRule =
+            let m =
+                HTTPRouteMatch(Path = HTTPPathMatch(Type = "PathPrefix", Value = sprintf "/%s/%s" pn.StringName suffix))
 
-        let historyPath (coreSet: CoreSet) (i: int) : V1HTTPIngressPath =
-            let pn = self.PodName coreSet i
-            let ingressPath = V1HTTPIngressPath()
-            ingressPath.Backend <- historyBackend pn
-            ingressPath.Path <- sprintf "/%s/history(/|$)(.*)" pn.StringName
-            ingressPath.PathType <- "ImplementationSpecific"
-            ingressPath
+            let b = HTTPBackendRef(Name = pn.StringName, Port = System.Nullable<int>(port))
 
-        let corePaths = self.MapAllPeers corePath
-        let historyPaths = self.MapAllPeers historyPath
+            HTTPRouteRule(
+                Matches = List<HTTPRouteMatch>([ m ]),
+                Filters = List<HTTPRouteFilter>([ rewriteFilter ]),
+                BackendRefs = List<HTTPBackendRef>([ b ])
+            )
 
-        let rule = V1HTTPIngressRuleValue(paths = Array.concat [ corePaths; historyPaths ])
+        let coreRule (coreSet: CoreSet) (i: int) : HTTPRouteRule =
+            ruleFor (self.PodName coreSet i) "core" CfgVal.httpPort
 
-        let host = self.IngressInternalHostName
-        let rules = [| V1IngressRule(host = host, http = rule) |]
-        let spec = V1IngressSpec(rules = rules)
+        let historyRule (coreSet: CoreSet) (i: int) : HTTPRouteRule =
+            ruleFor (self.PodName coreSet i) "history" CfgVal.historyPort
 
-        let annotation =
-            Map.ofArray [| ("kubernetes.io/ingress.class", self.missionContext.ingressClass)
-                           ("nginx.ingress.kubernetes.io/use-regex", "true")
-                           ("nginx.ingress.kubernetes.io/rewrite-target", "/$2") |]
+        let rules = Array.concat [ self.MapAllPeers coreRule; self.MapAllPeers historyRule ]
+
+        let spec =
+            HTTPRouteSpec(
+                ParentRefs = List<ParentReference>([ parentRef ]),
+                Hostnames = List<string>([ self.IngressInternalHostName ]),
+                Rules = List<HTTPRouteRule>(rules)
+            )
 
         let meta =
-            V1ObjectMeta(name = self.IngressName, namespaceProperty = self.NamespaceProperty, annotations = annotation)
+            V1ObjectMeta(name = self.IngressName, namespaceProperty = self.NamespaceProperty)
             |> applyAnchorOwner self
 
-        V1Ingress(spec = spec, metadata = meta)
+        HTTPRoute(Metadata = meta, Spec = spec)

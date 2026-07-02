@@ -17,6 +17,7 @@ open StellarStatefulSets
 open StellarCoreSet
 open StellarKubeSpecs
 open StellarNamespaceContent
+open GatewayApiModels
 open System
 open System.Diagnostics
 
@@ -320,11 +321,20 @@ type Kubernetes with
                 namespaceContent.Add(service)
 
             if not (List.isEmpty statefulSets) then
-                let ing = nCfg.ToIngress()
-                LogInfo "Creating Ingress %s" ing.Metadata.Name
+                let route = nCfg.ToHttpRoute()
+                LogInfo "Creating HTTPRoute %s" route.Metadata.Name
                 ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
-                let ingress = self.CreateNamespacedIngress(namespaceParameter = nsStr, body = ing)
-                namespaceContent.Add(ingress)
+
+                self.CreateNamespacedCustomObject(
+                    body = route,
+                    group = "gateway.networking.k8s.io",
+                    version = "v1",
+                    namespaceParameter = nsStr,
+                    plural = "httproutes"
+                )
+                |> ignore
+
+                namespaceContent.Add(route)
 
             let formation =
                 new StellarFormation(
