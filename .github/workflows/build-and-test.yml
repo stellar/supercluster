@@ -16,7 +16,7 @@ jobs:
     - name: Setup k3s
       uses: debianmaster/actions-k3s@master
       with:
-        version: 'v1.23.17-k3s1'
+        version: 'v1.28.5-k3s1'
     - name: Setup Gateway API + traefik gateway
       run: |
         set -euo pipefail
