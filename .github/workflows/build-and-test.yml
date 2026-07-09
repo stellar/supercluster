@@ -26,7 +26,11 @@ jobs:
         helm repo add traefik https://traefik.github.io/charts
         helm repo update
         kubectl create namespace traefik
-        helm install traefik traefik/traefik -n traefik \
+        # k3s bundles its own traefik in kube-system; isolate ours (distinct name,
+        # no IngressClass) so it only provides the gateway-api controller.
+        helm install ssc-traefik traefik/traefik -n traefik \
+          --set fullnameOverride=ssc-traefik \
+          --set ingressClass.enabled=false \
           --set providers.kubernetesGateway.enabled=true \
           --set gateway.enabled=false \
           --set service.type=LoadBalancer \
