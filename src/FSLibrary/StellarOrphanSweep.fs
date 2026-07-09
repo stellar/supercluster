@@ -123,8 +123,6 @@ let private sweepWithCutoff (cutoff: DateTime) (kube: Kubernetes) (ns: string) (
             |> ignore)
         cutoff
 
-    // Also sweep legacy Ingresses left by pre-migration runs (this harness no
-    // longer creates them, but old orphans should still be reaped).
     sweepKind
         apiRateLimit
         "Ingress"
@@ -140,9 +138,6 @@ let private sweepWithCutoff (cutoff: DateTime) (kube: Kubernetes) (ns: string) (
         apiRateLimit
         "HTTPRoute"
         (fun () ->
-            // `new` clears the FS0760 IDisposable warning; do NOT `use`/dispose —
-            // GenericClient wraps the shared mission `kube` client, and disposing
-            // it would dispose that client out from under the rest of the run.
             let gc = new GenericClient(kube, "gateway.networking.k8s.io", "v1", "httproutes")
 
             gc.ListNamespacedAsync<HTTPRouteList>(ns).GetAwaiter().GetResult().Items
