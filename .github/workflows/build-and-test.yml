@@ -12,57 +12,55 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v2
-    - name: Setup k3s
-      uses: debianmaster/actions-k3s@master
-      with:
-        version: 'v1.28.5-k3s1'
-    - name: Setup Gateway API + traefik gateway
+    - uses: actions/checkout@v4
+    - name: Setup k3d cluster (k3s, bundled traefik disabled)
       run: |
         set -euo pipefail
-        # Gateway API standard CRDs (gateway.networking.k8s.io/v1 HTTPRoute is GA in v1.0+).
-        kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.1.0/standard-install.yaml
-        # Traefik as the Gateway API controller, exposing the web entrypoint on :80 via k3s servicelb.
-        helm repo add traefik https://traefik.github.io/charts
-        helm repo update
-        kubectl create namespace traefik
-        # k3s bundles its own traefik in kube-system; isolate ours (distinct name,
-        # no IngressClass) so it only provides the gateway-api controller.
-        helm install ssc-traefik traefik/traefik -n traefik \
-          --set fullnameOverride=ssc-traefik \
-          --set ingressClass.enabled=false \
-          --set providers.kubernetesGateway.enabled=true \
-          --set gateway.enabled=false \
-          --set service.type=LoadBalancer \
-          --set ports.web.exposedPort=80 \
+        curl -s https://raw.githubusercontent.com/k3d-io/k3d/v5.9.0/install.sh | bash
+        # Disable k3s's bundled traefik; the gateway controller (envoy) is installed below.
+        # Map host :8081 -> the gateway LoadBalancer :80 so the mission driver can reach it.
+        k3d cluster create ssc \
+          --image rancher/k3s:v1.31.5-k3s1 \
+          --k3s-arg "--disable=traefik@server:*" \
+          -p "8081:80@loadbalancer" \
           --wait
-        # GatewayClass + the private gateway the missions attach to (matches CfgVal.gatewayName / gatewayNamespace).
+        k3d kubeconfig get ssc > "$RUNNER_TEMP/kubeconfig"
+        echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+    - name: Setup Envoy Gateway + Gateway
+      run: |
+        set -euo pipefail
+        # Envoy Gateway ships its own matching gateway-api CRDs + controller.
+        helm install eg oci://docker.io/envoyproxy/gateway-helm --version v1.2.6 \
+          -n envoy-gateway-system --create-namespace --wait --timeout 4m
+        # GatewayClass + the Gateway the per-mission HTTPRoutes attach to.
+        # Missions target it via --gateway-name / --gateway-namespace.
+        kubectl create namespace gateway
         kubectl apply -f - <<'YAML'
         apiVersion: gateway.networking.k8s.io/v1
         kind: GatewayClass
         metadata:
-          name: traefik
+          name: eg
         spec:
-          controllerName: traefik.io/gateway-controller
+          controllerName: gateway.envoyproxy.io/gatewayclass-controller
         ---
         apiVersion: gateway.networking.k8s.io/v1
         kind: Gateway
         metadata:
-          name: traefik-gateway-private
-          namespace: traefik
+          name: ssc-gateway
+          namespace: gateway
         spec:
-          gatewayClassName: traefik
+          gatewayClassName: eg
           listeners:
-          - name: web
-            port: 8000
+          - name: http
+            port: 80
             protocol: HTTP
             allowedRoutes:
               namespaces:
                 from: All
         YAML
-        kubectl wait --namespace traefik --for=condition=Programmed gateway/traefik-gateway-private --timeout=180s
+        kubectl wait --namespace gateway --for=condition=Programmed gateway/ssc-gateway --timeout=180s
     - name: Setup .NET SDK 8
-      uses: actions/setup-dotnet@v1
+      uses: actions/setup-dotnet@v4
       with:
         dotnet-version: '8.0.x'
     - name: Install dependencies
@@ -76,7 +74,7 @@ jobs:
     - name: Test
       run: dotnet test --no-restore --verbosity normal
     - name: Run BootAndSync mission
-      run: dotnet run --project src/App/App.fsproj --configuration Release -- mission BootAndSync --image stellar/stellar-core:stable --kubeconfig $KUBECONFIG --namespace default --ingress-internal-domain local --ingress-external-host localhost --uneven-sched
+      run: dotnet run --project src/App/App.fsproj --configuration Release -- mission BootAndSync --image stellar/stellar-core:stable --kubeconfig $KUBECONFIG --namespace default --gateway-name ssc-gateway --gateway-namespace gateway --ingress-internal-domain local --ingress-external-host localhost --ingress-external-port 8081 --uneven-sched
     - uses: actions/upload-artifact@v4
       with:
         name: destination
