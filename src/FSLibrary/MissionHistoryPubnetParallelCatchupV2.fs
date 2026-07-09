@@ -170,7 +170,7 @@ let installProject (context: MissionContext) =
     | None -> ()
 
     setOptions.Add(sprintf "monitor.hostname=%s" (jobMonitorHostName context))
-    setOptions.Add(sprintf "monitor.path=/%s/%s/(.*)" context.namespaceProperty helmReleaseName)
+    setOptions.Add(sprintf "monitor.path_prefix=/%s/%s" context.namespaceProperty helmReleaseName)
     setOptions.Add(sprintf "monitor.logging_interval_seconds=%d" jobMonitorLoggingIntervalSecs)
 
     // Set ASAN_OPTIONS if provided
