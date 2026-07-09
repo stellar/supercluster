@@ -313,14 +313,22 @@ type Kubernetes with
             for statefulSet in statefulSets do
                 namespaceContent.Add(statefulSet)
 
-            for svc in nCfg.ToPerPodServices() do
-                LogInfo "Creating Per-Pod Service %s" svc.Metadata.Name
-                ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
-
-                let service = self.CreateNamespacedService(namespaceParameter = nsStr, body = svc)
-                namespaceContent.Add(service)
-
             if not (List.isEmpty statefulSets) then
+                let proxyCfg = nCfg.ToHttpProxyConfigMap()
+                LogInfo "Creating HTTP proxy ConfigMap %s" proxyCfg.Metadata.Name
+                ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
+                namespaceContent.Add(self.CreateNamespacedConfigMap(body = proxyCfg, namespaceParameter = nsStr))
+
+                let proxyDep = nCfg.ToHttpProxyDeployment()
+                LogInfo "Creating HTTP proxy Deployment %s (%d replicas)" proxyDep.Metadata.Name proxyDep.Spec.Replicas.Value
+                ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
+                namespaceContent.Add(self.CreateNamespacedDeployment(body = proxyDep, namespaceParameter = nsStr))
+
+                let proxySvc = nCfg.ToHttpProxyService()
+                LogInfo "Creating HTTP proxy Service %s" proxySvc.Metadata.Name
+                ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
+                namespaceContent.Add(self.CreateNamespacedService(body = proxySvc, namespaceParameter = nsStr))
+
                 let route = nCfg.ToHttpRoute()
                 LogInfo "Creating HTTPRoute %s" route.Metadata.Name
                 ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
@@ -335,6 +343,22 @@ type Kubernetes with
                 |> ignore
 
                 namespaceContent.Add(route)
+
+                // Wait for at least one proxy pod to be ready before the driver
+                // routes core HTTP through it, so mission startup doesn't spend
+                // its retry budget on 502s.
+                let rec waitProxyReady (n: int) =
+                    ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
+                    let d = self.ReadNamespacedDeployment(name = proxyDep.Metadata.Name, namespaceParameter = nsStr)
+                    let ready = d.Status.ReadyReplicas.GetValueOrDefault(0)
+                    LogInfo "HTTP proxy %s: %d ready" proxyDep.Metadata.Name ready
+
+                    if ready < 1 then
+                        if n >= 60 then failwithf "HTTP proxy %s not ready after 60 attempts" proxyDep.Metadata.Name
+                        System.Threading.Thread.Sleep(2000)
+                        waitProxyReady (n + 1)
+
+                waitProxyReady 0
 
             let formation =
                 new StellarFormation(

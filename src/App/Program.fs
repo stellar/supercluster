@@ -42,10 +42,9 @@ type MissionOptions
         logDebugPartitions: seq<string>,
         logTracePartitions: seq<string>,
         namespaceProperty: string option,
-        ingressClass: string,
-        ingressInternalDomain: string,
-        ingressExternalHost: string option,
-        ingressExternalPort: int,
+        routeInternalDomain: string,
+        routeExternalHost: string option,
+        routeExternalPort: int,
         exportToPrometheus: bool,
         probeTimeout: int,
         missions: string seq,
@@ -70,6 +69,7 @@ type MissionOptions
         avoidNodeLabels: seq<string>,
         tolerateNodeTaints: seq<string>,
         apiRateLimit: int,
+        httpProxyReplicas: int,
         pubnetData: string option,
         flatQuorum: bool option,
         tier1Keys: string option,
@@ -155,28 +155,22 @@ type MissionOptions
     [<Option("namespace", HelpText = "Namespace to use, overriding kubeconfig.", Required = false)>]
     member self.NamespaceProperty = namespaceProperty
 
-    [<Option("ingress-class",
-             HelpText = "Value for kubernetes.io/ingress.class, on ingress",
-             Required = false,
-             Default = "ingress-private")>]
-    member self.IngressClass = ingressClass
-
     [<Option("ingress-internal-domain",
              HelpText = "Cluster-internal DNS domain in which to configure ingress",
              Required = false,
              Default = "local")>]
-    member self.IngressInternalDomain = ingressInternalDomain
+    member self.RouteInternalDomain = routeInternalDomain
 
     [<Option("ingress-external-host",
              HelpText = "Cluster-external hostname to connect to for access to ingress",
              Required = false)>]
-    member self.IngressExternalHost = ingressExternalHost
+    member self.RouteExternalHost = routeExternalHost
 
     [<Option("ingress-external-port",
              HelpText = "Cluster-external port to connect to for access to ingress",
              Required = false,
              Default = 80)>]
-    member self.IngressExternalPort = ingressExternalPort
+    member self.RouteExternalPort = routeExternalPort
 
     [<Option("export-to-prometheus", HelpText = "Whether to export core metrics to prometheus")>]
     member self.ExportToPrometheus : bool = exportToPrometheus
@@ -294,6 +288,12 @@ type MissionOptions
              Required = false,
              Default = 10)>]
     member self.ApiRateLimit = apiRateLimit
+
+    [<Option("http-proxy-replicas",
+             HelpText = "Max nginx HTTP proxy replicas per mission (cap); actual scales with node count, floor 1",
+             Required = false,
+             Default = 10)>]
+    member self.HttpProxyReplicas = httpProxyReplicas
 
     [<Option("pubnet-data", HelpText = "JSON file containing pubnet connectivity graph data", Required = false)>]
     member self.PubnetData = pubnetData
@@ -775,10 +775,9 @@ let main argv =
                                numNodes = mission.NumNodes
                                namespaceProperty = ns
                                logLevels = ll
-                               ingressClass = mission.IngressClass
-                               ingressInternalDomain = mission.IngressInternalDomain
-                               ingressExternalHost = mission.IngressExternalHost
-                               ingressExternalPort = mission.IngressExternalPort
+                               routeInternalDomain = mission.RouteInternalDomain
+                               routeExternalHost = mission.RouteExternalHost
+                               routeExternalPort = mission.RouteExternalPort
                                exportToPrometheus = mission.ExportToPrometheus
                                probeTimeout = mission.ProbeTimeout
                                coreResources = SmallTestResources
@@ -788,6 +787,7 @@ let main argv =
                                avoidNodeLabels = List.map splitLabel (List.ofSeq mission.AvoidNodeLabels)
                                tolerateNodeTaints = List.map splitLabel (List.ofSeq mission.TolerateNodeTaints)
                                apiRateLimit = mission.ApiRateLimit
+                               httpProxyReplicas = mission.HttpProxyReplicas
                                pubnetData = mission.PubnetData
                                flatQuorum = mission.FlatQuorum
                                tier1Keys = mission.Tier1Keys

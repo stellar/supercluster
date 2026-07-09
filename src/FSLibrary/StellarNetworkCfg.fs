@@ -104,6 +104,17 @@ type NetworkCfg =
 
     member self.HttpRouteName : string = sprintf "%s-stellar-core-http-route" self.Nonce
 
+    // The nginx HTTP proxy (Deployment + Service) that the HTTPRoute points at.
+    member self.HttpProxyName : string = sprintf "%s-http-proxy" self.Nonce
+
+    member self.HttpProxyConfigMapName : string = sprintf "%s-http-proxy-cfg" self.Nonce
+
+    // Labels scoping the proxy Deployment/Service to this run only (the shared
+    // namespace can hold other runs). Distinct from the core "app=stellar-core"
+    // labels so the proxy Service selects only proxy pods.
+    member self.HttpProxyLabels : Map<string, string> =
+        Map.ofSeq [ ("app", "stellar-core-http-proxy"); ("ssc-nonce", self.Nonce) ]
+
     member self.JobName(i: int) : string = sprintf "%s-stellar-core-job-%d" self.Nonce i
 
     member self.PeerCfgMapName (cs: CoreSet) (i: int) : string = sprintf "%s-cfg-map" (self.PodName cs i).StringName
@@ -120,11 +131,11 @@ type NetworkCfg =
 
         PeerDnsName s
 
-    member self.IngressInternalHostName : string = sprintf "%s.%s" self.Nonce self.missionContext.ingressInternalDomain
+    member self.RouteInternalHostName : string = sprintf "%s.%s" self.Nonce self.missionContext.routeInternalDomain
 
-    member self.IngressExternalHostName : string =
-        match self.missionContext.ingressExternalHost with
-        | None -> self.IngressInternalHostName
+    member self.RouteExternalHostName : string =
+        match self.missionContext.routeExternalHost with
+        | None -> self.RouteInternalHostName
         | Some h -> h
 
     member self.WithLive name (live: bool) =

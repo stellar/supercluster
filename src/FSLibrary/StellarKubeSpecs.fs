@@ -855,47 +855,116 @@ type NetworkCfg with
         statefulSet
 
 
-    // Returns an array of "per-Pod" Service objects, each named according to
-    // the peer-N short names, and mapping (via a somewhat hacky misuse of the
-    // ExternalName Service type -- thanks internet!) to the _internal_ DNS
-    // names of each pod.
-    //
-    // This exists strictly to support the Ingress object below, that routes
-    // separate URL prefixes to separate Pods (which is somewhat the opposite of
-    // the load-balancing task Services, Pods, and Ingress systems typically
-    // do).
-    member self.ToPerPodServices() : V1Service array =
-        let perPodService (coreSet: CoreSet) i =
-            let name = self.PodName coreSet i
+    // Metadata for a proxy object: run-scoped labels + the anchor owner ref so
+    // it is GC'd with the rest of the run. (Not NamespacedMeta, which would
+    // stamp the core "app=stellar-core" labels.)
+    member private self.HttpProxyMeta(name: string) : V1ObjectMeta =
+        V1ObjectMeta(name = name, namespaceProperty = self.NamespaceProperty, labels = self.HttpProxyLabels)
+        |> applyAnchorOwner self
 
-            let ports =
-                [| V1ServicePort(name = "core", port = CfgVal.httpPort)
-                   V1ServicePort(name = "history", port = 80) |]
+    // ConfigMap holding the nginx server config for the proxy. The pod's actual
+    // CoreDNS address is not known here, so we ship a template with a
+    // __RESOLVER__ placeholder that the container substitutes at startup from
+    // its own /etc/resolv.conf (see ToHttpProxyDeployment). Requests of the
+    // form /<pod>/core|history[/<rest>] are proxied to the pod's in-cluster DNS
+    // name; $is_args$args preserves the query string (the driver uses it, e.g.
+    // /<pod>/core/tx?blob=...).
+    member self.ToHttpProxyConfigMap() : V1ConfigMap =
+        let fqdn = sprintf "%s.%s.svc.cluster.local" self.ServiceName self.NamespaceProperty
 
-            let ports =
-                if self.missionContext.exportToPrometheus then
-                    Array.append ports [| V1ServicePort(name = "prom-exp", port = CfgVal.prometheusExporterPort) |]
-                else
-                    ports
+        let conf =
+            sprintf
+                """server {
+    listen 80 default_server;
+    server_name _;
+    resolver __RESOLVER__ ipv6=off valid=10s;
 
-            // ClusterIP service selecting the single pod by its StatefulSet pod-name label.
-            // (Previously ExternalName -> pod DNS, which the traefik Gateway provider rejects
-            // as an HTTPRoute backend.)
-            let selector =
-                CfgVal.labels |> Map.add "statefulset.kubernetes.io/pod-name" name.StringName
+    location ~ ^/([^/]+)/core(?:/(.*))?$ {
+        proxy_pass http://$1.%s:%d/$2$is_args$args;
+    }
 
-            let spec = V1ServiceSpec(selector = selector, ports = ports)
+    location ~ ^/([^/]+)/history(?:/(.*))?$ {
+        proxy_pass http://$1.%s:%d/$2$is_args$args;
+    }
+}
+"""
+                fqdn
+                CfgVal.httpPort
+                fqdn
+                CfgVal.historyPort
 
-            V1Service(metadata = self.NamespacedMeta name.StringName, spec = spec)
+        let data = Map.empty.Add(CfgVal.httpProxyConfigFileName, conf)
+        V1ConfigMap(metadata = self.HttpProxyMeta self.HttpProxyConfigMapName, data = data)
 
-        self.MapAllPeers perPodService
+    // Scalable nginx Deployment fronting driver->pod routing. The startup shim
+    // reads the CoreDNS server from /etc/resolv.conf and templates it into the
+    // nginx config, so the same manifest works on any cluster (the image's
+    // nginx is too old for `resolver local=on`).
+    member self.ToHttpProxyDeployment() : V1Deployment =
+        let shim =
+            sprintf
+                "set -e; R=$(awk '/^nameserver/ {print $2; exit}' /etc/resolv.conf); sed \"s/__RESOLVER__/$R/\" %s/%s > /etc/nginx/conf.d/default.conf; exec nginx -g 'daemon off;'"
+                CfgVal.httpProxyConfigMountPath
+                CfgVal.httpProxyConfigFileName
 
-    // Returns an HTTPRoute (gateway.networking.k8s.io/v1) mapping
-    // http://$ingressHost/<pod>/core|history/... to the per-Pod Service <pod>, attached to
-    // the shared private traefik gateway. Each pod gets a core rule (-> httpPort) and a
-    // history rule (-> historyPort); the /<pod>/core|history prefix is stripped via a
-    // ReplacePrefixMatch URLRewrite (equivalent to the old nginx rewrite-target /$2).
-    // Replaces the former nginx Ingress.
+        // Match the ingress-nginx private controller pods (ssc-eks) this proxy replaces.
+        let resources =
+            V1ResourceRequirements(
+                requests = dict [ ("cpu", ResourceQuantity("50m")); ("memory", ResourceQuantity("90Mi")) ],
+                limits = dict [ ("cpu", ResourceQuantity("250m")); ("memory", ResourceQuantity("768Mi")) ]
+            )
+
+        let container =
+            V1Container(
+                name = CfgVal.httpProxyContainerName,
+                image = self.missionContext.nginxImage,
+                command = [| "/bin/sh" |],
+                args = [| "-c"; shim |],
+                ports = [| V1ContainerPort(containerPort = 80, name = "http") |],
+                resources = resources,
+                volumeMounts =
+                    [| V1VolumeMount(name = CfgVal.httpProxyConfigVolumeName, mountPath = CfgVal.httpProxyConfigMountPath) |]
+            )
+
+        let volume =
+            V1Volume(
+                name = CfgVal.httpProxyConfigVolumeName,
+                configMap = V1ConfigMapVolumeSource(name = self.HttpProxyConfigMapName)
+            )
+
+        let podSpec = V1PodSpec(containers = [| container |], volumes = [| volume |])
+        let podTemplate = V1PodTemplateSpec(metadata = V1ObjectMeta(labels = self.HttpProxyLabels), spec = podSpec)
+
+        // The proxy only carries driver->core control HTTP (getinfo polling,
+        // loadgen commands, metrics) -- not the tx/overlay load, which is
+        // pod-to-pod. So 1 replica suffices for most missions; scale up only for
+        // large topologies. ceil(nodes/64), clamped to [1, cap] where cap is
+        // --http-proxy-replicas. Keeps the parallel-mission fan-out cheap.
+        let cap = max 1 self.missionContext.httpProxyReplicas
+        let nodesPerProxy = 64
+        let replicas = self.MaxPeerCount |> fun n -> (n + nodesPerProxy - 1) / nodesPerProxy |> max 1 |> min cap
+
+        let spec =
+            V1DeploymentSpec(
+                replicas = System.Nullable<int>(replicas),
+                selector = V1LabelSelector(matchLabels = self.HttpProxyLabels),
+                template = podTemplate
+            )
+
+        V1Deployment(metadata = self.HttpProxyMeta self.HttpProxyName, spec = spec)
+
+    // ClusterIP Service selecting the proxy pods; the HTTPRoute's single
+    // backend.
+    member self.ToHttpProxyService() : V1Service =
+        let spec = V1ServiceSpec(selector = self.HttpProxyLabels, ports = [| V1ServicePort(name = "http", port = 80) |])
+        V1Service(metadata = self.HttpProxyMeta self.HttpProxyName, spec = spec)
+
+    // Returns an HTTPRoute (gateway.networking.k8s.io/v1) attached to the shared
+    // private traefik gateway that sends all of http://$routeHost/* to the
+    // per-run nginx HTTP proxy Service. The proxy does the /<pod>/core|history
+    // demux internally, so this route needs exactly ONE rule regardless of pod
+    // count -- side-stepping the HTTPRoute 16-rule cap and the CoreDNS load of
+    // the former per-pod backends. Replaces the former nginx Ingress.
     member self.ToHttpRoute() : HTTPRoute =
         let parentRef =
             ParentReference(
@@ -905,37 +974,18 @@ type NetworkCfg with
                 Name = CfgVal.gatewayName
             )
 
-        let rewriteFilter =
-            HTTPRouteFilter(
-                Type = "URLRewrite",
-                UrlRewrite = HTTPURLRewriteFilter(Path = HTTPPathModifier(Type = "ReplacePrefixMatch", ReplacePrefixMatch = "/"))
-            )
-
-        let ruleFor (pn: PodName) (suffix: string) (port: int) : HTTPRouteRule =
-            let m =
-                HTTPRouteMatch(Path = HTTPPathMatch(Type = "PathPrefix", Value = sprintf "/%s/%s" pn.StringName suffix))
-
-            let b = HTTPBackendRef(Name = pn.StringName, Port = System.Nullable<int>(port))
-
+        let rule =
             HTTPRouteRule(
-                Matches = List<HTTPRouteMatch>([ m ]),
-                Filters = List<HTTPRouteFilter>([ rewriteFilter ]),
-                BackendRefs = List<HTTPBackendRef>([ b ])
+                Matches = List<HTTPRouteMatch>([ HTTPRouteMatch(Path = HTTPPathMatch(Type = "PathPrefix", Value = "/")) ]),
+                BackendRefs =
+                    List<HTTPBackendRef>([ HTTPBackendRef(Name = self.HttpProxyName, Port = System.Nullable<int>(80)) ])
             )
-
-        let coreRule (coreSet: CoreSet) (i: int) : HTTPRouteRule =
-            ruleFor (self.PodName coreSet i) "core" CfgVal.httpPort
-
-        let historyRule (coreSet: CoreSet) (i: int) : HTTPRouteRule =
-            ruleFor (self.PodName coreSet i) "history" CfgVal.historyPort
-
-        let rules = Array.concat [ self.MapAllPeers coreRule; self.MapAllPeers historyRule ]
 
         let spec =
             HTTPRouteSpec(
                 ParentRefs = List<ParentReference>([ parentRef ]),
-                Hostnames = List<string>([ self.IngressInternalHostName ]),
-                Rules = List<HTTPRouteRule>(rules)
+                Hostnames = List<string>([ self.RouteInternalHostName ]),
+                Rules = List<HTTPRouteRule>([ rule ])
             )
 
         let meta =

@@ -55,10 +55,9 @@ type MissionContext =
       numNodes: int
       namespaceProperty: string
       logLevels: LogLevels
-      ingressClass: string
-      ingressInternalDomain: string
-      ingressExternalHost: string option
-      ingressExternalPort: int
+      routeInternalDomain: string
+      routeExternalHost: string option
+      routeExternalPort: int
       exportToPrometheus: bool
       probeTimeout: int
       coreResources: CoreResources
@@ -68,6 +67,7 @@ type MissionContext =
       avoidNodeLabels: ((string * string option) list)
       tolerateNodeTaints: ((string * string option) list)
       apiRateLimit: int
+      httpProxyReplicas: int
       pubnetData: string option
       flatQuorum: bool option
       tier1Keys: string option
