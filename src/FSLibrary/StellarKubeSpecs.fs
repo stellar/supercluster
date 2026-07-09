@@ -984,8 +984,8 @@ type NetworkCfg with
             ParentReference(
                 Group = "gateway.networking.k8s.io",
                 Kind = "Gateway",
-                Namespace = CfgVal.gatewayNamespace,
-                Name = CfgVal.gatewayName
+                Namespace = self.missionContext.gatewayNamespace,
+                Name = self.missionContext.gatewayName
             )
 
         let rule =

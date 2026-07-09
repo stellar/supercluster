@@ -54,6 +54,8 @@ let ctx : MissionContext =
       numNodes = 100
       namespaceProperty = "stellar-supercluster"
       logLevels = { LogDebugPartitions = []; LogTracePartitions = [] }
+      gatewayName = "traefik-gateway-private"
+      gatewayNamespace = "traefik"
       routeInternalDomain = "local"
       routeExternalHost = None
       routeExternalPort = 80

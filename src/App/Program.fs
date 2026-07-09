@@ -42,6 +42,8 @@ type MissionOptions
         logDebugPartitions: seq<string>,
         logTracePartitions: seq<string>,
         namespaceProperty: string option,
+        gatewayName: string,
+        gatewayNamespace: string,
         routeInternalDomain: string,
         routeExternalHost: string option,
         routeExternalPort: int,
@@ -154,6 +156,18 @@ type MissionOptions
 
     [<Option("namespace", HelpText = "Namespace to use, overriding kubeconfig.", Required = false)>]
     member self.NamespaceProperty = namespaceProperty
+
+    [<Option("gateway-name",
+             HelpText = "Name of the Gateway (gateway.networking.k8s.io) the per-mission HTTPRoute attaches to",
+             Required = false,
+             Default = "traefik-gateway-private")>]
+    member self.GatewayName = gatewayName
+
+    [<Option("gateway-namespace",
+             HelpText = "Namespace of the Gateway the per-mission HTTPRoute attaches to",
+             Required = false,
+             Default = "traefik")>]
+    member self.GatewayNamespace = gatewayNamespace
 
     [<Option("ingress-internal-domain",
              HelpText = "Cluster-internal DNS domain used to form the per-mission Gateway API route hostname (flag name kept for compatibility)",
@@ -775,6 +789,8 @@ let main argv =
                                numNodes = mission.NumNodes
                                namespaceProperty = ns
                                logLevels = ll
+                               gatewayName = mission.GatewayName
+                               gatewayNamespace = mission.GatewayNamespace
                                routeInternalDomain = mission.RouteInternalDomain
                                routeExternalHost = mission.RouteExternalHost
                                routeExternalPort = mission.RouteExternalPort

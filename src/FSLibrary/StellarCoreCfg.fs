@@ -21,9 +21,6 @@ module CfgVal =
     let httpPort = 11626
     let historyPort = 80
     let prometheusExporterPort = 9473
-    // Gateway the per-mission HTTPRoute attaches to (shared private traefik gateway).
-    let gatewayName = "traefik-gateway-private"
-    let gatewayNamespace = "traefik"
     let labels = Map.ofSeq [ "app", "stellar-core" ]
     let labelSelector = "app = stellar-core"
     let stellarCoreBinPath = "stellar-core"

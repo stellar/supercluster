@@ -55,6 +55,8 @@ type MissionContext =
       numNodes: int
       namespaceProperty: string
       logLevels: LogLevels
+      gatewayName: string
+      gatewayNamespace: string
       routeInternalDomain: string
       routeExternalHost: string option
       routeExternalPort: int
