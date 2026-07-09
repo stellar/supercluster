@@ -856,8 +856,7 @@ type NetworkCfg with
 
 
     // Metadata for a proxy object: run-scoped labels + the anchor owner ref so
-    // it is GC'd with the rest of the run. (Not NamespacedMeta, which would
-    // stamp the core "app=stellar-core" labels.)
+    // it is GC'd with the rest of the run.
     member private self.HttpProxyMeta(name: string) : V1ObjectMeta =
         V1ObjectMeta(name = name, namespaceProperty = self.NamespaceProperty, labels = self.HttpProxyLabels)
         |> applyAnchorOwner self
@@ -898,8 +897,7 @@ type NetworkCfg with
 
     // Scalable nginx Deployment fronting driver->pod routing. The startup shim
     // reads the CoreDNS server from /etc/resolv.conf and templates it into the
-    // nginx config, so the same manifest works on any cluster (the image's
-    // nginx is too old for `resolver local=on`).
+    // nginx config.
     member self.ToHttpProxyDeployment() : V1Deployment =
         let shim =
             sprintf
@@ -944,11 +942,9 @@ type NetworkCfg with
         let podTemplate =
             V1PodTemplateSpec(metadata = V1ObjectMeta(labels = self.HttpProxyLabels), spec = podSpec)
 
-        // The proxy only carries driver->core control HTTP (getinfo polling,
-        // loadgen commands, metrics) -- not the tx/overlay load, which is
-        // pod-to-pod. So 1 replica suffices for most missions; scale up only for
+        //1 replica suffices for most missions; scale up only for
         // large topologies. ceil(nodes/64), clamped to [1, cap] where cap is
-        // --http-proxy-replicas. Keeps the parallel-mission fan-out cheap.
+        // --http-proxy-replicas. 
         let cap = max 1 self.missionContext.httpProxyReplicas
         let nodesPerProxy = 64
 
@@ -976,9 +972,7 @@ type NetworkCfg with
     // Returns an HTTPRoute (gateway.networking.k8s.io/v1) attached to the shared
     // private traefik gateway that sends all of http://$routeHost/* to the
     // per-run nginx HTTP proxy Service. The proxy does the /<pod>/core|history
-    // demux internally, so this route needs exactly ONE rule regardless of pod
-    // count -- side-stepping the HTTPRoute 16-rule cap and the CoreDNS load of
-    // the former per-pod backends. Replaces the former nginx Ingress.
+    // demux internally.
     member self.ToHttpRoute() : HTTPRoute =
         let parentRef =
             ParentReference(
