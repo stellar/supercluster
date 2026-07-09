@@ -140,7 +140,10 @@ let private sweepWithCutoff (cutoff: DateTime) (kube: Kubernetes) (ns: string) (
         apiRateLimit
         "HTTPRoute"
         (fun () ->
-            use gc = new GenericClient(kube, "gateway.networking.k8s.io", "v1", "httproutes")
+            // `new` clears the FS0760 IDisposable warning; do NOT `use`/dispose —
+            // GenericClient wraps the shared mission `kube` client, and disposing
+            // it would dispose that client out from under the rest of the run.
+            let gc = new GenericClient(kube, "gateway.networking.k8s.io", "v1", "httproutes")
 
             gc.ListNamespacedAsync<HTTPRouteList>(ns).GetAwaiter().GetResult().Items
             |> Seq.map (fun r -> r.Metadata))
