@@ -17,10 +17,46 @@ jobs:
       uses: debianmaster/actions-k3s@master
       with:
         version: 'v1.23.17-k3s1'
-    - name: Setup nginx-ingress
+    - name: Setup Gateway API + traefik gateway
       run: |
-        kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.5.1/deploy/static/provider/cloud/deploy.yaml
-        kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=120s
+        set -euo pipefail
+        # Gateway API standard CRDs (gateway.networking.k8s.io/v1 HTTPRoute is GA in v1.0+).
+        kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.1.0/standard-install.yaml
+        # Traefik as the Gateway API controller, exposing the web entrypoint on :80 via k3s servicelb.
+        helm repo add traefik https://traefik.github.io/charts
+        helm repo update
+        kubectl create namespace traefik
+        helm install traefik traefik/traefik -n traefik \
+          --set providers.kubernetesGateway.enabled=true \
+          --set gateway.enabled=false \
+          --set service.type=LoadBalancer \
+          --set ports.web.exposedPort=80 \
+          --wait
+        # GatewayClass + the private gateway the missions attach to (matches CfgVal.gatewayName / gatewayNamespace).
+        kubectl apply -f - <<'YAML'
+        apiVersion: gateway.networking.k8s.io/v1
+        kind: GatewayClass
+        metadata:
+          name: traefik
+        spec:
+          controllerName: traefik.io/gateway-controller
+        ---
+        apiVersion: gateway.networking.k8s.io/v1
+        kind: Gateway
+        metadata:
+          name: traefik-gateway-private
+          namespace: traefik
+        spec:
+          gatewayClassName: traefik
+          listeners:
+          - name: web
+            port: 8000
+            protocol: HTTP
+            allowedRoutes:
+              namespaces:
+                from: All
+        YAML
+        kubectl wait --namespace traefik --for=condition=Programmed gateway/traefik-gateway-private --timeout=180s
     - name: Setup .NET SDK 8
       uses: actions/setup-dotnet@v1
       with:
