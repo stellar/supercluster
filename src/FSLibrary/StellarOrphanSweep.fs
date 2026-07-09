@@ -140,7 +140,7 @@ let private sweepWithCutoff (cutoff: DateTime) (kube: Kubernetes) (ns: string) (
         apiRateLimit
         "HTTPRoute"
         (fun () ->
-            let gc = GenericClient(kube, "gateway.networking.k8s.io", "v1", "httproutes")
+            use gc = new GenericClient(kube, "gateway.networking.k8s.io", "v1", "httproutes")
 
             gc.ListNamespacedAsync<HTTPRouteList>(ns).GetAwaiter().GetResult().Items
             |> Seq.map (fun r -> r.Metadata))
