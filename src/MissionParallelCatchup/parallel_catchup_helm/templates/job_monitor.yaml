@@ -8,8 +8,10 @@ spec:
     kind: Gateway
     name: "{{ .Values.monitor.gateway_name }}"
     namespace: "{{ .Values.monitor.gateway_namespace }}"
+  {{- if .Values.monitor.hostname }}
   hostnames:
   - "{{ .Values.monitor.hostname }}"
+  {{- end }}
   rules:
   - matches:
     - path:

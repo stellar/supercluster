@@ -910,8 +910,12 @@ type NetworkCfg with
         // Match the ingress-nginx private controller pods (ssc-eks) this proxy replaces.
         let resources =
             V1ResourceRequirements(
-                requests = dict [ ("cpu", ResourceQuantity("50m")); ("memory", ResourceQuantity("90Mi")) ],
-                limits = dict [ ("cpu", ResourceQuantity("250m")); ("memory", ResourceQuantity("768Mi")) ]
+                requests =
+                    dict [ ("cpu", ResourceQuantity("50m"))
+                           ("memory", ResourceQuantity("90Mi")) ],
+                limits =
+                    dict [ ("cpu", ResourceQuantity("250m"))
+                           ("memory", ResourceQuantity("768Mi")) ]
             )
 
         let container =
@@ -923,7 +927,10 @@ type NetworkCfg with
                 ports = [| V1ContainerPort(containerPort = 80, name = "http") |],
                 resources = resources,
                 volumeMounts =
-                    [| V1VolumeMount(name = CfgVal.httpProxyConfigVolumeName, mountPath = CfgVal.httpProxyConfigMountPath) |]
+                    [| V1VolumeMount(
+                           name = CfgVal.httpProxyConfigVolumeName,
+                           mountPath = CfgVal.httpProxyConfigMountPath
+                       ) |]
             )
 
         let volume =
@@ -933,7 +940,9 @@ type NetworkCfg with
             )
 
         let podSpec = V1PodSpec(containers = [| container |], volumes = [| volume |])
-        let podTemplate = V1PodTemplateSpec(metadata = V1ObjectMeta(labels = self.HttpProxyLabels), spec = podSpec)
+
+        let podTemplate =
+            V1PodTemplateSpec(metadata = V1ObjectMeta(labels = self.HttpProxyLabels), spec = podSpec)
 
         // The proxy only carries driver->core control HTTP (getinfo polling,
         // loadgen commands, metrics) -- not the tx/overlay load, which is
@@ -942,7 +951,10 @@ type NetworkCfg with
         // --http-proxy-replicas. Keeps the parallel-mission fan-out cheap.
         let cap = max 1 self.missionContext.httpProxyReplicas
         let nodesPerProxy = 64
-        let replicas = self.MaxPeerCount |> fun n -> (n + nodesPerProxy - 1) / nodesPerProxy |> max 1 |> min cap
+
+        let replicas =
+            self.MaxPeerCount
+            |> fun n -> (n + nodesPerProxy - 1) / nodesPerProxy |> max 1 |> min cap
 
         let spec =
             V1DeploymentSpec(
@@ -956,7 +968,9 @@ type NetworkCfg with
     // ClusterIP Service selecting the proxy pods; the HTTPRoute's single
     // backend.
     member self.ToHttpProxyService() : V1Service =
-        let spec = V1ServiceSpec(selector = self.HttpProxyLabels, ports = [| V1ServicePort(name = "http", port = 80) |])
+        let spec =
+            V1ServiceSpec(selector = self.HttpProxyLabels, ports = [| V1ServicePort(name = "http", port = 80) |])
+
         V1Service(metadata = self.HttpProxyMeta self.HttpProxyName, spec = spec)
 
     // Returns an HTTPRoute (gateway.networking.k8s.io/v1) attached to the shared
@@ -976,7 +990,8 @@ type NetworkCfg with
 
         let rule =
             HTTPRouteRule(
-                Matches = List<HTTPRouteMatch>([ HTTPRouteMatch(Path = HTTPPathMatch(Type = "PathPrefix", Value = "/")) ]),
+                Matches =
+                    List<HTTPRouteMatch>([ HTTPRouteMatch(Path = HTTPPathMatch(Type = "PathPrefix", Value = "/")) ]),
                 BackendRefs =
                     List<HTTPBackendRef>([ HTTPBackendRef(Name = self.HttpProxyName, Port = System.Nullable<int>(80)) ])
             )

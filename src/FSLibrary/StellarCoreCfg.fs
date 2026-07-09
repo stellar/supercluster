@@ -47,7 +47,7 @@ module CfgVal =
     let peerCfgFileName = "stellar-core.cfg"
     let peerInitCfgFileName = "stellar-core-init.cfg"
     let peerDelayCfgFileName = "install-delays.sh"
-    
+
 
     let httpProxyContainerName = "http-proxy"
     let httpProxyConfigVolumeName = "proxy-tmpl"

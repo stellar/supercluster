@@ -113,7 +113,8 @@ type NetworkCfg =
     // namespace can hold other runs). Distinct from the core "app=stellar-core"
     // labels so the proxy Service selects only proxy pods.
     member self.HttpProxyLabels : Map<string, string> =
-        Map.ofSeq [ ("app", "stellar-core-http-proxy"); ("ssc-nonce", self.Nonce) ]
+        Map.ofSeq [ ("app", "stellar-core-http-proxy")
+                    ("ssc-nonce", self.Nonce) ]
 
     member self.JobName(i: int) : string = sprintf "%s-stellar-core-job-%d" self.Nonce i
 

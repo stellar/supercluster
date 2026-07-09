@@ -320,7 +320,12 @@ type Kubernetes with
                 namespaceContent.Add(self.CreateNamespacedConfigMap(body = proxyCfg, namespaceParameter = nsStr))
 
                 let proxyDep = nCfg.ToHttpProxyDeployment()
-                LogInfo "Creating HTTP proxy Deployment %s (%d replicas)" proxyDep.Metadata.Name proxyDep.Spec.Replicas.Value
+
+                LogInfo
+                    "Creating HTTP proxy Deployment %s (%d replicas)"
+                    proxyDep.Metadata.Name
+                    proxyDep.Spec.Replicas.Value
+
                 ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
                 namespaceContent.Add(self.CreateNamespacedDeployment(body = proxyDep, namespaceParameter = nsStr))
 
@@ -349,12 +354,19 @@ type Kubernetes with
                 // its retry budget on 502s.
                 let rec waitProxyReady (n: int) =
                     ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
-                    let d = self.ReadNamespacedDeployment(name = proxyDep.Metadata.Name, namespaceParameter = nsStr)
-                    let ready = d.Status.ReadyReplicas.GetValueOrDefault(0)
+
+                    let d =
+                        self.ReadNamespacedDeployment(name = proxyDep.Metadata.Name, namespaceParameter = nsStr)
+                    // Status (and ReadyReplicas within it) is populated asynchronously and may be
+                    // null right after creation; treat missing as 0 ready and keep polling.
+                    let ready = if isNull d.Status then 0 else d.Status.ReadyReplicas.GetValueOrDefault(0)
+
                     LogInfo "HTTP proxy %s: %d ready" proxyDep.Metadata.Name ready
 
                     if ready < 1 then
-                        if n >= 60 then failwithf "HTTP proxy %s not ready after 60 attempts" proxyDep.Metadata.Name
+                        if n >= 60 then
+                            failwithf "HTTP proxy %s not ready after 60 attempts" proxyDep.Metadata.Name
+
                         System.Threading.Thread.Sleep(2000)
                         waitProxyReady (n + 1)
 

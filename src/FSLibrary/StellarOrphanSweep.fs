@@ -123,17 +123,26 @@ let private sweepWithCutoff (cutoff: DateTime) (kube: Kubernetes) (ns: string) (
             |> ignore)
         cutoff
 
+    // Also sweep legacy Ingresses left by pre-migration runs (this harness no
+    // longer creates them, but old orphans should still be reaped).
+    sweepKind
+        apiRateLimit
+        "Ingress"
+        (fun () ->
+            kube.ListNamespacedIngress(namespaceParameter = ns).Items
+            |> Seq.map (fun i -> i.Metadata))
+        (fun n ->
+            kube.DeleteNamespacedIngress(namespaceParameter = ns, name = n, propagationPolicy = "Foreground")
+            |> ignore)
+        cutoff
+
     sweepKind
         apiRateLimit
         "HTTPRoute"
         (fun () ->
             let gc = GenericClient(kube, "gateway.networking.k8s.io", "v1", "httproutes")
 
-            gc
-                .ListNamespacedAsync<HTTPRouteList>(ns)
-                .GetAwaiter()
-                .GetResult()
-                .Items
+            gc.ListNamespacedAsync<HTTPRouteList>(ns).GetAwaiter().GetResult().Items
             |> Seq.map (fun r -> r.Metadata))
         (fun n ->
             kube.DeleteNamespacedCustomObject(

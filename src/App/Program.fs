@@ -156,18 +156,18 @@ type MissionOptions
     member self.NamespaceProperty = namespaceProperty
 
     [<Option("ingress-internal-domain",
-             HelpText = "Cluster-internal DNS domain in which to configure ingress",
+             HelpText = "Cluster-internal DNS domain used to form the per-mission Gateway API route hostname (flag name kept for compatibility)",
              Required = false,
              Default = "local")>]
     member self.RouteInternalDomain = routeInternalDomain
 
     [<Option("ingress-external-host",
-             HelpText = "Cluster-external hostname to connect to for access to ingress",
+             HelpText = "Cluster-external hostname the driver connects to for the gateway route; defaults to the route hostname (flag name kept for compatibility)",
              Required = false)>]
     member self.RouteExternalHost = routeExternalHost
 
     [<Option("ingress-external-port",
-             HelpText = "Cluster-external port to connect to for access to ingress",
+             HelpText = "Cluster-external port the driver connects to for the gateway route (flag name kept for compatibility)",
              Required = false,
              Default = 80)>]
     member self.RouteExternalPort = routeExternalPort
