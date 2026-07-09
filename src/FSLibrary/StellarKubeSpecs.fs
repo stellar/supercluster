@@ -944,7 +944,7 @@ type NetworkCfg with
 
         //1 replica suffices for most missions; scale up only for
         // large topologies. ceil(nodes/64), clamped to [1, cap] where cap is
-        // --http-proxy-replicas. 
+        // --http-proxy-replicas.
         let cap = max 1 self.missionContext.httpProxyReplicas
         let nodesPerProxy = 64
 
