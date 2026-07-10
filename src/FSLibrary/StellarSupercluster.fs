@@ -372,6 +372,50 @@ type Kubernetes with
 
                 waitProxyReady 0
 
+                // Best-effort wait for the gateway to mark the HTTPRoute Accepted,
+                // closing the window between pod-ready and route-programmed (404s).
+                // Non-fatal: if status can't be confirmed we log and proceed, since
+                // mission-level retries still cover the residual race.
+                let routeAccepted () =
+                    let gc = new GenericClient(self, "gateway.networking.k8s.io", "v1", "httproutes")
+
+                    gc.ListNamespacedAsync<HTTPRouteList>(nsStr).GetAwaiter().GetResult().Items
+                    |> Seq.tryFind (fun r -> r.Metadata.Name = route.Metadata.Name)
+                    |> Option.exists
+                        (fun r ->
+                            match r.Status with
+                            | null -> false
+                            | s when isNull s.Parents -> false
+                            | s ->
+                                s.Parents
+                                |> Seq.exists
+                                    (fun p ->
+                                        not (isNull p.Conditions)
+                                        && p.Conditions
+                                           |> Seq.exists (fun c -> c.Type = "Accepted" && c.Status = "True")))
+
+                let rec waitRouteAccepted (n: int) =
+                    ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
+
+                    let accepted =
+                        try
+                            routeAccepted ()
+                        with ex ->
+                            LogWarn "HTTPRoute %s status check failed (proceeding): %s" route.Metadata.Name ex.Message
+                            true
+
+                    if accepted then
+                        LogInfo "HTTPRoute %s Accepted by gateway" route.Metadata.Name
+                    elif n >= 30 then
+                        LogWarn
+                            "HTTPRoute %s not Accepted after 30 attempts; proceeding (mission retries cover it)"
+                            route.Metadata.Name
+                    else
+                        System.Threading.Thread.Sleep(2000)
+                        waitRouteAccepted (n + 1)
+
+                waitRouteAccepted 0
+
             let formation =
                 new StellarFormation(
                     networkCfg = nCfg,

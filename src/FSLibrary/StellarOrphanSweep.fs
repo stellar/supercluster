@@ -29,7 +29,17 @@ let private sweepKind
     : unit =
     ApiRateLimit.sleepUntilNextRateLimitedApiCallTime apiRateLimit
 
-    for meta in list () do
+    // Guard the list() itself: on a cluster missing this kind's CRD (e.g. no
+    // gateway-api) it throws, and without this catch it would abort the whole
+    // sweep and skip the remaining kinds.
+    let items =
+        try
+            list ()
+        with ex ->
+            LogWarn "Orphan sweep: failed to list %s (skipping kind): %s" kind ex.Message
+            Seq.empty
+
+    for meta in items do
         if isOlderThan cutoff meta then
             try
                 LogInfo

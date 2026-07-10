@@ -901,7 +901,7 @@ type NetworkCfg with
     member self.ToHttpProxyDeployment() : V1Deployment =
         let shim =
             sprintf
-                "set -e; R=$(awk '/^nameserver/ {print $2; exit}' /etc/resolv.conf); sed \"s/__RESOLVER__/$R/\" %s/%s > /etc/nginx/conf.d/default.conf; exec nginx -g 'daemon off;'"
+                "set -e; R=$(awk '/^nameserver/ {print $2; exit}' /etc/resolv.conf); [ -n \"$R\" ] || { echo 'http-proxy: no nameserver in /etc/resolv.conf' >&2; exit 1; }; sed \"s/__RESOLVER__/$R/\" %s/%s > /etc/nginx/conf.d/default.conf; exec nginx -g 'daemon off;'"
                 CfgVal.httpProxyConfigMountPath
                 CfgVal.httpProxyConfigFileName
 
@@ -924,6 +924,12 @@ type NetworkCfg with
                 args = [| "-c"; shim |],
                 ports = [| V1ContainerPort(containerPort = 80, name = "http") |],
                 resources = resources,
+                readinessProbe =
+                    V1Probe(
+                        tcpSocket = V1TCPSocketAction(port = IntstrIntOrString(value = "80")),
+                        initialDelaySeconds = System.Nullable<int>(1),
+                        periodSeconds = System.Nullable<int>(2)
+                    ),
                 volumeMounts =
                     [| V1VolumeMount(
                            name = CfgVal.httpProxyConfigVolumeName,
@@ -942,9 +948,10 @@ type NetworkCfg with
         let podTemplate =
             V1PodTemplateSpec(metadata = V1ObjectMeta(labels = self.HttpProxyLabels), spec = podSpec)
 
-        //1 replica suffices for most missions; scale up only for
-        // large topologies. ceil(nodes/64), clamped to [1, cap] where cap is
-        // --http-proxy-replicas.
+        // Replica count scales with node count at creation time: ceil(nodes/64),
+        // clamped to [1, cap] where cap is --http-proxy-replicas. One replica
+        // suffices for most missions. Not a live HPA -- the count is fixed for
+        // the run, which is fine since a mission's node count never changes.
         let cap = max 1 self.missionContext.httpProxyReplicas
         let nodesPerProxy = 64
 

@@ -27,6 +27,24 @@ namespace GatewayApiModels
 
         [JsonPropertyName("spec")]
         public HTTPRouteSpec Spec { get; set; }
+
+        [JsonPropertyName("status")]
+        public HTTPRouteStatus Status { get; set; }
+    }
+
+    // Minimal route status: each parent (Gateway) the route attached to reports
+    // conditions (notably "Accepted"). Used to wait for the gateway to admit the
+    // route before the driver sends traffic.
+    public class HTTPRouteStatus
+    {
+        [JsonPropertyName("parents")]
+        public IList<RouteParentStatus> Parents { get; set; }
+    }
+
+    public class RouteParentStatus
+    {
+        [JsonPropertyName("conditions")]
+        public IList<V1Condition> Conditions { get; set; }
     }
 
     [KubernetesEntity(Group = "gateway.networking.k8s.io", ApiVersion = "v1", Kind = "HTTPRouteList", PluralName = "httproutes")]
