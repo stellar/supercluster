@@ -414,7 +414,10 @@ let dedicatedNodeAntiAffinity (nonce: string) : V1PodAntiAffinity =
         [| V1LabelSelectorRequirement(key = CfgVal.runNonceLabelKey, operatorProperty = "NotIn", values = [| nonce |]) |]
 
     let selector = V1LabelSelector(matchLabels = CfgVal.labels, matchExpressions = matchExprs)
-    let term = V1PodAffinityTerm(labelSelector = selector, topologyKey = "kubernetes.io/hostname")
+
+    let term =
+        V1PodAffinityTerm(labelSelector = selector, topologyKey = "kubernetes.io/hostname")
+
     V1PodAntiAffinity(requiredDuringSchedulingIgnoredDuringExecution = [| term |])
 
 
