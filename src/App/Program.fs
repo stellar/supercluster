@@ -784,6 +784,9 @@ let main argv =
                                coreResources = SmallTestResources
                                keepData = mission.KeepData
                                unevenSched = mission.UnevenSched
+                               // Off by default; perf-sensitive missions (Max TPS, Min Block Time)
+                               // turn this on themselves via their MissionContext override.
+                               dedicatedNodes = false
                                requireNodeLabels = List.map splitLabel (List.ofSeq mission.RequireNodeLabels)
                                avoidNodeLabels = List.map splitLabel (List.ofSeq mission.AvoidNodeLabels)
                                tolerateNodeTaints = List.map splitLabel (List.ofSeq mission.TolerateNodeTaints)

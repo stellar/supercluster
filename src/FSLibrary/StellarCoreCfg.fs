@@ -22,6 +22,10 @@ module CfgVal =
     let prometheusExporterPort = 9473
     let labels = Map.ofSeq [ "app", "stellar-core" ]
     let labelSelector = "app = stellar-core"
+    // Per-run label key. Its value is the run's network nonce, which lets us
+    // distinguish pods belonging to different supercluster runs sharing a
+    // namespace (used for scheduling isolation; see StellarKubeSpecs.Affinity).
+    let runNonceLabelKey = "run-nonce"
     let stellarCoreBinPath = "stellar-core"
     let allCoreContainerCmds = [| "new-hist"; "new-db"; "catchup"; "run"; "test" |]
 

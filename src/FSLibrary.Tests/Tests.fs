@@ -63,6 +63,7 @@ let ctx : MissionContext =
       coreResources = SmallTestResources
       keepData = true
       unevenSched = false
+      dedicatedNodes = false
       requireNodeLabels = []
       avoidNodeLabels = []
       tolerateNodeTaints = []
@@ -189,6 +190,39 @@ type Tests(output: ITestOutputHelper) =
     // REVERTME: temporarily avoid looking for HTTP_PORT=0 on InitContainers
     // let initCfg = nCfg.StellarCoreCfg(coreSet, 1, InitCoreContainer)
     // Assert.Contains("HTTP_PORT = 0", initCfg.ToString())
+
+    [<Fact>]
+    member __.``Dedicated-nodes mission gets per-run pod anti-affinity``() =
+        let nCfgDedicated =
+            MakeNetworkCfg { ctx with dedicatedNodes = true; installNetworkDelay = Some false } [ coreSet ] passOpt
+
+        let spec = (nCfgDedicated.ToPodTemplateSpec coreSet).Spec
+
+        // Pods are tagged with their run nonce, which is what the anti-affinity
+        // discriminates on.
+        Assert.Equal(nCfgDedicated.Nonce, nCfgDedicated.PodLabels().[CfgVal.runNonceLabelKey])
+
+        // A single required pod anti-affinity term repels other runs' pods.
+        Assert.NotNull(spec.Affinity)
+        Assert.NotNull(spec.Affinity.PodAntiAffinity)
+        let terms = spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+        Assert.Equal(1, terms.Count)
+        let term = terms.[0]
+        Assert.Equal("kubernetes.io/hostname", term.TopologyKey)
+        Assert.Equal("stellar-core", term.LabelSelector.MatchLabels.["app"])
+        let expr = Seq.exactlyOne term.LabelSelector.MatchExpressions
+        Assert.Equal(CfgVal.runNonceLabelKey, expr.Key)
+        Assert.Equal("NotIn", expr.OperatorProperty)
+        Assert.Equal(nCfgDedicated.Nonce, Seq.exactlyOne expr.Values)
+
+    [<Fact>]
+    member __.``Non-dedicated mission has no affinity``() =
+        // The default ctx sets no node labels and dedicatedNodes = false, so
+        // there is no affinity block at all -- but pods still carry the nonce.
+        let nCfgPlain = MakeNetworkCfg { ctx with installNetworkDelay = Some false } [ coreSet ] passOpt
+        let spec = (nCfgPlain.ToPodTemplateSpec coreSet).Spec
+        Assert.Null(spec.Affinity)
+        Assert.Equal(nCfgPlain.Nonce, nCfgPlain.PodLabels().[CfgVal.runNonceLabelKey])
 
     [<Fact>]
     member __.``Core init commands look reasonable``() =
