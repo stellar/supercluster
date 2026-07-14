@@ -64,6 +64,16 @@ type MissionContext =
       coreResources: CoreResources
       keepData: bool
       unevenSched: bool
+      // When set, this run requires exclusive use of its nodes: its pods will
+      // not be scheduled onto a node hosting another run's stellar-core pods,
+      // and no other run's stellar-core pods will be scheduled onto its nodes
+      // while it is alive. This only covers pods carrying the app=stellar-core
+      // label (i.e. pods built from NetworkCfg pod templates); it does not
+      // repel other workloads such as parallel-catchup-v2 helm pods, which are
+      // instead kept on their own tainted nodes. Used for performance-sensitive
+      // missions (Max TPS, Min Block Time) whose measurements would be
+      // corrupted by co-tenant workloads.
+      dedicatedNodes: bool
       requireNodeLabels: ((string * string option) list)
       avoidNodeLabels: ((string * string option) list)
       tolerateNodeTaints: ((string * string option) list)
