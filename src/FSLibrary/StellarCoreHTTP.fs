@@ -5,12 +5,16 @@
 module StellarCoreHTTP
 
 open FSharp.Data
+open k8s
+open k8s.Models
+open Microsoft.Rest.Serialization
 open StellarCoreSet
 open PollRetry
 open Logging
 open StellarMissionContext
 open StellarNetworkCfg
 open StellarCorePeer
+open System.IO
 open System.Threading
 open StellarDotnetSdk.Transactions
 open StellarDotnetSdk.Responses.Results
@@ -388,9 +392,92 @@ type Peer with
             self.PodName.StringName
             path
 
-    member self.fetch(path: string) : string =
-        let url = self.URL path
-        Http.RequestString(url, headers = self.Headers)
+    // Reach stellar-core's admin HTTP endpoint by exec'ing `curl` inside the
+    // pod (via the Kubernetes API) rather than over the ingress. This is used
+    // when --core-http-via-pod-exec is set, for environments where the ingress
+    // hostname is not reachable from where SSC runs (e.g. a runner outside a
+    // non-SDF k3s cluster). Failures are surfaced as WebException so the
+    // existing WebExceptionRetry wrappers retry transient errors (e.g. core
+    // still booting) just as they do for ingress fetches.
+    // See https://github.com/stellar/supercluster/issues/399.
+    member self.fetchViaPodExec (path: string) (query: (string * string) list) : string =
+        let kube = self.networkCfg.missionContext.kube
+        let ns = self.networkCfg.NamespaceProperty
+        let name = self.PodName
+
+        let encode (s: string) : string = System.Uri.EscapeDataString s
+
+        let queryString =
+            match query with
+            | [] -> ""
+            | _ ->
+                query
+                |> List.map (fun (k, v) -> sprintf "%s=%s" (encode k) (encode v))
+                |> String.concat "&"
+                |> sprintf "?%s"
+
+        let url =
+            sprintf "http://localhost:%d/%s%s" StellarCoreCfg.CfgVal.httpPort path queryString
+
+        try
+            let muxedStream =
+                kube
+                    .MuxedStreamNamespacedPodExecAsync(name = name.StringName,
+                                                       ``namespace`` = ns,
+                                                       command = [| "curl"; "-sf"; url |],
+                                                       container = "stellar-core-run",
+                                                       tty = false,
+                                                       cancellationToken = CancellationToken())
+                    .GetAwaiter()
+                    .GetResult()
+
+            let stdOut =
+                muxedStream.GetStream(
+                    System.Nullable<ChannelIndex>(ChannelIndex.StdOut),
+                    System.Nullable<ChannelIndex>()
+                )
+
+            let error =
+                muxedStream.GetStream(
+                    System.Nullable<ChannelIndex>(ChannelIndex.Error),
+                    System.Nullable<ChannelIndex>()
+                )
+
+            let outReader = new StreamReader(stdOut)
+            let errReader = new StreamReader(error)
+            muxedStream.Start()
+            let outStr = outReader.ReadToEndAsync().GetAwaiter().GetResult()
+            let errStr = errReader.ReadToEndAsync().GetAwaiter().GetResult()
+            let returnMessage = SafeJsonConvert.DeserializeObject<V1Status>(errStr)
+            Kubernetes.GetExitCodeOrThrow(returnMessage) |> ignore
+            outStr
+        with
+        | :? System.Net.WebException -> reraise ()
+        | e -> raise (System.Net.WebException(sprintf "pod-exec fetch of /%s failed: %s" path e.Message))
+
+    // Single point through which all stellar-core admin HTTP GETs flow, so the
+    // transport (ingress vs. in-pod curl) is chosen in one place.
+    member self.httpGet (path: string) (query: (string * string) list) : string =
+        if self.networkCfg.missionContext.coreHttpViaPodExec then
+            self.fetchViaPodExec path query
+        else
+            Http.RequestString(url = self.URL path, httpMethod = "GET", headers = self.Headers, query = query)
+
+    member self.fetch(path: string) : string = self.httpGet path []
+
+    // For endpoints that must return a (JSON) body. While core is still booting,
+    // its admin HTTP server can answer with an empty body (and curl exits 0);
+    // surface that as a WebException so the JSON-parsing callers' retry loops
+    // wait for core rather than feeding an empty string to a parser. Endpoints
+    // that legitimately return an empty body on success (e.g. upgrades) keep
+    // using fetch/httpGet directly.
+    member self.fetchNonEmpty(path: string) : string =
+        let resp = self.fetch path
+
+        if System.String.IsNullOrEmpty resp then
+            raise (System.Net.WebException(sprintf "core returned an empty response for /%s, not ready yet" path))
+
+        resp
 
     member self.GetState() = self.GetInfo().State
 
@@ -399,15 +486,15 @@ type Peer with
         if i.Status.Length = 0 then i.State else i.Status.[0]
 
     member self.GetMetrics() : Metrics.Metrics =
-        WebExceptionRetry DefaultRetry (fun _ -> Metrics.Parse(self.fetch "metrics").Metrics)
+        WebExceptionRetry DefaultRetry (fun _ -> Metrics.Parse(self.fetchNonEmpty "metrics").Metrics)
 
-    member self.GetRawMetrics() = WebExceptionRetry DefaultRetry (fun _ -> self.fetch "metrics")
+    member self.GetRawMetrics() = WebExceptionRetry DefaultRetry (fun _ -> self.fetchNonEmpty "metrics")
 
     member self.GetInfo() : Info.Info =
         WebExceptionRetry
             DefaultRetry
             (fun _ ->
-                let resp = self.fetch "info"
+                let resp = self.fetchNonEmpty "info"
                 let parsed = Info.Parse(resp)
 
                 // stellar-core can respond with {"error":"Core is booting, try again later"}
@@ -416,7 +503,7 @@ type Peer with
                 | None -> raise (System.Net.WebException("Core is not ready, info property missing")))
 
     member self.GetSorobanInfo() : SorobanInfo.Root =
-        WebExceptionRetry DefaultRetry (fun _ -> SorobanInfo.Parse(self.fetch "sorobaninfo"))
+        WebExceptionRetry DefaultRetry (fun _ -> SorobanInfo.Parse(self.fetchNonEmpty "sorobaninfo"))
 
     member self.GetLedgerNum() : int = self.GetInfo().Ledger.Num
 
@@ -486,15 +573,7 @@ type Peer with
 
     member self.SetUpgrades(upgrades: UpgradeParameters) =
         let res =
-            WebExceptionRetry
-                DefaultRetry
-                (fun _ ->
-                    Http.RequestString(
-                        httpMethod = "GET",
-                        url = self.URL "upgrades",
-                        headers = self.Headers,
-                        query = upgrades.ToQuery
-                    ))
+            WebExceptionRetry DefaultRetry (fun _ -> self.httpGet "upgrades" upgrades.ToQuery)
 
         if res.ToLower().Contains("exception") then
             raise (PeerRejectedUpgradesException res)
@@ -684,68 +763,37 @@ type Peer with
             raise (ProtocolVersionNotUpgradedException(currentProtocolVersion, lastestProtocolVersion))
 
     member self.ClearMetrics() =
-        WebExceptionRetry
-            DefaultRetry
-            (fun _ -> Http.RequestString(httpMethod = "GET", headers = self.Headers, url = self.URL "clearmetrics"))
+        WebExceptionRetry DefaultRetry (fun _ -> self.httpGet "clearmetrics" [])
         |> ignore
 
     member self.ToggleOverlayOnlyMode() =
-        WebExceptionRetry
-            DefaultRetry
-            (fun _ ->
-                Http.RequestString(httpMethod = "GET", headers = self.Headers, url = self.URL "toggleoverlayonlymode"))
+        WebExceptionRetry DefaultRetry (fun _ -> self.httpGet "toggleoverlayonlymode" [])
 
     member self.GetTestAcc(accName: string) : TestAcc.Root =
         // NB: work around buggy JSON parser upstream, see
         // https://github.com/fsharp/FSharp.Data/pull/1262
         let s =
-            WebExceptionRetry
-                DefaultRetry
-                (fun _ ->
-                    Http.RequestString(
-                        httpMethod = "GET",
-                        url = self.URL("testacc"),
-                        headers = self.Headers,
-                        query = [ ("name", accName) ]
-                    ))
+            WebExceptionRetry DefaultRetry (fun _ -> self.httpGet "testacc" [ ("name", accName) ])
 
         TestAcc.Parse(if s.Trim().StartsWith("null") then "{}" else s)
 
     member self.StartSurveyCollecting(nonce: int) =
-        WebExceptionRetry
-            DefaultRetry
-            (fun _ ->
-                Http.RequestString(
-                    httpMethod = "GET",
-                    url = self.URL("startsurveycollecting"),
-                    headers = self.Headers,
-                    query = [ ("nonce", nonce.ToString()) ]
-                ))
+        WebExceptionRetry DefaultRetry (fun _ -> self.httpGet "startsurveycollecting" [ ("nonce", nonce.ToString()) ])
 
     member self.StopSurveyCollecting() =
-        WebExceptionRetry
-            DefaultRetry
-            (fun _ ->
-                Http.RequestString(httpMethod = "GET", url = self.URL("stopsurveycollecting"), headers = self.Headers))
+        WebExceptionRetry DefaultRetry (fun _ -> self.httpGet "stopsurveycollecting" [])
 
     member self.SurveyTopologyTimeSliced (node: string) (inboundPeersIndex: int) (outboundPeersIndex: int) =
         WebExceptionRetry
             DefaultRetry
             (fun _ ->
-                Http.RequestString(
-                    httpMethod = "GET",
-                    url = self.URL("surveytopologytimesliced"),
-                    headers = self.Headers,
-                    query =
-                        [ ("node", node)
-                          ("inboundpeerindex", inboundPeersIndex.ToString())
-                          ("outboundpeerindex", outboundPeersIndex.ToString()) ]
-                ))
+                self.httpGet
+                    "surveytopologytimesliced"
+                    [ ("node", node)
+                      ("inboundpeerindex", inboundPeersIndex.ToString())
+                      ("outboundpeerindex", outboundPeersIndex.ToString()) ])
 
-    member self.GetSurveyResult() =
-        WebExceptionRetry
-            DefaultRetry
-            (fun _ -> Http.RequestString(httpMethod = "GET", url = self.URL("getsurveyresult"), headers = self.Headers))
+    member self.GetSurveyResult() = WebExceptionRetry DefaultRetry (fun _ -> self.httpGet "getsurveyresult" [])
 
     member self.GetTestAccBalance(accName: string) : int64 =
         RetryUntilSome
@@ -758,22 +806,12 @@ type Peer with
             (fun _ -> LogWarn "Waiting for account %s to exist, to read seqnum" accName)
 
     member self.GenerateLoad(loadGen: LoadGen) : string =
-        WebExceptionRetry
-            DefaultRetry
-            (fun _ ->
-                Http.RequestString(
-                    httpMethod = "GET",
-                    headers = self.Headers,
-                    url = self.URL "generateload",
-                    query = loadGen.ToQuery
-                ))
+        WebExceptionRetry DefaultRetry (fun _ -> self.httpGet "generateload" loadGen.ToQuery)
 
     member self.StopLoadGen() : string = self.GenerateLoad { LoadGen.GetDefault() with mode = StopRun }
 
     member self.ManualClose() =
-        WebExceptionRetry
-            DefaultRetry
-            (fun _ -> Http.RequestString(httpMethod = "GET", headers = self.Headers, url = self.URL "manualclose"))
+        WebExceptionRetry DefaultRetry (fun _ -> self.httpGet "manualclose" [])
         |> ignore
 
     member self.SubmitSignedTransaction(tx: Transaction) : Tx.Root =
@@ -783,20 +821,8 @@ type Peer with
             WebExceptionRetry
                 DefaultRetry
                 (fun _ ->
-                    LogDebug
-                        "Submitting transaction: %s"
-                        ((self.URL "tx") + "?blob=" + (System.Uri.EscapeDataString b64))
-
-                    let response =
-                        Http.RequestStream(
-                            (self.URL "tx"),
-                            httpMethod = "GET",
-                            query = [ "blob", b64 ],
-                            headers = [ "Host", self.networkCfg.IngressInternalHostName ]
-                        )
-
-                    use reader = new System.IO.StreamReader(response.ResponseStream)
-                    reader.ReadToEnd())
+                    LogDebug "Submitting transaction with blob: %s" b64
+                    self.httpGet "tx" [ ("blob", b64) ])
 
         LogDebug "Transaction response: %s" s
         let res = Tx.Parse(s)

@@ -59,6 +59,7 @@ type MissionContext =
       ingressInternalDomain: string
       ingressExternalHost: string option
       ingressExternalPort: int
+      coreHttpViaPodExec: bool
       exportToPrometheus: bool
       probeTimeout: int
       coreResources: CoreResources

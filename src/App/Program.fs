@@ -46,6 +46,7 @@ type MissionOptions
         ingressInternalDomain: string,
         ingressExternalHost: string option,
         ingressExternalPort: int,
+        coreHttpViaPodExec: bool,
         exportToPrometheus: bool,
         probeTimeout: int,
         missions: string seq,
@@ -177,6 +178,12 @@ type MissionOptions
              Required = false,
              Default = 80)>]
     member self.IngressExternalPort = ingressExternalPort
+
+    [<Option("core-http-via-pod-exec",
+             HelpText = "Reach stellar-core's admin HTTP endpoint by exec'ing curl inside each pod (via the Kubernetes API) instead of through the ingress. Use when the ingress hostname is not reachable from where SSC runs, e.g. a runner outside a non-SDF k3s cluster.",
+             Required = false,
+             Default = false)>]
+    member self.CoreHttpViaPodExec = coreHttpViaPodExec
 
     [<Option("export-to-prometheus", HelpText = "Whether to export core metrics to prometheus")>]
     member self.ExportToPrometheus : bool = exportToPrometheus
@@ -779,6 +786,7 @@ let main argv =
                                ingressInternalDomain = mission.IngressInternalDomain
                                ingressExternalHost = mission.IngressExternalHost
                                ingressExternalPort = mission.IngressExternalPort
+                               coreHttpViaPodExec = mission.CoreHttpViaPodExec
                                exportToPrometheus = mission.ExportToPrometheus
                                probeTimeout = mission.ProbeTimeout
                                coreResources = SmallTestResources

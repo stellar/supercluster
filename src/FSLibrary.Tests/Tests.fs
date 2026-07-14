@@ -58,6 +58,7 @@ let ctx : MissionContext =
       ingressInternalDomain = "local"
       ingressExternalHost = None
       ingressExternalPort = 80
+      coreHttpViaPodExec = false
       exportToPrometheus = false
       probeTimeout = 10
       coreResources = SmallTestResources

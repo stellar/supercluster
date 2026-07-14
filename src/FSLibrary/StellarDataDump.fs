@@ -240,10 +240,14 @@ type StellarFormation with
             Kubernetes.GetExitCodeOrThrow(returnMessage) |> ignore
         with x -> ()
 
+    // Best-effort: a failed metrics scrape must not fail an otherwise-successful
+    // mission (the impact reported in #399). The transport used to reach core's
+    // admin HTTP endpoint -- ingress or in-pod `curl` -- is selected by
+    // GetRawMetrics based on the --core-http-via-pod-exec flag.
     member self.DumpPeerMetrics(p: Peer) =
-        let destination = self.NetworkCfg.missionContext.destination
-        let name = p.PodName
-        destination.WriteString(sprintf "%s.metrics.json" name.StringName) (p.GetRawMetrics())
+        try
+            self.Destination.WriteString(sprintf "%s.metrics.json" p.PodName.StringName) (p.GetRawMetrics())
+        with x -> LogWarn "Failed to dump metrics of peer %s: %s" p.PodName.StringName x.Message
 
     member self.DumpPeerData(p: Peer) =
         self.DumpPeerLogs p
