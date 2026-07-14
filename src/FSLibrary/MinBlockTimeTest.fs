@@ -39,7 +39,9 @@ let private maxTxSetSizeForTarget (kind: string) (targetMs: int) (txRate: int) =
 
     max (int txSetSize) 100
 
-let private classicMaxTxSetSizeForTarget (targetMs: int) (classicTxRate: int) =
+// Exposed for reuse by MissionTriggerTimerMixConsensus, which runs the same
+// MIXED_PREGEN_* load without the binary search.
+let classicMaxTxSetSizeForTarget (targetMs: int) (classicTxRate: int) =
     maxTxSetSizeForTarget "Classic" targetMs classicTxRate
 
 let private sorobanMaxTxSetSizeForTarget (targetMs: int) (sorobanTxRate: int) =
@@ -139,7 +141,8 @@ let private waitForMixedPregenSorobanLimits (peer: Peer) (limits: MixedPregenSor
             && info.Tx.MaxContractEventsSizeBytes = limits.txMaxContractEventsSizeBytes)
         (fun _ -> LogInfo "Waiting for MIXED_PREGEN_* Soroban limits on %s" peer.ShortName.StringName)
 
-let private upgradeMixedPregenSorobanLimits
+// Exposed for reuse by MissionTriggerTimerMixConsensus.
+let upgradeMixedPregenSorobanLimits
     (formation: StellarFormation)
     (coreSets: CoreSet list)
     (baseLoadGen: LoadGen)
@@ -227,7 +230,8 @@ let private toggleOverlayOnlyMode (formation: StellarFormation) (coreSets: CoreS
             let res = peer.ToggleOverlayOnlyMode()
             LogInfo "Toggled overlay-only mode on %s: %s" peer.ShortName.StringName res)
 
-let private withOverlayOnlyMode (formation: StellarFormation) (coreSets: CoreSet list) (f: unit -> unit) =
+// Exposed for reuse by MissionTriggerTimerMixConsensus.
+let withOverlayOnlyMode (formation: StellarFormation) (coreSets: CoreSet list) (f: unit -> unit) =
     LogInfo "Enabling overlay-only mode"
     toggleOverlayOnlyMode formation coreSets
 

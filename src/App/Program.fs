@@ -137,7 +137,13 @@ type MissionOptions
         maxBlockTimeMs: int,
         minBlockTimeMixedMode: string,
         minBlockTimeMixedClassicTxRate: int option,
-        minBlockTimeMixedSorobanTxRate: int option
+        minBlockTimeMixedSorobanTxRate: int option,
+        triggerTimerFlagPct: int,
+        uniformDrift: seq<int>,
+        bimodalDrift: seq<int>,
+        driftPct: int,
+        ledgerCloseTimeMs: int option,
+        enableTriggerTimer: bool option
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -631,6 +637,40 @@ type MissionOptions
              Required = false)>]
     member self.MinBlockTimeMixedSorobanTxRate = minBlockTimeMixedSorobanTxRate
 
+    [<Option("trigger-timer-flag-pct",
+             HelpText = "Percentage (0-100) of nodes with EXPERIMENTAL_TRIGGER_TIMER enabled",
+             Required = false,
+             Default = 100)>]
+    member self.TriggerTimerFlagPct = triggerTimerFlagPct
+
+    [<Option("uniform-drift",
+             Separator = ',',
+             HelpText = "Uniform clock drift range in signed ms: --uniform-drift=lower,upper (e.g. --uniform-drift=-2000,+2000)",
+             Required = false)>]
+    member self.UniformDrift = uniformDrift
+
+    [<Option("bimodal-drift",
+             Separator = ',',
+             HelpText = "Bimodal clock drift ranges in signed ms: --bimodal-drift=min1,max1,min2,max2 (e.g. --bimodal-drift=-5000,-2000,+2000,+5000)",
+             Required = false)>]
+    member self.BimodalDrift = bimodalDrift
+
+    [<Option("drift-pct",
+             HelpText = "Percentage (0-100) of nodes that receive clock drift",
+             Required = false,
+             Default = 0)>]
+    member self.DriftPct = driftPct
+
+    [<Option("ledger-close-time-ms",
+             HelpText = "Target ledger close time (ms) upgraded before applying load in TriggerTimerMixConsensus (default 5000)",
+             Required = false)>]
+    member self.LedgerCloseTimeMs = ledgerCloseTimeMs
+
+    [<Option("enable-trigger-timer",
+             HelpText = "Enable or disable EXPERIMENTAL_TRIGGER_TIMER on all nodes (true/false). Defaults to true in the max TPS missions and to the stellar-core default everywhere else. Not supported by TriggerTimerMixConsensus, which uses --trigger-timer-flag-pct instead",
+             Required = false)>]
+    member self.EnableTriggerTimer = enableTriggerTimer
+
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' |> Array.toList with
     | [ x ] -> x, None
@@ -872,7 +912,13 @@ let main argv =
                                minBlockTimeMixedMode = mission.MinBlockTimeMixedMode
                                minBlockTimeMixedClassicTxRate = mission.MinBlockTimeMixedClassicTxRate
                                minBlockTimeMixedSorobanTxRate = mission.MinBlockTimeMixedSorobanTxRate
-                               runForMinBlockTime = false }
+                               runForMinBlockTime = false
+                               triggerTimerFlagPct = mission.TriggerTimerFlagPct
+                               uniformDrift = List.ofSeq mission.UniformDrift
+                               bimodalDrift = List.ofSeq mission.BimodalDrift
+                               driftPct = mission.DriftPct
+                               ledgerCloseTimeMs = mission.LedgerCloseTimeMs
+                               enableTriggerTimer = mission.EnableTriggerTimer }
 
                          allMissions.[m] missionContext
 
