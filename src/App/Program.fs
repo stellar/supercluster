@@ -770,9 +770,6 @@ let main argv =
             if mission.PubnetData.IsNone && mission.PubnetDataDelay then
                 failwith "Error: --pubnet-data-delay requires --pubnet-data to be set"
 
-            if mission.MeasureE2eLatency && not mission.PubnetDataDelay then
-                failwith "Error: --measure-e2e-latency requires --pubnet-data-delay to be set"
-
             if mission.MeasureE2eLatency && mission.LoadgenKeys.IsNone then
                 failwith "Error: --measure-e2e-latency requires --loadgen-keys"
 
