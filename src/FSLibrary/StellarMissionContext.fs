@@ -138,4 +138,13 @@ type MissionContext =
       minBlockTimeMixedMode: string
       minBlockTimeMixedClassicTxRate: int option
       minBlockTimeMixedSorobanTxRate: int option
-      runForMinBlockTime: bool }
+      runForMinBlockTime: bool
+      triggerTimerFlagPct: int
+      uniformDrift: int list
+      bimodalDrift: int list
+      driftPct: int
+      ledgerCloseTimeMs: int option
+      // Explicit EXPERIMENTAL_TRIGGER_TIMER setting for all nodes. When None,
+      // the max TPS missions default to enabled and everything else defers to
+      // the core image's default (the key is omitted from the config).
+      enableTriggerTimer: bool option }

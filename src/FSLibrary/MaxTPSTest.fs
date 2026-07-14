@@ -133,6 +133,17 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
                 context.image
                 (if context.flatQuorum.IsSome then context.flatQuorum.Value else false)
 
+    // The max TPS missions enable EXPERIMENTAL_TRIGGER_TIMER unless
+    // --enable-trigger-timer=false is passed explicitly.
+    let triggerTimer = context.enableTriggerTimer |> Option.defaultValue true
+
+    let allNodes =
+        allNodes
+        |> List.map
+            (fun (cs: CoreSet) ->
+                { cs with
+                      options = { cs.options with experimentalTriggerTimer = Some triggerTimer } })
+
     // PayPregenerated requires node restart between failed iterations to ensure validity of the pregenerated transactions
     // However, large-scale simulation restarts can be slow, so for now only use the new mode on small networks
     let baseLoadGen =
