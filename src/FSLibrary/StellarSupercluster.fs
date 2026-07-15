@@ -17,6 +17,7 @@ open StellarStatefulSets
 open StellarCoreSet
 open StellarKubeSpecs
 open StellarNamespaceContent
+open GatewayApiModels
 open System
 open System.Diagnostics
 
@@ -312,19 +313,108 @@ type Kubernetes with
             for statefulSet in statefulSets do
                 namespaceContent.Add(statefulSet)
 
-            for svc in nCfg.ToPerPodServices() do
-                LogInfo "Creating Per-Pod Service %s" svc.Metadata.Name
-                ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
-
-                let service = self.CreateNamespacedService(namespaceParameter = nsStr, body = svc)
-                namespaceContent.Add(service)
-
             if not (List.isEmpty statefulSets) then
-                let ing = nCfg.ToIngress()
-                LogInfo "Creating Ingress %s" ing.Metadata.Name
+                let proxyCfg = nCfg.ToHttpProxyConfigMap()
+                LogInfo "Creating HTTP proxy ConfigMap %s" proxyCfg.Metadata.Name
                 ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
-                let ingress = self.CreateNamespacedIngress(namespaceParameter = nsStr, body = ing)
-                namespaceContent.Add(ingress)
+                namespaceContent.Add(self.CreateNamespacedConfigMap(body = proxyCfg, namespaceParameter = nsStr))
+
+                let proxyDep = nCfg.ToHttpProxyDeployment()
+
+                LogInfo
+                    "Creating HTTP proxy Deployment %s (%d replicas)"
+                    proxyDep.Metadata.Name
+                    proxyDep.Spec.Replicas.Value
+
+                ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
+                namespaceContent.Add(self.CreateNamespacedDeployment(body = proxyDep, namespaceParameter = nsStr))
+
+                let proxySvc = nCfg.ToHttpProxyService()
+                LogInfo "Creating HTTP proxy Service %s" proxySvc.Metadata.Name
+                ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
+                namespaceContent.Add(self.CreateNamespacedService(body = proxySvc, namespaceParameter = nsStr))
+
+                let route = nCfg.ToHttpRoute()
+                LogInfo "Creating HTTPRoute %s" route.Metadata.Name
+                ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
+
+                self.CreateNamespacedCustomObject(
+                    body = route,
+                    group = "gateway.networking.k8s.io",
+                    version = "v1",
+                    namespaceParameter = nsStr,
+                    plural = "httproutes"
+                )
+                |> ignore
+
+                namespaceContent.Add(route)
+
+                // Wait for at least one proxy pod to be ready before the driver
+                // routes core HTTP through it, so mission startup doesn't spend
+                // its retry budget on 502s.
+                let rec waitProxyReady (n: int) =
+                    ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
+
+                    let d =
+                        self.ReadNamespacedDeployment(name = proxyDep.Metadata.Name, namespaceParameter = nsStr)
+                    // Status (and ReadyReplicas within it) is populated asynchronously and may be
+                    // null right after creation; treat missing as 0 ready and keep polling.
+                    let ready = if isNull d.Status then 0 else d.Status.ReadyReplicas.GetValueOrDefault(0)
+
+                    LogInfo "HTTP proxy %s: %d ready" proxyDep.Metadata.Name ready
+
+                    if ready < 1 then
+                        if n >= 60 then
+                            failwithf "HTTP proxy %s not ready after 60 attempts" proxyDep.Metadata.Name
+
+                        System.Threading.Thread.Sleep(2000)
+                        waitProxyReady (n + 1)
+
+                waitProxyReady 0
+
+                // Best-effort wait for the gateway to mark the HTTPRoute Accepted,
+                // closing the window between pod-ready and route-programmed (404s).
+                // Non-fatal: if status can't be confirmed we log and proceed, since
+                // mission-level retries still cover the residual race.
+                let routeAccepted () =
+                    let gc = new GenericClient(self, "gateway.networking.k8s.io", "v1", "httproutes")
+
+                    gc.ListNamespacedAsync<HTTPRouteList>(nsStr).GetAwaiter().GetResult().Items
+                    |> Seq.tryFind (fun r -> r.Metadata.Name = route.Metadata.Name)
+                    |> Option.exists
+                        (fun r ->
+                            match r.Status with
+                            | null -> false
+                            | s when isNull s.Parents -> false
+                            | s ->
+                                s.Parents
+                                |> Seq.exists
+                                    (fun p ->
+                                        not (isNull p.Conditions)
+                                        && p.Conditions
+                                           |> Seq.exists (fun c -> c.Type = "Accepted" && c.Status = "True")))
+
+                let rec waitRouteAccepted (n: int) =
+                    ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
+
+                    let accepted =
+                        try
+                            routeAccepted ()
+                        with ex ->
+                            LogWarn "HTTPRoute %s status check failed (proceeding): %s" route.Metadata.Name ex.Message
+                            true
+
+                    if accepted then
+                        LogInfo "HTTPRoute %s Accepted by gateway" route.Metadata.Name
+                    elif n >= 30 then
+                        LogWarn
+                            "HTTPRoute %s not Accepted after 30 attempts; proceeding (mission retries cover it)"
+                            route.Metadata.Name
+                    else
+                        System.Threading.Thread.Sleep(2000)
+                        waitRouteAccepted (n + 1)
+
+                waitRouteAccepted 0
 
             let formation =
                 new StellarFormation(

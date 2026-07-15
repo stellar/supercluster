@@ -42,10 +42,11 @@ type MissionOptions
         logDebugPartitions: seq<string>,
         logTracePartitions: seq<string>,
         namespaceProperty: string option,
-        ingressClass: string,
-        ingressInternalDomain: string,
-        ingressExternalHost: string option,
-        ingressExternalPort: int,
+        gatewayName: string,
+        gatewayNamespace: string,
+        routeInternalDomain: string,
+        routeExternalHost: string option,
+        routeExternalPort: int,
         exportToPrometheus: bool,
         probeTimeout: int,
         missions: string seq,
@@ -70,6 +71,7 @@ type MissionOptions
         avoidNodeLabels: seq<string>,
         tolerateNodeTaints: seq<string>,
         apiRateLimit: int,
+        httpProxyReplicas: int,
         pubnetData: string option,
         flatQuorum: bool option,
         tier1Keys: string option,
@@ -161,28 +163,34 @@ type MissionOptions
     [<Option("namespace", HelpText = "Namespace to use, overriding kubeconfig.", Required = false)>]
     member self.NamespaceProperty = namespaceProperty
 
-    [<Option("ingress-class",
-             HelpText = "Value for kubernetes.io/ingress.class, on ingress",
+    [<Option("gateway-name",
+             HelpText = "Name of the Gateway (gateway.networking.k8s.io) the per-mission HTTPRoute attaches to",
              Required = false,
-             Default = "ingress-private")>]
-    member self.IngressClass = ingressClass
+             Default = "traefik-gateway-private")>]
+    member self.GatewayName = gatewayName
+
+    [<Option("gateway-namespace",
+             HelpText = "Namespace of the Gateway the per-mission HTTPRoute attaches to",
+             Required = false,
+             Default = "traefik")>]
+    member self.GatewayNamespace = gatewayNamespace
 
     [<Option("ingress-internal-domain",
-             HelpText = "Cluster-internal DNS domain in which to configure ingress",
+             HelpText = "Cluster-internal DNS domain used to form the per-mission Gateway API route hostname (flag name kept for compatibility)",
              Required = false,
              Default = "local")>]
-    member self.IngressInternalDomain = ingressInternalDomain
+    member self.RouteInternalDomain = routeInternalDomain
 
     [<Option("ingress-external-host",
-             HelpText = "Cluster-external hostname to connect to for access to ingress",
+             HelpText = "Cluster-external hostname the driver connects to for the gateway route; defaults to the route hostname (flag name kept for compatibility)",
              Required = false)>]
-    member self.IngressExternalHost = ingressExternalHost
+    member self.RouteExternalHost = routeExternalHost
 
     [<Option("ingress-external-port",
-             HelpText = "Cluster-external port to connect to for access to ingress",
+             HelpText = "Cluster-external port the driver connects to for the gateway route (flag name kept for compatibility)",
              Required = false,
              Default = 80)>]
-    member self.IngressExternalPort = ingressExternalPort
+    member self.RouteExternalPort = routeExternalPort
 
     [<Option("export-to-prometheus", HelpText = "Whether to export core metrics to prometheus")>]
     member self.ExportToPrometheus : bool = exportToPrometheus
@@ -300,6 +308,12 @@ type MissionOptions
              Required = false,
              Default = 10)>]
     member self.ApiRateLimit = apiRateLimit
+
+    [<Option("http-proxy-replicas",
+             HelpText = "Max nginx HTTP proxy replicas per mission (cap); actual scales with node count, floor 1",
+             Required = false,
+             Default = 10)>]
+    member self.HttpProxyReplicas = httpProxyReplicas
 
     [<Option("pubnet-data", HelpText = "JSON file containing pubnet connectivity graph data", Required = false)>]
     member self.PubnetData = pubnetData
@@ -815,10 +829,11 @@ let main argv =
                                numNodes = mission.NumNodes
                                namespaceProperty = ns
                                logLevels = ll
-                               ingressClass = mission.IngressClass
-                               ingressInternalDomain = mission.IngressInternalDomain
-                               ingressExternalHost = mission.IngressExternalHost
-                               ingressExternalPort = mission.IngressExternalPort
+                               gatewayName = mission.GatewayName
+                               gatewayNamespace = mission.GatewayNamespace
+                               routeInternalDomain = mission.RouteInternalDomain
+                               routeExternalHost = mission.RouteExternalHost
+                               routeExternalPort = mission.RouteExternalPort
                                exportToPrometheus = mission.ExportToPrometheus
                                probeTimeout = mission.ProbeTimeout
                                coreResources = SmallTestResources
@@ -831,6 +846,7 @@ let main argv =
                                avoidNodeLabels = List.map splitLabel (List.ofSeq mission.AvoidNodeLabels)
                                tolerateNodeTaints = List.map splitLabel (List.ofSeq mission.TolerateNodeTaints)
                                apiRateLimit = mission.ApiRateLimit
+                               httpProxyReplicas = mission.HttpProxyReplicas
                                pubnetData = mission.PubnetData
                                flatQuorum = mission.FlatQuorum
                                tier1Keys = mission.Tier1Keys

@@ -19,6 +19,7 @@ open StellarDotnetSdk.Accounts
 // paths, labels, etc.
 module CfgVal =
     let httpPort = 11626
+    let historyPort = 80
     let prometheusExporterPort = 9473
     let labels = Map.ofSeq [ "app", "stellar-core" ]
     let labelSelector = "app = stellar-core"
@@ -47,6 +48,12 @@ module CfgVal =
     let peerCfgFileName = "stellar-core.cfg"
     let peerInitCfgFileName = "stellar-core-init.cfg"
     let peerDelayCfgFileName = "install-delays.sh"
+
+
+    let httpProxyContainerName = "http-proxy"
+    let httpProxyConfigVolumeName = "proxy-tmpl"
+    let httpProxyConfigMountPath = "/proxy-tmpl"
+    let httpProxyConfigFileName = "default.conf.template"
 
     let peerNameEnvCfgFileWord : ShWord =
         ShWord.ShPieces [| ShBare("/cfg-")

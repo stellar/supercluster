@@ -377,14 +377,14 @@ exception NodeLostSyncException of string
 type Peer with
 
     member self.Headers =
-        let host = self.networkCfg.IngressInternalHostName
+        let host = self.networkCfg.RouteInternalHostName
         [ HttpRequestHeaders.Host host ]
 
     member self.URL(path: string) : string =
         sprintf
             "http://%s:%d/%s/core/%s"
-            self.networkCfg.IngressExternalHostName
-            self.networkCfg.missionContext.ingressExternalPort
+            self.networkCfg.RouteExternalHostName
+            self.networkCfg.missionContext.routeExternalPort
             self.PodName.StringName
             path
 
@@ -792,7 +792,7 @@ type Peer with
                             (self.URL "tx"),
                             httpMethod = "GET",
                             query = [ "blob", b64 ],
-                            headers = [ "Host", self.networkCfg.IngressInternalHostName ]
+                            headers = [ "Host", self.networkCfg.RouteInternalHostName ]
                         )
 
                     use reader = new System.IO.StreamReader(response.ResponseStream)

@@ -170,8 +170,12 @@ let installProject (context: MissionContext) =
     | None -> ()
 
     setOptions.Add(sprintf "monitor.hostname=%s" (jobMonitorHostName context))
-    setOptions.Add(sprintf "monitor.path=/%s/%s/(.*)" context.namespaceProperty helmReleaseName)
+    setOptions.Add(sprintf "monitor.path_prefix=/%s/%s" context.namespaceProperty helmReleaseName)
     setOptions.Add(sprintf "monitor.logging_interval_seconds=%d" jobMonitorLoggingIntervalSecs)
+    // Attach the job-monitor HTTPRoute to the same Gateway as the core route
+    // (--gateway-name/--gateway-namespace), instead of the values.yaml defaults.
+    setOptions.Add(sprintf "monitor.gateway_name=%s" context.gatewayName)
+    setOptions.Add(sprintf "monitor.gateway_namespace=%s" context.gatewayNamespace)
 
     // Set ASAN_OPTIONS if provided
     match context.asanOptions with
