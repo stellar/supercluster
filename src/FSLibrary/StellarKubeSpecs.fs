@@ -127,8 +127,8 @@ let SimulatePubnetTier1PerfCoreResourceRequirements : V1ResourceRequirements =
 
 let ParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
     // When doing parallel catchup, we give each container
-    // 0.25 vCPUs, 8GB RAM and 35 GB of disk bursting to 2vCPU, 16GB and 40 GB
-    makeResourceRequirementsWithStorageLimit 250 8192 35 2000 16384 40
+    // 0.25 vCPUs, 8GB RAM and 35 GB of disk bursting to 2vCPU, 24000MB and 40 GB
+    makeResourceRequirementsWithStorageLimit 250 8192 35 2000 24000 40
 
 let NonParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
     // When doing non-parallel catchup, we give each container
@@ -392,15 +392,34 @@ let tolerateTaint ((key: string), (value: string option)) =
     | None -> V1Toleration(key = key, operatorProperty = "Exists")
     | Some v -> V1Toleration(key = key, operatorProperty = "Equal", value = v)
 
-let affinity (requirements: V1NodeSelectorRequirement list) : V1Affinity option =
+let nodeAffinity (requirements: V1NodeSelectorRequirement list) : V1NodeAffinity option =
     if List.isEmpty requirements then
         None
     else
-        // An affinity is satisfied if _all_ matchExpressions are satisfied.
+        // A node affinity is satisfied if _all_ matchExpressions are satisfied.
         let terms = [| V1NodeSelectorTerm(matchExpressions = Array.ofList requirements) |]
         let sel = V1NodeSelector(nodeSelectorTerms = terms)
-        let na = V1NodeAffinity(requiredDuringSchedulingIgnoredDuringExecution = sel)
-        Some(V1Affinity(nodeAffinity = na))
+        Some(V1NodeAffinity(requiredDuringSchedulingIgnoredDuringExecution = sel))
+
+// A required pod anti-affinity that repels every supercluster pod belonging to
+// a _different_ run, i.e. carrying a run-nonce label other than this run's.
+// Kubernetes evaluates required anti-affinity symmetrically, so a single term
+// on this run's pods gives us both directions of isolation:
+//   * this run's pods will not schedule onto a node already hosting another
+//     run's pods, and
+//   * no other run's pods will schedule onto a node hosting this run's pods for
+//     as long as this run's pods are alive (this holds even if the other run
+//     did not opt into isolation).
+let dedicatedNodeAntiAffinity (nonce: string) : V1PodAntiAffinity =
+    let matchExprs =
+        [| V1LabelSelectorRequirement(key = CfgVal.runNonceLabelKey, operatorProperty = "NotIn", values = [| nonce |]) |]
+
+    let selector = V1LabelSelector(matchLabels = CfgVal.labels, matchExpressions = matchExprs)
+
+    let term =
+        V1PodAffinityTerm(labelSelector = selector, topologyKey = "kubernetes.io/hostname")
+
+    V1PodAntiAffinity(requiredDuringSchedulingIgnoredDuringExecution = [| term |])
 
 
 // Apply the per-run anchor owner reference to `meta` if one has been set on
@@ -427,13 +446,25 @@ type NetworkCfg with
         V1ObjectMeta(name = name, labels = CfgVal.labels, namespaceProperty = self.NamespaceProperty)
         |> applyAnchorOwner self
 
-    member self.PodLabels() : Map<string, string> = Map.add "mission" self.missionContext.missionName CfgVal.labels
+    member self.PodLabels() : Map<string, string> =
+        CfgVal.labels
+        |> Map.add "mission" self.missionContext.missionName
+        |> Map.add CfgVal.runNonceLabelKey self.Nonce
 
     member self.Affinity() : V1Affinity option =
         let require = List.map requireNodeLabel self.missionContext.requireNodeLabels
         let avoid = List.map avoidNodeLabel self.missionContext.avoidNodeLabels
-        let both = List.append require avoid
-        affinity both
+        let na = nodeAffinity (List.append require avoid)
+
+        let paa =
+            if self.missionContext.dedicatedNodes then
+                Some(dedicatedNodeAntiAffinity self.Nonce)
+            else
+                None
+
+        match na, paa with
+        | None, None -> None
+        | _ -> Some(V1Affinity(?nodeAffinity = na, ?podAntiAffinity = paa))
 
     member self.TopologyConstraints() : V1TopologySpreadConstraint array =
         if self.missionContext.unevenSched then [||] else evenTopologyConstraints

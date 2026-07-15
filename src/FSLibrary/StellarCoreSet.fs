@@ -220,6 +220,8 @@ type CoreSetOptions =
       maxBatchWriteCount: int
       emitMeta: bool
       addArtificialDelayUsec: int option
+      experimentalTriggerTimer: bool option
+      clockOffsets: int list option
       surveyPhaseDuration: int option
       updateSorobanCosts: bool option
       // `skipHighCriticalValidatorChecks` exists to allow supercluster to
@@ -261,6 +263,8 @@ type CoreSetOptions =
           maxBatchWriteCount = 1024
           emitMeta = false
           addArtificialDelayUsec = None
+          experimentalTriggerTimer = None
+          clockOffsets = None
           surveyPhaseDuration = None
           updateSorobanCosts = None
           skipHighCriticalValidatorChecks = true }

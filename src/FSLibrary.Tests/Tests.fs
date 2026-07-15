@@ -64,6 +64,7 @@ let ctx : MissionContext =
       coreResources = SmallTestResources
       keepData = true
       unevenSched = false
+      dedicatedNodes = false
       requireNodeLabels = []
       avoidNodeLabels = []
       tolerateNodeTaints = []
@@ -145,7 +146,13 @@ let ctx : MissionContext =
       minBlockTimeMixedMode = "mixed_pregen_sac_payment"
       minBlockTimeMixedClassicTxRate = None
       minBlockTimeMixedSorobanTxRate = None
-      runForMinBlockTime = false }
+      runForMinBlockTime = false
+      triggerTimerFlagPct = 100
+      uniformDrift = []
+      bimodalDrift = []
+      driftPct = 0
+      ledgerCloseTimeMs = None
+      enableTriggerTimer = None }
 
 let netdata = __SOURCE_DIRECTORY__ + "/../../../data/public-network-data-2024-08-01.json"
 let pubkeys = __SOURCE_DIRECTORY__ + "/../../../data/tier1keys.json"
@@ -186,11 +193,90 @@ type Tests(output: ITestOutputHelper) =
         Assert.Contains("OP_APPLY_SLEEP_TIME_DURATION_FOR_TESTING = [10, 100]", toml)
         Assert.Contains("OP_APPLY_SLEEP_TIME_WEIGHT_FOR_TESTING = [30, 70]", toml)
         Assert.Contains("HTTP_PORT = " + CfgVal.httpPort.ToString(), toml)
+        // Trigger timer and clock offset settings must be omitted unless
+        // explicitly configured on the CoreSet or the mission context.
+        Assert.DoesNotContain("EXPERIMENTAL_TRIGGER_TIMER", toml)
+        Assert.DoesNotContain("ARTIFICIALLY_SET_SYSTEM_CLOCK_OFFSET_FOR_TESTING", toml)
+
+    [<Fact>]
+    member __.``TOML Config emits trigger timer and per-node clock offsets``() =
+        let opts =
+            { coreSetOptions with
+                  experimentalTriggerTimer = Some true
+                  clockOffsets = Some [ 0; -800; 1500 ] }
+
+        let cs = MakeLiveCoreSet "test" opts
+        let cfg = MakeNetworkCfg ctx [ cs ] passOpt
+
+        let tomlOfNode i = cfg.StellarCoreCfg(cs, i, MainCoreContainer).ToString()
+
+        for i in 0 .. 2 do
+            Assert.Contains("EXPERIMENTAL_TRIGGER_TIMER = true", tomlOfNode i)
+
+        Assert.Contains("ARTIFICIALLY_SET_SYSTEM_CLOCK_OFFSET_FOR_TESTING = 0", tomlOfNode 0)
+        Assert.Contains("ARTIFICIALLY_SET_SYSTEM_CLOCK_OFFSET_FOR_TESTING = -800", tomlOfNode 1)
+        Assert.Contains("ARTIFICIALLY_SET_SYSTEM_CLOCK_OFFSET_FOR_TESTING = 1500", tomlOfNode 2)
+
+    [<Fact>]
+    member __.``TOML Config falls back to mission-level trigger timer setting``() =
+        let tomlWith ctxOverride =
+            let cfg = MakeNetworkCfg ctxOverride [ coreSet ] passOpt
+            cfg.StellarCoreCfg(coreSet, 0, MainCoreContainer).ToString()
+
+        // The CoreSet leaves the option unset, so the mission-level flag
+        // decides whether (and with which value) the key is emitted.
+        Assert.Contains("EXPERIMENTAL_TRIGGER_TIMER = true", tomlWith { ctx with enableTriggerTimer = Some true })
+        Assert.Contains("EXPERIMENTAL_TRIGGER_TIMER = false", tomlWith { ctx with enableTriggerTimer = Some false })
+        Assert.DoesNotContain("EXPERIMENTAL_TRIGGER_TIMER", tomlWith ctx)
+
+        // A CoreSet-level setting wins over the mission-level flag.
+        let csOn =
+            MakeLiveCoreSet "test" { coreSetOptions with experimentalTriggerTimer = Some true }
+
+        let cfgOn = MakeNetworkCfg { ctx with enableTriggerTimer = Some false } [ csOn ] passOpt
+
+        Assert.Contains(
+            "EXPERIMENTAL_TRIGGER_TIMER = true",
+            cfgOn.StellarCoreCfg(csOn, 0, MainCoreContainer).ToString()
+        )
 
     // Test init config
     // REVERTME: temporarily avoid looking for HTTP_PORT=0 on InitContainers
     // let initCfg = nCfg.StellarCoreCfg(coreSet, 1, InitCoreContainer)
     // Assert.Contains("HTTP_PORT = 0", initCfg.ToString())
+
+    [<Fact>]
+    member __.``Dedicated-nodes mission gets per-run pod anti-affinity``() =
+        let nCfgDedicated =
+            MakeNetworkCfg { ctx with dedicatedNodes = true; installNetworkDelay = Some false } [ coreSet ] passOpt
+
+        let spec = (nCfgDedicated.ToPodTemplateSpec coreSet).Spec
+
+        // Pods are tagged with their run nonce, which is what the anti-affinity
+        // discriminates on.
+        Assert.Equal(nCfgDedicated.Nonce, nCfgDedicated.PodLabels().[CfgVal.runNonceLabelKey])
+
+        // A single required pod anti-affinity term repels other runs' pods.
+        Assert.NotNull(spec.Affinity)
+        Assert.NotNull(spec.Affinity.PodAntiAffinity)
+        let terms = spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+        Assert.Equal(1, terms.Count)
+        let term = terms.[0]
+        Assert.Equal("kubernetes.io/hostname", term.TopologyKey)
+        Assert.Equal("stellar-core", term.LabelSelector.MatchLabels.["app"])
+        let expr = Seq.exactlyOne term.LabelSelector.MatchExpressions
+        Assert.Equal(CfgVal.runNonceLabelKey, expr.Key)
+        Assert.Equal("NotIn", expr.OperatorProperty)
+        Assert.Equal(nCfgDedicated.Nonce, Seq.exactlyOne expr.Values)
+
+    [<Fact>]
+    member __.``Non-dedicated mission has no affinity``() =
+        // The default ctx sets no node labels and dedicatedNodes = false, so
+        // there is no affinity block at all -- but pods still carry the nonce.
+        let nCfgPlain = MakeNetworkCfg { ctx with installNetworkDelay = Some false } [ coreSet ] passOpt
+        let spec = (nCfgPlain.ToPodTemplateSpec coreSet).Spec
+        Assert.Null(spec.Affinity)
+        Assert.Equal(nCfgPlain.Nonce, nCfgPlain.PodLabels().[CfgVal.runNonceLabelKey])
 
     [<Fact>]
     member __.``Core init commands look reasonable``() =

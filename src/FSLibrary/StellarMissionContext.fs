@@ -65,6 +65,16 @@ type MissionContext =
       coreResources: CoreResources
       keepData: bool
       unevenSched: bool
+      // When set, this run requires exclusive use of its nodes: its pods will
+      // not be scheduled onto a node hosting another run's stellar-core pods,
+      // and no other run's stellar-core pods will be scheduled onto its nodes
+      // while it is alive. This only covers pods carrying the app=stellar-core
+      // label (i.e. pods built from NetworkCfg pod templates); it does not
+      // repel other workloads such as parallel-catchup-v2 helm pods, which are
+      // instead kept on their own tainted nodes. Used for performance-sensitive
+      // missions (Max TPS, Min Block Time) whose measurements would be
+      // corrupted by co-tenant workloads.
+      dedicatedNodes: bool
       requireNodeLabels: ((string * string option) list)
       avoidNodeLabels: ((string * string option) list)
       tolerateNodeTaints: ((string * string option) list)
@@ -140,4 +150,13 @@ type MissionContext =
       minBlockTimeMixedMode: string
       minBlockTimeMixedClassicTxRate: int option
       minBlockTimeMixedSorobanTxRate: int option
-      runForMinBlockTime: bool }
+      runForMinBlockTime: bool
+      triggerTimerFlagPct: int
+      uniformDrift: int list
+      bimodalDrift: int list
+      driftPct: int
+      ledgerCloseTimeMs: int option
+      // Explicit EXPERIMENTAL_TRIGGER_TIMER setting for all nodes. When None,
+      // the max TPS missions default to enabled and everything else defers to
+      // the core image's default (the key is omitted from the config).
+      enableTriggerTimer: bool option }

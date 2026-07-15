@@ -18,6 +18,9 @@ let maxTPSMixed (baseContext: MissionContext) =
               coreResources = SimulatePubnetTier1PerfResources
               installNetworkDelay = Some(baseContext.installNetworkDelay |> Option.defaultValue true)
               enableTailLogging = false
+              // Isolate this perf run onto its own nodes so co-tenant pods from
+              // other supercluster runs cannot skew the measured TPS.
+              dedicatedNodes = true
               // Setup distributions based on pubnet data
               wasmBytesDistribution = defaultListValue pubnetWasmBytes baseContext.wasmBytesDistribution
               dataEntriesDistribution = defaultListValue pubnetDataEntries baseContext.dataEntriesDistribution
