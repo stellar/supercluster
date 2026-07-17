@@ -906,10 +906,25 @@ type Peer with
     // mid-run: when catchup finishes applying its buffered ledgers the node
     // reports "Synced!" even if the live network has since moved on, and it
     // keeps reporting "Synced!" while it sits at that stale ledger waiting
-    // for the next catchup trigger. Waiting until this node reaches the
-    // ledger some reference peer has already closed proves it is actually
-    // tracking the live network.
-    member self.WaitUntilCaughtUpWith(other: Peer) = self.WaitForLedgerNum(other.GetLedgerNum())
+    // for the next catchup trigger. That can repeat over several catchup
+    // rounds, so compare against the reference peer's latest ledger on every
+    // poll rather than a ledger sampled once: this only passes when the node
+    // is actually tracking the live network, no matter how many rounds it
+    // takes to get there.
+    member self.WaitUntilCaughtUpWith(other: Peer) =
+        // A node tracking the live network trails the reference peer by at
+        // most a ledger or two of polling skew.
+        let maxLedgerGap = 2
+
+        RetryUntilTrue
+            (fun _ -> other.GetLedgerNum() - self.GetLedgerNum() <= maxLedgerGap)
+            (fun _ ->
+                LogInfo
+                    "Waiting until %s (ledger %d) catches up with %s (ledger %d)"
+                    self.ShortName.StringName
+                    (self.GetLedgerNum())
+                    other.ShortName.StringName
+                    (other.GetLedgerNum()))
 
     member self.WaitForAuthenticatedPeers(n: int) =
         RetryUntilTrue
