@@ -902,6 +902,24 @@ type Peer with
             (fun _ -> self.GetState() = "Synced!")
             (fun _ -> LogInfo "Waiting until %s is synced: %s" self.ShortName.StringName (self.GetStatusOrState()))
 
+    // A node that joined the network mid-run reports "Synced!" whenever a
+    // catchup round completes, even if the live network has since moved on
+    // and another round is needed. Wait until this node is within a few
+    // ledgers of the reference peer's latest, proving it is actually
+    // tracking the live network.
+    member self.WaitUntilCaughtUpWith(other: Peer) =
+        let maxLedgerGap = 5
+
+        RetryUntilTrue
+            (fun _ -> other.GetLedgerNum() - self.GetLedgerNum() <= maxLedgerGap)
+            (fun _ ->
+                LogInfo
+                    "Waiting until %s (ledger %d) catches up with %s (ledger %d)"
+                    self.ShortName.StringName
+                    (self.GetLedgerNum())
+                    other.ShortName.StringName
+                    (other.GetLedgerNum()))
+
     member self.WaitForAuthenticatedPeers(n: int) =
         RetryUntilTrue
             (fun _ -> self.GetInfo().Peers.AuthenticatedCount >= n)
