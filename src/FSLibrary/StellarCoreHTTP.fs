@@ -904,21 +904,24 @@ type Peer with
 
     // A node that joined the network mid-run reports "Synced!" whenever a
     // catchup round completes, even if the live network has since moved on
-    // and another round is needed. Wait until this node is within a few
-    // ledgers of the reference peer's latest, proving it is actually
-    // tracking the live network.
+    // and another round is needed. Wait until this node reaches the ledger
+    // the reference peer was on when the wait began: passing that fixed
+    // target proves the node applied everything the network had at that
+    // point. Comparing against the reference's *live* ledger instead would
+    // never terminate for a node that tracks the network at a constant few
+    // ledgers behind (e.g. while it is also publishing checkpoints).
     member self.WaitUntilCaughtUpWith(other: Peer) =
-        let maxLedgerGap = 5
+        let targetLedger = other.GetLedgerNum()
 
         RetryUntilTrue
-            (fun _ -> other.GetLedgerNum() - self.GetLedgerNum() <= maxLedgerGap)
+            (fun _ -> self.GetLedgerNum() >= targetLedger)
             (fun _ ->
                 LogInfo
-                    "Waiting until %s (ledger %d) catches up with %s (ledger %d)"
+                    "Waiting until %s (ledger %d) reaches %s's ledger %d"
                     self.ShortName.StringName
                     (self.GetLedgerNum())
                     other.ShortName.StringName
-                    (other.GetLedgerNum()))
+                    targetLedger)
 
     member self.WaitForAuthenticatedPeers(n: int) =
         RetryUntilTrue
