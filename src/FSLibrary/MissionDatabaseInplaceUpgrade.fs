@@ -80,5 +80,15 @@ let databaseInplaceUpgrade (context: MissionContext) =
             let afterUpgradeCoreSetLive = formation.NetworkCfg.FindCoreSet afterUpgradeCoreSet.name
             formation.WaitUntilSynced [ afterUpgradeCoreSetLive ]
 
+            // The upgraded node is a watcher outside the quorum, so the
+            // validators keep closing ledgers while it catches up and it can
+            // report "Synced!" while still many ledgers behind them. Running
+            // loadgen against it in that state fails: loadgen verifies its
+            // transactions against the local ledger, which stalls until the
+            // node's next catchup round. Wait for it to reach the validators'
+            // current ledger before generating load on it.
+            let upgradedPeer = formation.NetworkCfg.GetPeer afterUpgradeCoreSetLive 0
+            upgradedPeer.WaitUntilCaughtUpWith(formation.NetworkCfg.GetPeer coreSet 0)
+
             formation.RunLoadgen afterUpgradeCoreSet context.GeneratePaymentLoad
             formation.RunLoadgen coreSet context.GeneratePaymentLoad)
