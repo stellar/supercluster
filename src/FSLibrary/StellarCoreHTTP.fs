@@ -904,11 +904,11 @@ type Peer with
 
     // A node that joined the network mid-run reports "Synced!" whenever a
     // catchup round completes, even if the live network has since moved on
-    // and another round is needed. Wait until this node is within a couple
-    // of ledgers of the reference peer's latest, proving it is actually
+    // and another round is needed. Wait until this node is within a few
+    // ledgers of the reference peer's latest, proving it is actually
     // tracking the live network.
     member self.WaitUntilCaughtUpWith(other: Peer) =
-        let maxLedgerGap = 2
+        let maxLedgerGap = 5
 
         RetryUntilTrue
             (fun _ -> other.GetLedgerNum() - self.GetLedgerNum() <= maxLedgerGap)
