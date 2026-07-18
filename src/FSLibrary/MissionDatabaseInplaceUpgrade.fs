@@ -16,7 +16,8 @@ open StellarSupercluster
 let databaseInplaceUpgrade (context: MissionContext) =
     let context =
         { context.WithNominalLoad with
-              genesisTestAccountCount = Some context.WithNominalLoad.numAccounts }
+              genesisTestAccountCount = Some context.WithNominalLoad.numAccounts
+              coreResources = MediumTestResources }
 
     let newImage = context.image
     let oldImage = GetOrDefault context.oldImage context.image

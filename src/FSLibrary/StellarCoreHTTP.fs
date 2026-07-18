@@ -908,7 +908,10 @@ type Peer with
     // ledgers of the reference peer's latest, proving it is actually
     // tracking the live network.
     member self.WaitUntilCaughtUpWith(other: Peer) =
-        let maxLedgerGap = 5
+        // self and other are read in two separate requests, so the network
+        // advances between them; the gap absorbs that timing skew (and the
+        // small steady lag of a watcher outside the quorum).
+        let maxLedgerGap = 10
 
         RetryUntilTrue
             (fun _ -> other.GetLedgerNum() - self.GetLedgerNum() <= maxLedgerGap)
