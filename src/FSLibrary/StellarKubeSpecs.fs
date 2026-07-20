@@ -974,7 +974,16 @@ type NetworkCfg with
                 configMap = V1ConfigMapVolumeSource(name = self.HttpProxyConfigMapName)
             )
 
-        let podSpec = V1PodSpec(containers = [| container |], volumes = [| volume |])
+        // Mirror the core pods' node placement so the proxy schedules onto the
+        // same (often tainted/dedicated) node pool it fronts -- otherwise it is
+        // confined to untainted capacity and can stay Pending on a busy cluster.
+        let podSpec =
+            V1PodSpec(
+                containers = [| container |],
+                volumes = [| volume |],
+                ?affinity = self.Affinity(),
+                tolerations = self.Tolerations()
+            )
 
         let podTemplate =
             V1PodTemplateSpec(metadata = V1ObjectMeta(labels = self.HttpProxyLabels), spec = podSpec)
