@@ -351,7 +351,13 @@ type Kubernetes with
 
                 // Wait for at least one proxy pod to be ready before the driver
                 // routes core HTTP through it, so mission startup doesn't spend
-                // its retry budget on 502s.
+                // its retry budget on 502s. The proxy is pinned to the mission's
+                // node pool (e.g. largetests/catchup), so first-ready can take
+                // several minutes when karpenter must cold-provision a node and
+                // the CNI assign an IP -- hence a generous budget. The overall
+                // mission timeout still bounds a genuinely stuck proxy.
+                let proxyReadyMaxAttempts = 300 // x 2s ~= 10 min
+
                 let rec waitProxyReady (n: int) =
                     ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
 
@@ -361,11 +367,22 @@ type Kubernetes with
                     // null right after creation; treat missing as 0 ready and keep polling.
                     let ready = if isNull d.Status then 0 else d.Status.ReadyReplicas.GetValueOrDefault(0)
 
-                    LogInfo "HTTP proxy %s: %d ready" proxyDep.Metadata.Name ready
+                    // Throttle the poll log to ~once a minute (every 30th attempt)
+                    // plus the terminal ready line, instead of one line every 2s.
+                    if ready >= 1 || n % 30 = 0 then
+                        LogInfo
+                            "HTTP proxy %s: %d ready (attempt %d/%d)"
+                            proxyDep.Metadata.Name
+                            ready
+                            n
+                            proxyReadyMaxAttempts
 
                     if ready < 1 then
-                        if n >= 60 then
-                            failwithf "HTTP proxy %s not ready after 60 attempts" proxyDep.Metadata.Name
+                        if n >= proxyReadyMaxAttempts then
+                            failwithf
+                                "HTTP proxy %s not ready after %d attempts"
+                                proxyDep.Metadata.Name
+                                proxyReadyMaxAttempts
 
                         System.Threading.Thread.Sleep(2000)
                         waitProxyReady (n + 1)
