@@ -356,7 +356,7 @@ type Kubernetes with
                 // several minutes when karpenter must cold-provision a node and
                 // the CNI assign an IP -- hence a generous budget. The overall
                 // mission timeout still bounds a genuinely stuck proxy.
-                let proxyReadyMaxAttempts = 300 // x 2s ~= 10 min
+                let proxyReadyMaxAttempts = 450 // x 2s ~= 15 min
 
                 let rec waitProxyReady (n: int) =
                     ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (rps)
