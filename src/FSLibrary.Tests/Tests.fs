@@ -279,6 +279,41 @@ type Tests(output: ITestOutputHelper) =
         Assert.Equal(nCfgPlain.Nonce, nCfgPlain.PodLabels().[CfgVal.runNonceLabelKey])
 
     [<Fact>]
+    member __.``HTTP proxy pod inherits mission node affinity and tolerations``() =
+        // Regression: the HTTP proxy Deployment must carry the mission's node
+        // placement (self.Affinity()/self.Tolerations()) like the core pods it
+        // fronts -- otherwise it cannot schedule onto a tainted/dedicated pool
+        // and stays Pending on a busy cluster.
+        let nCfg =
+            MakeNetworkCfg
+                { ctx with
+                      requireNodeLabels = [ ("purpose", Some "largetests") ]
+                      tolerateNodeTaints = [ ("largetests", None) ]
+                      installNetworkDelay = Some false }
+                [ coreSet ]
+                passOpt
+
+        let spec = nCfg.ToHttpProxyDeployment().Spec.Template.Spec
+
+        // Node affinity requires the mission node label.
+        Assert.NotNull(spec.Affinity)
+        Assert.NotNull(spec.Affinity.NodeAffinity)
+
+        let term =
+            Seq.exactlyOne spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+
+        let expr = Seq.exactlyOne term.MatchExpressions
+        Assert.Equal("purpose", expr.Key)
+        Assert.Equal("In", expr.OperatorProperty)
+        Assert.Equal("largetests", Seq.exactlyOne expr.Values)
+
+        // Tolerates the mission node taint.
+        Assert.True(
+            spec.Tolerations
+            |> Seq.exists (fun t -> t.Key = "largetests" && t.OperatorProperty = "Exists")
+        )
+
+    [<Fact>]
     member __.``Core init commands look reasonable``() =
         let nCfgWithoutSimulateApply =
             MakeNetworkCfg { ctx with simulateApplyWeight = None; simulateApplyDuration = None } [ coreSet ] passOpt
