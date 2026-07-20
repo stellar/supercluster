@@ -368,8 +368,8 @@ type Kubernetes with
                     let ready = if isNull d.Status then 0 else d.Status.ReadyReplicas.GetValueOrDefault(0)
 
                     // Throttle the poll log to ~once a minute (every 30th attempt)
-                    // plus the terminal ready line, instead of one line every 2s.
-                    if ready >= 1 || n % 30 = 0 then
+                    // plus the first and terminal ready lines, instead of one line every 2s.
+                    if ready >= 1 || n = 1 || n % 30 = 0 then
                         LogInfo
                             "HTTP proxy %s: %d ready (attempt %d/%d)"
                             proxyDep.Metadata.Name
@@ -387,7 +387,7 @@ type Kubernetes with
                         System.Threading.Thread.Sleep(2000)
                         waitProxyReady (n + 1)
 
-                waitProxyReady 0
+                waitProxyReady 1
 
                 // Best-effort wait for the gateway to mark the HTTPRoute Accepted,
                 // closing the window between pod-ready and route-programmed (404s).
