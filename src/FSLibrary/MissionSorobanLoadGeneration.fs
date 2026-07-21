@@ -19,6 +19,7 @@ let sorobanLoadGeneration (context: MissionContext) =
         MakeLiveCoreSet
             "core"
             { CoreSetOptions.GetDefault context.image with
+                  nodeCount = context.numNodes
                   invariantChecks = AllInvariantsExceptEvents
                   dumpDatabase = false }
 

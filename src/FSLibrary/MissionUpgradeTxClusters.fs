@@ -19,6 +19,7 @@ let upgradeTxClusters (context: MissionContext) =
         MakeLiveCoreSet
             "core"
             { CoreSetOptions.GetDefault context.image with
+                  nodeCount = context.numNodes
                   invariantChecks = AllInvariantsExceptEvents
                   emptyDirType = DiskBackedEmptyDir
                   updateSorobanCosts = Some(true) }
