@@ -127,7 +127,6 @@ let ctx : MissionContext =
       updateSorobanCosts = None
       genesisTestAccountCount = None
       asanOptions = None
-      enableRelaxedAutoQsetConfig = false
       jobMonitorExternalHost = None
       txBatchMaxSize = None
       runForMaxTps = None
