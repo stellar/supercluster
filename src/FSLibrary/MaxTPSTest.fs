@@ -165,9 +165,15 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
         List.find (fun (cs: CoreSet) -> cs.name.StringName = "stellar" || cs.name.StringName = "sdf") allNodes
 
     let tier1 = List.filter (fun (cs: CoreSet) -> cs.options.tier1 = Some true) allNodes
+    let loadGenNodes = List.filter (fun (cs: CoreSet) -> cs.options.generatesLoad) allNodes
 
-    // On smaller networks, run loadgen on all nodes to better balance the overhead of load generation
-    let loadGenNodes = if List.length allNodes > smallNetworkSize then tier1 else allNodes
+    let loadGenNodes =
+        if List.isEmpty loadGenNodes then
+            // On smaller networks, run loadgen on all nodes to better balance the overhead of load generation
+            if List.length allNodes > smallNetworkSize then tier1 else allNodes
+        else
+            loadGenNodes
+
     let isLoadGenNode cs = List.exists (fun (cs': CoreSet) -> cs' = cs) loadGenNodes
 
     // Assign pre-generated transaction information to each load generator node.

@@ -55,7 +55,12 @@ let networkPingInMs (loc1: GeoLoc) (loc2: GeoLoc) : double =
     // A ping is a round trip, so double one-way delay.
     2.0 * (networkDelayInMs loc1 loc2)
 
-let getNetworkDelayCommands (loc1: GeoLoc) (locsAndNames: (GeoLoc * PeerDnsName) array) (delay: int option) : ShCmd =
+let getPeerDelays (loc1: GeoLoc) (locsAndNames: (GeoLoc * PeerDnsName) array) : (int * PeerDnsName) array =
+    // Get the one way delays from loc1 to the locations in locsAndNames
+    locsAndNames
+    |> Array.map (fun (loc2, name) -> int (networkDelayInMs loc1 loc2), name)
+
+let getNetworkDelayCommands (delaysAndNames: (int * PeerDnsName) array) (delay: int option) : ShCmd =
     // Traffic shaping happens using the 'tc' command on linux. This is a
     // complicated command. We build up the commands in pieces.
 
@@ -264,19 +269,19 @@ let getNetworkDelayCommands (loc1: GeoLoc) (locsAndNames: (GeoLoc * PeerDnsName)
 
     let perPeerResolveCmds : ShCmd array =
         Array.mapi
-            (fun (i: int) (loc2: GeoLoc, peer: PeerDnsName) ->
+            (fun (i: int) (_, peer: PeerDnsName) ->
                 let classNo = 1 + i
                 [| resolveName classNo peer |])
-            locsAndNames
+            delaysAndNames
         |> Array.concat
 
     let perPeerCmds : ShCmd array =
         Array.mapi
-            (fun (i: int) (loc2: GeoLoc, peer: PeerDnsName) ->
+            (fun (i: int) (edgeDelay: int, peer: PeerDnsName) ->
                 let msDelay =
                     match delay with
                     | Some d -> d
-                    | None -> int (networkDelayInMs loc1 loc2)
+                    | None -> edgeDelay
 
                 let classNo = 1 + i
 
@@ -284,7 +289,7 @@ let getNetworkDelayCommands (loc1: GeoLoc) (locsAndNames: (GeoLoc * PeerDnsName)
                    addFilter classNo
                    addNetemQdisc classNo msDelay
                    addFqLeaf classNo |])
-            locsAndNames
+            delaysAndNames
         |> Array.concat
 
     let seq =
@@ -302,7 +307,6 @@ let getNetworkDelayCommands (loc1: GeoLoc) (locsAndNames: (GeoLoc * PeerDnsName)
 
     ShSeq seq
 
-
 type NetworkCfg with
 
     member self.LocAndDnsName (cs: CoreSet) (i: int) : (GeoLoc * PeerDnsName) Option =
@@ -319,27 +323,68 @@ type NetworkCfg with
         match self.missionContext.installNetworkDelay with
         | Some true ->
             let atLeastOneLocation = Map.exists (fun _ cs -> cs.options.nodeLocs.IsSome) self.coreSets
+            let haveDelays = Map.forall (fun _ cs -> cs.options.edgeDelays.IsSome) self.coreSets
 
-            if atLeastOneLocation then
-                true
-            else
-                // If there's _some_ geo info, we can extrapolate.
-                // However, if there's _no_ geo info, we can't really do anything.
-                // Don't install network delay if your topology has no geo info.
-                failwith "Network delays can't be installed if no geo info provided."
+            match self.missionContext.pubnetDataDelay with
+            | true ->
+                if haveDelays then
+                    true
+                else
+                    failwith "Per-edge network delays can't be installed if edge data is missing"
+            | false ->
+                if atLeastOneLocation then
+                    true
+                else
+                    // If there's _some_ geo info, we can extrapolate.
+                    // However, if there's _no_ geo info, we can't really do anything.
+                    // Don't install network delay if your topology has no geo info.
+                    failwith "Network delays can't be installed if no geo info provided."
         | _ -> false
 
     member self.NetworkDelayScript (cs: CoreSet) (i: int) : ShCmd =
-        match cs.options.nodeLocs with
-        | None -> ShCmd.True()
-        | Some (locs) ->
-            let selfLoc = locs.[i]
-
-            let otherLocsAndNames : (GeoLoc * PeerDnsName) array =
+        match self.missionContext.pubnetDataDelay with
+        | true ->
+            let otherDelaysAndNames : (int * PeerDnsName) array =
                 match cs.options.preferredPeersMap with
                 | Some (otherMap) ->
                     let otherKeys = Array.ofList otherMap.[cs.keys.[i].PublicKey]
-                    Array.choose self.LocAndDnsNameForKey otherKeys
-                | None -> Array.choose id (self.MapAllPeers self.LocAndDnsName)
+                    let otherKeysSet = Set.ofArray otherKeys
 
-            getNetworkDelayCommands selfLoc otherLocsAndNames self.missionContext.flatNetworkDelay
+                    let names =
+                        self.MapAllPeers
+                            (fun cs i ->
+                                let pk = cs.keys.[i].PublicKey
+                                if otherKeysSet.Contains pk then Some(pk, self.PeerDnsName cs i) else None)
+                        |> Array.choose id
+                        |> Map.ofArray
+
+                    let delays = cs.options.edgeDelays.Value
+                    let selfKey = cs.keys.[i].PublicKey
+
+                    otherKeys
+                    |> Array.map (fun peerKey -> delays.[selfKey, peerKey], names.[peerKey])
+                | None ->
+                    if self.missionContext.flatNetworkDelay.IsNone then
+                        failwith
+                            "Failed to construct network delay script: no preferred peers map or flat network delay"
+                    else
+                        self.MapAllPeers(fun cs i -> 0, self.PeerDnsName cs i)
+
+            getNetworkDelayCommands otherDelaysAndNames self.missionContext.flatNetworkDelay
+        | false ->
+            match cs.options.nodeLocs with
+            | None -> ShCmd.True()
+            | Some (locs) ->
+                let selfLoc = locs.[i]
+
+                let otherDelaysAndNames : (int * PeerDnsName) array =
+                    let locsAndNames =
+                        match cs.options.preferredPeersMap with
+                        | Some (otherMap) ->
+                            let otherKeys = Array.ofList otherMap.[cs.keys.[i].PublicKey]
+                            Array.choose self.LocAndDnsNameForKey otherKeys
+                        | None -> Array.choose id (self.MapAllPeers self.LocAndDnsName)
+
+                    locsAndNames |> getPeerDelays selfLoc
+
+                getNetworkDelayCommands otherDelaysAndNames self.missionContext.flatNetworkDelay

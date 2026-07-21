@@ -71,8 +71,12 @@ let ctx : MissionContext =
       apiRateLimit = 10
       httpProxyReplicas = 2
       pubnetData = None
+      pubnetDataDelay = false
+      measureE2eLatency = false
+      peerAuthenticationTimeout = None
       flatQuorum = None
       tier1Keys = None
+      loadgenKeys = None
       maxConnections = None
       fullyConnectTier1 = false
       peerReadingCapacity = None
@@ -496,7 +500,10 @@ type Tests(output: ITestOutputHelper) =
         let Chennai = { lat = 13.08784; lon = 80.27847 }
         let dns1 = PeerDnsName "www.foo.com"
         let dns2 = PeerDnsName "www.bar.com"
-        let cmd = getNetworkDelayCommands Ashburn [| (Beauharnois, dns1); (Chennai, dns2) |] None
+
+        let cmd =
+            getNetworkDelayCommands (getPeerDelays Ashburn [| (Beauharnois, dns1); (Chennai, dns2) |]) None
+
         let cmdStr = cmd.ToString()
 
         Assert.Contains(dns1.StringName, cmdStr)

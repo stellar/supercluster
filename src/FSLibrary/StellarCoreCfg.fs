@@ -166,6 +166,7 @@ type StellarCoreCfg =
       automaticMaintenanceCount: int
       accelerateTime: bool
       generateLoad: bool
+      measureE2eLatency: bool
       updateSorobanCosts: bool option
       manualClose: bool
       invariantChecks: InvariantChecksSpec
@@ -317,6 +318,9 @@ type StellarCoreCfg =
         t.Add("ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING", self.accelerateTime) |> ignore
         t.Add("ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING", self.generateLoad) |> ignore
 
+        if self.measureE2eLatency && self.network.missionContext.measureE2eLatency then
+            t.Add("LOADGEN_MEASURE_TX_E2E_LATENCY_FOR_TESTING", true) |> ignore
+
         if self.updateSorobanCosts.IsSome then
             t.Add("UPDATE_SOROBAN_COSTS_DURING_PROTOCOL_UPGRADE_FOR_TESTING", self.updateSorobanCosts.Value)
             |> ignore
@@ -364,6 +368,10 @@ type StellarCoreCfg =
 
         t.Add("MAX_ADDITIONAL_PEER_CONNECTIONS", self.targetPeerConnections * 3)
         |> ignore
+
+        match self.network.missionContext.peerAuthenticationTimeout with
+        | Some timeout -> t.Add("PEER_AUTHENTICATION_TIMEOUT", timeout) |> ignore
+        | None -> ()
 
         t.Add("QUORUM_INTERSECTION_CHECKER", false) |> ignore
         t.Add("MANUAL_CLOSE", self.manualClose) |> ignore
@@ -653,6 +661,7 @@ type NetworkCfg with
           automaticMaintenanceCount = if opts.performMaintenance then 50000 else 0
           accelerateTime = opts.accelerateTime
           generateLoad = true
+          measureE2eLatency = opts.generatesLoad
           updateSorobanCosts = opts.updateSorobanCosts
           manualClose = false
           invariantChecks = opts.invariantChecks
@@ -698,6 +707,7 @@ type NetworkCfg with
           automaticMaintenanceCount = if c.options.performMaintenance then 50000 else 0
           accelerateTime = c.options.accelerateTime
           generateLoad = true
+          measureE2eLatency = c.options.generatesLoad
           updateSorobanCosts = c.options.updateSorobanCosts
           manualClose = false
           invariantChecks = c.options.invariantChecks
