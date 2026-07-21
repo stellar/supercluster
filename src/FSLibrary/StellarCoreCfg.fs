@@ -319,7 +319,7 @@ type StellarCoreCfg =
         t.Add("ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING", self.generateLoad) |> ignore
 
         if self.measureE2eLatency && self.network.missionContext.measureE2eLatency then
-            t.Add("LOADGEN_MEASURE_TX_LATENCY_FOR_TESTING", true) |> ignore
+            t.Add("LOADGEN_MEASURE_TX_E2E_LATENCY_FOR_TESTING", true) |> ignore
 
         if self.updateSorobanCosts.IsSome then
             t.Add("UPDATE_SOROBAN_COSTS_DURING_PROTOCOL_UPGRADE_FOR_TESTING", self.updateSorobanCosts.Value)
