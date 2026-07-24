@@ -81,6 +81,7 @@ type MissionContext =
       apiRateLimit: int
       httpProxyReplicas: int
       pubnetData: string option
+      measureE2eLatency: bool
       flatQuorum: bool option
       tier1Keys: string option
       loadgenKeys: string option

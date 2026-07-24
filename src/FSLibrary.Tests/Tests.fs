@@ -73,6 +73,7 @@ let ctx : MissionContext =
       apiRateLimit = 10
       httpProxyReplicas = 2
       pubnetData = None
+      measureE2eLatency = false
       flatQuorum = None
       tier1Keys = None
       loadgenKeys = None
