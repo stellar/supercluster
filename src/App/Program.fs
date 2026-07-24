@@ -75,6 +75,7 @@ type MissionOptions
         pubnetData: string option,
         flatQuorum: bool option,
         tier1Keys: string option,
+        loadgenKeys: string option,
         maxConnections: int option,
         fullyConnectTier1: bool,
         byteCountValues: seq<int>,
@@ -323,6 +324,9 @@ type MissionOptions
 
     [<Option("tier1-keys", HelpText = "JSON file containing list of 'tier-1' pubkeys from pubnet", Required = false)>]
     member self.Tier1Keys = tier1Keys
+
+    [<Option("loadgen-keys", HelpText = "JSON file containing list of pubkeys to generate load", Required = false)>]
+    member self.LoadgenKeys = loadgenKeys
 
     [<Option("max-connections",
              HelpText = "Maximum number of connections to allow any node in pubnet data to have. When enabled, this option will prune connections for any node with more than this number of connections. (default: no limit)",
@@ -743,6 +747,9 @@ let main argv =
             0
 
         | :? MissionOptions as mission ->
+            if mission.LoadgenKeys.IsSome && mission.PubnetData.IsNone then
+                failwith "Error: --loadgen-keys requires --pubnet-data to be set"
+
             let _ = logToConsoleAndFile (sprintf "%s/stellar-supercluster.log" mission.Destination)
 
             let ll =
@@ -850,6 +857,7 @@ let main argv =
                                pubnetData = mission.PubnetData
                                flatQuorum = mission.FlatQuorum
                                tier1Keys = mission.Tier1Keys
+                               loadgenKeys = mission.LoadgenKeys
                                maxConnections = mission.MaxConnections
                                fullyConnectTier1 = mission.FullyConnectTier1
                                byteCountDistribution =

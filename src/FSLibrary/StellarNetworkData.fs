@@ -20,8 +20,32 @@ let PubnetLatestHistoryArchiveState =
 let TestnetLatestHistoryArchiveState =
     "http://history.stellar.org/prd/core-testnet/core_testnet_001/.well-known/stellar-history.json"
 
-type PubnetNode = JsonProvider<"json-type-samples/sample-network-data.json", SampleIsList=false, ResolutionFolder=cwd>
+type PubnetNodeJSON =
+    JsonProvider<"json-type-samples/sample-network-data.json", SampleIsList=false, ResolutionFolder=cwd>
+
 type Tier1PublicKey = JsonProvider<"json-type-samples/sample-keys.json", SampleIsList=false, ResolutionFolder=cwd>
+
+// Using an actual record instead of the JSON type allows us to use record
+// update syntax. The static member also lets us verify earlier that the JSON is
+// of the correct shape.
+type PubnetNode =
+    { PublicKey: string
+      Peers: string array
+      RadarHomeDomain: string option
+      RadarIsValidating: bool option
+      RadarGeoData: {| Latitude: decimal; Longitude: decimal |} option
+      RadarName: string option }
+
+    static member ofJSON(node: PubnetNodeJSON.Root) : PubnetNode =
+        { PublicKey = node.PublicKey
+          Peers = node.Peers
+          RadarHomeDomain = node.RadarHomeDomain
+          RadarIsValidating = node.RadarIsValidating
+          RadarGeoData =
+              match node.RadarGeoData with
+              | Some geoData -> Some {| Latitude = geoData.Latitude; Longitude = geoData.Longitude |}
+              | None -> None
+          RadarName = node.RadarName }
 
 // Adjacency map for peers
 type PeerMap = Map<string, Set<string>>
@@ -147,8 +171,8 @@ let locations =
 
 // Each edge connecting a and b is represented as (a, b) if a < b, and (b, a) otherwise.
 // This makes sense as the graph is undirected, and it also makes it easier to handle a set of edges.
-let extractEdges (graph: PubnetNode.Root array) : (string * string) array =
-    let getEdgesFromNode (node: PubnetNode.Root) : (string * string) array =
+let extractEdges (graph: PubnetNode array) : (string * string) array =
+    let getEdgesFromNode (node: PubnetNode) : (string * string) array =
         node.Peers
         |> Array.filter (fun peer -> peer < node.PublicKey) // This filter ensures that we add each edge exactly once.
         |> Array.map (fun peer -> (peer, node.PublicKey))
@@ -260,7 +284,7 @@ let private pruneAdjacencyMap (maxConnections: int) (noPrune: Set<string>) (m: P
 // then we pick a random edge (a, b), remove (a, b) and add (a, u) and (u, b).
 // We continue this process until u has a desired degree.
 let addEdges
-    (graph: PubnetNode.Root array)
+    (graph: PubnetNode array)
     (newNodes: string array)
     (tier1KeySet: Set<string>)
     (random: System.Random)
@@ -334,41 +358,56 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
     if context.pubnetData.IsNone then
         failwith "pubnet simulation requires --pubnet-data=<filename.json>"
 
-    let allPubnetNodes : PubnetNode.Root array = PubnetNode.Load(context.pubnetData.Value)
+    let allPubnetNodes : PubnetNode array = PubnetNodeJSON.Load(context.pubnetData.Value) |> Array.map PubnetNode.ofJSON
 
     // A Random object with a fixed seed.
     let random = System.Random context.randomSeed
 
     let newTier1Nodes =
         [ for i in 1 .. context.tier1OrgsToAdd * tier1OrgSize ->
-              PubnetNode.Parse(
+              PubnetNodeJSON.Parse(
                   sprintf
                       """ [{ "publicKey": "%s", "radar_homeDomain": "home.domain.%d" }] """
                       (KeyPair.Random().Address)
                       ((i - 1) / tier1OrgSize)
-              ).[0] ]
+              ).[0]
+              |> PubnetNode.ofJSON ]
         |> Array.ofList
 
     let newNonTier1Nodes =
         [ for i in 1 .. context.nonTier1NodesToAdd ->
-              PubnetNode.Parse(sprintf """ [{ "publicKey": "%s" }] """ (KeyPair.Random().Address)).[0] ]
+              PubnetNodeJSON.Parse(sprintf """ [{ "publicKey": "%s" }] """ (KeyPair.Random().Address)).[0]
+              |> PubnetNode.ofJSON ]
         |> Array.ofList
 
     let tier1KeySet : Set<string> =
         if context.tier1Keys.IsSome then
-            let newTier1Keys = Array.map (fun (n: PubnetNode.Root) -> n.PublicKey) newTier1Nodes in
+            let newTier1Keys = Array.map (fun (n: PubnetNode) -> n.PublicKey) newTier1Nodes in
 
             Tier1PublicKey.Load(context.tier1Keys.Value)
             |> Array.map (fun n -> n.PublicKey)
             |> Array.append newTier1Keys
             |> Set.ofArray
         else
-            PubnetNode.Load(context.pubnetData.Value)
+            PubnetNodeJSON.Load(context.pubnetData.Value)
             // Any node with a home domain is considered tier1.
             |> Array.filter (fun n -> n.RadarHomeDomain.IsSome)
             |> Array.map (fun n -> n.PublicKey)
             |> Set.ofArray
 
+    let loadgenKeySet : Set<string> =
+        if context.loadgenKeys.IsSome then
+            Tier1PublicKey.Load(context.loadgenKeys.Value)
+            |> Array.map (fun n -> n.PublicKey)
+            |> Set.ofArray
+        else
+            Set.empty
+
+    // Check that there is no overlap between tier1 and loadgen keys
+    let overlap = Set.intersect tier1KeySet loadgenKeySet
+
+    if not (Set.isEmpty overlap) then
+        failwithf "Overlap between tier1 and loadgen keys: %A" overlap
 
     // Shuffle the nodes to ensure that the order will
     // not affect the outcome of the scaling algorithm.
@@ -376,7 +415,16 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
         Array.append newTier1Nodes newNonTier1Nodes
         |> Array.sortBy (fun _ -> random.Next())
 
-    let allPubnetNodes = allPubnetNodes |> Array.append newNodes
+    let allPubnetNodes =
+        allPubnetNodes
+        |> Array.append newNodes
+        // Ensure that each load-generator has a home domain
+        |> Array.map
+            (fun n ->
+                if Set.contains n.PublicKey loadgenKeySet && n.RadarHomeDomain.IsNone then
+                    { n with RadarHomeDomain = Some "loadgennode" }
+                else
+                    n)
 
     // For each pubkey in the pubnet, we map it to an actual KeyPair (with a private
     // key) to use in the simulation. It's important to keep these straight! The keys
@@ -384,7 +432,7 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
     // throughout the rest of this function, as strings called "pubkey", but should not
     // appear in the final CoreSets we're building.
     let mutable pubnetKeyToSimKey : Map<string, KeyPair> =
-        Array.map (fun (n: PubnetNode.Root) -> (n.PublicKey, KeyPair.Random())) allPubnetNodes
+        Array.map (fun (n: PubnetNode) -> (n.PublicKey, KeyPair.Random())) allPubnetNodes
         |> Map.ofArray
 
     // Not every pubkey used in the qsets is represented in the base set of pubnet nodes,
@@ -401,7 +449,7 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
     // This is because `networkSizeLimit` may be smaller than the degree of some new node
     // and cause an issue to the scaling algorithm.
     let adjacencyMap =
-        addEdges allPubnetNodes (Array.map (fun (n: PubnetNode.Root) -> n.PublicKey) newNodes) tier1KeySet random
+        addEdges allPubnetNodes (Array.map (fun (n: PubnetNode) -> n.PublicKey) newNodes) tier1KeySet random
         |> if context.fullyConnectTier1 then fullyConnectTier1 tier1KeySet else id
         |> match context.maxConnections with
            | Some maxConnections ->
@@ -420,8 +468,8 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
 
     let orgNodes, miscNodes =
         allPubnetNodes
-        |> Array.filter (fun (n: PubnetNode.Root) -> minAllowedConnectionCount <= numPeers adjacencyMap n.PublicKey)
-        |> Array.partition (fun (n: PubnetNode.Root) -> n.RadarHomeDomain.IsSome)
+        |> Array.filter (fun (n: PubnetNode) -> minAllowedConnectionCount <= numPeers adjacencyMap n.PublicKey)
+        |> Array.partition (fun (n: PubnetNode) -> n.RadarHomeDomain.IsSome)
 
     // We then trim down the set of misc nodes so that they fit within simulation
     // size limit passed. If we can't even fit the org nodes, we fail here.
@@ -439,18 +487,33 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
     let allPubnetNodes = Array.append orgNodes miscNodes
     let _ = assert ((Array.length allPubnetNodes) <= context.networkSizeLimit)
 
-    let allPubnetNodeKeys =
-        Array.map (fun (n: PubnetNode.Root) -> n.PublicKey) allPubnetNodes
-        |> Set.ofArray
+    let allPubnetNodeKeys = Array.map (fun (n: PubnetNode) -> n.PublicKey) allPubnetNodes |> Set.ofArray
+
+    // Check if we removed any tier1 or loadgen nodes.
+    let keptNodes : Set<string> =
+        allPubnetNodeKeys
+        |> Seq.filter (fun (n: string) -> Set.contains n tier1KeySet || Set.contains n loadgenKeySet)
+        |> Set.ofSeq
+
+    for removedNode in Set.difference tier1KeySet keptNodes do
+        LogWarn "Removed tier1 node %s from simulation" removedNode
+
+    for removedNode in Set.difference loadgenKeySet keptNodes do
+        LogWarn "Removed loadgen node %s from simulation" removedNode
 
     LogInfo "SimulatePubnet will run with %d nodes" (Array.length allPubnetNodes)
 
     // We then group the org nodes by their home domains. The domain names are drawn
     // from the HomeDomains of the public network but with periods replaced with dashes,
     // and lowercased, so for example keybase.io turns into keybase-io.
-    let groupedOrgNodes : (HomeDomainName * PubnetNode.Root array) array =
+    // Additionally, each load generator needs to exist in a size-1 org (because
+    // the downstream only generates load on one node per CoreSet). So, we add a
+    // loadgen-%d suffix to each load generator.
+    let loadgenNumber : Map<string, int> = loadgenKeySet |> Seq.mapi (fun i key -> key, i) |> Map.ofSeq
+
+    let groupedOrgNodes : (HomeDomainName * PubnetNode array) array =
         Array.groupBy
-            (fun (n: PubnetNode.Root) ->
+            (fun (n: PubnetNode) ->
                 let domain = n.RadarHomeDomain.Value
                 // We turn 'www.stellar.org' into 'stellar'
                 // and 'stellar.blockdaemon.com' into 'blockdaemon'
@@ -467,23 +530,35 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
                 // or not tier 1, we split them into separate orgs by appending
                 // "-non-tier1" to the home domain of any non-tier1 node in an
                 // org.
-                let withTierInfo =
-                    if not (Set.contains n.PublicKey tier1KeySet) then
+                let withNodeInfo =
+                    if Set.contains n.PublicKey loadgenKeySet then
+                        cleanOrgName + "-loadgen-" + loadgenNumber.[n.PublicKey].ToString()
+                    elif not (Set.contains n.PublicKey tier1KeySet) then
                         cleanOrgName + "-non-tier1"
                     else
                         cleanOrgName
 
 
-                let lowercase = withTierInfo.ToLower()
+                let lowercase = withNodeInfo.ToLower()
                 HomeDomainName lowercase)
             orgNodes
+
+    // Check that load generators each exist in size-1 orgs
+    for hdn, nodes in groupedOrgNodes do
+        let loadGenerators = nodes |> Array.filter (fun n -> Set.contains n.PublicKey loadgenKeySet)
+
+        if loadGenerators.Length > 0 && nodes.Length > 1 then
+            failwithf
+                "Load generator node(s) found in org %s with %d nodes. Each node that generates load should have its own home domain"
+                hdn.StringName
+                nodes.Length
 
     // Then build a map from accountID to HomeDomainName and index-within-domain
     // for each org node.
     let orgNodeHomeDomains : Map<string, (HomeDomainName * int)> =
         Array.collect
-            (fun (hdn: HomeDomainName, nodes: PubnetNode.Root array) ->
-                Array.mapi (fun (i: int) (n: PubnetNode.Root) -> (n.PublicKey, (hdn, i))) nodes)
+            (fun (hdn: HomeDomainName, nodes: PubnetNode array) ->
+                Array.mapi (fun (i: int) (n: PubnetNode) -> (n.PublicKey, (hdn, i))) nodes)
             groupedOrgNodes
         |> Map.ofArray
 
@@ -538,14 +613,12 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
     let defaultQuorum : QuorumSetSpec =
         let tier1Nodes =
             allPubnetNodes
-            |> Array.filter
-                (fun (n: PubnetNode.Root) -> (Set.contains n.PublicKey tier1KeySet) && n.RadarHomeDomain.IsSome)
+            |> Array.filter (fun (n: PubnetNode) -> (Set.contains n.PublicKey tier1KeySet) && n.RadarHomeDomain.IsSome)
 
         let tier1NodesGroupedByHomeDomain : (string array) array =
             tier1Nodes
-            |> Array.groupBy (fun (n: PubnetNode.Root) -> n.RadarHomeDomain.Value)
-            |> Array.map
-                (fun (_, nodes: PubnetNode.Root []) -> Array.map (fun (n: PubnetNode.Root) -> n.PublicKey) nodes)
+            |> Array.groupBy (fun (n: PubnetNode) -> n.RadarHomeDomain.Value)
+            |> Array.map (fun (_, nodes: PubnetNode []) -> Array.map (fun (n: PubnetNode) -> n.PublicKey) nodes)
 
         let orgToExplicitQSet (org: string array) : ExplicitQuorumSet =
             { thresholdPercent = Some(51) // Simple majority
@@ -555,7 +628,7 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
         let tier1Orgs =
             tier1Nodes
             |> Array.map
-                (fun (n: PubnetNode.Root) -> { name = (homeDomainNameForKey n.PublicKey).StringName; quality = High })
+                (fun (n: PubnetNode) -> { name = (homeDomainNameForKey n.PublicKey).StringName; quality = High })
             |> Set.ofArray
 
         let flatQset =
@@ -596,9 +669,9 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
     // as long as the random function is persistent.
     let geoLocations : GeoLoc array =
         allPubnetNodes
-        |> Array.filter (fun (n: PubnetNode.Root) -> n.RadarGeoData.IsSome)
+        |> Array.filter (fun (n: PubnetNode) -> n.RadarGeoData.IsSome)
         |> Array.map
-            (fun (n: PubnetNode.Root) ->
+            (fun (n: PubnetNode) ->
                 { lat = float n.RadarGeoData.Value.Latitude
                   lon = float n.RadarGeoData.Value.Longitude })
         |> Seq.ofArray
@@ -611,7 +684,7 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
     // The assignment is deterministic as it depends on the public key of the
     // node. This ensures that geolocations persist across runs, even if the
     // total number of nodes changes via the *-orgs-to-add flags.
-    let getGeoLocOrDefault (n: PubnetNode.Root) : GeoLoc =
+    let getGeoLocOrDefault (n: PubnetNode) : GeoLoc =
         match n.RadarGeoData with
         | Some geoData -> { lat = float geoData.Latitude; lon = float geoData.Longitude }
         | None ->
@@ -636,7 +709,7 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
 
         allPubnetNodes
         |> Array.map
-            (fun (n: PubnetNode.Root) ->
+            (fun (n: PubnetNode) ->
                 let key = getSimPubKey n.PublicKey
 
                 let peers =
@@ -659,7 +732,7 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
     // Given a node, returns a tuple where the first element is a boolean
     // indicating whether the node is a validator, and the second element is an
     // appropriate quorum set configuration for that node.
-    let computeQset (n: PubnetNode.Root) =
+    let computeQset (n: PubnetNode) =
         let tier1 = Set.contains n.PublicKey tier1KeySet
         let hdn = homeDomainNameForKey n.PublicKey
 
@@ -746,7 +819,7 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
 
     let miscCoreSets : CoreSet array =
         Array.mapi
-            (fun (_: int) (n: PubnetNode.Root) ->
+            (fun (_: int) (n: PubnetNode) ->
                 let hdn = homeDomainNameForKey n.PublicKey
                 let keys = [| getSimKey n.PublicKey |]
                 let tier1 = Set.contains n.PublicKey tier1KeySet
@@ -760,6 +833,7 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
                           tier1 = Some tier1
                           validate = validate
                           homeDomain = if validate then Some hdn.StringName else None
+                          generatesLoad = false
                           nodeLocs = Some [ getGeoLocOrDefault n ]
                           preferredPeersMap = Some(keysToPreferredPeersMap keys) }
 
@@ -770,11 +844,12 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
 
     let orgCoreSets : CoreSet array =
         Array.map
-            (fun (hdn: HomeDomainName, nodes: PubnetNode.Root array) ->
+            (fun (hdn: HomeDomainName, nodes: PubnetNode array) ->
                 assert (nodes.Length <> 0)
                 let nodeList = List.ofArray nodes
-                let keys = Array.map (fun (n: PubnetNode.Root) -> getSimKey n.PublicKey) nodes
+                let keys = Array.map (fun (n: PubnetNode) -> getSimKey n.PublicKey) nodes
                 let tier1 = Set.contains nodes.[0].PublicKey tier1KeySet
+                let generatesLoad = Set.contains nodes.[0].PublicKey loadgenKeySet
 
                 let validate, qset = mergeQSets (List.map computeQset nodeList)
 
@@ -785,6 +860,7 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
                           tier1 = Some tier1
                           validate = validate
                           homeDomain = if validate then Some hdn.StringName else None
+                          generatesLoad = generatesLoad
                           nodeLocs = Some(List.map getGeoLocOrDefault nodeList)
                           preferredPeersMap = Some(keysToPreferredPeersMap keys) }
 

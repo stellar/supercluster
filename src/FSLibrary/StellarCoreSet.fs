@@ -211,6 +211,7 @@ type CoreSetOptions =
       validate: bool
       homeDomain: string option
       tier1: bool option
+      generatesLoad: bool
       catchupMode: CatchupMode
       image: string
       initialization: CoreSetInitialization
@@ -264,6 +265,7 @@ type CoreSetOptions =
           validate = true
           homeDomain = Some "stellar.org"
           tier1 = None
+          generatesLoad = false
           catchupMode = CatchupComplete
           image = image
           initialization = CoreSetInitialization.Default

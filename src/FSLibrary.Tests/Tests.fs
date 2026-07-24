@@ -75,6 +75,7 @@ let ctx : MissionContext =
       pubnetData = None
       flatQuorum = None
       tier1Keys = None
+      loadgenKeys = None
       maxConnections = None
       fullyConnectTier1 = false
       peerReadingCapacity = None
