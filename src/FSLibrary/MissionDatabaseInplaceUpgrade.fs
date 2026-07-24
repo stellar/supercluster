@@ -86,7 +86,11 @@ let databaseInplaceUpgrade (context: MissionContext) =
             // which would make loadgen time out against its stale local
             // ledger. Wait until it actually tracks the network.
             let upgradedPeer = formation.NetworkCfg.GetPeer afterUpgradeCoreSetLive 0
-            upgradedPeer.WaitUntilCaughtUpWith(formation.NetworkCfg.GetPeer coreSet 0)
+            let corePeer = formation.NetworkCfg.GetPeer coreSet 0
+            upgradedPeer.WaitUntilCaughtUpWith(corePeer)
 
             formation.RunLoadgen afterUpgradeCoreSet context.GeneratePaymentLoad
-            formation.RunLoadgen coreSet context.GeneratePaymentLoad)
+            formation.RunLoadgen coreSet context.GeneratePaymentLoad
+
+            peer.WaitUntilCaughtUpWith(corePeer)
+            upgradedPeer.WaitUntilCaughtUpWith(corePeer))
