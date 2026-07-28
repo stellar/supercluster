@@ -255,6 +255,32 @@ let private collectLedgerAgePercentiles
     |> Async.RunSynchronously
     |> Array.toList
 
+let private logE2eLatencyMetrics (formation: StellarFormation) (coreSets: CoreSet list) : unit =
+    let e2eLatencyMetrics : (string * (Metrics.Metrics -> Metrics.GenericCounter option)) list =
+        [ "min", (fun m -> m.LoadgenTxLatencyRunMinMs)
+          "mean", (fun m -> m.LoadgenTxLatencyRunMeanMs)
+          "p50", (fun m -> m.LoadgenTxLatencyRunP50Ms)
+          "p75", (fun m -> m.LoadgenTxLatencyRunP75Ms)
+          "p99", (fun m -> m.LoadgenTxLatencyRunP99Ms)
+          "max", (fun m -> m.LoadgenTxLatencyRunMaxMs) ]
+
+    for peer in formation.NetworkCfg.PeersInSets(List.toArray coreSets) do
+        let metrics = peer.GetMetrics()
+
+        let summary =
+            e2eLatencyMetrics
+            |> List.map
+                (fun (name, get) ->
+                    let value =
+                        get metrics
+                        |> Option.map (fun c -> string c.Count)
+                        |> Option.defaultValue "none"
+
+                    sprintf "%s=%s" name value)
+            |> String.concat " "
+
+        LogInfo "TX e2e latency: peer=%s loadgen-tx-latency-run-ms: %s" peer.ShortName.StringName summary
+
 // Returns true iff every peer's ledger.age.closed-histogram satisfies:
 //   P75 in [0.80*T, 1.20*T)
 //   P99 <= 2*T
@@ -500,6 +526,9 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                 // Snapshot SLA metrics before consistency checks; those can take
                 // long enough to skew the ledger age percentiles.
                 let ledgerAgePercentiles = collectLedgerAgePercentiles formation allNodes
+
+                if context.measureE2eLatency then
+                    logE2eLatencyMetrics formation activeLoadGenNodes
 
                 formation.CheckNoErrorsAndPairwiseConsistency()
                 formation.EnsureAllNodesInSync allNodes
