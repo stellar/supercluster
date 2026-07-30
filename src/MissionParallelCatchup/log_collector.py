@@ -62,8 +62,10 @@ STORAGE_MODE = os.getenv('STORAGE_MODE', 'pvc')
 # and workingSetBytes per container in the same /stats/summary payload this
 # already fetches for ephemeral storage, at ~10s cAdvisor housekeeping against a
 # 30s scrape -- and without depending on Prometheus being up, being reachable,
-# or still retaining the window. cpu is not sampled at all: the request is fixed
-# at REQ_CPU, so a measured value has nothing to size.
+# or still retaining the window. The old _promql helper swallowed all three of
+# those failures into "no peak", so an outage produced a profile that looked
+# complete and was empty. cpu is not sampled at all: the request is fixed at
+# REQ_CPU, so a measured value has nothing to size.
 # Peaks are held per pod and flushed on significant growth, so a restart loses
 # at most PEAK_FLUSH_RATIO of a range's high-water rather than all of it --
 # Prometheus's server-side max_over_time needed no such state.
@@ -77,7 +79,10 @@ LOG_POLL_SECONDS = float(os.getenv('LOG_POLL_SECONDS', 10))
 MAX_CONCURRENT_POLLS = int(os.getenv('MAX_CONCURRENT_POLLS', 96))
 # Most one poll may read before it stops. A pod that has been unwatched for a
 # while has a large backlog; this bounds a single response, and the next poll
-# picks up from the timestamp this one reached.
+# picks up from the timestamp this one reached. Also the backstop against a
+# blob that never terminates -- a progress meter emitting only carriage returns
+# would otherwise grow the buffer until the sidecar OOMs, with 2096 streams
+# doing it at once.
 MAX_POLL_CHARS = int(os.getenv('MAX_POLL_CHARS', 8388608))
 # Bounds in-flight polls across every pod. Lives beside its own constant rather
 # than among the peak dicts, where it landed inside the region the scanner tests
@@ -96,7 +101,9 @@ _pod_secs = {}
 PEAK_KEYS = ('peakAnonBytes', 'peakWorkingSetBytes', 'peakEphemeralBytes')
 # Failed polls tolerated after a pod goes terminal before we stop asking. Its
 # log is not coming back, and spinning on it holds a task and a poll slot for
-# the rest of the run; a couple of retries still absorb a transient 500.
+# the rest of the run; a couple of retries still absorb a transient 500, which
+# arrived in bursts at ramp. Returning bare on one of those used to drop the
+# metrics for every range whose last read happened to throw.
 TERMINAL_POLL_ATTEMPTS = int(os.getenv('TERMINAL_POLL_ATTEMPTS', 3))
 # Phases whose log endpoint can actually answer. Pending has no container yet
 # and Unknown means the node stopped reporting; the terminal phases are kept
@@ -427,6 +434,9 @@ async def sample_kubelet(session, nodes):
                             write_metrics(ref[0], ref[1],
                                           {'peakEphemeralBytes': int(used)})
             for c in entry.get('containers', []):
+                # The worker container only. Sidecars share the pod, so summing
+                # across containers -- or letting the last one win -- would size
+                # the range from whichever one kubelet happened to list last.
                 if c.get('name') != CONTAINER:
                     continue
                 # Absent for the first seconds of a container's life, before
@@ -439,6 +449,8 @@ async def sample_kubelet(session, nodes):
                 rss = mem.get('rssBytes')
                 if rss is None:
                     continue
+                # High-water, never last-seen: anon oscillates through the
+                # download phase, so a later lower sample must not lower it.
                 if int(rss) <= _anon_peak.get(name, 0):
                     continue
                 _anon_peak[name] = int(rss)
@@ -470,11 +482,18 @@ def _mark_done(end, attempt):
 async def finalize(session, pod, end, attempt, tx, done_ok, started=None):
     """Persist everything this attempt owes, then let its stream go.
 
-    Reached from two places: a clean end of stream once the pod is terminal,
-    and a 404 once the pod object is gone. The second path used to not exist,
-    so a pod deleted while Running -- reaped node, eviction, or the monitor
-    deleting a finished Job -- left its stream retrying every 30s for the rest
-    of the run, holding a connection slot the whole time.
+    Reached from three places, and deliberately ONE implementation: a clean end
+    of stream once the pod is terminal, a 404 once the pod object is gone, and
+    a terminal pod whose polls keep failing past TERMINAL_POLL_ATTEMPTS. Two
+    copies of the metrics/discard logic is how one path silently stops writing
+    peakAnonBytes while the other keeps working.
+
+    The 404 path used to not exist, so a pod deleted while Running -- reaped
+    node, eviction, or the monitor deleting a finished Job -- left its stream
+    retrying every 30s for the rest of the run, holding a connection slot the
+    whole time. Note the converse: an interrupted read on a pod that is STILL
+    RUNNING must not come here. Finalizing then writes a truncated peak and
+    leaves the range looking measured when it is not.
     """
     # Before discard: on success the archive is about to be deleted.
     measured = {}
@@ -499,6 +518,8 @@ async def finalize(session, pod, end, attempt, tx, done_ok, started=None):
     _peak_flushed.pop(pod, None)
     _peak_flushed.pop(pod + '/eph', None)
     _streaming.pop(pod, None)
+    # One _wake entry per pod, and pods are per range per attempt: 3979 ranges
+    # plus their retries would accumulate here for the life of the run.
     _wake.pop(pod, None)
     anon = _anon_peak.pop(pod, None)
     if anon is not None:
@@ -739,7 +760,9 @@ async def main():
     tasks, terminal, succeeded, vanished = {}, {}, {}, {}
     # Streams that ran to completion. Without this a finished task is deleted
     # from `tasks` and the next poll re-opens the stream, forever: one full log
-    # re-read per pod per cycle, which at 1024 workers is a lot of apiserver.
+    # re-read per pod every POLL_SECONDS, which at 1024 workers is a lot of
+    # apiserver -- measured, the completion block ran once per range per cycle
+    # for the rest of the run.
     streamed = set()
 
     async with aiohttp.ClientSession(connector=conn, timeout=timeout) as session:

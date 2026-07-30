@@ -166,9 +166,8 @@ def test_the_range_scoped_reap_still_waits_for_the_done_marker(cluster):
     written `.done` -- JOB_TTL_SECONDS is the backstop for a collector that
     never gets there.
 
-    This is the behavioural half of the guarantee that
-    test_job_monitor.py::test_the_reap_waits_for_the_collectors_done_marker
-    asserts by extracting and exec'ing the function's source.
+    This is the range-scoped half of the guarantee; the attempt-scoped half is
+    unit/test_reaping.py::test_the_reap_waits_for_the_collectors_done_marker.
     """
     cluster.reconcile()
     cluster.advance(300, 'succeeded')
