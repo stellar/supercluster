@@ -1073,11 +1073,37 @@ MARK=/data/.job-key
 RESUME=false
 LCL=""
 if [ -f "$MARK" ] && [ "$(cat "$MARK" 2>/dev/null)" = "$KEY" ]; then
-  PREV_LOG=$(ls -t /data/stellar-core*.log 2>/dev/null | head -n 1 || true)
-  if [ -n "$PREV_LOG" ]; then
-    LCL=$(grep -oE "Ledger close complete: [0-9]+" "$PREV_LOG" 2>/dev/null | tail -1 | grep -oE "[0-9]+$" || true)
+  # Ask core for its own LCL. It reads storestate.lastclosedledgerheader through
+  # its own accessor, so this survives both a schema change (v27 dropped
+  # ledgerheaders, which is what silently disabled resume before) and any log
+  # level above INFO. Safe here specifically: core has not started, so nothing
+  # holds /data/buckets/stellar-core.lock. Core logs to the console alongside
+  # the JSON, hence grepping rather than parsing.
+  LCL=$(/usr/bin/stellar-core --conf /config/stellar-core.cfg offline-info --console 2>/dev/null \
+        | tr -d ' ' | grep -A8 '"ledger":' | grep -oE '"num":[0-9]+' | head -1 \
+        | grep -oE '[0-9]+$' || true)
+  if [ -n "$LCL" ]; then
+    echo "RESUME PROBE: offline-info reports lcl $LCL"
+  else
+    # Fallback: the previous incarnation's log on /data. Goes blind above INFO,
+    # which is why it is no longer the primary probe.
+    PREV_LOG=$(ls -t /data/stellar-core*.log 2>/dev/null | head -n 1 || true)
+    if [ -n "$PREV_LOG" ]; then
+      LCL=$(grep -oE "Ledger close complete: [0-9]+" "$PREV_LOG" 2>/dev/null | tail -1 | grep -oE "[0-9]+$" || true)
+    fi
+    echo "RESUME PROBE: offline-info gave nothing; log fallback says '${LCL:-none}'"
   fi
-  if [ -n "$LCL" ] && [ "$LCL" -ge $((TARGET - COUNT)) ] && [ "$LCL" -le "$TARGET" ] 2>/dev/null; then
+  # Already at the target: a1 finished the replay and was evicted before it
+  # could exit 0. Re-running catchup here applies nothing and stellar-core exits
+  # 2, identically on every retry, so the range burns its whole budget and the
+  # mission aborts the run over work that was actually done. Measured on
+  # ssc-test 2026-07-30: range 16752063 killed a 2096-worker run that was 61
+  # percent complete, exactly this way.
+  if [ -n "$LCL" ] && [ "$LCL" -ge "$TARGET" ] 2>/dev/null; then
+    echo "ALREADY COMPLETE: $KEY reached ledger $LCL >= target $TARGET; nothing left to replay"
+    exit 0
+  fi
+  if [ -n "$LCL" ] && [ "$LCL" -ge $((TARGET - COUNT)) ] && [ "$LCL" -lt "$TARGET" ] 2>/dev/null; then
     RESUME=true; echo "RESUME: $KEY reached ledger $LCL, replay had started; skipping new-db"
   else
     echo "RESUME DECLINED: $KEY last close was '${LCL:-none}' (need >= $((TARGET - COUNT))); bucket phase incomplete, starting fresh"

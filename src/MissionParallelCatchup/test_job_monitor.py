@@ -2144,3 +2144,79 @@ def test_escalation_counts_ooms_not_attempts():
     assert ns['_oom_count'](9, 6) == 3
     body = _extract(r"(base = \(_profile_overrides\(end, escalated=False\).*?retry_mem = [^\n]+)").group(1)
     assert '_oom_count(end, attempt) + 1' in body, "escalation still keys on the attempt index"
+
+
+# --- an already-finished range must not be retried -------------------------
+# Measured on ssc-test 2026-07-30: a1 replayed range 16752063 to its target
+# ledger and was evicted before it could exit 0. a2 resumed, found LCL ==
+# TARGET, ran catchup against a DB with nothing left to apply, and stellar-core
+# exited 2 -- deterministically, every attempt. The range exhausted its budget
+# and the mission aborted a 61%-complete 2096-worker run over work that had
+# actually been done.
+
+def _run_resume_script(lcl, target=16752063, count=16320, mark_matches=True):
+    """Execute RESUME_SCRIPT's decision logic with a stubbed core."""
+    import subprocess, tempfile, os as _os, re as _re
+    src = _extract(r"RESUME_SCRIPT = r'''(.*?)'''").group(1)
+    src = src % {'key': f"{target}/{count}", 'target': target, 'count': count}
+    d = tempfile.mkdtemp()
+    bindir = _os.path.join(d, 'bin'); _os.makedirs(bindir)
+    # stub stellar-core: report `lcl` to offline-info, log what else is invoked
+    stub = _os.path.join(bindir, 'stellar-core')
+    with open(stub, 'w') as fh:
+        fh.write('#!/bin/sh\n'
+                 'for a in "$@"; do case "$a" in\n'
+                 '  offline-info) ' +
+                 (f'echo \'{{"info":{{"ledger":{{"num":{lcl},"hash":"x"}}}}}}\'; ' if lcl else 'echo "{}"; ') +
+                 'exit 0;;\n'
+                 '  new-db)  echo "RAN:new-db"  >> "$STUBLOG"; exit 0;;\n'
+                 '  catchup) echo "RAN:catchup" >> "$STUBLOG"; exit 2;;\n'
+                 'esac; done\nexit 0\n')
+    _os.chmod(stub, 0o755)
+    src = src.replace('/usr/bin/stellar-core', stub)
+    _os.makedirs(_os.path.join(d, 'data'), exist_ok=True)
+    src = src.replace('/data/', _os.path.join(d, 'data') + '/')
+    src = src.replace('MARK=' + _os.path.join(d, 'data') + '/.job-key',
+                      'MARK=' + _os.path.join(d, 'data') + '/.job-key')
+    mark = _os.path.join(d, 'data', '.job-key')
+    if mark_matches:
+        open(mark, 'w').write(f"{target}/{count}")
+    stublog = _os.path.join(d, 'stub.log')
+    env = dict(_os.environ, STUBLOG=stublog)
+    r = subprocess.run(['/bin/sh', '-c', src], capture_output=True, text=True, env=env, timeout=30)
+    ran = open(stublog).read().split() if _os.path.exists(stublog) else []
+    return r.returncode, r.stdout, ran
+
+
+def test_a_range_already_at_its_target_exits_success_without_recatching():
+    code, out, ran = _run_resume_script(lcl=16752063)
+    assert 'ALREADY COMPLETE' in out, out
+    assert code == 0, f"exit {code}; a finished range must not fail"
+    assert 'RAN:catchup' not in ran, "re-ran catchup on a completed range -> exit 2"
+    assert 'RAN:new-db' not in ran, "wiped a completed range"
+
+
+def test_a_partially_replayed_range_still_resumes():
+    code, out, ran = _run_resume_script(lcl=16752063 - 100)
+    assert 'RESUME:' in out and 'ALREADY COMPLETE' not in out, out
+    assert 'RAN:catchup' in ran and 'RAN:new-db' not in ran, ran
+
+
+def test_a_range_that_never_started_replay_starts_fresh():
+    code, out, ran = _run_resume_script(lcl=None)
+    assert 'RESUME DECLINED' in out, out
+    assert 'RAN:new-db' in ran and 'RAN:catchup' in ran, ran
+
+
+def test_the_resume_script_survives_its_own_percent_formatting():
+    # RESUME_SCRIPT is %-formatted with the range's key/target/count at dispatch.
+    # A bare % anywhere in it -- including in a comment -- raises at runtime and
+    # takes down every job dispatch. Nearly shipped exactly that: a comment
+    # reading "61%-complete".
+    src = _extract(r"RESUME_SCRIPT = r'''(.*?)'''").group(1)
+    src % {'key': '123/456', 'target': 123, 'count': 456}      # must not raise
+    # %% is a legitimate escape (printf '%%s'), so strip those pairs before
+    # looking for a stray one.
+    probe = src.replace('%%', '')
+    stray = [m.start() for m in re.finditer(r"%(?!\()", probe)]
+    assert not stray, f"bare % in RESUME_SCRIPT near {probe[max(0,stray[0]-40):stray[0]+20]!r}"
