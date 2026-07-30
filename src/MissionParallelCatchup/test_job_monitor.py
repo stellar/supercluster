@@ -1198,7 +1198,7 @@ def _run_stream_pod(status, terminal):
         'API': 'https://k8s', 'NAMESPACE': 'ns', 'CONTAINER': 'stellar-core',
         'LOG_DIR': d, 'LOG_POLL_SECONDS': 0.05, 'MAX_POLL_CHARS': 1 << 20,
         'TERMINAL_POLL_ATTEMPTS': 3,
-        '_poll_slots': asyncio.Semaphore(4),
+        '_poll_slots': asyncio.Semaphore(4), '_wake': {},
         'token': lambda: 't', 'finalize': fake_finalize,
         'base': lambda e, a: _os.path.join(d, f"range-{e}-a{a}"),
         'read_state': lambda e, a: None, 'write_state': lambda e, a, ts: None,
@@ -1327,7 +1327,7 @@ def test_finalize_records_the_working_set_peak():
     written, ws = [], {'pod-1': 4096}
     ns = {
         '_anon_peak': {'pod-1': 900}, '_ws_peak': ws, '_eph_peak': {},
-        '_peak_flushed': {}, '_streaming': {}, 'SAVE_SUCCESS_LOGS': True,
+        '_peak_flushed': {}, '_streaming': {}, '_wake': {}, 'SAVE_SUCCESS_LOGS': True,
         'write_metrics': lambda e, a, v: written.append(v),
         'discard': lambda e, a: None, '_mark_done': lambda e, a: None,
         'logger': type('L', (), {'info': lambda s, *a: None})(),
@@ -1501,7 +1501,7 @@ def test_finalize_records_that_an_attempt_resumed():
     def run(resumed):
         written = []
         ns = {'_anon_peak': {'p': 1}, '_ws_peak': {}, '_eph_peak': {},
-              '_peak_flushed': {}, '_streaming': {}, 'SAVE_SUCCESS_LOGS': True,
+              '_peak_flushed': {}, '_streaming': {}, '_wake': {}, 'SAVE_SUCCESS_LOGS': True,
               'write_metrics': lambda e, a, v: written.append(v),
               'discard': lambda e, a: None, '_mark_done': lambda e, a: None,
               'logger': type('L', (), {'info': lambda s, *a: None})()}
@@ -1740,7 +1740,7 @@ def test_the_collector_records_a_duration_the_monitor_cannot():
     import asyncio
     written = []
     ns = {'asyncio': asyncio, '_anon_peak': {}, '_ws_peak': {}, '_eph_peak': {},
-          '_peak_flushed': {}, '_streaming': {}, 'SAVE_SUCCESS_LOGS': True,
+          '_peak_flushed': {}, '_streaming': {}, '_wake': {}, 'SAVE_SUCCESS_LOGS': True,
           'write_metrics': lambda e, a, v: written.append(v),
           'discard': lambda e, a: None, '_mark_done': lambda e, a: None,
           'logger': type('L', (), {'info': lambda s, *a: None})()}
@@ -1824,8 +1824,8 @@ def test_a_failed_attempt_is_not_reaped_before_the_collector_finalizes_it():
     # would lose the last interval. Gate it either way.
     body = _extract(r"(try:\s*\n\s*batch_v1\.create_namespaced_job.*?)continue").group(1)
     assert 'delete_job(end, attempt)' in body
-    assert re.search(r"if peaks_for_range\(end, attempt\):\s*\n\s*delete_job\(end, attempt\)", body), \
-        "the retry-path reap is not gated on the collector having finalized"
+    assert re.search(r"if _attempt_finalized\(end, attempt\):\s*\n\s*delete_job\(end, attempt\)", body), \
+        "the retry-path reap is not gated on the collector's done marker"
     assert body.index('create_namespaced_job') < body.index('delete_job('), \
         "successor must exist before the predecessor is reaped"
 
@@ -1993,3 +1993,47 @@ def test_both_sides_agree_on_the_marker_path():
     m = _extract(r"^(def done_path\(.*?)(?=\n\ndef )").group(1)
     assert ".done" in c and ".done" in m
     assert 'range-' in m and 'base(end, attempt)' in c
+
+
+def test_a_terminal_pod_wakes_its_poller_immediately():
+    # The delay that matters is between the container exiting and the last read.
+    # Sleeping blind for LOG_POLL_SECONDS hands that window to a spot reclaim,
+    # which deletes the pod and takes the final lines with it.
+    loop = _extract(r"while True:\n(.*?)await asyncio\.sleep\(POLL_SECONDS\)",
+                    COLLECTOR_SRC).group(1)
+    # Structure, not just presence: mutating the guard to `if False:` leaves
+    # the .set() line in place and sails past a substring check.
+    assert re.search(r"terminal\[name\] = phase in [^\n]*\n\s*if terminal\[name\][^\n]*:\s*\n(?:\s*#[^\n]*\n)*\s*_wake\[name\]\.set\(\)", loop), \
+        "a pod going terminal does not wake its poller"
+    poller = _extract(r"^(async def poll_pod\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
+    assert 'asyncio.wait_for(' in poller and '_wake.setdefault' in poller, \
+        "the poller still sleeps blind between polls"
+    assert 'await asyncio.sleep(backoff)' not in poller
+
+
+def test_the_wake_entry_is_dropped_when_the_attempt_finishes():
+    # One entry per pod, and pods are per range per attempt -- 3979 ranges with
+    # retries would otherwise accumulate for the life of the run.
+    fn = _extract(r"^(async def finalize\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
+    assert '_wake.pop(pod, None)' in fn
+
+
+def test_a_vanished_pod_also_wakes_its_poller():
+    # Gone is terminal. Without the wake its poller sleeps out the interval
+    # before taking the 404, delaying finalize and the .done the monitor needs
+    # before it can reap the Job.
+    loop = _extract(r"while True:\n(.*?)await asyncio\.sleep\(POLL_SECONDS\)",
+                    COLLECTOR_SRC).group(1)
+    blk = loop[loop.index('n not in live'):loop.index('if STORAGE_MODE') if 'if STORAGE_MODE' in loop else loop.index('for pod in pods:')]
+    assert 'terminal[name] = True' in blk
+    assert re.search(r"if name in _wake:\s*\n(?:\s*#[^\n]*\n)*\s*_wake\[name\]\.set\(\)", blk), \
+        "a vanished pod never wakes its poller"
+
+
+def test_both_reap_paths_wait_for_the_same_marker():
+    # Success and retry must agree. Gating one on peaks and the other on the
+    # marker means an attempt with no peaks is reaped on one path and left to
+    # the TTL on the other.
+    assert len(re.findall(r"_attempt_finalized\(end, attempt\)", SRC)) >= 2
+    assert 'if peaks_for_range(end, attempt):' not in SRC, \
+        "a reap still uses peaks as a proxy for the collector being done"

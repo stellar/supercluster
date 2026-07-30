@@ -91,6 +91,12 @@ MAX_POLL_CHARS = int(os.getenv('MAX_POLL_CHARS', 8388608))
 # than among the peak dicts, where it landed inside the region the scanner tests
 # exec and broke six of them on an asyncio NameError.
 _poll_slots = asyncio.Semaphore(MAX_CONCURRENT_POLLS)
+# pod name -> Event, set by the main loop the moment it first observes the pod
+# terminal. poll_pod waits on it instead of sleeping blind, so the final read
+# happens within the pod-list cadence rather than up to LOG_POLL_SECONDS later.
+# That window is the only thing standing between a spot reclaim and the last
+# lines the container wrote.
+_wake = {}
 # Failed polls tolerated after a pod goes terminal before we stop asking. Its
 # log is not coming back, and spinning on it holds a task and a poll slot for
 # the rest of the run; a couple of retries still absorb a transient 500.
@@ -430,6 +436,7 @@ async def finalize(session, pod, end, attempt, tx, done_ok, started=None):
         measured['txApplySeconds'] = tx.seconds
     _peak_flushed.pop(pod, None)
     _streaming.pop(pod, None)
+    _wake.pop(pod, None)
     anon = _anon_peak.pop(pod, None)
     if anon is not None:
         # Recorded for every attempt, not just the winner. peaks_for_range takes
@@ -589,7 +596,15 @@ async def poll_pod(session, pod, end, attempt, done, done_ok):
                 # mid-poll and drop whatever it wrote on the way out.
                 await finalize(session, pod, end, attempt, tx, done_ok, started)
                 return
-        await asyncio.sleep(backoff)
+        # Not a blind sleep: a pod going terminal cuts it short. Polling faster
+        # would not help -- sinceTime has second granularity, so anything under
+        # ~1s re-reads the same second -- and the delay that matters is between
+        # the container exiting and the last read, not between routine polls.
+        try:
+            await asyncio.wait_for(_wake.setdefault(pod, asyncio.Event()).wait(),
+                                   timeout=backoff)
+        except asyncio.TimeoutError:
+            pass
 
 
 async def list_pods(session):
@@ -638,6 +653,11 @@ async def main():
                 # attempt it will never win.
                 for name in [n for n in tasks if n not in live]:
                     terminal[name] = True
+                    if name in _wake:
+                        # Gone is terminal. Without this its poller sleeps out
+                        # the interval before taking the 404, delaying finalize
+                        # and the .done that lets the monitor reap the Job.
+                        _wake[name].set()
                     t = tasks[name]
                     if t.done():
                         del tasks[name]
@@ -670,6 +690,9 @@ async def main():
                         continue
                     phase = pod.get('status', {}).get('phase')
                     terminal[name] = phase in ('Succeeded', 'Failed')
+                    if terminal[name] and name in _wake:
+                        # Wake its poller now rather than at the next tick.
+                        _wake[name].set()
                     succeeded[name] = phase == 'Succeeded'
                     if phase == 'Failed':
                         record_outcome(pod, end, labels.get(LABEL_ATTEMPT, '1'))

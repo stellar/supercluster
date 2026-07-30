@@ -1676,7 +1676,11 @@ def reconcile(state):
                 # for .metrics means the collector has finalized this attempt --
                 # its peaks, its tx_apply and its duration are all durable.
                 # JOB_TTL_SECONDS reaps it if the collector never gets there.
-                if peaks_for_range(end, attempt):
+                # Same marker the success path waits for. Peaks were a proxy:
+                # an attempt that legitimately has none would never be reaped,
+                # and one whose peaks landed early could be reaped while the
+                # collector was still reading its log.
+                if _attempt_finalized(end, attempt):
                     delete_job(end, attempt)
                 in_progress.append(job_key(int(end), by_end[end]))
                 continue
