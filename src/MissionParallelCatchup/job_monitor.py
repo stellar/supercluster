@@ -1356,8 +1356,18 @@ def volume_spread_constraints():
         label_selector=client.V1LabelSelector(match_labels={LABEL_RUN: RUN_NAME}))]
 
 
-def pod_labels(end):
-    labels = {LABEL_RUN: RUN_NAME, LABEL_RANGE: str(end)}
+def pod_labels(end, attempt):
+    """Labels on the worker POD, which are not the Job's.
+
+    LABEL_ATTEMPT has to be here as well: the collector reads it off the pod to
+    decide which range-<end>-a<n>.* files this attempt owns, and its default is
+    "1". Measured on ssc-test 2026-07-30 -- with the label only on the Job, all
+    2246 metrics files were a1 while 475 a2 pods were running, so every retry
+    overwrote the first attempt's peaks instead of being maxed against them,
+    peaks_for_range(end, 2) found nothing, and those Jobs were never reaped.
+    """
+    labels = {LABEL_RUN: RUN_NAME, LABEL_RANGE: str(end),
+              LABEL_ATTEMPT: str(attempt)}
     if EMIT_MISSION_LABEL and MISSION:
         labels['mission'] = MISSION
     return labels
@@ -1417,7 +1427,7 @@ def build_job(end, count, attempt, owner, mem=None, eph=None):
             ttl_seconds_after_finished=JOB_TTL_SECONDS,
             active_deadline_seconds=ATTEMPT_DEADLINE_SECONDS or None,
             template=client.V1PodTemplateSpec(
-                metadata=client.V1ObjectMeta(labels=pod_labels(end)),
+                metadata=client.V1ObjectMeta(labels=pod_labels(end, attempt)),
                 spec=client.V1PodSpec(
                     # IRSA for the S3 history mirror. Without it workers fall
                     # back to the public archive, which throttles at 1024.

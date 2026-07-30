@@ -2070,3 +2070,31 @@ def test_the_ceiling_exception_is_peaks_only():
         assert '_peak_attempts' not in fn, f"{fn_name} would double-count redone work"
     peaks = _extract(r"^(def peaks_for_range\(.*?)(?=\ndef )").group(1)
     assert '_peak_attempts(end, attempt)' in peaks
+
+
+def test_the_worker_pod_carries_its_attempt_number():
+    # The collector reads LABEL_ATTEMPT off the POD, not the Job, and defaults
+    # to "1". With the label only on the Job every attempt claimed the same
+    # range-<end>-a1.* files: measured on ssc-test 2026-07-30, 2246 metrics
+    # files all a1 while 475 a2 pods ran, so each retry overwrote the first
+    # attempt's peak instead of being maxed against it -- destroying exactly
+    # the OOM evidence the chain exists to keep.
+    fn = _extract(r"^(def pod_labels\(.*?)(?=\ndef )").group(1)
+    # The dict itself, not the docstring -- which names LABEL_ATTEMPT while
+    # explaining why it must be there, and made an earlier version of this
+    # assertion pass against a pod_labels that had dropped it.
+    body = fn[fn.index('labels = {'):]
+    assert re.search(r"LABEL_ATTEMPT: str\(attempt\)", body), \
+        "the pod template omits the attempt label"
+    assert re.match(r"def pod_labels\(end, attempt\)", fn), \
+        "pod_labels does not take the attempt"
+    assert 'metadata=client.V1ObjectMeta(labels=pod_labels(end, attempt))' in SRC
+    # and the collector's default is what makes the omission silent
+    assert re.search(r"labels\.get\(LABEL_ATTEMPT, '1'\)", COLLECTOR_SRC), \
+        "collector no longer defaults the attempt -- update this test"
+
+
+def test_pod_and_job_agree_on_the_attempt_label_key():
+    # Two readers, one key. A mismatch reproduces the same silent collision.
+    assert _extract(r"LABEL_ATTEMPT = '([^']+)'").group(1) == \
+           _extract(r"LABEL_ATTEMPT = '([^']+)'", COLLECTOR_SRC).group(1)
