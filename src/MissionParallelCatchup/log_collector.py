@@ -33,6 +33,7 @@ import json
 import logging
 import os
 import re
+import signal
 import ssl
 import sys
 import zlib
@@ -213,6 +214,15 @@ _TX_METRIC = "metric 'ledger.transaction.apply'"
 # silently missing for 25% of ranges -- 91-99% of everything above ledger 35M,
 # exactly the expensive end.
 _SUM_RE = re.compile(r"sum\s*=\s*([0-9.]+(?:[eE][+-]?[0-9]+)?)ms")
+_SYNTHETIC_PEAK_RE = re.compile(
+    r"SYNTHETIC PEAK: anonBytes=(\d+) workingSetBytes=(\d+)")
+SYNTHETIC_WORKER = os.getenv('SYNTHETIC_WORKER', '').lower() == 'true'
+
+
+def _install_synthetic_restart_handler():
+    """Allow a collector-only container restart in the opt-in live harness."""
+    if SYNTHETIC_WORKER:
+        signal.signal(signal.SIGTERM, lambda _signum, _frame: sys.exit(0))
 
 
 class TxApplyScanner:
@@ -238,12 +248,19 @@ class TxApplyScanner:
         self.seconds = None
         self.resumed = False
         self.resume_decided = False
+        self.synthetic_anon = None
+        self.synthetic_working_set = None
         # A new poller starting from durable .state missed every earlier line.
         # Finalization must recover scanner-only facts from the archive.
         self.recreated = recreated
         self._left = 0
 
     def feed(self, line):
+        if SYNTHETIC_WORKER:
+            peak = _SYNTHETIC_PEAK_RE.search(line)
+            if peak:
+                self.synthetic_anon = int(peak.group(1))
+                self.synthetic_working_set = int(peak.group(2))
         if self.RESUME_MARK in line:
             self.resumed = True
             self.resume_decided = True
@@ -469,6 +486,8 @@ async def sample_kubelet(session, nodes):
     OOM. The `time` field on this payload runs 1-3s behind wall clock; the ~80s
     lag applies only to the du-based ephemeral figure alongside it.
     """
+    if SYNTHETIC_WORKER:
+        return
     for node in nodes:
         url = f"{API}/api/v1/nodes/{node}/proxy/stats/summary"
         try:
@@ -578,7 +597,8 @@ async def finalize(session, pod, end, attempt, tx, done_ok, started=None):
     # finalization; recover only the state this scanner could have missed.
     archived = None
     need_resume = int(attempt) > 1 and not tx.resume_decided
-    need_tx = tx.recreated and tx.seconds is None
+    need_tx = (tx.recreated and tx.seconds is None) or (
+        SYNTHETIC_WORKER and tx.recreated)
     if need_resume or need_tx:
         archived = scan_archive(end, attempt, need_tx=need_tx)
     if tx.resumed or (archived is not None and archived.resumed):
@@ -591,6 +611,10 @@ async def finalize(session, pod, end, attempt, tx, done_ok, started=None):
         tx_seconds = archived.seconds
     if tx_seconds is not None:
         measured['txApplySeconds'] = tx_seconds
+    synthetic = archived if archived is not None else tx
+    if SYNTHETIC_WORKER and synthetic.synthetic_anon is not None:
+        measured['peakAnonBytes'] = synthetic.synthetic_anon
+        measured['peakWorkingSetBytes'] = synthetic.synthetic_working_set
     _peak_flushed.pop(pod, None)
     _peak_flushed.pop(pod + '/eph', None)
     _streaming.pop(pod, None)
@@ -956,4 +980,5 @@ async def main():
 
 
 if __name__ == '__main__':
+    _install_synthetic_restart_handler()
     asyncio.run(main())

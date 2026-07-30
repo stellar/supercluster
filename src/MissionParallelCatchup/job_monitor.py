@@ -51,6 +51,25 @@ metric_buckets = (300, 900, 1800, 3600, 5400, 7200, float("inf"))
 # =============================================================================
 CORE_IMAGE = os.getenv('CORE_IMAGE')
 ASAN_OPTIONS = os.getenv('ASAN_OPTIONS', '')
+# Test-only worker configuration. Empty is the production path; the chart sets
+# these only for its fixed, opt-in synthetic integration worker.
+SYNTHETIC_WORKER_CONFIG_MAP = os.getenv('SYNTHETIC_WORKER_CONFIG_MAP', '')
+SYNTHETIC_WORKER_IMAGE_PULL_POLICY = os.getenv(
+    'SYNTHETIC_WORKER_IMAGE_PULL_POLICY', 'IfNotPresent')
+SYNTHETIC_PREDECESSOR_SECONDS = os.getenv('SYNTHETIC_PREDECESSOR_SECONDS', '12')
+SYNTHETIC_SUCCESSOR_MINIMUM_SECONDS = os.getenv(
+    'SYNTHETIC_SUCCESSOR_MINIMUM_SECONDS', '12')
+SYNTHETIC_MAXIMUM_WAIT_SECONDS = os.getenv('SYNTHETIC_MAXIMUM_WAIT_SECONDS', '180')
+SYNTHETIC_PREDECESSOR_ANON_MIB = os.getenv('SYNTHETIC_PREDECESSOR_ANON_MIB', '48')
+SYNTHETIC_PREDECESSOR_WORKING_SET_MIB = os.getenv(
+    'SYNTHETIC_PREDECESSOR_WORKING_SET_MIB', '56')
+SYNTHETIC_SUCCESSOR_ANON_MIB = os.getenv('SYNTHETIC_SUCCESSOR_ANON_MIB', '24')
+SYNTHETIC_SUCCESSOR_WORKING_SET_MIB = os.getenv(
+    'SYNTHETIC_SUCCESSOR_WORKING_SET_MIB', '32')
+SYNTHETIC_PREDECESSOR_TX_APPLY_MS = os.getenv(
+    'SYNTHETIC_PREDECESSOR_TX_APPLY_MS', '1250')
+SYNTHETIC_SUCCESSOR_TX_APPLY_MS = os.getenv(
+    'SYNTHETIC_SUCCESSOR_TX_APPLY_MS', '2500')
 
 # Which ledger ranges to run. These are pure inputs to the range generator:
 # dispatch recomputes the whole list every reconcile, so a restart must
@@ -2157,6 +2176,47 @@ def build_job(end, count, attempt, owner, mem=None, eph=None):
         data_vol = client.V1Volume(name='data', empty_dir=client.V1EmptyDirVolumeSource())
 
     env = [client.V1EnvVar(name='ASAN_OPTIONS', value=ASAN_OPTIONS)] if ASAN_OPTIONS else []
+    command = ['/bin/sh', '-c', script]
+    image_pull_policy = None
+    volumes = [data_vol, client.V1Volume(
+        name='config', config_map=client.V1ConfigMapVolumeSource(
+            name=f"{RUN_NAME}-stellar-core-config"))]
+    volume_mounts = [
+        client.V1VolumeMount(name='data', mount_path='/data'),
+        client.V1VolumeMount(name='config', mount_path='/config')]
+    if SYNTHETIC_WORKER_CONFIG_MAP:
+        command = ['python3', '/synthetic/worker.py']
+        image_pull_policy = SYNTHETIC_WORKER_IMAGE_PULL_POLICY
+        env = [
+            client.V1EnvVar(name='SYNTHETIC_ATTEMPT', value=str(attempt)),
+            client.V1EnvVar(name='SYNTHETIC_TARGET', value=str(end)),
+            client.V1EnvVar(name='SYNTHETIC_COUNT', value=str(count)),
+            client.V1EnvVar(name='SYNTHETIC_KEY', value=key),
+            client.V1EnvVar(name='SYNTHETIC_PREDECESSOR_SECONDS',
+                            value=SYNTHETIC_PREDECESSOR_SECONDS),
+            client.V1EnvVar(name='SYNTHETIC_SUCCESSOR_MINIMUM_SECONDS',
+                            value=SYNTHETIC_SUCCESSOR_MINIMUM_SECONDS),
+            client.V1EnvVar(name='SYNTHETIC_MAXIMUM_WAIT_SECONDS',
+                            value=SYNTHETIC_MAXIMUM_WAIT_SECONDS),
+            client.V1EnvVar(name='SYNTHETIC_PREDECESSOR_ANON_MIB',
+                            value=SYNTHETIC_PREDECESSOR_ANON_MIB),
+            client.V1EnvVar(name='SYNTHETIC_PREDECESSOR_WORKING_SET_MIB',
+                            value=SYNTHETIC_PREDECESSOR_WORKING_SET_MIB),
+            client.V1EnvVar(name='SYNTHETIC_SUCCESSOR_ANON_MIB',
+                            value=SYNTHETIC_SUCCESSOR_ANON_MIB),
+            client.V1EnvVar(name='SYNTHETIC_SUCCESSOR_WORKING_SET_MIB',
+                            value=SYNTHETIC_SUCCESSOR_WORKING_SET_MIB),
+            client.V1EnvVar(name='SYNTHETIC_PREDECESSOR_TX_APPLY_MS',
+                            value=SYNTHETIC_PREDECESSOR_TX_APPLY_MS),
+            client.V1EnvVar(name='SYNTHETIC_SUCCESSOR_TX_APPLY_MS',
+                            value=SYNTHETIC_SUCCESSOR_TX_APPLY_MS),
+        ]
+        volumes.append(client.V1Volume(
+            name='synthetic-worker',
+            config_map=client.V1ConfigMapVolumeSource(
+                name=SYNTHETIC_WORKER_CONFIG_MAP)))
+        volume_mounts.append(client.V1VolumeMount(
+            name='synthetic-worker', mount_path='/synthetic', read_only=True))
 
     # Require and avoid go in ONE matchExpressions list: expressions within a
     # term are ANDed, whereas separate terms are ORed and an avoid-only pod would
@@ -2186,10 +2246,10 @@ def build_job(end, count, attempt, owner, mem=None, eph=None):
 
     container = client.V1Container(
         name='stellar-core', image=CORE_IMAGE,
-        command=['/bin/sh', '-c', script], env=env, resources=_resources(mem, eph, end),
+        image_pull_policy=image_pull_policy,
+        command=command, env=env, resources=_resources(mem, eph, end),
         ports=[client.V1ContainerPort(container_port=11626, name='http')],
-        volume_mounts=[client.V1VolumeMount(name='data', mount_path='/data'),
-                       client.V1VolumeMount(name='config', mount_path='/config')])
+        volume_mounts=volume_mounts)
 
     return client.V1Job(
         metadata=client.V1ObjectMeta(
@@ -2240,9 +2300,7 @@ def build_job(end, count, attempt, owner, mem=None, eph=None):
                     termination_grace_period_seconds=WORKER_GRACE_SECONDS,
                     affinity=affinity, tolerations=tolerations,
                     containers=[container],
-                    volumes=[data_vol, client.V1Volume(
-                        name='config', config_map=client.V1ConfigMapVolumeSource(
-                            name=f"{RUN_NAME}-stellar-core-config"))]))))
+                    volumes=volumes))))
 
 
 # --- reconcile --------------------------------------------------------------

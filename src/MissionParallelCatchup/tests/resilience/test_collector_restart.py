@@ -213,6 +213,36 @@ def test_finalize_recovers_txapply_after_the_scanner_is_recreated(vol, monkeypat
         "the test must prove recovery happened before success-log discard"
 
 
+def test_synthetic_peaks_survive_the_same_scanner_recreation(vol, monkeypatch):
+    monkeypatch.setattr(lc, 'SYNTHETIC_WORKER', True)
+    path = lc.base('300', 2) + '.log.gz'
+    with gzip.open(path, 'wt') as fh:
+        fh.write('RESUME: local state reached ledger 250; skipping new-db\n')
+        fh.write('SYNTHETIC PEAK: anonBytes=50331648 workingSetBytes=58720256\n')
+        fh.write("metric 'ledger.transaction.apply'\n")
+        fh.write('sum = 2500ms\n')
+
+    finalize('w-300-a2', 300, attempt=2, tx=lc.TxApplyScanner(recreated=True))
+
+    assert metrics(300, 2) == {
+        'peakAnonBytes': 50331648,
+        'peakWorkingSetBytes': 58720256,
+        'resumed': True,
+        'txApplySeconds': 2.5,
+    }
+
+
+def test_synthetic_mode_never_overwrites_fixed_peaks_from_kubelet(vol, monkeypatch):
+    monkeypatch.setattr(lc, 'SYNTHETIC_WORKER', True)
+    session = FakeSession(summary(
+        'w-300-a1', rss=80 * GIB, ws=90 * GIB))
+
+    run(lc.sample_kubelet(session, ['node-1']))
+
+    assert session.urls == []
+    assert metrics(300) is None
+
+
 def test_finalize_does_not_promote_resume_declined(vol):
     path = lc.base('300', 2) + '.log.gz'
     with gzip.open(path, 'wt') as fh:

@@ -65,6 +65,11 @@ monitor:
   # ConfigMap name and point monitor.image at a plain python base; the deps the
   # Dockerfile bakes get pip-installed at start. Empty = use the image as built.
   sourceConfigMap: ""
+  # Source-mode development normally installs dependencies at container start.
+  # Disable only when the selected image already contains them, for example in
+  # the opt-in synthetic integration harness where external package access is
+  # intentionally avoided.
+  sourceInstallDependencies: true
   # Range profile from an earlier run, as a ConfigMap holding profile.json.
   # The mission driver resolves --pubnet-parallel-catchup-profile (a local
   # path or an https URL) into one. Empty = size from the configured
@@ -180,6 +185,24 @@ monitor:
   resources:
     requests: { cpu: "200m", memory: "512Mi" }
     limits:   { cpu: "2",    memory: "2Gi" }
+
+# Fixed, chart-owned worker used only by the bounded Kubernetes integration
+# harness. It never invokes stellar-core or history services. Keeping the script
+# in the chart instead of accepting a command value avoids turning this into a
+# general arbitrary-command surface.
+integration:
+  syntheticWorker:
+    enabled: false
+    imagePullPolicy: IfNotPresent
+    predecessorSeconds: 12
+    successorMinimumSeconds: 12
+    maximumWaitSeconds: 180
+    predecessorAnonMiB: 48
+    predecessorWorkingSetMiB: 56
+    successorAnonMiB: 24
+    successorWorkingSetMiB: 32
+    predecessorTxApplyMilliseconds: 1250
+    successorTxApplyMilliseconds: 2500
 
 service_account:
   annotations: []

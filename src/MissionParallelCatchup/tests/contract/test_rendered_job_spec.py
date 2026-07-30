@@ -259,6 +259,34 @@ def test_the_worker_runs_the_resume_script_for_its_own_range(job):
     assert f'catchup "$KEY"' in script
 
 
+def test_synthetic_worker_is_absent_from_the_default_job(job):
+    container = job.spec.template.spec.containers[0]
+    assert container.image_pull_policy is None
+    assert 'synthetic-worker' not in {v.name for v in job.spec.template.spec.volumes}
+    assert not any(e.name.startswith('SYNTHETIC_') for e in container.env)
+
+
+def test_opt_in_synthetic_worker_uses_only_the_fixed_chart_script(job, monkeypatch):
+    monkeypatch.setattr(jm, 'SYNTHETIC_WORKER_CONFIG_MAP', 'pc-synthetic-worker')
+    monkeypatch.setattr(jm, 'SYNTHETIC_WORKER_IMAGE_PULL_POLICY', 'IfNotPresent')
+
+    synthetic = jm.build_job(31005951, 16320, 2, None)
+    container = synthetic.spec.template.spec.containers[0]
+    env = {e.name: e.value for e in container.env}
+    volumes = {v.name: v for v in synthetic.spec.template.spec.volumes}
+    mounts = {m.name: m.mount_path for m in container.volume_mounts}
+
+    assert container.command == ['python3', '/synthetic/worker.py']
+    assert container.image == 'stellar/stellar-core:test'
+    assert container.image_pull_policy == 'IfNotPresent'
+    assert env['SYNTHETIC_ATTEMPT'] == '2'
+    assert env['SYNTHETIC_TARGET'] == '31005951'
+    assert env['SYNTHETIC_COUNT'] == '16320'
+    assert env['SYNTHETIC_KEY'] == jm.job_key(31005951, 16320)
+    assert volumes['synthetic-worker'].config_map.name == 'pc-synthetic-worker'
+    assert mounts['synthetic-worker'] == '/synthetic'
+
+
 def test_the_worker_mounts_the_config_the_chart_renders(job):
     """The stellar-core.cfg ConfigMap is the chart's, named off the release.
 

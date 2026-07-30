@@ -33,6 +33,7 @@ DEBUG_ONLY = {'LOGGING_LEVEL', 'WATCH_STALE_SECONDS', 'CONNECTION_POOL',
 # by no template at all -- absent from here, that stays invisible.
 FULL = (
     'monitor.profileConfigMap=p',
+    'integration.syntheticWorker.enabled=true',
     'worker.requireNodeLabels[0].key=purpose',
     'worker.requireNodeLabels[0].operator=In',
     'worker.requireNodeLabels[0].values[0]=catchup8-spot',
