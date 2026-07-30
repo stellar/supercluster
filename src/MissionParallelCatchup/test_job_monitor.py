@@ -2309,3 +2309,22 @@ def test_the_pods_own_duration_wins_over_the_pollers_elapsed_time():
     loop = _extract(r"while True:\n(.*?)await asyncio\.sleep\(POLL_SECONDS\)",
                     COLLECTOR_SRC).group(1)
     assert 'pod_seconds(pod)' in loop, "nothing captures it while the pod exists"
+
+
+def test_the_oom_budget_outlives_the_escalation_ladder():
+    # MAX_ATTEMPTS is effectively the OOM budget -- `failed` is the only other
+    # outcome reaching it and that one sets no retry reason. It must be large
+    # enough that a range reaches MEM_ESCALATION_CAP before being condemned,
+    # because a condemned range aborts the entire run.
+    n = int(_extract(r"MAX_ATTEMPTS_PER_RANGE = int\(os\.getenv\('MAX_ATTEMPTS', (\d+)\)\)").group(1))
+    bump = float(_extract(r"MEM_BUMP_FACTOR = float\(os\.getenv\('MEM_BUMP_FACTOR', ([\d.]+)\)\)").group(1))
+    cap_s = _extract(r"MEM_ESCALATION_CAP = os\.getenv\('MAX_MEM', '(\d+)Gi'\)").group(1)
+    cap_mi = int(cap_s) * 1024
+    # the largest profile-derived request we have seen (p90 ~4.2GiB, max ~9.2GiB)
+    reached = 9200 * (bump ** (n - 1))
+    assert reached >= cap_mi, \
+        f"{n} attempts only reaches {reached:.0f}Mi, short of the {cap_mi}Mi cap"
+    assert n > int(_extract(r"MAX_TIMEOUT_ATTEMPTS = int\(os\.getenv\('MAX_TIMEOUT_ATTEMPTS', (\d+)\)\)").group(1))
+    chart = open(__file__.replace(
+        'test_job_monitor.py', 'parallel_catchup_helm/values.yaml')).read()
+    assert int(_extract(r"maxAttempts: (\d+)", chart).group(1)) == n

@@ -98,7 +98,7 @@ monitor:
   # once the panels aggregate.
   emitMissionLabel: false
   loggingIntervalSeconds: 10
-  maxAttempts: 5
+  maxAttempts: 10
   # Hangs are usually persistent (bad archive host, absent checkpoint), so they
   # get a lower cap than evictions -- otherwise a wedged range costs
   # maxAttempts x attemptDeadlineSeconds before it is reported.
