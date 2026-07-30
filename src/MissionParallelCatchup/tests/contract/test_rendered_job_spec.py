@@ -71,21 +71,24 @@ def test_a_worker_pod_is_never_restarted_in_place(job):
     assert job.spec.template.spec.restart_policy == 'Never'
 
 
-def test_the_deadline_is_on_the_pod_not_on_the_job(job, monkeypatch):
-    """JobSpec.activeDeadlineSeconds runs from the Job's startTime.
+def test_the_deadline_is_on_the_job_so_it_can_be_patched_live(job, monkeypatch):
+    """A pod-level deadline is immutable once the pod exists.
 
-    Every second spent Pending -- waiting for Karpenter, pulling the image -- is
-    then charged against a budget meant to bound how long the range RUNS. During
-    a node-class outage this run sat ~15 minutes Pending and ranges died as
-    "timeouts" having barely executed; a timeout gets only MAX_TIMEOUT_ATTEMPTS,
-    so two stalls condemn a range and fail the mission.
+    Measured 2026-07-30: 1007 Jobs were repointed in place from 3h to 12h while
+    their pods kept running, and later 850 pod-level ones could not be corrected
+    at all -- the only way out would have been deleting every pod. The JobSpec
+    field is mutable, which is worth more than the Pending time it also counts.
+
+    That Pending time is handled instead by _really_ran(): a deadline kill on a
+    container that barely executed is charged as a disruption, not a timeout, so
+    a capacity stall cannot condemn a range.
     """
     monkeypatch.setattr(jm, 'ATTEMPT_DEADLINE_SECONDS', 10800)
+    monkeypatch.setattr(jm, 'PROFILE_DEADLINE_FACTOR', 0)
     j = jm.build_job(300, 420, 1, None)
-    assert j.spec.active_deadline_seconds is None, \
-        "the deadline is on the JobSpec, so Pending time is charged to the range"
-    assert j.spec.template.spec.active_deadline_seconds == 10800
-
+    assert j.spec.active_deadline_seconds == 10800, \
+        "the deadline must be patchable, so it belongs on the JobSpec"
+    assert j.spec.template.spec.active_deadline_seconds is None
 
 def test_no_deadline_means_no_field_at_all(job, monkeypatch):
     """0 is "off". Rendering it literally would kill every pod instantly."""

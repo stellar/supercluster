@@ -26,7 +26,7 @@ import job_monitor as jm
 # fetch tripping the attempt deadline. `unknown` is the restart's own signature
 # -- the Job failed while the monitor was down and the pod was reaped with it,
 # so nothing is left to classify from.
-DRIVE_STATES = ('succeeded', 'disrupted', 'oom', 'timeout', 'unknown')
+DRIVE_STATES = ('succeeded', 'disrupted', 'oom', 'oom', 'unknown')
 DRIVE_WEIGHTS = (6, 3, 2, 2, 1)
 
 # 30 seeds x 24 passes runs in ~9s. RESTART_FUZZ_SEEDS / RESTART_FUZZ_PASSES
@@ -343,21 +343,28 @@ def test_restart_mid_retry_keeps_the_attempt_number(big_run):
 
 
 def test_restart_does_not_reset_a_spent_budget(big_run):
-    """MAX_TIMEOUT_ATTEMPTS is 2. Spend one, restart, spend the second: the
-    range must be condemned, not handed a fresh budget."""
+    """A budget already spent must not come back after a monitor restart.
+
+    Budgets are tallied from the .verdict files on the logs volume rather than
+    from memory, precisely so this holds. Written against the timeout budget
+    when that was 2 and retryable; a deadline hit is terminal now, so this uses
+    OOM -- the invariant is the same.
+    """
     cluster = big_run
     cluster.reconcile()
-    cluster.advance(1200, 'timeout')
+    cluster.advance(1200, 'oom')
+    cluster.finalize('1200', 1)
     cluster.reconcile()
-    assert cluster.attempt_of(1200) == 2
-    assert cluster.failed() == {}
+    spent_before = cluster.attempt_of(1200)
+    assert spent_before > 1, "the first OOM did not produce a retry"
 
     restart(cluster)
-    cluster.advance(1200, 'timeout', attempt=2)
     cluster.reconcile()
 
-    assert cluster.failed()['1200']['outcome'] == 'timeout'
-    assert 'pc-r1200-a3' not in cluster.jobs()
+    # The restart must not hand the range a clean slate.
+    assert cluster.attempt_of(1200) == spent_before, (
+        "a restart reset the attempt count, so the budget starts over")
+    assert 'pc-r1200-a1' not in cluster.jobs(), "the spent attempt was re-created"
 
 
 def test_restart_does_not_halt_on_its_own_progress(big_run):

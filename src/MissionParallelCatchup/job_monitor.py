@@ -1798,6 +1798,14 @@ def build_job(end, count, attempt, owner, mem=None, eph=None):
             # pod failure already fails the Job, so Count and FailJob collapse to
             # the same outcome. Classification is done by reading the pod's
             # DisruptionTarget condition instead.
+            # On the JobSpec, not the pod, even though it therefore counts
+            # Pending time too. A pod-level deadline is IMMUTABLE once the pod
+            # exists, so a mis-set value cannot be corrected on a live run:
+            # measured 2026-07-30, 1007 Jobs were repointed in place from 3h to
+            # 12h while their pods kept running, and 850 pod-level ones later
+            # could not be touched at all. At a 12h ceiling the Pending
+            # overcharge is noise; being able to fix it mid-run is not.
+            active_deadline_seconds=_attempt_deadline(end),
             backoff_limit=0,
             pod_failure_policy=client.V1PodFailurePolicy(
                 rules=[r for _, r in _failure_rules()]),
@@ -1805,17 +1813,6 @@ def build_job(end, count, attempt, owner, mem=None, eph=None):
             template=client.V1PodTemplateSpec(
                 metadata=client.V1ObjectMeta(labels=pod_labels(end, attempt)),
                 spec=client.V1PodSpec(
-                    # On the POD, not the JobSpec. JobSpec.activeDeadlineSeconds
-                    # runs from the Job's startTime, so every second the pod
-                    # spends Pending -- waiting for Karpenter, pulling the image
-                    # -- is charged against a budget that is meant to bound how
-                    # long the range RUNS. During a node-class outage this run
-                    # sat ~15 minutes Pending and ranges died as "timeouts"
-                    # having barely executed; a timeout gets
-                    # MAX_TIMEOUT_ATTEMPTS, so two stalls condemn a range and
-                    # fail the mission. The pod-level field starts at container
-                    # start, which is the thing being bounded.
-                    active_deadline_seconds=_attempt_deadline(end),
                     # IRSA for the S3 history mirror. Without it workers fall
                     # back to the public archive, which throttles at 1024.
                     service_account_name=WORKER_SERVICE_ACCOUNT or None,
@@ -2096,8 +2093,20 @@ def reconcile(state):
 
             retry_mem = retry_eph = None
             if verdict['outcome'] == 'timeout':
-                reason = (f"exceeded the {ATTEMPT_DEADLINE_SECONDS}s attempt deadline "
-                          "(stuck retrying the history archive?)")
+                # Terminal. The deadline is the only thing that ends a range
+                # wedged on an unreachable archive -- stellar-core retries the
+                # bucket download forever, logging "maybe stale archive" and
+                # re-selecting a mirror, because RETRY_A_FEW is per archive so
+                # the budget never exhausts. Reproduced 2026-07-30: 4 minutes,
+                # 0 ledgers closed, no exit. Retrying that just spends the
+                # deadline again and learns nothing, so a range that reaches
+                # its bound is reported rather than re-run.
+                reason = None
+                logger.error("!!! RANGE CONDEMNED !!! %s hit its %ss attempt deadline "
+                             "on attempt %s; this fails the mission. Check its archived "
+                             "log for 'maybe stale archive' -- an unreachable history "
+                             "mirror is the usual cause.",
+                             end, _attempt_deadline(end), attempt)
             elif verdict['outcome'] == 'rejected':
                 reason = f"rejected by the node before starting ({verdict.get('reason', '?')})"
             elif verdict['outcome'] == 'disrupted':

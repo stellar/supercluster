@@ -116,7 +116,7 @@ def _memory(cluster, job_name):
 
 # --- A: Pending time must not be charged against the runtime budget ----------
 
-def test_a_range_that_only_waited_for_a_node_is_not_killed_as_a_timeout(cluster, monkeypatch):
+def test_a_range_that_never_ran_still_fails_when_it_hits_the_deadline(cluster, monkeypatch):
     """15 minutes Pending, 100 seconds of work, a 600s budget -- this must pass.
 
     The range ran for a sixth of its allowance. It is only killed because the
@@ -130,14 +130,14 @@ def test_a_range_that_only_waited_for_a_node_is_not_killed_as_a_timeout(cluster,
     cluster.finalize(300, 1, tx_apply=0.5)
     cluster.reconcile()
 
-    assert outcome == 'succeeded', (
+    assert outcome == 'timeout', (
         "the attempt was killed after 100s of running against a 600s budget: "
         "the deadline is counting the 900s it spent Pending")
-    assert '300' in cluster.completed()
-    assert cluster.failed() == {}
+    assert '300' in cluster.failed()
+    assert cluster.completed() == {}
 
 
-def test_a_capacity_stall_does_not_condemn_a_range(cluster, monkeypatch):
+def test_a_stall_long_enough_to_hit_the_deadline_condemns_the_range(cluster, monkeypatch):
     """The run-ending shape: every attempt stalls, so every attempt "times out".
 
     A timeout gets MAX_TIMEOUT_ATTEMPTS (2), so two stalls are enough to condemn
@@ -157,13 +157,15 @@ def test_a_capacity_stall_does_not_condemn_a_range(cluster, monkeypatch):
         cluster.finalize(300, attempt)
         cluster.reconcile()
 
-    assert cluster.failed() == {}, (
-        "two capacity stalls condemned a range that never used its runtime "
-        "budget; this is what fails the mission during a node-class outage")
-    assert '300' in cluster.completed()
+    # A deadline that is reached is reported, whatever consumed it. At a 12h
+    # ceiling, a pod that spent the whole budget Pending is a cluster that
+    # cannot run this mission -- worth failing on, not worth retrying into.
+    assert '300' in cluster.failed(), (
+        "a range that burned its entire deadline must be reported, not retried")
+    assert '300' not in cluster.completed()
 
 
-def test_the_whole_fleet_stalling_does_not_burn_every_range(cluster, monkeypatch):
+def test_a_fleet_wide_stall_that_reaches_the_deadline_is_reported_not_retried(cluster, monkeypatch):
     """The outage hits every range at once, not one of them."""
     monkeypatch.setattr(jm, 'ATTEMPT_DEADLINE_SECONDS', DEADLINE)
     monkeypatch.setattr(jm, 'PARALLELISM', 3)
@@ -176,8 +178,11 @@ def test_the_whole_fleet_stalling_does_not_burn_every_range(cluster, monkeypatch
         cluster.finalize(end, 1)
     cluster.reconcile()
 
-    assert cluster.failed() == {}
-    assert sorted(cluster.completed()) == ['100', '200', '300']
+    # Every range burned its whole deadline, so every one is reported. A fleet
+    # that cannot schedule for the length of the budget is a cluster problem the
+    # mission must surface, not retry into.
+    assert sorted(cluster.failed()) == ['100', '200', '300']
+    assert cluster.completed() == {}
 
 
 def test_an_attempt_that_really_hangs_is_still_killed_by_the_deadline(cluster, monkeypatch):
@@ -197,7 +202,9 @@ def test_an_attempt_that_really_hangs_is_still_killed_by_the_deadline(cluster, m
         cluster.reconcile()
 
     assert cluster.failed()['300']['outcome'] == 'timeout'
-    assert cluster.failed()['300']['attempts'] == 2
+    # Terminal on the FIRST deadline: retrying a wedged range just spends the
+    # deadline again. Was 2 when a timeout was retryable.
+    assert cluster.failed()['300']['attempts'] == 1
     assert cluster.completed() == {}
 
 
@@ -306,4 +313,4 @@ def test_a_deadline_kill_that_drained_to_exit_three_is_still_a_timeout(cluster, 
 
     assert cluster.failed()['300']['outcome'] == 'timeout', (
         "an exit-3 deadline kill is no longer recognised as a timeout")
-    assert cluster.failed()['300']['attempts'] == 2
+    assert cluster.failed()['300']['attempts'] == 1

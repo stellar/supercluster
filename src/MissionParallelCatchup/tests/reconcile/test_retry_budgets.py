@@ -102,16 +102,21 @@ def test_evictions_do_not_burn_the_disk_budget(cluster, monkeypatch):
     assert jm._quantity_bytes(grown) > jm._quantity_bytes('40Gi'), grown
 
 
-def test_evictions_do_not_burn_the_timeout_budget(cluster):
-    """Timeout budget is only 2, so churn eats it almost immediately."""
+def test_evictions_do_not_burn_the_oom_budget(cluster):
+    """The OOM budget is small, so churn would eat it almost immediately.
+
+    Retargeted from the timeout budget, which no longer exists: a deadline hit
+    is terminal now. The invariant is the same one -- a cause with a large
+    deliberate budget must not spend a small one belonging to a different cause.
+    """
     end = dispatch(cluster)
     hit(cluster, end, 'disrupted', times=3)
     assert cluster.attempt_of(end) == 4
 
-    hit(cluster, end, 'timeout')
+    hit(cluster, end, 'oom')
 
     assert not condemned(cluster, end), (
-        f"first timeout after 3 evictions condemned the range; "
+        f"first OOM after 3 evictions condemned the range; "
         f"failed={cluster.failed()}")
     assert job_exists(cluster, end, 5)
 
