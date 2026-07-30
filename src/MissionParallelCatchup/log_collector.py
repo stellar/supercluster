@@ -42,7 +42,6 @@ LOG_DIR = os.getenv('LOG_DIR', '/logs')
 CONTAINER = os.getenv('WORKER_CONTAINER', 'stellar-core')
 POLL_SECONDS = float(os.getenv('COLLECTOR_POLL_SECONDS', 5))
 STATE_FLUSH_SECONDS = float(os.getenv('STATE_FLUSH_SECONDS', 10))
-MAX_CONCURRENT = int(os.getenv('COLLECTOR_MAX_STREAMS', 1200))
 # Poll cycles a stream gets to finalize itself after its pod leaves the pod list
 # before it is cancelled outright. One cycle is usually enough; the margin is for
 # a stream still finalizing: writing its .metrics and closing its archive.
@@ -77,6 +76,25 @@ PEAK_FLUSH_RATIO = float(os.getenv('PEAK_FLUSH_RATIO', 1.05))
 # 4096 -- on its own enough to OOM the sidecar. 64 KiB is ~64x the longest line
 # stellar-core actually emits.
 MAX_LINE_CHARS = int(os.getenv('MAX_LINE_CHARS', 65536))
+# Seconds between polls of one pod's log. Latency here is archive lag, not
+# anything a decision waits on; 4096 pods at 10s is ~90 concurrent polls.
+LOG_POLL_SECONDS = float(os.getenv('LOG_POLL_SECONDS', 10))
+# Concurrent in-flight log polls, across all pods. This is the whole point of
+# polling: it is independent of how many pods exist, where follow=true needed
+# one held connection per pod forever.
+MAX_CONCURRENT_POLLS = int(os.getenv('MAX_CONCURRENT_POLLS', 96))
+# Most one poll may read before it stops. A pod that has been unwatched for a
+# while has a large backlog; this bounds a single response, and the next poll
+# picks up from the timestamp this one reached.
+MAX_POLL_CHARS = int(os.getenv('MAX_POLL_CHARS', 8388608))
+# Bounds in-flight polls across every pod. Lives beside its own constant rather
+# than among the peak dicts, where it landed inside the region the scanner tests
+# exec and broke six of them on an asyncio NameError.
+_poll_slots = asyncio.Semaphore(MAX_CONCURRENT_POLLS)
+# Failed polls tolerated after a pod goes terminal before we stop asking. Its
+# log is not coming back, and spinning on it holds a task and a poll slot for
+# the rest of the run; a couple of retries still absorb a transient 500.
+TERMINAL_POLL_ATTEMPTS = int(os.getenv('TERMINAL_POLL_ATTEMPTS', 3))
 
 LABEL_RUN = 'catchup.stellar.org/run'
 LABEL_RANGE = 'catchup.stellar.org/range-end'
@@ -284,7 +302,7 @@ def record_outcome(pod, end, attempt):
 # Peak ephemeral disk, for sizing a later run's ephemeral-storage request.
 #
 # Only meaningful in ephemeral mode. Sampled for every pod, but only kept for
-# ranges that finished -- see the completion gate in stream_pod. Spot is fine:
+# ranges that finished -- see the completion gate in finalize. Spot is fine:
 # what invalidates a sample is being cut short, not the capacity type.
 #
 # Prometheus cannot answer this -- cAdvisor reports fs usage per node, with no
@@ -374,7 +392,7 @@ async def finalize(session, pod, end, attempt, tx, done_ok, started=None):
     and a 404 once the pod object is gone. The second path used to not exist,
     so a pod deleted while Running -- reaped node, eviction, or the monitor
     deleting a finished Job -- left its stream retrying every 30s for the rest
-    of the run, holding one of MAX_CONCURRENT connection slots the whole time.
+    of the run, holding a connection slot the whole time.
     """
     # Before discard: on success the archive is about to be deleted.
     measured = {}
@@ -423,113 +441,127 @@ async def finalize(session, pod, end, attempt, tx, done_ok, started=None):
         logger.info("range %s attempt %s: stream complete", end, attempt)
 
 
-async def stream_pod(session, pod, end, attempt, done, done_ok):
-    """Follow one pod's log until it terminates, appending to its archive."""
-    path = base(end, attempt) + '.log.gz'
+async def _poll_once(session, pod, end, attempt, last_ts, tx):
+    """One short read of a pod's log. Returns (new_last_ts, gone).
+
+    No follow=true: the request completes and the connection is released, so
+    concurrency is bounded by _poll_slots rather than by how many pods exist.
+    Measured on ssc-test, a single poll takes ~0.22s from outside the cluster,
+    so 2096 pods on a 10s interval need ~46 concurrent slots against the 2096
+    permanently-held connections follow=true required.
+    """
+    params = {'container': CONTAINER, 'timestamps': 'true'}
+    if last_ts:
+        # Second granularity, so this overlaps on purpose; the per-line
+        # comparison below removes the overlap exactly.
+        params['sinceTime'] = last_ts[:19] + 'Z'
+    url = f"{API}/api/v1/namespaces/{NAMESPACE}/pods/{pod}/log"
+    async with _poll_slots:
+        async with session.get(url, params=params,
+                               headers={'Authorization': f'Bearer {token()}'}) as resp:
+            if resp.status == 404:
+                return last_ts, True
+            resp.raise_for_status()
+            # Chunked, not line-wise: aiohttp raises above 512 KiB on a single
+            # line, and a carriage-return progress meter trivially exceeds that
+            # -- one 628 MiB download arrived as a single "line". Split on \r as
+            # well, and cap what a pathological blob may buffer.
+            body = ''
+            async for chunk in resp.content.iter_chunked(65536):
+                body += chunk.decode('utf-8', 'replace')
+                if len(body) > MAX_POLL_CHARS:
+                    break
+
+    pending = None
+    lines = [l for l in re.split(r'[\r\n]', body) if l]
+    if not lines:
+        return last_ts, False
+    # Opened per poll, not held for the pod's life. A live gzip deflate buffer
+    # per stream is what put the sidecar at 1444 MiB of a 2048 MiB limit at 2096
+    # follow streams; here nothing is retained between polls.
+    with gzip.open(base(end, attempt) + '.log.gz', 'at') as fh:
+        for line in lines:
+            ts, _, rest = line.partition(' ')
+            if not _TS_RE.match(ts):
+                # Untimestamped kubelet text. Keep it, but never let it become
+                # the resume point.
+                fh.write(line + '\n')
+                continue
+            if last_ts and ts <= last_ts:
+                continue          # exact dedup of the resume overlap
+            fh.write(rest + '\n')
+            tx.feed(rest)
+            pending = ts
+    if pending:
+        write_state(end, attempt, pending)
+        return pending, False
+    return last_ts, False
+
+
+async def poll_pod(session, pod, end, attempt, done, done_ok):
+    """Read one pod's log to completion, by repeated short polls.
+
+    Replaces a follow=true stream. The stream held a connection, a gzip deflate
+    buffer and aiohttp read buffers for the pod's entire life, so cost scaled
+    with parallelism: measured at 2096 pods the sidecar sat at 1444 MiB of a
+    2048 MiB limit with memory.events max=2617 and 1.00 of 2 cpu, which
+    extrapolates past both limits at 4096. Polling makes concurrency a tuning
+    parameter instead of a function of pod count.
+
+    The one thing follow=true did better is the tail: it already held the bytes
+    when a pod died. So on seeing the pod go terminal this polls once more,
+    immediately, before finalizing -- without that, every spot eviction would
+    lose up to one interval of exactly the log we most want.
+    """
     last_ts = read_state(end, attempt)
     if last_ts is None:
         # Empty state = "claimed, nothing durable yet". job_monitor's backstop
         # skips any range with a state file, so this prevents both of us writing
         # the same log.
         write_state(end, attempt, '')
-    backoff = 1.0
-    # Wall clock for this attempt. The monitor records attemptSeconds from the
-    # pod's own terminated timestamps, but only when it still has the pod -- and
-    # a spot eviction reaps the node first, so 212 of 212 disruptions on
-    # ssc-test were classified from the Job condition with no pod and no
-    # duration. This process watched the container run, so it is the only
-    # observer left. Approximate: the stream opens up to COLLECTOR_POLL_SECONDS
-    # after the container did.
+        last_ts = ''
     started = asyncio.get_event_loop().time()
-    # Outside the reconnect loop: the medida block could straddle a dropped
-    # stream, and a fresh scanner per attempt would lose the half it saw.
+    # Outside the poll loop: the medida block can straddle two polls, and a
+    # fresh scanner per poll would lose the half it saw.
     tx = TxApplyScanner()
+    backoff = LOG_POLL_SECONDS
+    failures = 0
 
     while True:
-        params = {'container': CONTAINER, 'follow': 'true', 'timestamps': 'true'}
-        if last_ts:
-            # Second granularity, so this overlaps on purpose; the per-line
-            # comparison below removes the overlap exactly.
-            params['sinceTime'] = last_ts[:19] + 'Z'
-        url = f"{API}/api/v1/namespaces/{NAMESPACE}/pods/{pod}/log"
-
+        was_terminal = done(pod)
         try:
-            async with session.get(url, params=params,
-                                   headers={'Authorization': f'Bearer {token()}'}) as resp:
-                if resp.status == 404:
-                    # Pod object gone -- reaped node, eviction, or the monitor
-                    # deleting a finished Job. Nothing more to read, but the
-                    # bytes already streamed still owe a tx_apply and the peaks
-                    # are in Prometheus regardless. A bare return here dropped
-                    # both for every pod that outlived its object.
-                    logger.info("pod %s gone before/while streaming range %s", pod, end)
-                    await finalize(session, pod, end, attempt, tx, done_ok, started)
-                    return
-                resp.raise_for_status()
-                backoff = 1.0
-                pending = None
-                # gzip append writes a new member; concatenated members are a
-                # valid archive, so restarts do not corrupt what is already there.
-                with gzip.open(path, 'at') as fh:
-                    since_flush = asyncio.get_event_loop().time()
-                    # Chunked, not line-wise. `async for raw in resp.content`
-                    # yields lines and aiohttp raises over 512 KiB, which any
-                    # carriage-return progress meter in the worker's output
-                    # trivially exceeds -- one 628 MiB download is a single
-                    # "line". The worker now passes --no-progress, but a stream
-                    # must not be destroyable by whatever a worker happens to
-                    # print, so split on \r as well and cap what we buffer.
-                    pending_buf = ''
-                    async for chunk in resp.content.iter_chunked(65536):
-                        pending_buf += chunk.decode('utf-8', 'replace')
-                        if len(pending_buf) > MAX_LINE_CHARS:
-                            # A single unterminated blob. Keep the tail so the
-                            # real line ending is still found, drop the rest.
-                            pending_buf = pending_buf[-MAX_LINE_CHARS:]
-                        parts = re.split(r'[\r\n]', pending_buf)
-                        pending_buf = parts.pop()
-                        for line in parts:
-                            if not line:
-                                continue
-                            ts, _, rest = line.partition(' ')
-                            if not _TS_RE.match(ts):
-                                # Untimestamped kubelet text. Keep it, but never let
-                                # it become the resume point.
-                                fh.write(line + '\n')
-                                continue
-                            if last_ts and ts <= last_ts:
-                                continue          # exact dedup of the resume overlap
-                            fh.write(rest + '\n')
-                            tx.feed(rest)
-                            pending = ts
-                            now = asyncio.get_event_loop().time()
-                            if now - since_flush >= STATE_FLUSH_SECONDS:
-                                fh.flush()
-                                write_state(end, attempt, pending)
-                                last_ts = pending
-                                since_flush = now
-                if pending:
-                    write_state(end, attempt, pending)
-                    last_ts = pending
-            # A clean end of stream means the container exited.
-            if done(pod):
+            last_ts, gone = await _poll_once(session, pod, end, attempt, last_ts, tx)
+            backoff = LOG_POLL_SECONDS
+            failures = 0
+            if gone:
+                logger.info("pod %s gone before/while polling range %s", pod, end)
                 await finalize(session, pod, end, attempt, tx, done_ok, started)
                 return
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.info("range %s stream interrupted (%s); resuming from %s",
+            failures += 1
+            logger.info("range %s poll failed (%s); retrying from %s",
                         end, e, last_ts or 'start')
-        if done(pod):
-            # Reached when the last read threw rather than ending cleanly -- a
-            # 500 burst, a dropped connection -- and the pod has since gone
-            # terminal. The partial stream may already hold the medida block,
-            # and the peaks are query-side, so this owes exactly what the clean
-            # path owes. It used to return bare and lose both.
-            await finalize(session, pod, end, attempt, tx, done_ok, started)
-            return
+            backoff = min(backoff * 2, 30)
+            if was_terminal and failures >= TERMINAL_POLL_ATTEMPTS:
+                # The container has exited and its log will not come back. A
+                # follow=true stream finalized here because it already held the
+                # bytes; polling has to decide to stop asking, or it spins on a
+                # dead pod for the rest of the run and never writes its metrics.
+                logger.warning("range %s attempt %s: %d failed polls after the pod "
+                               "went terminal; finalizing on what was read",
+                               end, attempt, failures)
+                await finalize(session, pod, end, attempt, tx, done_ok, started)
+                return
+        else:
+            if was_terminal:
+                # Terminal BEFORE that poll, so the poll saw the container's
+                # final output. Checking after would race a pod that exits
+                # mid-poll and drop whatever it wrote on the way out.
+                await finalize(session, pod, end, attempt, tx, done_ok, started)
+                return
         await asyncio.sleep(backoff)
-        backoff = min(backoff * 2, 30)
 
 
 async def list_pods(session):
@@ -548,7 +580,11 @@ async def main():
     # pool stays full -- and every holder is a follow=true stream open for the
     # life of its pod. Below the live pod count this does not degrade, it
     # starves, and it starves the pods created last, which are the retries.
-    conn = aiohttp.TCPConnector(limit=MAX_CONCURRENT, ssl=ssl_ctx())
+    # Sized for concurrent polls plus headroom for the pod-list and kubelet
+    # calls, not for one connection per pod. Under follow=true this had to
+    # exceed parallelism or pods silently starved -- 1200 against 2048 workers
+    # left 896 blocked forever, and retries, created last, never got a slot.
+    conn = aiohttp.TCPConnector(limit=MAX_CONCURRENT_POLLS + 64, ssl=ssl_ctx())
     # No total timeout: these streams are meant to stay open for the life of a
     # range, which can be hours.
     timeout = aiohttp.ClientTimeout(total=None, sock_connect=10)
@@ -624,7 +660,7 @@ async def main():
                     attempt = labels.get(LABEL_ATTEMPT, '1')
                     _streaming[name] = (end, attempt)
                     tasks[name] = asyncio.create_task(
-                        stream_pod(session, name, end, attempt,
+                        poll_pod(session, name, end, attempt,
                                    lambda p: terminal.get(p, False),
                                    lambda p: succeeded.get(p, False)))
                     logger.info("opened stream for range %s attempt %s (%d active)",

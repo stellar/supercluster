@@ -138,17 +138,21 @@ monitor:
   # A worker printing a carriage-return progress meter would otherwise grow this
   # without bound, on every stream at once.
   maxLineChars: 65536
+  # Log collection polls rather than holding a follow=true stream per pod, so
+  # concurrency is independent of worker.replicas. At 4096 pods and a 10s
+  # interval this is ~90 in-flight polls.
+  logPollSeconds: 10
+  maxConcurrentPolls: 96
+  maxPollChars: 8388608
+  # Failed polls tolerated after a pod goes terminal before the collector stops
+  # asking. Its log is not coming back and the task holds a poll slot.
+  terminalPollAttempts: 3
   # Growth factor before an in-flight peak is flushed to its .metrics file, so a
   # collector restart cannot silently reset a range's high-water to zero.
   peakFlushRatio: 1.05
   # Poll cycles a stream gets to finalize after its pod leaves the pod list,
   # before it is cancelled and its connection slot reclaimed.
   collectorVanishedGraceCycles: 3
-  # 0 = derive from worker.replicas. A fixed value here is how 2048-worker runs
-  # silently lost every retry pod's metrics: this caps the aiohttp connection
-  # pool, not the task count, so pods beyond it block forever rather than
-  # queueing -- and retries, created last, never got a slot.
-  collectorMaxStreams: 0
   collectorResources:
     requests: { cpu: "200m", memory: "512Mi" }
     limits:   { cpu: "2",    memory: "2Gi" }

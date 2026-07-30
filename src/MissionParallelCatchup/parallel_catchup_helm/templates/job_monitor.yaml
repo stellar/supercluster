@@ -329,14 +329,20 @@ spec:
               value: /logs
             - name: COLLECTOR_POLL_SECONDS
               value: {{ .Values.monitor.collectorPollSeconds | quote }}
+            - name: TERMINAL_POLL_ATTEMPTS
+              value: {{ .Values.monitor.terminalPollAttempts | quote }}
+            - name: LOG_POLL_SECONDS
+              value: {{ .Values.monitor.logPollSeconds | quote }}
+            - name: MAX_CONCURRENT_POLLS
+              value: {{ .Values.monitor.maxConcurrentPolls | quote }}
+            - name: MAX_POLL_CHARS
+              value: {{ .Values.monitor.maxPollChars | int64 | quote }}
             - name: MAX_LINE_CHARS
-              value: {{ .Values.monitor.maxLineChars | quote }}
+              value: {{ .Values.monitor.maxLineChars | int64 | quote }}
             - name: PEAK_FLUSH_RATIO
               value: {{ .Values.monitor.peakFlushRatio | quote }}
             - name: COLLECTOR_VANISHED_GRACE_CYCLES
               value: {{ .Values.monitor.collectorVanishedGraceCycles | quote }}
-            - name: COLLECTOR_MAX_STREAMS
-              value: {{ if gt (.Values.monitor.collectorMaxStreams | int) 0 }}{{ .Values.monitor.collectorMaxStreams | quote }}{{ else }}{{ add (.Values.worker.replicas | int) 256 | quote }}{{ end }}
             # Failures are always kept; successes are the bulk of the volume.
             - name: SAVE_SUCCESS_LOGS
               value: {{ .Values.monitor.saveSuccessLogs | quote }}

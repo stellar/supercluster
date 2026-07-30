@@ -1148,6 +1148,8 @@ def test_both_exit_paths_share_one_finalize():
     # writing peakAnonBytes while the other keeps working.
     # Three: clean exit, pod-gone 404, and an interrupted read on a pod that
     # has since gone terminal.
+    # Three: pod gone (404), the pod was terminal before the poll that just
+    # succeeded, and a terminal pod whose polls keep failing.
     assert len(re.findall(r"await finalize\(session, pod, end, attempt, tx, done_ok, started\)",
                           COLLECTOR_SRC)) == 3
     assert len(re.findall(r"write_metrics\(end, attempt, measured\)", COLLECTOR_SRC)) == 1
@@ -1155,14 +1157,13 @@ def test_both_exit_paths_share_one_finalize():
 
 
 def _run_stream_pod(status, terminal):
-    """Execute stream_pod against a fake apiserver. Returns finalize calls.
+    """Execute poll_pod against a fake apiserver. Returns finalize calls.
 
-    Executed rather than pattern-matched: the previous version of this test
-    asserted on a `except ClientResponseError` branch that raise_for_status
-    could never reach, because an earlier `if resp.status == 404` returned
-    first. It passed against dead code.
+    Executed rather than pattern-matched: an earlier version of these tests
+    asserted on an `except ClientResponseError` branch that raise_for_status
+    could never reach, and passed against dead code.
     """
-    import asyncio, tempfile, types, os as _os
+    import asyncio, tempfile, os as _os, gzip as _gzip
     calls = []
 
     class FakeResp:
@@ -1174,9 +1175,11 @@ def _run_stream_pod(status, terminal):
                 raise OSError(f"HTTP {self.status}")
         @property
         def content(self):
-            async def it():
-                if False: yield b''
-            return it()
+            class C:
+                async def iter_chunked(self, n):
+                    if False:
+                        yield b''
+            return C()
 
     FakeResp.status = status      # class bodies cannot close over a local
 
@@ -1188,21 +1191,26 @@ def _run_stream_pod(status, terminal):
 
     d = tempfile.mkdtemp()
     ns = {
-        'asyncio': asyncio, 'gzip': __import__('gzip'), 'os': _os,
+        'asyncio': asyncio, 'gzip': _gzip, 're': re, 'os': _os,
         'API': 'https://k8s', 'NAMESPACE': 'ns', 'CONTAINER': 'stellar-core',
-        'LOG_DIR': d, 'STATE_FLUSH_SECONDS': 10,
+        'LOG_DIR': d, 'LOG_POLL_SECONDS': 0.05, 'MAX_POLL_CHARS': 1 << 20,
+        'TERMINAL_POLL_ATTEMPTS': 3,
+        '_poll_slots': asyncio.Semaphore(4),
         'token': lambda: 't', 'finalize': fake_finalize,
         'base': lambda e, a: _os.path.join(d, f"range-{e}-a{a}"),
         'read_state': lambda e, a: None, 'write_state': lambda e, a, ts: None,
         '_TS_RE': re.compile(r"^\d{4}"),
-        'TxApplyScanner': type('T', (), {'seconds': None, 'feed': lambda s, l: None}),
+        'TxApplyScanner': type('T', (), {'seconds': None, 'resumed': False,
+                                         'feed': lambda s, l: None}),
         'logger': type('L', (), {'info': lambda s, *a: None,
                                  'warning': lambda s, *a: None})(),
     }
-    exec(_extract(r"^(async def stream_pod\(.*?)(?=\n\nasync def )",
+    exec(_extract(r"^(async def _poll_once\(.*?)(?=\n\nasync def )",
                   COLLECTOR_SRC).group(1), ns)
-    coro = ns['stream_pod'](FakeSession(), 'pod-1', '999', '1',
-                            lambda p: terminal, lambda p: False)
+    exec(_extract(r"^(async def poll_pod\(.*?)(?=\n\nasync def )",
+                  COLLECTOR_SRC).group(1), ns)
+    coro = ns['poll_pod'](FakeSession(), 'pod-1', '999', '1',
+                          lambda p: terminal, lambda p: False)
     asyncio.run(asyncio.wait_for(coro, timeout=2))
     return calls
 
@@ -1675,8 +1683,8 @@ def test_progress_is_written_atomically():
 def test_the_log_stream_resumes_from_the_last_durable_timestamp():
     # Without sinceTime a reconnect re-reads the whole log from the start: one
     # full re-read per pod per reconnect, at 2096 pods.
-    fn = _extract(r"^(async def stream_pod\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
-    assert "params['sinceTime']" in fn, "reconnect does not resume"
+    fn = _extract(r"^(async def _poll_once\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
+    assert "params['sinceTime']" in fn, "a poll does not resume from the last durable line"
     # ...and the second-granularity overlap it creates is removed per line.
     assert re.search(r"if last_ts and ts <= last_ts:\s*\n\s*continue", fn), \
         "the deliberate resume overlap is never deduped"
@@ -1770,15 +1778,16 @@ def test_the_authoritative_outcome_wins_over_the_collector_estimate():
 # every retry pod of a collector stream and left a2 metrics empty.
 
 def test_the_stream_is_read_in_chunks_not_lines():
-    fn = _extract(r"^(async def stream_pod\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
+    fn = _extract(r"^(async def _poll_once\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
     assert 'iter_chunked' in fn, "line-wise reads are bounded by aiohttp's 512KiB limit"
     assert 'async for raw in resp.content:' not in fn
+    assert "'follow'" not in fn, "a poll must not follow"
 
 
 def test_carriage_returns_split_lines_too():
     # The progress meter is \r-delimited. Without \r in the split it stays one
     # blob no matter how the bytes arrive.
-    fn = _extract(r"^(async def stream_pod\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
+    fn = _extract(r"^(async def _poll_once\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
     m = re.search(r"re\.split\(r'\[([^\]]+)\]'", fn)
     assert m, "no line splitting found"
     assert '\\r' in m.group(1) and '\\n' in m.group(1), f"splits on {m.group(1)!r}"
@@ -1787,9 +1796,8 @@ def test_carriage_returns_split_lines_too():
 def test_an_unterminated_blob_is_capped_not_buffered_forever():
     # A meter that never emits a newline would otherwise grow the buffer until
     # the collector OOMs -- 2096 streams doing it at once.
-    fn = _extract(r"^(async def stream_pod\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
-    assert 'MAX_LINE_CHARS' in fn
-    assert re.search(r"pending_buf\[-MAX_LINE_CHARS:\]", fn), "buffer is never trimmed"
+    fn = _extract(r"^(async def _poll_once\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
+    assert 'MAX_POLL_CHARS' in fn, "a single poll response is unbounded"
     cap = int(_extract(r"MAX_LINE_CHARS = int\(os\.getenv\('MAX_LINE_CHARS', (\d+)\)\)",
                        COLLECTOR_SRC).group(1))
     assert 1024 < cap < 524288, f"cap {cap} is outside a sane range"
@@ -1830,3 +1838,67 @@ def test_the_line_buffer_cap_is_charged_per_stream():
     chart = open(__file__.replace(
         'test_job_monitor.py', 'parallel_catchup_helm/values.yaml')).read()
     assert int(_extract(r"maxLineChars: (\d+)", chart).group(1)) == cap
+
+
+# --- polling replaces follow=true ------------------------------------------
+# Measured on ssc-test at 2096 follow streams: 1444 MiB of a 2048 MiB limit,
+# memory.events max=2617, 1.00 of 2 cpu, 1797 held connections. That scales
+# with pod count, so 4096 exceeds both limits. Polling makes concurrency a
+# tuning parameter instead.
+
+def test_concurrency_is_independent_of_pod_count():
+    # The whole point. Under follow=true the cap had to exceed parallelism or
+    # pods starved silently -- 1200 against 2048 left 896 blocked forever.
+    assert 'COLLECTOR_MAX_STREAMS' not in COLLECTOR_SRC
+    chart = open(__file__.replace(
+        'test_job_monitor.py', 'parallel_catchup_helm/templates/job_monitor.yaml')).read()
+    assert 'COLLECTOR_MAX_STREAMS' not in chart
+    assert 'worker.replicas' not in chart.split('MAX_CONCURRENT_POLLS')[1][:200], \
+        "poll concurrency must not be derived from parallelism"
+
+
+def test_polls_are_bounded_by_a_semaphore():
+    fn = _extract(r"^(async def _poll_once\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
+    assert 'async with _poll_slots:' in fn, "polls are not bounded"
+    # ...and the connector is sized for polls, not for one socket per pod.
+    assert 'MAX_CONCURRENT_POLLS + 64' in COLLECTOR_SRC
+
+
+def test_the_archive_is_not_held_open_between_polls():
+    # A live gzip deflate buffer per stream is most of what put the sidecar at
+    # 1444 MiB. Opening per poll means nothing is retained between them.
+    fn = _extract(r"^(async def _poll_once\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
+    assert "gzip.open(base(end, attempt) + '.log.gz', 'at')" in fn
+    loop = _extract(r"^(async def poll_pod\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
+    assert 'gzip.open' not in loop, "the archive is held across polls"
+
+
+def test_terminal_is_read_before_the_poll_not_after():
+    # A pod that exits mid-poll would otherwise have its final output dropped:
+    # the poll that read it would not yet know the pod was terminal, and the
+    # next check would come after finalize.
+    loop = _extract(r"^(async def poll_pod\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
+    assert loop.index('was_terminal = done(pod)') < loop.index('await _poll_once('), \
+        "terminal is sampled after the poll, which races a pod exiting mid-poll"
+
+
+def test_a_dead_pod_is_not_polled_forever():
+    # Its log is not coming back, and the task holds a poll slot for the rest of
+    # the run. follow=true finalized here because it already held the bytes.
+    loop = _extract(r"^(async def poll_pod\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
+    assert 'TERMINAL_POLL_ATTEMPTS' in loop
+    n = int(_extract(r"TERMINAL_POLL_ATTEMPTS = int\(os\.getenv\('TERMINAL_POLL_ATTEMPTS', (\d+)\)\)",
+                     COLLECTOR_SRC).group(1))
+    assert n >= 2, "a single transient 500 would end the attempt"
+
+
+def test_a_terminal_pod_whose_polls_keep_failing_still_finalizes():
+    # Executed: the loop must exit, not spin. Was a real regression when polling
+    # replaced streaming -- the suite caught it.
+    assert _run_stream_pod(500, terminal=True) == [('pod-1', '999', '1')]
+
+
+def test_poll_concurrency_default_is_modest():
+    n = int(_extract(r"MAX_CONCURRENT_POLLS = int\(os\.getenv\('MAX_CONCURRENT_POLLS', (\d+)\)\)",
+                     COLLECTOR_SRC).group(1))
+    assert 16 <= n <= 256, f"{n} in-flight polls is not a sane default"
