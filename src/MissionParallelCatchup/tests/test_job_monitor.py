@@ -12,12 +12,22 @@ Run: python3 -m pytest test_job_monitor.py
 """
 
 import json
+import os
 import re
 
 import pytest
 
-SRC = open(__file__.replace('test_job_monitor.py', 'job_monitor.py')).read()
-COLLECTOR_SRC = open(__file__.replace('test_job_monitor.py', 'log_collector.py')).read()
+# The modules under test sit one level above tests/.
+_SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _read(name):
+    with open(os.path.join(_SRC_DIR, name)) as fh:
+        return fh.read()
+
+
+SRC = _read('job_monitor.py')
+COLLECTOR_SRC = _read('log_collector.py')
 
 
 def _extract(pattern, src=None):
@@ -377,9 +387,7 @@ def test_the_ephemeral_sampler_runs_every_poll_not_once_per_stream():
 
 
 def test_every_env_the_collector_reads_is_set_on_the_collector_container():
-    chart = open(__file__.replace(
-        'test_job_monitor.py',
-        'parallel_catchup_helm/templates/job_monitor.yaml')).read()
+    chart = open(os.path.join(_SRC_DIR, 'parallel_catchup_helm/templates/job_monitor.yaml')).read()
     collector = chart[chart.index('- name: log-collector'):]
     needed = set(re.findall(r"os\.getenv\('([A-Z_]+)'", COLLECTOR_SRC))
     missing = {v for v in needed - COLLECTOR_ENV_WITH_DEFAULTS
@@ -669,7 +677,7 @@ def test_working_set_is_still_recorded_as_a_diagnostic():
 
 import shutil, subprocess
 
-CHART = __file__.replace('test_job_monitor.py', 'parallel_catchup_helm')
+CHART = os.path.join(_SRC_DIR, 'parallel_catchup_helm')
 
 
 def _helm(*extra):
@@ -734,8 +742,7 @@ def test_chart_defaults_match_the_code_defaults():
     # os.getenv default. They drifted once -- code said 512Mi while the chart
     # still said 0 -- and the chart silently won, reproducing the OOMs the code
     # change was meant to fix.
-    values = open(__file__.replace(
-        'test_job_monitor.py', 'parallel_catchup_helm/values.yaml')).read()
+    values = open(os.path.join(_SRC_DIR, 'parallel_catchup_helm/values.yaml')).read()
     pairs = [('PROFILE_CACHE_HEADROOM', 'profileCacheHeadroom'),
              ('PROFILE_MAX_MEM', 'profileMaxMemory'),
              ('PROFILE_CPU_LIMIT', 'profileCpuLimit'),
@@ -848,9 +855,7 @@ def test_the_chart_grants_the_pvc_delete_release_pvc_needs():
     # release_pvc calls delete_namespaced_persistent_volume_claim. The Role
     # granted only get/list/create, so every completion logged a 403 warning and
     # the volumes leaked -- 3982 of them, which crashed the EBS CSI controller.
-    chart = open(__file__.replace(
-        'test_job_monitor.py',
-        'parallel_catchup_helm/templates/job_monitor.yaml')).read()
+    chart = open(os.path.join(_SRC_DIR, 'parallel_catchup_helm/templates/job_monitor.yaml')).read()
     blk = _extract(r'resources: \["persistentvolumeclaims"\]\s*\n\s*verbs: \[([^\]]+)\]', chart)
     verbs = {v.strip().strip('"') for v in blk.group(1).split(',')}
     assert 'delete' in verbs, f"release_pvc needs delete, Role has {sorted(verbs)}"
@@ -942,9 +947,7 @@ def test_delete_job_is_best_effort():
 def test_the_chart_grants_the_job_delete_reconcile_needs():
     # Same failure the PVC Role had: verbs omitted delete, so every reap logged
     # a 403 and nothing was ever collected.
-    chart = open(__file__.replace(
-        'test_job_monitor.py',
-        'parallel_catchup_helm/templates/job_monitor.yaml')).read()
+    chart = open(os.path.join(_SRC_DIR, 'parallel_catchup_helm/templates/job_monitor.yaml')).read()
     blk = _extract(r'resources: \["jobs"\]\s*\n\s*verbs: \[([^\]]+)\]', chart)
     verbs = {v.strip().strip('"') for v in blk.group(1).split(',')}
     assert 'delete' in verbs, f"delete_job needs delete, Role has {sorted(verbs)}"
@@ -978,8 +981,7 @@ def test_the_chart_ttl_matches_the_code_default():
     # The TTL is now only a backstop, but a chart/code split is how the cache
     # headroom regression shipped: the code default was fixed and the chart
     # still forced the old value.
-    chart = open(__file__.replace(
-        'test_job_monitor.py', 'parallel_catchup_helm/values.yaml')).read()
+    chart = open(os.path.join(_SRC_DIR, 'parallel_catchup_helm/values.yaml')).read()
     want = int(_extract(r"JOB_TTL_SECONDS = int\(os\.getenv\('JOB_TTL_SECONDS', (\d+)\)\)").group(1))
     got = int(_extract(r"jobTtlSeconds: (\d+)", chart).group(1))
     assert got == want, f"chart sets {got}, code defaults to {want}"
@@ -1108,8 +1110,7 @@ def test_the_sizing_formula_is_peak_times_115_plus_512mi(peak, want_mi):
 
 
 def test_the_chart_matches_the_new_sizing_defaults():
-    chart = open(__file__.replace(
-        'test_job_monitor.py', 'parallel_catchup_helm/values.yaml')).read()
+    chart = open(os.path.join(_SRC_DIR, 'parallel_catchup_helm/values.yaml')).read()
     assert _extract(r"profileMargin: ([\d.]+)", chart).group(1) == \
            _extract(r"PROFILE_MARGIN = float\(os\.getenv\('PROFILE_MARGIN', ([\d.]+)\)\)").group(1)
     assert _extract(r'profileCacheHeadroom: "(\d+Mi)"', chart).group(1) == \
@@ -1354,8 +1355,7 @@ def test_the_flush_ratio_default_is_above_one_and_matches_the_chart():
         r"PEAK_FLUSH_RATIO = float\(os\.getenv\('PEAK_FLUSH_RATIO', ([\d.]+)\)\)",
         COLLECTOR_SRC).group(1))
     assert got > 1.0, f"ratio {got} flushes on every sample"
-    chart = open(__file__.replace(
-        'test_job_monitor.py', 'parallel_catchup_helm/values.yaml')).read()
+    chart = open(os.path.join(_SRC_DIR, 'parallel_catchup_helm/values.yaml')).read()
     assert float(_extract(r"peakFlushRatio: ([\d.]+)", chart).group(1)) == got
 
 
@@ -1814,9 +1814,8 @@ def test_an_unterminated_blob_is_capped_not_buffered_forever():
 def test_the_worker_disables_the_aws_progress_meter():
     # The real cure: never emit the \r spam. Also keeps it out of the archives,
     # where it was the bulk of every large range's log.
-    fs = open(__file__.replace(
-        'src/MissionParallelCatchup/test_job_monitor.py',
-        'src/FSLibrary/MissionHistoryPubnetParallelCatchupV2.fs')).read()
+    fs = open(os.path.join(_SRC_DIR, os.pardir,
+                           'FSLibrary', 'MissionHistoryPubnetParallelCatchupV2.fs')).read()
     m = re.search(r'sprintf "aws s3 cp ([^"]*)--region %s"', fs)
     assert m, "s3 GET command not found"
     assert '--no-progress' in m.group(1), f"aws s3 cp flags: {m.group(1)!r}"
@@ -1845,8 +1844,7 @@ def test_concurrency_is_independent_of_pod_count():
     # The whole point. Under follow=true the cap had to exceed parallelism or
     # pods starved silently -- 1200 against 2048 left 896 blocked forever.
     assert 'COLLECTOR_MAX_STREAMS' not in COLLECTOR_SRC
-    chart = open(__file__.replace(
-        'test_job_monitor.py', 'parallel_catchup_helm/templates/job_monitor.yaml')).read()
+    chart = open(os.path.join(_SRC_DIR, 'parallel_catchup_helm/templates/job_monitor.yaml')).read()
     assert 'COLLECTOR_MAX_STREAMS' not in chart
     assert 'worker.replicas' not in chart.split('MAX_CONCURRENT_POLLS')[1][:200], \
         "poll concurrency must not be derived from parallelism"
@@ -2312,8 +2310,7 @@ def test_the_oom_budget_stops_short_of_the_cap_on_purpose():
     assert 2 <= n <= 8, f"{n} rungs: below 2 cannot escalate, above 8 chases a broken range"
     assert bump ** (n - 1) >= 3.0, "the ladder cannot even treble the request before giving up"
     assert n > int(_extract(r"MAX_TIMEOUT_ATTEMPTS = int\(os\.getenv\('MAX_TIMEOUT_ATTEMPTS', (\d+)\)\)").group(1))
-    chart = open(__file__.replace(
-        'test_job_monitor.py', 'parallel_catchup_helm/values.yaml')).read()
+    chart = open(os.path.join(_SRC_DIR, 'parallel_catchup_helm/values.yaml')).read()
     assert int(_extract(r"maxAttempts: (\d+)", chart).group(1)) == n
 
 
