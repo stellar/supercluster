@@ -9,6 +9,8 @@ make the run unprofileable. medida's total and a pod's duration are per-process
 for exactly the same reason, so both are tail-only in the same way.
 """
 
+import gzip
+import io
 import json
 
 import pytest
@@ -18,6 +20,19 @@ import job_monitor as jm
 
 GIB = 1024 ** 3
 MIB = 1024 ** 2
+
+
+def _gzip_member(text):
+    buf = io.BytesIO()
+    with gzip.GzipFile(fileobj=buf, mode='wb', mtime=0) as fh:
+        fh.write(text.encode())
+    return buf.getvalue()
+
+
+def _archive(end, attempt, *members):
+    with open(jm.log_path(end, attempt), 'wb') as fh:
+        for member in members:
+            fh.write(_gzip_member(member))
 
 
 @pytest.fixture
@@ -47,6 +62,48 @@ def test_the_chain_is_the_run_of_resumed_attempts_ending_at_this_one(attempts):
 def test_an_attempt_with_no_metrics_file_is_not_treated_as_resumed(attempts):
     attempts(999, {1: ({}, None)})
     assert jm._attempt_resumed(999, 2) is False
+
+
+def test_resume_falls_back_to_the_archive_when_metrics_lacks_the_field(attempts):
+    attempts(999, {2: ({'attemptSeconds': 300.0}, None)})
+    _archive(999, 2, 'RESUME: reached ledger 900; skipping new-db\n')
+
+    assert jm._attempt_resumed(999, 2) is True
+
+
+def test_resume_declined_is_not_a_true_resume(attempts):
+    attempts(999, {2: ({}, None)})
+    _archive(999, 2, 'RESUME DECLINED: no usable local state; running new-db\n')
+
+    assert jm._attempt_resumed(999, 2) is False
+
+
+def test_resume_is_found_across_concatenated_gzip_members(attempts):
+    attempts(999, {2: ({}, None)})
+    _archive(999, 2, 'worker startup\n',
+             'RESUME: reached ledger 900; skipping new-db\n')
+
+    assert jm._attempt_resumed(999, 2) is True
+
+
+def test_missing_truncated_and_corrupt_archives_are_safe(attempts):
+    attempts(999, {2: ({}, None), 3: ({}, None), 4: ({}, None)})
+    with open(jm.log_path(999, 3), 'wb') as fh:
+        fh.write(_gzip_member('worker startup\n')[:-8])
+    with open(jm.log_path(999, 4), 'wb') as fh:
+        fh.write(b'not a gzip archive')
+
+    assert jm._attempt_resumed(999, 2) is False
+    assert jm._attempt_resumed(999, 3) is False
+    assert jm._attempt_resumed(999, 4) is False
+
+
+def test_three_attempt_chain_can_be_recovered_entirely_from_archives(attempts):
+    attempts(999, {1: ({}, None), 2: ({}, None), 3: ({}, None)})
+    _archive(999, 2, 'RESUME: reached ledger 700; skipping new-db\n')
+    _archive(999, 3, 'RESUME: reached ledger 800; skipping new-db\n')
+
+    assert list(jm._resumed_chain(999, 3)) == [1, 2, 3]
 
 
 # --- peaks --------------------------------------------------------------------
@@ -176,6 +233,90 @@ def test_the_authoritative_outcome_wins_over_the_collector_estimate(attempts):
                        {'outcome': 'disrupted', 'attemptSeconds': 900.0}),
                    2: ({'resumed': True}, None)})
     assert jm.seconds_for_range(999, 2, 300.0) == 1200.0
+
+
+# --- completed profile reconstruction -----------------------------------------
+
+def test_repair_recovers_predecessor_peaks_and_seconds_idempotently(attempts):
+    attempts(999, {
+        1: ({'attemptSeconds': 900.0, 'peakAnonBytes': 2 * GIB,
+             'peakWorkingSetBytes': 3 * GIB}, None),
+        2: ({'attemptSeconds': 300.0, 'peakAnonBytes': 400 * MIB,
+             'peakWorkingSetBytes': 500 * MIB}, None),
+    })
+    _archive(999, 2, 'RESUME: reached ledger 800; skipping new-db\n')
+    progress = {'completed': {'999': {
+        'attempts': 2, 'seconds': 300.0,
+        'peakAnonBytes': 400 * MIB, 'peakWorkingSetBytes': 500 * MIB,
+    }}}
+
+    assert jm.repair_completed_profiles(progress) == 1
+    repaired = progress['completed']['999']
+    assert repaired['seconds'] == 1200.0
+    assert repaired['peakAnonBytes'] == 2 * GIB
+    assert repaired['peakWorkingSetBytes'] == 3 * GIB
+
+    snapshot = json.loads(json.dumps(progress))
+    assert jm.repair_completed_profiles(progress) == 0
+    assert progress == snapshot
+
+
+def test_reconstruction_sums_available_txapply_legs_in_a_three_attempt_chain(attempts):
+    attempts(999, {
+        1: ({'txApplySeconds': 10.0}, None),
+        2: ({}, None),                              # this leg's metric was unavailable
+        3: ({'txApplySeconds': 3.0}, None),
+    })
+    _archive(999, 2, 'RESUME: reached ledger 700; skipping new-db\n')
+    _archive(999, 3, 'RESUME: reached ledger 800; skipping new-db\n')
+
+    rebuilt = jm.reconstruct_completed_profile(999, 3)
+    assert rebuilt['txApply'] == 13.0
+
+
+def test_reconstruction_leaves_txapply_absent_when_every_leg_is_missing(attempts):
+    attempts(999, {1: ({}, None), 2: ({}, None)})
+    _archive(999, 2, 'RESUME: reached ledger 800; skipping new-db\n')
+
+    assert 'txApply' not in jm.reconstruct_completed_profile(999, 2)
+
+
+def test_reconstruction_does_not_cross_a_fresh_restart_boundary(attempts):
+    attempts(999, {
+        1: ({'attemptSeconds': 900.0, 'txApplySeconds': 100.0,
+             'peakAnonBytes': 8 * GIB}, None),
+        2: ({'attemptSeconds': 300.0, 'txApplySeconds': 7.0,
+             'peakAnonBytes': 900 * MIB}, None),
+        3: ({'attemptSeconds': 60.0, 'txApplySeconds': 2.0,
+             'peakAnonBytes': 400 * MIB}, None),
+    })
+    _archive(999, 2, 'RESUME DECLINED: running new-db\n')
+    _archive(999, 3, 'RESUME: reached ledger 950; skipping new-db\n')
+
+    rebuilt = jm.reconstruct_completed_profile(999, 3)
+    assert rebuilt['seconds'] == 360.0
+    assert rebuilt['txApply'] == 9.0
+    assert rebuilt['peakAnonBytes'] == 900 * MIB
+
+
+def test_reconcile_repairs_a_completed_record_with_no_live_job(cluster):
+    cluster.write(jm.PROGRESS_FILE, json.dumps({
+        'completed': {'300': {'attempts': 2, 'count': 100, 'seconds': 300.0,
+                              'txApply': 2.0, 'peakAnonBytes': 400 * MIB}},
+        'failed': {},
+    }))
+    cluster.finalize(300, 1, tx_apply=10.0, attempt_seconds=900.0,
+                     peaks={'peakAnonBytes': 2 * GIB})
+    cluster.finalize(300, 2, tx_apply=2.0, attempt_seconds=300.0,
+                     peaks={'peakAnonBytes': 400 * MIB})
+    _archive(300, 2, 'RESUME: reached ledger 250; skipping new-db\n')
+
+    cluster.reconcile()
+
+    repaired = cluster.completed()['300']
+    assert repaired['seconds'] == 1200.0
+    assert repaired['txApply'] == 12.0
+    assert repaired['peakAnonBytes'] == 2 * GIB
 
 
 # --- counting causes, not attempts --------------------------------------------

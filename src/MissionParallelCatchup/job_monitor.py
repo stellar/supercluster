@@ -900,32 +900,10 @@ def _rehydrate_from_metrics(progress):
     completed = progress.get('completed') or {}
     if not completed:
         return progress
-    recovered = 0
-    for end, rec in completed.items():
-        attempt = int(rec.get('attempts') or 1)
-        try:
-            peaks = peaks_for_range(int(end), attempt)
-            if peaks:
-                for k, v in peaks.items():
-                    rec.setdefault(k, v)
-            if rec.get('txApply') is None:
-                # Not named `tx`: a source-text test in the suite matches the
-                # first `tx = tx_apply_for_range(` in this file and means the
-                # one in reconcile().
-                recovered_tx = tx_apply_for_range(int(end), attempt)
-                if recovered_tx is not None:
-                    rec['txApply'] = recovered_tx
-            if rec.get('seconds') is None:
-                secs = seconds_for_range(int(end), attempt)
-                if secs is not None:
-                    rec['seconds'] = secs
-        except (OSError, ValueError):
-            continue
-        if _has_peaks(rec):
-            recovered += 1
+    recovered = repair_completed_profiles(progress)
     logger.warning("progress.json was unreadable; recovered state from the ConfigMap "
-                   "mirror and re-read measurements for %d of %d completed ranges "
-                   "from .metrics on the volume", recovered, len(completed))
+                   "mirror and reconstructed measurements for %d of %d completed ranges "
+                   "from attempt artifacts on the volume", recovered, len(completed))
     return progress
 
 
@@ -1443,14 +1421,37 @@ def _resumed_chain(end, attempt):
 def _attempt_resumed(end, attempt):
     """Did this attempt pick up at LCL+1 rather than run new-db?
 
-    Recorded by the collector from the worker's own "RESUME: ..." line, which is
-    the only place that knows -- it depends on what was left on /data, not on
-    storage mode or attempt number.
+    Prefer the collector's marker, then recover it from the durable archive for
+    legacy files and pollers recreated after the early RESUME line.
     """
     try:
         with open(metrics_path(end, attempt)) as fh:
-            return bool(json.load(fh).get('resumed'))
-    except (OSError, ValueError):
+            if json.load(fh).get('resumed') is True:
+                return True
+    except FileNotFoundError:
+        pass
+    except ValueError as e:
+        logger.warning("could not parse resume metrics for range %s attempt %s: %s",
+                       end, attempt, e)
+    except OSError as e:
+        logger.warning("could not read resume metrics for range %s attempt %s: %s",
+                       end, attempt, e)
+    return _archive_resumed(end, attempt)
+
+
+def _archive_resumed(end, attempt):
+    """Read the exact worker resume decision from concatenated gzip members."""
+    path = log_path(end, attempt)
+    try:
+        with gzip.open(path, 'rt', errors='replace') as fh:
+            return any('RESUME: ' in line for line in fh)
+    except FileNotFoundError:
+        return False
+    except (EOFError, gzip.BadGzipFile, zlib.error) as e:
+        logger.warning("could not read resume decision from %s: %s", path, e)
+        return False
+    except OSError as e:
+        logger.warning("could not open resume archive %s: %s", path, e)
         return False
 
 
@@ -1490,23 +1491,78 @@ def seconds_for_range(end, attempt=1, final=None):
     """
     total = None
     for n in _resumed_chain(end, attempt):
-        if n == int(attempt):
+        if n == int(attempt) and final is not None:
             leg = final
         else:
-            # .outcome is authoritative -- the pod's own terminated timestamps.
-            # It is absent whenever the pod was reaped before the monitor could
-            # classify it, which is every spot eviction, so fall back to the
-            # collector's stream-lifetime figure rather than losing the leg.
-            leg = (read_outcome(end, n) or {}).get('attemptSeconds')
-            if leg is None:
-                try:
-                    with open(metrics_path(end, n)) as fh:
-                        leg = json.load(fh).get('attemptSeconds')
-                except (OSError, ValueError):
-                    leg = None
+            leg = _attempt_seconds(end, n)
         if leg is not None:
             total = leg if total is None else total + leg
     return total
+
+
+def _attempt_seconds(end, attempt):
+    """Best durable duration for one attempt, or None when it was never saved."""
+    # .outcome is authoritative -- the pod's own terminated timestamps. It is
+    # absent whenever the pod was reaped before the monitor could classify it,
+    # which is every spot eviction, so fall back to the collector's estimate.
+    leg = (read_outcome(end, attempt) or {}).get('attemptSeconds')
+    if leg is not None:
+        return leg
+    try:
+        with open(metrics_path(end, attempt)) as fh:
+            return json.load(fh).get('attemptSeconds')
+    except (OSError, ValueError):
+        return None
+
+
+def reconstruct_completed_profile(end, attempt):
+    """Recompute recoverable profile fields from immutable attempt artifacts.
+
+    Durations and tx-apply totals follow only the continuous resumed chain, so a
+    fresh retry never double-counts discarded work. Peaks use that chain plus
+    every attempt that hit a resource ceiling. Missing legs remain missing; the
+    available legs are combined with the existing <=64-ledger tx-apply overlap.
+
+    Reconstructable: sampled peaks in .metrics, attemptSeconds in .outcome or
+    .metrics, and txApplySeconds in .metrics or retained .log.gz. Not
+    reconstructable: wallSeconds, samples that were never persisted, or a
+    missing tx-apply/duration leg whose process and archive are both gone.
+    """
+    rebuilt = peaks_for_range(end, attempt)
+    seconds = seconds_for_range(end, attempt)
+    if seconds is not None:
+        rebuilt['seconds'] = seconds
+    tx_apply = tx_apply_for_range(end, attempt)
+    if tx_apply is not None:
+        rebuilt['txApply'] = tx_apply
+    return rebuilt
+
+
+def _apply_profile_reconstruction(record, rebuilt):
+    """Merge reconstruction without lowering stronger persisted evidence."""
+    updates = {}
+    for key, value in rebuilt.items():
+        current = record.get(key)
+        if current is None or value > current:
+            updates[key] = value
+    record.update(updates)
+    return updates
+
+
+def repair_completed_profiles(progress):
+    """Apply artifact reconstruction to old completed records idempotently."""
+    repaired = 0
+    for end, record in (progress.get('completed') or {}).items():
+        try:
+            attempt = int(record.get('attempts') or 1)
+            rebuilt = reconstruct_completed_profile(end, attempt)
+        except (TypeError, ValueError):
+            logger.warning("cannot reconstruct malformed completed record for range %s", end)
+            continue
+        updates = _apply_profile_reconstruction(record, rebuilt)
+        if updates:
+            repaired += 1
+    return repaired
 
 
 def _tx_apply_for_attempt(end, attempt=1, pod_name=None):
@@ -2365,6 +2421,16 @@ def reconcile(state):
     progress = load_progress()
     completed = progress.setdefault('completed', {})
     failed = progress.setdefault('failed', {})
+    # One pass per monitor process repairs records completed by an older build,
+    # including Jobs that were already reaped and therefore never enter the live
+    # completion branch below. Attempt artifacts are immutable after .done, and
+    # current completions still use the same helpers directly.
+    if not state.get('completed_profiles_reconstructed'):
+        repaired = repair_completed_profiles(progress)
+        state['completed_profiles_reconstructed'] = True
+        if repaired:
+            save_progress(progress)
+            logger.info("reconstructed profile fields for %d completed ranges", repaired)
 
     jobs = batch_v1.list_namespaced_job(
         NAMESPACE, label_selector=f"{LABEL_RUN}={RUN_NAME}").items
@@ -2438,30 +2504,16 @@ def reconcile(state):
                 # Durably recorded first: the record is what makes the volume
                 # and the Job disposable, so it must land before either goes.
                 save_progress(progress)
-            elif (not _has_peaks(completed[end])
-                  or completed[end].get('txApply') is None
-                  or not _attempt_finalized(end, attempt)):
+            else:
                 # Backfill. The record is written the moment the Job flips to
                 # succeeded, which is usually before the collector has finalized
-                # -- and peaks_for_range has no fallback, unlike tx_apply, which
-                # reads the archive. Measured on ssc-test: 356 of 356 completed
-                # ranges carried txApply and 0 carried peakAnonBytes, while 1936
-                # .metrics files on the same volume held it. Retry while the Job
-                # is still here; delete_job below is what ends the chances.
-                late = peaks_for_range(end, attempt)
-                if completed[end].get('txApply') is None:
-                    # Same one-shot race as the peaks, and the same fix. The
-                    # collector writes txApplySeconds into .metrics when it
-                    # finalizes, which can land after reconcile recorded the
-                    # range. Measured in the sandbox edge suite 2026-07-30:
-                    # progress.json carried txApply=null while the durable
-                    # .metrics file held txApplySeconds=0.000486848.
-                    late_tx = tx_apply_for_range(end, attempt)
-                    if late_tx is not None:
-                        late = dict(late or {})
-                        late['txApply'] = late_tx
+                # -- and the final write can add peaks, txApplySeconds,
+                # attemptSeconds, and the resume marker together. Reconstruct the
+                # same profile used on first completion, not a field-by-field
+                # subset that can leave a pre-marker record permanently short.
+                late = _apply_profile_reconstruction(
+                    completed[end], reconstruct_completed_profile(end, attempt))
                 if late:
-                    completed[end].update(late)
                     save_progress(progress)
                     logger.info("range %s: measurements arrived late, backfilled %s",
                                 end, sorted(late))
