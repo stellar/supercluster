@@ -35,6 +35,7 @@ import os
 import re
 import ssl
 import sys
+import zlib
 from datetime import datetime
 
 import aiohttp
@@ -252,10 +253,20 @@ class TxApplyScanner:
             self._left = 0
 
 
-
-
-
-
+def archive_resumed(end, attempt):
+    """Recover this attempt's exact resume decision from its durable archive."""
+    path = base(end, attempt) + '.log.gz'
+    try:
+        with gzip.open(path, 'rt', errors='replace') as fh:
+            return any(TxApplyScanner.RESUME_MARK in line for line in fh)
+    except FileNotFoundError:
+        return False
+    except (EOFError, gzip.BadGzipFile, zlib.error) as e:
+        logger.warning("could not read resume decision from %s: %s", path, e)
+        return False
+    except OSError as e:
+        logger.warning("could not open resume archive %s: %s", path, e)
+        return False
 
 
 def write_metrics(end, attempt, values):
@@ -292,6 +303,11 @@ def write_metrics(end, attempt, values):
         a, b = prior.get(k), values.get(k)
         if a is not None and b is not None:
             merged[k] = max(a, b)
+    # Once any poller or archive read proves that this attempt resumed, a later
+    # restarted poller cannot un-prove it. In particular, a merge containing
+    # resumed=False must never lower the durable decision back to fresh.
+    if prior.get('resumed') is True or values.get('resumed') is True:
+        merged['resumed'] = True
     values = merged
     try:
         with open(tmp, 'w') as fh:
@@ -524,7 +540,10 @@ async def finalize(session, pod, end, attempt, tx, done_ok, started=None):
         # finalized twice, and the second poller's clock started at the restart.
         measured['attemptSeconds'] = round(
             asyncio.get_event_loop().time() - started, 1)
-    if tx.resumed:
+    # RESUME is printed before stellar-core starts, so a stream/poller recreated
+    # later can never see it in memory. The archive is appended durably before
+    # finalization and is the source of truth when this scanner missed the line.
+    if tx.resumed or archive_resumed(end, attempt):
         # Not a peak -- PEAK_FIELDS filters it out of the profile. peaks_for_range
         # reads it to decide how far back to aggregate: a resumed attempt only
         # measured the tail of its range, so the attempt before it still counts.

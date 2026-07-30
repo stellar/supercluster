@@ -20,6 +20,7 @@ these drive log_collector's file-writing entry points directly.
 """
 
 import asyncio
+import gzip
 import json
 import os
 
@@ -173,6 +174,34 @@ def test_a_write_that_omits_a_peak_leaves_it_alone(vol):
     assert stored['peakAnonBytes'] == 5 * GIB
     assert stored['peakEphemeralBytes'] == 30 * GIB
     assert stored['txApplySeconds'] == 12.5
+
+
+def test_resumed_true_is_monotonic_across_restarted_writers(vol):
+    lc.write_metrics('300', 2, {'resumed': True})
+    lc.write_metrics('300', 2, {'resumed': False, 'attemptSeconds': 10.0})
+
+    assert metrics(300, 2)['resumed'] is True
+
+
+def test_finalize_recovers_resume_after_the_scanner_is_recreated(vol):
+    """The first poll saw RESUME, then its scanner vanished before finalize."""
+    path = lc.base('300', 2) + '.log.gz'
+    with gzip.open(path, 'wt') as fh:
+        fh.write('RESUME: local state reached ledger 250; skipping new-db\n')
+
+    finalize('w-300-a2', 300, attempt=2, tx=lc.TxApplyScanner())
+
+    assert metrics(300, 2)['resumed'] is True
+
+
+def test_finalize_does_not_promote_resume_declined(vol):
+    path = lc.base('300', 2) + '.log.gz'
+    with gzip.open(path, 'wt') as fh:
+        fh.write('RESUME DECLINED: no usable local state; running new-db\n')
+
+    finalize('w-300-a2', 300, attempt=2, tx=lc.TxApplyScanner())
+
+    assert (metrics(300, 2) or {}).get('resumed') is not True
 
 
 def test_peaks_from_different_writes_accumulate_into_one_record(vol):
