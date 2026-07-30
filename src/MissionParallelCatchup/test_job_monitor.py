@@ -2311,19 +2311,15 @@ def test_the_pods_own_duration_wins_over_the_pollers_elapsed_time():
     assert 'pod_seconds(pod)' in loop, "nothing captures it while the pod exists"
 
 
-def test_the_oom_budget_outlives_the_escalation_ladder():
-    # MAX_ATTEMPTS is effectively the OOM budget -- `failed` is the only other
-    # outcome reaching it and that one sets no retry reason. It must be large
-    # enough that a range reaches MEM_ESCALATION_CAP before being condemned,
-    # because a condemned range aborts the entire run.
+def test_the_oom_budget_stops_short_of_the_cap_on_purpose():
+    # 5 rungs is 1.5^4 = 5x the profile figure. A range needing more is broken,
+    # not mis-sized, and chasing it to MEM_ESCALATION_CAP parks a whole node on
+    # it. The price is that such a range is condemned -- which today aborts the
+    # run, so the coupling below is what must not be forgotten.
     n = int(_extract(r"MAX_ATTEMPTS_PER_RANGE = int\(os\.getenv\('MAX_ATTEMPTS', (\d+)\)\)").group(1))
     bump = float(_extract(r"MEM_BUMP_FACTOR = float\(os\.getenv\('MEM_BUMP_FACTOR', ([\d.]+)\)\)").group(1))
-    cap_s = _extract(r"MEM_ESCALATION_CAP = os\.getenv\('MAX_MEM', '(\d+)Gi'\)").group(1)
-    cap_mi = int(cap_s) * 1024
-    # the largest profile-derived request we have seen (p90 ~4.2GiB, max ~9.2GiB)
-    reached = 9200 * (bump ** (n - 1))
-    assert reached >= cap_mi, \
-        f"{n} attempts only reaches {reached:.0f}Mi, short of the {cap_mi}Mi cap"
+    assert 2 <= n <= 8, f"{n} rungs: below 2 cannot escalate, above 8 chases a broken range"
+    assert bump ** (n - 1) >= 3.0, "the ladder cannot even treble the request before giving up"
     assert n > int(_extract(r"MAX_TIMEOUT_ATTEMPTS = int\(os\.getenv\('MAX_TIMEOUT_ATTEMPTS', (\d+)\)\)").group(1))
     chart = open(__file__.replace(
         'test_job_monitor.py', 'parallel_catchup_helm/values.yaml')).read()

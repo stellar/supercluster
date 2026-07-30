@@ -192,12 +192,15 @@ EMIT_MISSION_LABEL = os.getenv('EMIT_MISSION_LABEL', 'false').lower() == 'true'
 # =============================================================================
 PARALLELISM = int(os.getenv('PARALLELISM', 3))
 # Effectively the OOM budget: `failed` is the only other outcome that reaches
-# it, and that one sets no retry reason. Escalation now counts OOMs rather than
-# attempts, so rung N means the range genuinely wanted more N times. 10 rungs is
-# 1.5^9 = 38x the profile figure, which MEM_ESCALATION_CAP bounds well before
-# then -- so the real effect is that a range keeps trying until the cap, instead
-# of being condemned at 5. A condemned range aborts the whole run.
-MAX_ATTEMPTS_PER_RANGE = int(os.getenv('MAX_ATTEMPTS', 10))
+# it, and that one sets no retry reason. Escalation counts OOMs rather than
+# attempts, so rung N means the range genuinely wanted more N times.
+#
+# Deliberately stops short of MEM_ESCALATION_CAP: 5 rungs is 1.5^4 = 5x the
+# profile figure, and a range needing more than that is not mis-sized, it is
+# broken -- chasing it to 48Gi parks a whole r8a.2xlarge on one range for hours.
+# The cost of stopping is that the range is condemned, and today a condemned
+# range aborts the run. That coupling is the thing to fix, not this number.
+MAX_ATTEMPTS_PER_RANGE = int(os.getenv('MAX_ATTEMPTS', 5))
 # A hang gets far fewer retries than an eviction. The measured causes -- an
 # unreachable archive host, an absent checkpoint, a bucket that will not
 # decompress -- are persistent, so retrying mostly burns another full deadline.
