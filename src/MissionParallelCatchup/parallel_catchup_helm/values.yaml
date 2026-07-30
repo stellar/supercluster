@@ -102,6 +102,17 @@ monitor:
   # profiled at 190MiB rss got a 209MiB limit and 90 of them OOMKilled within
   # 90s of dispatch.
   profileCacheHeadroom: "512Mi"
+  # Runtime-weighted allowance, scaled by seconds/longest so a 6h range gets
+  # the full amount and a 13min one gets almost none. A flat margin misprices
+  # both ends: the short ranges are measured tightly and need nothing, while
+  # the long ones sit exposed to archive growth and cache drift for hours.
+  profileRuntimeMemoryInsurance: "3Gi"
+  # Probing 1000+ workers serially takes longer than the poll interval, so the
+  # sampler runs threaded and bounded rather than inline.
+  livenessProbeIntervalSeconds: 30
+  livenessProbeTimeoutSeconds: 5
+  livenessFailureThreshold: 3
+  livenessMaxConcurrency: 32
   imagePullPolicy: IfNotPresent
   mission: "HistoryPubnetParallelCatchup"
   # Adds a `mission` label to worker pods, which kube-state-metrics exposes as

@@ -240,7 +240,19 @@ spec:
               value: {{ .Values.monitor.profileMaxMemory | quote }}
             - name: PROFILE_CACHE_HEADROOM
               value: {{ .Values.monitor.profileCacheHeadroom | quote }}
+            # Handed out in proportion to a range's own runtime, so the ranges
+            # that sit exposed to drift the longest get the largest share.
+            - name: PROFILE_RUNTIME_MEMORY_INSURANCE
+              value: {{ .Values.monitor.profileRuntimeMemoryInsurance | quote }}
             {{- end }}
+            - name: LIVENESS_PROBE_INTERVAL_SECONDS
+              value: {{ .Values.monitor.livenessProbeIntervalSeconds | quote }}
+            - name: LIVENESS_PROBE_TIMEOUT_SECONDS
+              value: {{ .Values.monitor.livenessProbeTimeoutSeconds | quote }}
+            - name: LIVENESS_FAILURE_THRESHOLD
+              value: {{ .Values.monitor.livenessFailureThreshold | quote }}
+            - name: LIVENESS_MAX_CONCURRENCY
+              value: {{ .Values.monitor.livenessMaxConcurrency | quote }}
             # Failed ranges are always saved; successful ones are the bulk of
             # the volume and can be turned off for a cheap run.
             - name: SAVE_SUCCESS_LOGS
