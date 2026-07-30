@@ -228,6 +228,8 @@ spec:
             {{- if .Values.monitor.profileConfigMap }}
             - name: PROFILE_PATH
               value: /profile/profile.json
+            - name: PROFILE_DEADLINE_FACTOR
+              value: {{ .Values.monitor.profileDeadlineFactor | quote }}
             - name: PROFILE_CPU_TIERS
               value: {{ .Values.monitor.profileCpuTiers | quote }}
             - name: PROFILE_MARGIN

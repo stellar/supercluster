@@ -1580,6 +1580,38 @@ def _slack_cpu(seconds):
     return tiers[-1][1]
 
 
+# Multiple of a range's own measured runtime to allow before calling it wedged.
+# The deadline exists for ONE failure mode, reproduced 2026-07-30: with an
+# unreachable archive, stellar-core retries the bucket download forever. It logs
+# "Missing HAS for ledger N: maybe stale archive", re-selects a different mirror
+# and goes again -- RETRY_A_FEW is per archive, so the budget never exhausts.
+# Zero ledgers close, no give-up wording, no exit. Nothing but this kills it.
+#
+# One number cannot bound that, because runtimes span 190x (p25 771s, max 5.9h).
+# A 3h deadline killed 941 legitimate ranges; a 12h one kills none but lets a
+# wedged 771s range burn 56x its expected runtime first. So take whichever bound
+# is tighter: the configured ceiling for the unforeseen, and a multiple of this
+# range's own profiled cost for the failure we know about. Backtested against
+# the previous run, 2x/3x/4x would each have produced ZERO false kills -- the
+# measured wall never approached even twice the profile.
+PROFILE_DEADLINE_FACTOR = float(os.getenv('PROFILE_DEADLINE_FACTOR', 0))
+
+
+def _attempt_deadline(end):
+    """Seconds this attempt may run, or None for no bound."""
+    ceiling = ATTEMPT_DEADLINE_SECONDS or None
+    if not PROFILE_DEADLINE_FACTOR:
+        return ceiling
+    prof = profile_for(end) or {}
+    secs = prof.get('seconds')
+    if not secs:
+        # Unprofiled means newer than anything measured, so there is no honest
+        # estimate to tighten with -- fall back to the configured ceiling.
+        return ceiling
+    scaled = int(secs * PROFILE_DEADLINE_FACTOR)
+    return min(scaled, ceiling) if ceiling else scaled
+
+
 def _profile_overrides(end, escalated):
     """Request overrides for this range from the profile, or {} for none.
 
@@ -1783,7 +1815,7 @@ def build_job(end, count, attempt, owner, mem=None, eph=None):
                     # MAX_TIMEOUT_ATTEMPTS, so two stalls condemn a range and
                     # fail the mission. The pod-level field starts at container
                     # start, which is the thing being bounded.
-                    active_deadline_seconds=ATTEMPT_DEADLINE_SECONDS or None,
+                    active_deadline_seconds=_attempt_deadline(end),
                     # IRSA for the S3 history mirror. Without it workers fall
                     # back to the public archive, which throttles at 1024.
                     service_account_name=WORKER_SERVICE_ACCOUNT or None,

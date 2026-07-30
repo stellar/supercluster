@@ -77,6 +77,11 @@ monitor:
   # 3267 of 3859 profiled ranges still fit at 0.5 cores. Empty disables tiering
   # and every range keeps the configured cpu request.
   # Paired with profileCpuSlowdown: the measured runtime multiplier per tier.
+  # Multiple of a range's own profiled runtime to allow before it is called
+  # wedged, taking whichever is tighter: this or attemptDeadlineSeconds. One
+  # global number cannot bound runtimes that span 190x -- 3h killed 941 real
+  # ranges, 12h lets a wedged 13-minute range burn 56x its cost. 0 disables.
+  profileDeadlineFactor: 0
   profileCpuTiers: ""
   profileMargin: 1.15
   # CPU limit for ranges the profile has measured. Above the configured
