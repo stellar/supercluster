@@ -1902,3 +1902,22 @@ def test_poll_concurrency_default_is_modest():
     n = int(_extract(r"MAX_CONCURRENT_POLLS = int\(os\.getenv\('MAX_CONCURRENT_POLLS', (\d+)\)\)",
                      COLLECTOR_SRC).group(1))
     assert 16 <= n <= 256, f"{n} in-flight polls is not a sane default"
+
+
+def test_a_pending_pod_is_not_polled_yet():
+    # Its container has not started, so the log endpoint answers 400 and the
+    # poll is wasted -- 60 of 88 failures immediately after the polling switch.
+    loop = _extract(r"while True:\n(.*?)await asyncio\.sleep\(POLL_SECONDS\)",
+                    COLLECTOR_SRC).group(1)
+    per_pod = loop[loop.index('for pod in pods:'):]
+    # From the attempt lookup to the stream open: the earlier
+    # terminal[name] = phase in ('Succeeded', 'Failed') line is not this guard.
+    guard = per_pod[per_pod.index('attempt = labels.get'):per_pod.index('_streaming[name]')]
+    assert 'phase not in POLLABLE_PHASES' in guard, \
+        "pollability is not decided by an allowlist"
+    allowed = set(re.findall(r"'(\w+)'", _extract(
+        r"POLLABLE_PHASES = \(([^)]+)\)", COLLECTOR_SRC).group(1)))
+    # Terminal phases must stay in -- that is where a pod's final output lives.
+    assert {'Running', 'Succeeded', 'Failed'} == allowed, allowed
+    # Pending has no container; Unknown means the node stopped reporting.
+    assert 'Pending' not in allowed and 'Unknown' not in allowed

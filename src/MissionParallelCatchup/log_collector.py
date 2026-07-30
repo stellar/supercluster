@@ -95,6 +95,10 @@ _poll_slots = asyncio.Semaphore(MAX_CONCURRENT_POLLS)
 # log is not coming back, and spinning on it holds a task and a poll slot for
 # the rest of the run; a couple of retries still absorb a transient 500.
 TERMINAL_POLL_ATTEMPTS = int(os.getenv('TERMINAL_POLL_ATTEMPTS', 3))
+# Phases whose log endpoint can actually answer. Pending has no container yet
+# and Unknown means the node stopped reporting; the terminal phases are kept
+# because that is where a pod's final output lives.
+POLLABLE_PHASES = ('Running', 'Succeeded', 'Failed')
 
 LABEL_RUN = 'catchup.stellar.org/run'
 LABEL_RANGE = 'catchup.stellar.org/range-end'
@@ -658,6 +662,15 @@ async def main():
                     if name in streamed:
                         continue
                     attempt = labels.get(LABEL_ATTEMPT, '1')
+                    if phase not in POLLABLE_PHASES:
+                        # Allowlist, not "skip Pending". A container that has not
+                        # started answers 400 "waiting to start" -- 60 of 88 poll
+                        # failures right after the polling switch -- and Unknown
+                        # means the node stopped reporting, so that poll cannot
+                        # succeed either. Both are picked up on the cycle they
+                        # become pollable. Succeeded and Failed stay in: a
+                        # terminal pod is where the final output lives.
+                        continue
                     _streaming[name] = (end, attempt)
                     tasks[name] = asyncio.create_task(
                         poll_pod(session, name, end, attempt,
