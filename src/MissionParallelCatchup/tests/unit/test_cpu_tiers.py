@@ -1,12 +1,14 @@
-"""CPU request as a slack budget, not a demand estimate.
+"""CPU request as a slack budget, keyed on rank rather than absolute seconds.
 
-Measured unthrottled on ssc-test 2026-07-30: replay wants ~1.0 cores at every
-ledger position (1.04 at 63.7M, 0.96 at 43.2M) and replay is 80-95% of a job,
-so demand barely varies. What varies is how much throttling a range can absorb
-before it stops finishing inside the longest job's shadow -- and that slack is
-free packing density. 3267 of 3859 profiled ranges still fit at 0.5 cores;
-tiering took the fleet from 491 nodes / 3928 vCPU (over the 2304 quota) to 291
-nodes / 2328 vCPU at the same 3.13h makespan.
+The request is not a demand estimate. Measured unthrottled 2026-07-30, replay
+wants ~1.0 cores at every ledger position (1.04 at 63.7M, 0.96 at 43.2M) and is
+80-95% of a job, so demand barely varies. What varies is how much throttling a
+range can absorb, and that slack is free packing density: bin-packed, flat 1.0
+needs 491 nodes / 3928 vCPU -- over the 2304 quota -- against 291 / 2328 tiered.
+
+Rank rather than seconds because the absolute budget is set by the single
+worst-throttled job: between two real runs it moved 1.79x while the median
+range moved 1.55x, swinging the top two tiers from 127 ranges to 65.
 """
 
 import pytest
@@ -14,15 +16,17 @@ import pytest
 import job_monitor as jm
 
 TIERS = '0.5,0.75,1.0,1.25'
-SLOW = '1.53,1.17,1.06,1.0'
-BUDGET = 10000.0         # longest range in the pretend profile, in SECONDS
+SHARES = '0.85,0.98,0.995,1.0'
+# 1000 ranges, 1s..1000s, so a range's value IS its percentile x 1000.
+PROFILE = [(i, {'seconds': float(i)}) for i in range(1, 1001)]
 
 
 @pytest.fixture
 def tiered(monkeypatch):
     monkeypatch.setattr(jm, 'PROFILE_CPU_TIERS', TIERS)
-    monkeypatch.setattr(jm, 'PROFILE_CPU_SLOWDOWN', SLOW)
-    monkeypatch.setattr(jm, '_LONGEST_RANGE_SECONDS', BUDGET)
+    monkeypatch.setattr(jm, 'PROFILE_CPU_SHARES', SHARES)
+    monkeypatch.setattr(jm, 'PROFILE', PROFILE)
+    monkeypatch.setattr(jm, '_SORTED_SECONDS', None)
 
 
 def test_tiering_is_off_unless_configured(monkeypatch):
@@ -30,41 +34,64 @@ def test_tiering_is_off_unless_configured(monkeypatch):
     assert jm._slack_cpu(500) is None
 
 
-def test_a_short_range_gets_the_cheapest_tier(tiered):
-    # 500s even at 1.53x slowdown is 765s, far inside a 10000s floor.
-    assert jm._slack_cpu(500) == '0.5'
+def test_the_cheap_bulk_gets_the_cheapest_tier(tiered):
+    assert jm._slack_cpu(1) == '0.5'
+    assert jm._slack_cpu(850) == '0.5'      # exactly the 85% cut
 
 
-def test_the_floor_setting_range_gets_the_top_tier(tiered):
-    # Nothing slower than saturation fits, so it must not be throttled at all.
-    assert jm._slack_cpu(BUDGET) == '1.25'
-
-
-def test_each_tier_is_the_cheapest_that_still_fits(tiered):
-    # 7000 * 1.53 = 10710 > floor, but 7000 * 1.17 = 8190 fits -> 0.75.
-    assert jm._slack_cpu(7000) == '0.75'
-    # 9000 * 1.17 = 10530 > floor, 9000 * 1.06 = 9540 fits -> 1.0.
-    assert jm._slack_cpu(9000) == '1.0'
+def test_each_band_maps_to_its_tier(tiered):
+    assert jm._slack_cpu(851) == '0.75'     # just past 85%
+    assert jm._slack_cpu(980) == '0.75'
+    assert jm._slack_cpu(981) == '1.0'
+    assert jm._slack_cpu(995) == '1.0'
+    assert jm._slack_cpu(1000) == '1.25'    # the longest range
 
 
 def test_an_unmeasured_range_gets_the_top_tier(tiered):
-    # Matches the dispatch order: unprofiled means newer than anything measured,
-    # so assume worst rather than assume average.
+    # Matches dispatch order: unprofiled is newer than anything measured.
     assert jm._slack_cpu(None) == '1.25'
 
 
-def test_the_floor_comes_from_the_profile_not_a_constant(monkeypatch):
-    # It has to move on its own as the chain grows.
-    monkeypatch.setattr(jm, 'PROFILE', [(100, {'seconds': 42}), (200, {'seconds': 900})])
-    monkeypatch.setattr(jm, '_LONGEST_RANGE_SECONDS', None)
-    assert jm.longest_range_seconds() == 900
+def test_a_uniformly_slower_run_assigns_the_same_tiers(monkeypatch):
+    """The property absolute-seconds keying does not have.
+
+    Every range 3x slower must not shuffle anything: rank is unchanged, so the
+    fleet needs the same shape. Under a `seconds <= longest` rule this is only
+    true if the slowdown is perfectly uniform, which measurement shows it is not.
+    """
+    monkeypatch.setattr(jm, 'PROFILE_CPU_TIERS', TIERS)
+    monkeypatch.setattr(jm, 'PROFILE_CPU_SHARES', SHARES)
+    monkeypatch.setattr(jm, 'PROFILE', [(i, {'seconds': i * 3.0}) for i in range(1, 1001)])
+    monkeypatch.setattr(jm, '_SORTED_SECONDS', None)
+    assert jm._slack_cpu(850 * 3) == '0.5'
+    assert jm._slack_cpu(981 * 3) == '1.0'
+    assert jm._slack_cpu(1000 * 3) == '1.25'
 
 
-def test_cpu_is_requested_but_never_limited(tiered, monkeypatch, cluster):
-    # A limit would cap the bucket phase, which measured up to 2.53 cores and is
-    # the one part of a job that slicing cannot remove.
-    monkeypatch.setattr(jm, 'PROFILE', [(300, {'seconds': 500, 'peakAnonBytes': 1 << 30})])
-    monkeypatch.setattr(jm, '_LONGEST_RANGE_SECONDS', BUDGET)
+def test_shares_must_line_up_with_tiers(monkeypatch):
+    # A mismatched config disables tiering rather than guessing.
+    monkeypatch.setattr(jm, 'PROFILE_CPU_TIERS', '0.5,1.0')
+    monkeypatch.setattr(jm, 'PROFILE_CPU_SHARES', '0.9')
+    assert jm._slack_cpu(100) is None
+
+
+def test_cpu_is_requested_but_never_limited(monkeypatch, cluster):
+    # A limit would cap the bucket phase, measured up to 2.53 cores and the one
+    # part of a job that slicing cannot remove.
+    prof = [(i, {'seconds': float(i)}) for i in range(1, 1001)]
+    prof[299] = (300, {'seconds': 300.0, 'peakAnonBytes': 1 << 30})   # 30th pct
+    monkeypatch.setattr(jm, 'PROFILE_CPU_TIERS', TIERS)
+    monkeypatch.setattr(jm, 'PROFILE_CPU_SHARES', SHARES)
+    monkeypatch.setattr(jm, 'PROFILE', prof)
+    monkeypatch.setattr(jm, '_SORTED_SECONDS', None)
     r = jm._resources(end=300)
     assert r.requests['cpu'] == '0.5'
     assert 'cpu' not in r.limits
+
+
+def test_a_one_range_profile_gives_that_range_the_top_tier(tiered, monkeypatch):
+    # It is simultaneously the cheapest and the longest range measured, so the
+    # 100th percentile is the honest answer -- not the cheapest tier.
+    monkeypatch.setattr(jm, 'PROFILE', [(300, {'seconds': 1.0})])
+    monkeypatch.setattr(jm, '_SORTED_SECONDS', None)
+    assert jm._slack_cpu(1.0) == '1.25'

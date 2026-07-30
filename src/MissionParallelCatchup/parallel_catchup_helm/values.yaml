@@ -78,7 +78,11 @@ monitor:
   # and every range keeps the configured cpu request.
   # Paired with profileCpuSlowdown: the measured runtime multiplier per tier.
   profileCpuTiers: ""
-  profileCpuSlowdown: "1.53,1.17,1.06,1.0"
+  # Cumulative, cheapest-first: 0.85 means the cheapest 85% of ranges take
+  # the first tier. Pins the fleet shape run to run, which an absolute
+  # seconds threshold does not -- that budget is set by the single
+  # worst-throttled job and moved 1.79x between two real runs.
+  profileCpuShares: "0.85,0.98,0.995,1.0"
   profileMargin: 1.15
   # CPU limit for ranges the profile has measured. Above the configured
   # worker limit on purpose: at a 2-core limit every range pegs 2.0, so the

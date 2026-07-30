@@ -1522,63 +1522,59 @@ def _sized(value, margin, cap):
 # CPU tiers, as request only. The request is not a demand estimate -- measured
 # unthrottled, REPLAY wants ~1.0 cores at every ledger position (1.04 at 63.7M,
 # 0.96 at 43.2M) and replay is 80-95% of a job, so demand barely varies. What
-# varies enormously is how much throttling a range can ABSORB: makespan is the
-# single longest job, so any range that still lands inside that shadow at a
-# lower request is giving away free packing density.
+# varies is how much throttling a range can ABSORB before it stops finishing
+# inside the longest job's shadow, and that slack is free packing density.
+# Measured 2026-07-30: bin-packed, flat 1.0 needs 491 nodes and 3928 vCPU --
+# over the 2304 quota -- where tiering needs 291 nodes and 2328 vCPU at the
+# same makespan.
 #
-# Measured 2026-07-30 over 3859 profiled ranges: 3267 of them finish inside the
-# floor at 0.5 cores. Flat 1.0 needs 491 nodes and 3928 vCPU -- over the 2304
-# quota; tiered needs 291 nodes and 2328 vCPU at the same 3.13h makespan.
+# Keyed on where a range falls in the profile's own runtime distribution, not
+# on its absolute seconds. Absolute keying compares against the longest range,
+# which is set by the single worst-throttled job: between two real runs that
+# budget moved 1.79x while the median range moved 1.55x, and the top two tiers
+# went from 127 ranges to 65. Shares pin the fleet size instead, which is what
+# has to fit a fixed vCPU quota. Per-range assignment agrees ~85% either way --
+# that ceiling is run-to-run noise in the measurement (Spearman 0.87), not
+# something the keying can fix.
 #
-# Slowdown per tier is the measured cpu curve relative to saturation. Empty
-# PROFILE_CPU_TIERS disables the whole thing and every range keeps REQ_CPU.
-PROFILE_CPU_TIERS = os.getenv('PROFILE_CPU_TIERS', '')   # e.g. "0.5,0.75,1.0,1.25"
-PROFILE_CPU_SLOWDOWN = os.getenv('PROFILE_CPU_SLOWDOWN', '1.53,1.17,1.06,1.0')
-# Ranges whose own runtime sets the floor. Taken from the profile rather than
-# configured: it moves on its own as the chain grows.
-_LONGEST_RANGE_SECONDS = None
+# Shares are cumulative and cheapest-first: 0.85 means the cheapest 85% of
+# ranges take the first tier. Empty PROFILE_CPU_TIERS disables tiering.
+PROFILE_CPU_TIERS = os.getenv('PROFILE_CPU_TIERS', '')          # "0.5,0.75,1.0,1.25"
+PROFILE_CPU_SHARES = os.getenv('PROFILE_CPU_SHARES', '0.85,0.98,0.995,1.0')
+_SORTED_SECONDS = None
 
 
-def _cpu_tiers():
-    if not PROFILE_CPU_TIERS.strip():
-        return []
-    tiers = [float(x) for x in PROFILE_CPU_TIERS.split(',') if x.strip()]
-    slow = [float(x) for x in PROFILE_CPU_SLOWDOWN.split(',') if x.strip()]
-    return list(zip(tiers, slow)) if len(slow) == len(tiers) else []
-
-
-def longest_range_seconds():
-    """Runtime of the longest measured range, in SECONDS.
-
-    The deadline every other range is sized against -- not to be confused with
-    the cpu ladder's own floor and ceiling (0.5 and 1.25 cores by default).
-    A range earns a cheaper tier by still finishing inside this.
-    """
-    global _LONGEST_RANGE_SECONDS
-    if _LONGEST_RANGE_SECONDS is None:
-        secs = [(r.get('seconds') or 0) for _, r in (PROFILE or [])]
-        _LONGEST_RANGE_SECONDS = max(secs) if secs else 0
-    return _LONGEST_RANGE_SECONDS
+def _profile_seconds():
+    """Every measured runtime in the profile, sorted, for percentile lookup."""
+    global _SORTED_SECONDS
+    if _SORTED_SECONDS is None:
+        _SORTED_SECONDS = sorted(r['seconds'] for _, r in (PROFILE or [])
+                                 if r.get('seconds'))
+    return _SORTED_SECONDS
 
 
 def _slack_cpu(seconds):
-    """Cheapest tier this range can run at and still finish inside the floor.
+    """Tier for a range, by its rank among all profiled runtimes.
 
     A range with no measured runtime gets the top tier, matching the dispatch
     order: unprofiled means newer than anything measured, so assume worst.
     """
-    tiers = _cpu_tiers()
+    tiers = [float(x) for x in PROFILE_CPU_TIERS.split(',') if x.strip()]
     if not tiers:
         return None
-    if not seconds:
-        return str(tiers[-1][0])
-    budget = longest_range_seconds()
-    if not budget:
+    shares = [float(x) for x in PROFILE_CPU_SHARES.split(',') if x.strip()]
+    if len(shares) != len(tiers):
         return None
-    for cores, slowdown in tiers:
-        if seconds * slowdown <= budget:
+    if not seconds:
+        return str(tiers[-1])
+    everything = _profile_seconds()
+    if not everything:
+        return None
+    pct = bisect.bisect_right(everything, seconds) / len(everything)
+    for cores, upto in zip(tiers, shares):
+        if pct <= upto:
             return str(cores)
-    return str(tiers[-1][0])
+    return str(tiers[-1])
 
 
 def _profile_overrides(end, escalated):
