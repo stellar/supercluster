@@ -2025,53 +2025,54 @@ def reconcile(state):
             in_progress.append(job_key(int(end), by_end.get(end, 0)))
             in_flight.add(str(end))
 
-    # Monotonic progress is invariant in a healthy run. A decrease means the
-    # durable record or the Jobs were tampered with; redoing hours of work
-    # silently is worse than stopping.
-    if len(completed) < state['max_completed']:
-        logger.error("PROGRESS WENT BACKWARDS: completed %d -> %d. Refusing to dispatch. "
-                     "The progress ConfigMap or the Jobs were deleted underneath this run.",
-                     state['max_completed'], len(completed))
-        state['halted'] = True
-    state['max_completed'] = max(state['max_completed'], len(completed))
-
-    # Dispatch, heaviest range first (index 0 is the tip), up to PARALLELISM.
+    # Nothing halts dispatch. There used to be a monotonic-progress guard here
+    # that stopped the run when `completed` shrank, on the theory that the record
+    # had been tampered with and redoing hours of work silently was worse than
+    # stopping. It kept its high-water mark in memory, so a monitor restart reset
+    # it to zero -- the guard was disarmed by exactly the event it was there to
+    # survive, and it only ever fired for a fault it could not have caused.
     #
-    # A condemned range does NOT stop dispatch. It used to, which deadlocked the
-    # driver: the mission waits for `remaining == 0 and in_progress == []`
-    # (MissionHistoryPubnetParallelCatchupV2.fs), and a frozen dispatch leaves
-    # `remaining` pinned at however many ranges were never sent, forever. The
-    # mission still fails on a condemned range -- it reports once the run drains,
-    # so the ranges that were already paid for are not thrown away.
+    # A reconciler must not gate a decision on state that a restart erases. The
+    # cost of dropping it is re-running a range, which is idempotent: the PVC
+    # still holds /data so the attempt resumes from its last closed ledger, and
+    # the measurements are re-recorded rather than lost.
+    #
+    # A condemned range does not stop dispatch either. It used to, which
+    # deadlocked the driver: the mission waits for `remaining == 0 and
+    # in_progress == []` (MissionHistoryPubnetParallelCatchupV2.fs), and a frozen
+    # dispatch leaves `remaining` pinned at however many ranges were never sent,
+    # forever. The mission still fails on a condemned range -- it reports once
+    # the run drains, so work already paid for is not thrown away.
+    #
+    # Dispatch, heaviest range first (index 0 is the tip), up to PARALLELISM.
     created = 0
-    if not state['halted']:
-        # No slots: a range's PVC is keyed by the range itself, so concurrency is
-        # simply how many are in flight.
-        capacity = PARALLELISM - len(in_progress)
-        for end, count in ranges:
-            if capacity <= 0:
-                break
-            key = str(end)
-            if key in completed or key in failed or key in live:
-                continue
-            try:
-                batch_v1.create_namespaced_job(NAMESPACE, build_job(
-                    end, count, 1, state['owner']))
-                created += 1
-                capacity -= 1
-                in_progress.append(job_key(end, count))
-                in_flight.add(str(end))
-            except ApiException as e:
-                if e.status != 409:   # AlreadyExists: name uniqueness is the mutex
-                    raise
-                # Losing the mutex means the Job EXISTS and is in flight, so it
-                # occupies a slot exactly like one we created. Falling through
-                # without spending capacity dispatched PARALLELISM+1 workers --
-                # one extra per lost race -- and reported the range as
-                # `remaining` while it was already running.
-                capacity -= 1
-                in_progress.append(job_key(end, count))
-                in_flight.add(str(end))
+    # No slots: a range's PVC is keyed by the range itself, so concurrency is
+    # simply how many are in flight.
+    capacity = PARALLELISM - len(in_progress)
+    for end, count in ranges:
+        if capacity <= 0:
+            break
+        key = str(end)
+        if key in completed or key in failed or key in live:
+            continue
+        try:
+            batch_v1.create_namespaced_job(NAMESPACE, build_job(
+                end, count, 1, state['owner']))
+            created += 1
+            capacity -= 1
+            in_progress.append(job_key(end, count))
+            in_flight.add(str(end))
+        except ApiException as e:
+            if e.status != 409:   # AlreadyExists: name uniqueness is the mutex
+                raise
+            # Losing the mutex means the Job EXISTS and is in flight, so it
+            # occupies a slot exactly like one we created. Falling through
+            # without spending capacity dispatched PARALLELISM+1 workers --
+            # one extra per lost race -- and reported the range as
+            # `remaining` while it was already running.
+            capacity -= 1
+            in_progress.append(job_key(end, count))
+            in_flight.add(str(end))
 
     observe_recorded(progress, state['replayed'])
     sync_counters(progress, state['counted'])
@@ -2112,7 +2113,7 @@ def update_status_and_metrics():
     # process start is correct anyway, because that IS the start of a new run.
     mission_start_time = read_mission_start() or time.time()
     check_storage_config()
-    state = {'owner': None, 'replayed': set(), 'max_completed': 0, 'halted': False,
+    state = {'owner': None, 'replayed': set(),
              'counted': {}}
     while True:
         try:

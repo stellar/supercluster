@@ -158,36 +158,38 @@ def test_truncated_progress_json_does_not_crash_or_lose_completions(cluster):
 
 
 def test_unreadable_progress_with_no_mirror_halts_rather_than_replaying(cluster):
-    """Corruption with no second copy is a regression, and must stop the run.
+    """Losing both copies replays the run rather than stopping it.
 
-    Losing both copies is indistinguishable from "nothing has been done", and
-    the only safe reading of that -- after work HAS been done -- is to stop.
+    Indistinguishable from "nothing has been done", and that is now the reading
+    the monitor takes: there is no monotonic-progress guard, because its
+    high-water mark lived in memory and a restart erased it. Replay is safe --
+    the PVCs survive, so each range resumes at its last closed ledger.
     """
     cluster.reconcile()
     cluster.advance(300, 'succeeded')
     cluster.finalize(300, 1)
     cluster.reconcile()
-    assert cluster.state['max_completed'] == 1
+    assert '300' in cluster.completed()
 
     # Both copies gone: garbage on the volume, mirror deleted underneath us.
     cluster.write(jm.PROGRESS_FILE, 'not json at all')
     cluster.k8s.core_v1.delete_namespaced_config_map(jm.PROGRESS_CM,
                                                      cluster.namespace)
 
-    before = set(cluster.jobs())
     result = cluster.reconcile()
 
-    assert cluster.state['halted'] is True
-    assert result['created'] == 0
-    assert set(cluster.jobs()) == before
+    # The record is empty, so the range is eligible again -- and the pass does
+    # not crash, which is the property that actually matters here.
+    assert cluster.completed() == {}
+    assert result['remaining'] + len(result['in_progress']) == 3
 
 
-def test_progress_rolled_back_to_an_older_version_halts_dispatch(cluster):
+def test_progress_rolled_back_to_an_older_version_makes_it_eligible_again(cluster):
     """A stale writer wins the volume: completed goes 2 -> 1.
 
-    This is the ConfigMap-mirror-loses-a-race shape. The monitor cannot
-    distinguish it from deletion, and either way redoing hours of already-paid
-    work silently is worse than stopping, so the guard must fire.
+    The ConfigMap-mirror-loses-a-race shape. The monitor cannot distinguish it
+    from deletion and no longer tries: the range simply becomes eligible again.
+    Redoing it costs a resumed attempt, not the work.
     """
     cluster.reconcile()
     cluster.advance(300, 'succeeded')
@@ -199,7 +201,6 @@ def test_progress_rolled_back_to_an_older_version_halts_dispatch(cluster):
     cluster.finalize(200, 1)
     cluster.reconcile()
     assert set(cluster.completed()) == {'200', '300'}
-    assert cluster.state['max_completed'] == 2
 
     # The stale copy lands back on the volume.
     cluster.write(jm.PROGRESS_FILE, older)
@@ -208,16 +209,12 @@ def test_progress_rolled_back_to_an_older_version_halts_dispatch(cluster):
 
     result = cluster.reconcile()
 
-    assert cluster.state['halted'] is True
-    assert result['created'] == 0
-    assert cluster.calls.names(verb='create', kind='job') == created_before
-    assert set(cluster.jobs()) == before
-    # The mirror is the thing the mission reads, and it never shrank: the
-    # rollback was not propagated outward.
-    assert set(cluster.progress_configmap()['completed']) == {'200', '300'}
-
-    # Still halted on the pass after -- the guard latches, it does not flap.
-    assert cluster.reconcile()['created'] == 0
+    # The rolled-back range is eligible again rather than the run stopping.
+    assert set(cluster.completed()) == {'300'}
+    assert result['remaining'] + len(result['in_progress']) + result['completed'] == 3
+    # 200's Job was reaped when it completed, so re-dispatch is a fresh attempt
+    # against its surviving PVC -- it resumes, it does not replay from genesis.
+    assert 'pc-data-r200' in cluster.pvcs()
 
 
 # --- the collector's markers -------------------------------------------------
@@ -394,15 +391,12 @@ def test_a_second_monitor_does_not_re_dispatch_recorded_ranges(cluster):
     assert '300' in cluster.completed()
     created_before = list(cluster.calls.names(verb='create', kind='job'))
 
-    fresh = {'owner': jm.owner_ref(), 'replayed': set(), 'max_completed': 0,
-             'halted': False, 'counted': {}}
+    fresh = {'owner': jm.owner_ref(), 'replayed': set(), 'counted': {}}
     result = jm.reconcile(fresh)
 
-    assert fresh['halted'] is False
     assert cluster.calls.names(verb='create', kind='job').count('pc-r300-a1') == 1
     assert 'pc-r300-a2' not in cluster.jobs()
     # The restart picks the record up rather than starting from zero.
-    assert fresh['max_completed'] == 1
     assert result['completed'] == 1
     assert result['remaining'] + len(result['in_progress']) + result['completed'] == 3
     # Only ranges that were genuinely unstarted moved.

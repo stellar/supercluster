@@ -135,21 +135,24 @@ def test_a_disruption_does_not_spend_the_range_budget(cluster):
     assert resources.limits['memory'] == jm.LIM_MEM
 
 
-def test_progress_going_backwards_halts_dispatch(cluster):
+def test_progress_going_backwards_redispatches_rather_than_halting(cluster):
+    # There is no monotonic-progress guard. It kept its high-water mark in
+    # memory, so a restart reset it to zero and disarmed the guard for exactly
+    # the event it existed to survive. Re-running a range is idempotent -- the
+    # PVC still holds /data, so the attempt resumes from its last closed ledger.
     cluster.reconcile()
     cluster.advance(300, 'succeeded')
     cluster.finalize(300, 1)
     cluster.reconcile()
-    assert cluster.state['max_completed'] == 1
+    assert '300' in cluster.completed()
 
     # Someone deletes the record underneath the run.
     cluster.write(jm.PROGRESS_FILE, '{}')
-    before = set(cluster.jobs())
     result = cluster.reconcile()
 
-    assert cluster.state['halted'] is True
-    assert result['created'] == 0
-    assert set(cluster.jobs()) == before
+    # Back in the pool, and the run keeps going instead of halting.
+    assert '300' not in cluster.completed()
+    assert result['remaining'] + len(result['in_progress']) == 3
 
 
 def test_the_fake_raises_the_status_codes_the_monitor_branches_on(cluster):

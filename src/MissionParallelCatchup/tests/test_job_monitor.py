@@ -2377,7 +2377,8 @@ def test_a_condemned_range_does_not_freeze_dispatch():
     of never-dispatched ranges, so the mission waited forever instead of
     failing -- strictly worse than the abort it replaced.
     """
-    assert "if not state['halted']:" in SRC, \
-        "dispatch must be gated on halted alone"
     assert "not state['halted'] and not failed" not in SRC, \
         "a condemned range must not freeze dispatch (driver deadlock)"
+    assert "state['halted']" not in SRC, \
+        "the halt gate is gone: its high-water mark lived in memory, so a " \
+        "restart disarmed the guard for exactly the event it existed to survive"

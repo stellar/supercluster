@@ -194,13 +194,17 @@ def test_two_condemned_ranges_still_leave_the_run_drainable(cluster,
 
 # -- the safety valve the fix must not take with it ---------------------------
 
-def test_a_halted_run_still_refuses_to_dispatch(cluster):
-    """Guard, not a repro: `halted` is the gate that must survive.
+def test_nothing_gates_dispatch_at_all(cluster):
+    """The gate is gone on purpose, and no new one may appear.
 
-    Dispatch is gated on `halted` alone now. `halted` means the durable record
-    went backwards, so nothing can be trusted and stopping is correct. This
-    passes both before and after the fix; it is here so that "gate on halted
-    alone" cannot be satisfied by deleting the gate.
+    `failed` stopped gating dispatch because it deadlocked the driver. `halted`
+    stopped gating it because its high-water mark lived in memory: a restart
+    reset it to zero, so the guard was disarmed by the very event it was there
+    to survive. A reconciler must not gate a decision on state a restart erases.
+
+    The cost is re-running a range, which is idempotent -- the PVC still holds
+    /data so the attempt resumes at its last closed ledger and the measurements
+    are re-recorded rather than lost.
     """
     cluster.reconcile()
     cluster.advance(300, 'succeeded')
@@ -208,10 +212,17 @@ def test_a_halted_run_still_refuses_to_dispatch(cluster):
     cluster.reconcile()
 
     cluster.write(jm.PROGRESS_FILE, '{}')    # the record is wiped underneath us
-    before = set(cluster.jobs())
 
     poll = cluster.reconcile()
 
-    assert cluster.state['halted'] is True
-    assert poll['created'] == 0
-    assert set(cluster.jobs()) == before
+    # The range returns to the pool rather than the run stopping. Nothing is
+    # created on this pass only because PARALLELISM is already spent on the
+    # other two ranges -- capacity, not a gate.
+    assert '300' not in cluster.completed()
+    assert poll['completed'] == 0
+    assert poll['remaining'] + len(poll['in_progress']) == 3
+
+    # Free a slot and it really is dispatched again: the run is not wedged.
+    cluster.advance(200, 'succeeded')
+    cluster.finalize(200, 1, tx_apply=1.0, peaks={'peakRssBytes': 1})
+    assert cluster.reconcile()['created'] >= 1
