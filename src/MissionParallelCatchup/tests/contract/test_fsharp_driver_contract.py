@@ -62,6 +62,35 @@ def test_the_driver_really_does_configure_the_chart():
     assert 'worker.stellar_core_image' in keys and 'range.ledgersPerJob' in keys
 
 
+def test_every_helm_command_uses_the_mission_namespace():
+    """KUBECONFIG chooses a cluster, but its current namespace is unrelated.
+
+    The Kubernetes client always uses context.namespaceProperty. Every Helm
+    operation must use that same namespace explicitly or install into the
+    kubeconfig default, poll sandbox through the client, and wait forever for a
+    monitor that exists in another namespace.
+    """
+    blocks = re.findall(r'RunShellCommand\s+\[\|\s*"helm"(.*?)\|\]', FS, re.S)
+    assert len(blocks) == 4, (
+        f"expected install, get-values and two cleanup commands; found {len(blocks)}")
+    for block in blocks:
+        verb = re.search(r'"(install|get|upgrade|uninstall)"', block)
+        assert verb, f"could not identify Helm command in {block!r}"
+        assert re.search(
+            r'"--namespace"\s+context\.namespaceProperty', block), (
+            f"helm {verb.group(1)} does not target the mission namespace: {block!r}")
+
+
+def test_profile_configmap_uses_the_mission_namespace():
+    """The profile mount and Helm release must be created in one namespace."""
+    block = fs_extract(
+        r'RunShellCommand\s+\[\|\s*"kubectl"(.*?)\|\]').group(1)
+    assert '"create"' in block and '"configmap"' in block
+    assert re.search(r'"--namespace"\s+context\.namespaceProperty', block), (
+        "the range-profile ConfigMap follows kubeconfig's default namespace "
+        "instead of the mission namespace")
+
+
 def test_every_value_the_driver_sets_is_one_the_chart_knows():
     """`helm --set` on an unknown path is accepted and ignored.
 

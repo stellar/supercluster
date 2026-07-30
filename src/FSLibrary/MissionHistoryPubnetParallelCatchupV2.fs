@@ -30,7 +30,8 @@ open CSLibrary
 // can point at a working copy without editing this file.
 let helmChartPath =
     match Environment.GetEnvironmentVariable("SUPERCLUSTER_CHART_PATH") with
-    | null | "" -> "/supercluster/src/MissionParallelCatchup/parallel_catchup_helm"
+    | null
+    | "" -> "/supercluster/src/MissionParallelCatchup/parallel_catchup_helm"
     | p -> p
 
 // Comment out the path below for local testing
@@ -41,7 +42,8 @@ let valuesFilePath = helmChartPath + "/values.yaml"
 
 // Keys in the <release>-catchup-progress ConfigMap. These were HTTP paths when
 // the driver polled the monitor through a Gateway; it reads the ConfigMap now.
-let jobMonitorStatusKey = "status.json"     // live queue counts
+let jobMonitorStatusKey = "status.json" // live queue counts
+
 let jobMonitorProgressKey = "progress.json" // durable per-range completion record
 let jobMonitorLoggingIntervalSecs = 30 // frequency of the monitor reconcile loop: dispatch, liveness ping, status publish
 let jobMonitorStatusCheckIntervalSecs = 60 // frequency of us querying job monitor's `/status` end point
@@ -85,6 +87,7 @@ let resolveRangeProfile (context: MissionContext) : string option =
             // Parse before shipping it: a 404 page or a truncated download would
             // otherwise reach the monitor as an unreadable mount.
             let doc = JObject.Parse(body)
+
             let count =
                 match doc.["ranges"] with
                 | :? JObject as r -> r.Count
@@ -102,15 +105,15 @@ let resolveRangeProfile (context: MissionContext) : string option =
                                    "create"
                                    "configmap"
                                    name
+                                   "--namespace"
+                                   context.namespaceProperty
                                    sprintf "--from-file=profile.json=%s" file |]
                 |> ignore
 
                 LogInfo "Range profile: %d ranges from %s -> configmap %s" count spec name
                 Some name
         with ex ->
-            LogWarn "Could not load range profile %s (%s); sizing from configured requests"
-                spec
-                ex.Message
+            LogWarn "Could not load range profile %s (%s); sizing from configured requests" spec ex.Message
             None
 
 
@@ -176,9 +179,7 @@ let installProject (context: MissionContext) =
 
     setOptions.Add(sprintf "range.latestLedgerNum=%d" endLedger)
 
-    setOptions.Add(
-        sprintf "range.ledgersPerJob=%d" context.pubnetParallelCatchupLedgersPerJob
-    )
+    setOptions.Add(sprintf "range.ledgersPerJob=%d" context.pubnetParallelCatchupLedgersPerJob)
 
     // Skip known results by default
     setOptions.Add(
@@ -229,8 +230,10 @@ let installProject (context: MissionContext) =
     // monitor clamps any profile-derived cpu request to REQ_CPU, so this is the
     // ceiling as well as the default.
     let cpuReqEffective =
-        if String.IsNullOrWhiteSpace context.pubnetParallelCatchupCpuRequest then cpuReqMili
-        else context.pubnetParallelCatchupCpuRequest
+        if String.IsNullOrWhiteSpace context.pubnetParallelCatchupCpuRequest then
+            cpuReqMili
+        else
+            context.pubnetParallelCatchupCpuRequest
 
     setOptions.Add(sprintf "worker.resources.requests.cpu=%s" cpuReqEffective)
     setOptions.Add(sprintf "worker.resources.requests.memory=%s" memReqMebi)
@@ -252,8 +255,7 @@ let installProject (context: MissionContext) =
         // over 512 KiB, so every large download killed its own stream, which
         // then reconnected and hit the same wall. Measured on ssc-test
         // 2026-07-30: it starved every retry pod of a collector stream.
-        let s3GetCommandBase =
-            sprintf "aws s3 cp --no-progress --region %s" context.s3HistoryMirrorRegionPcV2
+        let s3GetCommandBase = sprintf "aws s3 cp --no-progress --region %s" context.s3HistoryMirrorRegionPcV2
         let command = sprintf "%s s3://%s/core_live_00%d/{0} {1}" s3GetCommandBase url index
         setOptions.Add(sprintf "worker.historyGetCommandCore00%d=\"%s\"" index command)
 
@@ -318,6 +320,8 @@ let installProject (context: MissionContext) =
                        "install"
                        helmReleaseName
                        helmChartPath
+                       "--namespace"
+                       context.namespaceProperty
                        "--values"
                        valuesFilePath
                        "--set"
@@ -327,7 +331,9 @@ let installProject (context: MissionContext) =
     match RunShellCommand [| "helm"
                              "get"
                              "values"
-                             helmReleaseName |] with
+                             helmReleaseName
+                             "--namespace"
+                             context.namespaceProperty |] with
     | Some valuesOutput -> LogInfo "%s" valuesOutput
     | _ -> ()
 
@@ -343,7 +349,8 @@ let collectLogsFromPods (context: MissionContext) =
     // retry, on success before the Job's TTL -- onto its own volume, so one
     // exec here replaces the ~1024 that the StatefulSet design needed.
     let monitorPods =
-        context.kube
+        context
+            .kube
             .ListNamespacedPod(
                 context.namespaceProperty,
                 labelSelector = sprintf "app=job-monitor,release=%s" helmReleaseName
@@ -353,10 +360,7 @@ let collectLogsFromPods (context: MissionContext) =
         |> List.ofSeq
 
     match monitorPods with
-    | [] ->
-        LogWarn
-            "No job-monitor pod found for release %s; worker logs cannot be collected"
-            helmReleaseName
+    | [] -> LogWarn "No job-monitor pod found for release %s; worker logs cannot be collected" helmReleaseName
     | podName :: _ ->
         try
             LogInfo "Collecting worker logs from job-monitor pod %s to %s" podName context.destination.Path
@@ -392,8 +396,7 @@ let collectLogsFromPods (context: MissionContext) =
             else
                 LogWarn "Worker log archive is empty: %s" outputFile
 
-        with ex ->
-            LogWarn "Could not collect worker logs from %s: %s" podName ex.Message
+        with ex -> LogWarn "Could not collect worker logs from %s: %s" podName ex.Message
 
 // Cleanup on exit. `signalTriggered` indicates we're running under a hard
 // deadline (Jenkins' SoftKillWaitSeconds, ~5s by default, before SIGKILL).
@@ -435,8 +438,14 @@ let rangeProfileFields =
     // quantity). Omitting it here silently stripped it from the mission's
     // profile artifact while the monitor's own progress.json carried it --
     // measured 2026-07-30: artifact 0% peakAnonBytes, volume copy 99%.
-    [ "peakAnonBytes"; "peakRssBytes"; "peakWorkingSetBytes"; "peakCpuCores"
-      "peakEphemeralBytes"; "seconds"; "wallSeconds"; "txApply" ]
+    [ "peakAnonBytes"
+      "peakRssBytes"
+      "peakWorkingSetBytes"
+      "peakCpuCores"
+      "peakEphemeralBytes"
+      "seconds"
+      "wallSeconds"
+      "txApply" ]
 
 // A missing measurement must stay missing rather than become a null: the
 // consumer falls back to its configured default when the field is absent.
@@ -459,7 +468,8 @@ let projectRangeEntry (record: JObject) : JObject =
 // ConfigMap would silently truncate the artifact.
 let readProgressRecord (context: MissionContext) : JObject option =
     let monitorPods =
-        context.kube
+        context
+            .kube
             .ListNamespacedPod(
                 context.namespaceProperty,
                 labelSelector = sprintf "app=job-monitor,release=%s" helmReleaseName
@@ -559,11 +569,7 @@ let buildRangeProfile (completed: JObject) : JObject =
 
 
 // The profile document to write, or None when there is nothing worth writing.
-let rangeProfileDocument
-    (storageMode: string)
-    (defaultLedgersPerRange: int)
-    (completed: JObject)
-    : JObject option =
+let rangeProfileDocument (storageMode: string) (defaultLedgersPerRange: int) (completed: JObject) : JObject option =
     let ranges = buildRangeProfile completed
 
     // Slicing and storage mode both go in the name, because a profile is
@@ -579,10 +585,11 @@ let rangeProfileDocument
     let ledgersPerRange =
         let counts =
             ranges.Properties()
-            |> Seq.choose (fun p ->
-                match (p.Value :?> JObject).["count"] with
-                | null -> None
-                | v -> Some(v.Value<int>()))
+            |> Seq.choose
+                (fun p ->
+                    match (p.Value :?> JObject).["count"] with
+                    | null -> None
+                    | v -> Some(v.Value<int>()))
             |> Seq.toList
 
         match counts with
@@ -632,7 +639,8 @@ let writeRangeProfile (context: MissionContext) =
                             "%s-profile-%dledgers-%s.json"
                             helmReleaseName
                             ledgersPerRange
-                            context.pubnetParallelCatchupStorageMode)
+                            context.pubnetParallelCatchupStorageMode
+                    )
 
                 File.WriteAllText(path, doc.ToString())
                 LogInfo "Wrote range profile for %d ranges to %s" ranges.Count path
@@ -663,7 +671,9 @@ let cleanup (signalTriggered: bool) (context: MissionContext) =
 
             RunShellCommand [| "helm"
                                "uninstall"
-                               helmReleaseName |]
+                               helmReleaseName
+                               "--namespace"
+                               context.namespaceProperty |]
             |> ignore
         else
             // Normal / legitimate-failure path: pods are still alive through
@@ -680,7 +690,9 @@ let cleanup (signalTriggered: bool) (context: MissionContext) =
 
             RunShellCommand [| "helm"
                                "uninstall"
-                               helmReleaseName |]
+                               helmReleaseName
+                               "--namespace"
+                               context.namespaceProperty |]
             |> ignore
 
 let mutable cleanupContext : MissionContext option = None
