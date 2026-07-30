@@ -225,6 +225,8 @@ MAX_EPHEMERAL_ATTEMPTS = int(os.getenv('MAX_EPHEMERAL_ATTEMPTS', 4))
 EPH_BUMP_FACTOR = float(os.getenv('EPH_BUMP_FACTOR', 1.5))
 EPH_ESCALATION_CAP = os.getenv('EPH_ESCALATION_CAP', '200Gi')
 ENVIRONMENTAL_OUTCOMES = ('disrupted', 'rejected', 'unknown')
+ATTEMPT_OUTCOMES = ('disrupted', 'oom', 'ephemeral', 'timeout',
+                    'rejected', 'unknown', 'failed')
 # Verdicts only the pod can produce, and which a Job-level DeadlineExceeded must
 # never overwrite. Each names a specific mechanism -- the kubelet OOM-killed it,
 # the node was draining, the ephemeral limit blew -- and each earns a different
@@ -412,14 +414,26 @@ metric_wall_duration = Histogram('ssc_parallel_catchup_job_wall_duration_seconds
                                  'First dispatch to success, including failed attempts',
                                  buckets=metric_buckets)
 metric_mission_duration = Gauge('ssc_parallel_catchup_mission_duration_seconds', 'Number of seconds since the mission started ')
-metric_retries = Counter('ssc_parallel_catchup_job_retried_count', 'Number of jobs that were retried')
+metric_retries = Counter(
+    'ssc_parallel_catchup_job_retried_count',
+    'Retry attempts dispatched after a predecessor attempt failed')
 # Separates infrastructure churn from application failure: many evictions with
 # zero app failures is spot behaving as intended.
-metric_evictions = Counter('ssc_parallel_catchup_job_spot_eviction_count', 'Pod attempts lost to node disruption')
+metric_evictions = Counter(
+    'ssc_parallel_catchup_job_spot_eviction_count',
+    'Pod attempts classified as lost to node disruption')
 metric_pvc_released = Counter('ssc_parallel_catchup_pvc_released_count', 'PVCs deleted after their range completed')
 metric_jobs_reaped = Counter('ssc_parallel_catchup_jobs_reaped_count', 'Finished Jobs deleted after their record was durable')
-metric_oom_retries = Counter('ssc_parallel_catchup_job_oom_retried_count', 'Jobs retried with an escalated memory limit')
-metric_eph_retries = Counter('ssc_parallel_catchup_job_ephemeral_retried_count', 'Jobs retried with an escalated ephemeral-storage limit')
+metric_oom_retries = Counter(
+    'ssc_parallel_catchup_job_oom_retried_count',
+    'Retry attempts dispatched after an OOM verdict, with an escalated memory limit')
+metric_eph_retries = Counter(
+    'ssc_parallel_catchup_job_ephemeral_retried_count',
+    'Retry attempts dispatched after an ephemeral-storage verdict, with an escalated limit')
+metric_retry_reasons = Counter(
+    'ssc_parallel_catchup_job_retried_reason_count',
+    'Retry attempts dispatched, by the effective verdict of the predecessor attempt',
+    ['reason'])
 
 
 def _worker_targets(pods):
@@ -1225,7 +1239,7 @@ def _oom_count(end, attempt):
     OOM. That inflation is fleet-wide and it is what exhausts the vCPU quota.
     """
     return sum(1 for n in range(1, int(attempt) + 1)
-               if (read_outcome(end, n) or {}).get('outcome') == 'oom')
+               if _verdict_of(end, n) == 'oom')
 
 
 def verdict_path(end, attempt):
@@ -1255,11 +1269,13 @@ def save_verdict(end, attempt, outcome):
 def _verdict_of(end, attempt):
     try:
         with open(verdict_path(end, attempt)) as fh:
-            return fh.read().strip() or None
+            verdict = fh.read().strip()
     except OSError:
         # Pre-fix runs, or an attempt whose verdict write lost the volume:
         # the pod-derived classification is the next best thing.
-        return (read_outcome(end, attempt) or {}).get('outcome')
+        outcome = (read_outcome(end, attempt) or {}).get('outcome')
+        return outcome if outcome in ATTEMPT_OUTCOMES else None
+    return verdict if verdict in ATTEMPT_OUTCOMES else None
 
 
 def _cause_count(end, attempt, causes):
@@ -2144,44 +2160,144 @@ def build_job(end, count, attempt, owner, mem=None, eph=None):
 
 # --- reconcile --------------------------------------------------------------
 
-def sync_counters(progress, counted):
+_ATTEMPT_FILE = re.compile(
+    r'^range-(?P<end>\d+)-a(?P<attempt>[1-9]\d*)\.'
+    r'(?:verdict|outcome|state|metrics|done|log\.gz)$')
+
+
+def _retry_counter_totals(progress, current_attempts=()):
+    """Reconstruct retry metrics from durable records and observed attempts.
+
+    A verdict says why an attempt ended; it does not say a retry was dispatched.
+    Attempt N therefore contributes to retry totals only when attempt N+1 is
+    evidenced by progress, a persisted per-attempt file, or the current Job
+    snapshot. The latter makes a newly-created successor visible before its range
+    completes, while the durable sources rebuild the same truth after restart.
+    """
+    try:
+        names = os.listdir(LOG_DIR)
+    except OSError:
+        names = []
+
+    max_attempt = {}
+    terminal = set()
+
+    def remember(end, attempt):
+        try:
+            attempt = int(attempt)
+        except (TypeError, ValueError):
+            return
+        if attempt < 1:
+            return
+        end = str(end)
+        max_attempt[end] = max(max_attempt.get(end, 0), attempt)
+
+    if isinstance(progress, dict):
+        for bucket in ('completed', 'failed'):
+            records = progress.get(bucket)
+            if not isinstance(records, dict):
+                continue
+            for end, record in records.items():
+                if not isinstance(record, dict):
+                    continue
+                try:
+                    attempt = int(record.get('attempts', 1))
+                except (TypeError, ValueError):
+                    continue
+                if attempt < 1:
+                    continue
+                remember(end, attempt)
+                terminal.add((str(end), attempt))
+
+    for item in current_attempts:
+        try:
+            end, attempt = item
+        except (TypeError, ValueError):
+            continue
+        remember(end, attempt)
+
+    verdict_files = set()
+    outcome_files = set()
+    for name in names:
+        match = _ATTEMPT_FILE.match(name)
+        if not match:
+            continue
+        key = (match.group('end'), int(match.group('attempt')))
+        remember(*key)
+        if name.endswith('.verdict'):
+            verdict_files.add(key)
+        elif name.endswith('.outcome'):
+            outcome_files.add(key)
+
+    effective = {}
+    for end, attempt in verdict_files:
+        try:
+            with open(verdict_path(end, attempt)) as fh:
+                verdict = fh.read().strip()
+        except OSError:
+            continue
+        if verdict in ATTEMPT_OUTCOMES:
+            effective[(end, attempt)] = verdict
+
+    # .outcome predates .verdict. It is safe only for a completed attempt chain:
+    # a current collector outcome can still be superseded by reconcile's
+    # effective verdict (notably failed -> timeout). Presence of any verdict file,
+    # even a malformed one, means this is not a legacy attempt and must never
+    # fall back to the less-authoritative classification.
+    for end, attempt in outcome_files - verdict_files:
+        if attempt >= max_attempt.get(end, 0) and (end, attempt) not in terminal:
+            continue
+        try:
+            with open(outcome_path(end, attempt)) as fh:
+                record = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        outcome = record.get('outcome') if isinstance(record, dict) else None
+        if outcome in ATTEMPT_OUTCOMES:
+            effective[(end, attempt)] = outcome
+
+    retries = sum(max(0, attempt - 1) for attempt in max_attempt.values())
+    reasons = {reason: 0 for reason in ATTEMPT_OUTCOMES}
+    for (end, attempt), reason in effective.items():
+        if attempt < max_attempt.get(end, 0):
+            reasons[reason] += 1
+
+    return {
+        'retries': retries,
+        'evicted': sum(1 for verdict in effective.values() if verdict == 'disrupted'),
+        'oom': reasons['oom'],
+        'ephemeral': reasons['ephemeral'],
+        'reasons': reasons,
+    }
+
+
+def sync_counters(progress, counted, current_attempts=()):
     """Drive the counters from persisted state instead of from events.
 
     Two reasons not to .inc() as things happen:
 
     * a terminally-failed range stays the newest Job for its range, so an
       event-driven inc fires again on every reconcile until teardown
-    * the process resets to zero on restart, while the underlying record
-      (attempts in the progress ConfigMap, .outcome files on the PVC) survives
+    * the process resets to zero on restart, while verdicts and attempt state on
+      the PVC survive
 
     Computing the true total and incrementing by the delta is monotonic,
     idempotent, and self-heals after a restart: the counter starts at 0 and the
     first sync walks it up to the recorded total.
     """
-    retries = 0
-    for rec in list(progress.get('completed', {}).values()) + list(progress.get('failed', {}).values()):
-        retries += max(0, int(rec.get('attempts', 1)) - 1)
-
-    oom = evicted = 0
-    try:
-        for name in os.listdir(LOG_DIR):
-            if not name.endswith('.outcome'):
-                continue
-            try:
-                with open(os.path.join(LOG_DIR, name)) as fh:
-                    o = json.load(fh).get('outcome')
-            except (OSError, ValueError):
-                continue
-            if o == 'oom':
-                oom += 1
-            elif o == 'disrupted':
-                evicted += 1
-    except OSError:
-        pass
-
-    for key, total, metric in (('retries', retries, metric_retries),
-                               ('oom', oom, metric_oom_retries),
-                               ('evicted', evicted, metric_evictions)):
+    totals = _retry_counter_totals(progress, current_attempts)
+    for key, total, metric in (('retries', totals['retries'], metric_retries),
+                               ('oom', totals['oom'], metric_oom_retries),
+                               ('ephemeral', totals['ephemeral'], metric_eph_retries),
+                               ('evicted', totals['evicted'], metric_evictions)):
+        delta = total - counted.get(key, 0)
+        if delta > 0:
+            metric.inc(delta)
+            counted[key] = total
+    for reason in ATTEMPT_OUTCOMES:
+        metric = metric_retry_reasons.labels(reason=reason)
+        key = ('reason', reason)
+        total = totals['reasons'][reason]
         delta = total - counted.get(key, 0)
         if delta > 0:
             metric.inc(delta)
@@ -2244,9 +2360,11 @@ def reconcile(state):
     job_pods = pods_by_job()
 
     live = {}           # range-end -> (attempt, job)
+    current_attempts = set()
     for j in jobs:
         end = (j.metadata.labels or {}).get(LABEL_RANGE)
         attempt = int((j.metadata.labels or {}).get(LABEL_ATTEMPT, 1))
+        current_attempts.add((str(end), attempt))
         prev = live.get(end)
         if prev is None or attempt >= prev[0]:
             live[end] = (attempt, j)
@@ -2487,7 +2605,6 @@ def reconcile(state):
                         "memory limit %s -- RAISE THE CONFIGURED MEMORY LIMIT, this run is only "
                         "surviving by escalating at runtime", end, attempt, MAX_ATTEMPTS_PER_RANGE, retry_mem)
                 elif verdict['outcome'] == 'ephemeral':
-                    metric_eph_retries.inc()
                     logger.error(
                         "!!! DISK RETRY !!! range %s %s on attempt %d/%d; retrying with "
                         "ephemeral-storage %s -- RAISE THE CONFIGURED EPHEMERAL STORAGE, this "
@@ -2502,6 +2619,7 @@ def reconcile(state):
                 except ApiException as e:
                     if e.status != 409:
                         raise
+                current_attempts.add((str(end), attempt + 1))
                 # After the successor exists, never before. If the create above
                 # had failed with the predecessor already gone, the range would
                 # have no live Job at all and the next pass would redispatch it
@@ -2577,6 +2695,7 @@ def reconcile(state):
         try:
             batch_v1.create_namespaced_job(NAMESPACE, build_job(
                 end, count, 1, state['owner']))
+            current_attempts.add((str(end), 1))
             created += 1
             capacity -= 1
             in_progress.append(job_key(end, count))
@@ -2584,6 +2703,7 @@ def reconcile(state):
         except ApiException as e:
             if e.status != 409:   # AlreadyExists: name uniqueness is the mutex
                 raise
+            current_attempts.add((str(end), 1))
             # Losing the mutex means the Job EXISTS and is in flight, so it
             # occupies a slot exactly like one we created. Falling through
             # without spending capacity dispatched PARALLELISM+1 workers --
@@ -2594,7 +2714,7 @@ def reconcile(state):
             in_flight.add(str(end))
 
     observe_recorded(progress, state['replayed'])
-    sync_counters(progress, state['counted'])
+    sync_counters(progress, state['counted'], current_attempts)
     return {
         'total': len(ranges),
         'completed': len(completed),
