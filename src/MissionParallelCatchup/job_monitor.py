@@ -1866,8 +1866,15 @@ def reconcile(state):
     state['max_completed'] = max(state['max_completed'], len(completed))
 
     # Dispatch, heaviest range first (index 0 is the tip), up to PARALLELISM.
+    #
+    # A condemned range does NOT stop dispatch. It used to, which deadlocked the
+    # driver: the mission waits for `remaining == 0 and in_progress == []`
+    # (MissionHistoryPubnetParallelCatchupV2.fs), and a frozen dispatch leaves
+    # `remaining` pinned at however many ranges were never sent, forever. The
+    # mission still fails on a condemned range -- it reports once the run drains,
+    # so the ranges that were already paid for are not thrown away.
     created = 0
-    if not state['halted'] and not failed:
+    if not state['halted']:
         # No slots: a range's PVC is keyed by the range itself, so concurrency is
         # simply how many are in flight.
         capacity = PARALLELISM - len(in_progress)

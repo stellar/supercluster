@@ -2379,3 +2379,17 @@ def test_a_late_tx_apply_is_backfilled_like_the_peaks():
     body = _extract(r"(late = peaks_for_range\(end, attempt\).*?)(?=\n\s+_reap_if_complete)").group(1)
     assert 'tx_apply_for_range(end, attempt)' in body, "txApply is never re-read"
     assert "late['txApply'] = late_tx" in body
+
+
+def test_a_condemned_range_does_not_freeze_dispatch():
+    """A failed range must not stop the run from dispatching the rest.
+
+    The driver waits for `remaining == 0 and in_progress == []` before it
+    reports. Gating dispatch on `not failed` pinned `remaining` at the number
+    of never-dispatched ranges, so the mission waited forever instead of
+    failing -- strictly worse than the abort it replaced.
+    """
+    assert "if not state['halted']:" in SRC, \
+        "dispatch must be gated on halted alone"
+    assert "not state['halted'] and not failed" not in SRC, \
+        "a condemned range must not freeze dispatch (driver deadlock)"
