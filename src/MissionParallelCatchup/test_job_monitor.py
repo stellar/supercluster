@@ -2220,3 +2220,17 @@ def test_the_resume_script_survives_its_own_percent_formatting():
     probe = src.replace('%%', '')
     stray = [m.start() for m in re.finditer(r"%(?!\()", probe)]
     assert not stray, f"bare % in RESUME_SCRIPT near {probe[max(0,stray[0]-40):stray[0]+20]!r}"
+
+
+def test_the_lcl_probe_does_not_window_its_grep():
+    # offline-info puts ~40 lines of bucketlist hashes between "ledger": and
+    # "num", so `grep -A8 '"ledger":'` yields nothing and the probe degrades to
+    # the log fallback silently -- shipped exactly that once. Verified against
+    # 27.1.1 on ssc-test 2026-07-30: exactly one "num" key in the document, and
+    # it is the ledger's (genesis reads 1).
+    src = _extract(r"RESUME_SCRIPT = r'''(.*?)'''").group(1)
+    probe = src[src.index('offline-info'):src.index('if [ -n "$LCL" ]')]
+    assert not re.search(r"grep\s+-A\d+", probe), \
+        "a line-windowed grep cannot reach \"num\" past the bucketlist"
+    assert '"num"' in probe, "the probe no longer reads the ledger num"
+    assert 'head -1' in probe, "unbounded match could pick up a later key"

@@ -1079,9 +1079,13 @@ if [ -f "$MARK" ] && [ "$(cat "$MARK" 2>/dev/null)" = "$KEY" ]; then
   # level above INFO. Safe here specifically: core has not started, so nothing
   # holds /data/buckets/stellar-core.lock. Core logs to the console alongside
   # the JSON, hence grepping rather than parsing.
+  # One "num" key in the whole document and it is the ledger's -- verified
+  # against 27.1.1 output on ssc-test 2026-07-30. Do NOT window this with
+  # `grep -A<n> '"ledger":'`: bucketlist puts ~40 lines of hashes between the
+  # key and "num", so a small window silently yields nothing and the probe
+  # degrades to the log fallback without saying so.
   LCL=$(/usr/bin/stellar-core --conf /config/stellar-core.cfg offline-info --console 2>/dev/null \
-        | tr -d ' ' | grep -A8 '"ledger":' | grep -oE '"num":[0-9]+' | head -1 \
-        | grep -oE '[0-9]+$' || true)
+        | sed -n 's/.*"num"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -1 || true)
   if [ -n "$LCL" ]; then
     echo "RESUME PROBE: offline-info reports lcl $LCL"
   else
