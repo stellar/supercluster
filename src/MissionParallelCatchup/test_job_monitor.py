@@ -359,7 +359,9 @@ def test_metrics_writes_merge_so_a_rewrite_cannot_drop_a_measurement():
     # If a later write clobbered the file, the peak already persisted would be
     # lost -- which is exactly what happened before this merge.
     fn = _extract(r"def write_metrics\(.*?(?=\ndef )", COLLECTOR_SRC).group(0)
-    assert '{**json.load(fh), **values}' in fn, "existing fields must survive"
+    assert '{**prior, **values}' in fn, "existing fields must survive"
+    # ...and peaks additionally take the max, see the monotonicity test below.
+    assert 'PEAK_KEYS' in fn
 
 
 def test_the_ephemeral_sampler_runs_every_poll_not_once_per_stream():
@@ -2247,3 +2249,29 @@ def test_a_pod_already_finished_reports_no_duration():
     assert re.search(r"if first_pass and was_terminal:\s*\n(?:\s*#[^\n]*\n)*\s*started = None", poller), \
         "an already-finished pod still reports a fabricated duration"
     assert poller.index('was_terminal = done(pod)') < poller.index('first_pass = False')
+
+
+def test_a_peak_on_disk_is_never_lowered_by_a_later_write():
+    # Peaks are monotonic, but the merge overwrote. After a collector restart
+    # the fresh poller's high-water starts at zero, so its first flush would
+    # replace a higher pre-restart value with a lower one -- undersizing the
+    # range next run, the one direction that costs an OOM.
+    import tempfile, os as _os, json as _json
+    d = tempfile.mkdtemp()
+    ns = {'json': _json, 'os': _os,
+          'base': lambda e, a: _os.path.join(d, f"r{e}-a{a}"),
+          'PEAK_KEYS': ('peakAnonBytes', 'peakWorkingSetBytes', 'peakEphemeralBytes'),
+          'logger': type('L', (), {'info': lambda s, *a: None,
+                                   'warning': lambda s, *a: None})()}
+    exec(_extract(r"^(def write_metrics\(.*?)(?=\ndef )", COLLECTOR_SRC).group(1), ns)
+    w = ns['write_metrics']
+    w(1, 1, {'peakAnonBytes': 3000, 'txApplySeconds': 12.0})
+    w(1, 1, {'peakAnonBytes': 900})                    # restarted poller, lower
+    got = _json.load(open(ns['base'](1, 1) + '.metrics'))
+    assert got['peakAnonBytes'] == 3000, f"peak was lowered to {got['peakAnonBytes']}"
+    assert got['txApplySeconds'] == 12.0, "an unrelated field was dropped"
+    w(1, 1, {'peakAnonBytes': 5000})                   # a genuinely higher peak
+    assert _json.load(open(ns['base'](1, 1) + '.metrics'))['peakAnonBytes'] == 5000
+    # non-peak fields still take the newest value
+    w(1, 1, {'txApplySeconds': 99.0})
+    assert _json.load(open(ns['base'](1, 1) + '.metrics'))['txApplySeconds'] == 99.0

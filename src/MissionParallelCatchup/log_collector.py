@@ -97,6 +97,9 @@ _poll_slots = asyncio.Semaphore(MAX_CONCURRENT_POLLS)
 # That window is the only thing standing between a spot reclaim and the last
 # lines the container wrote.
 _wake = {}
+# Fields that only ever grow. write_metrics maxes these instead of overwriting,
+# so a restarted poller starting its high-water at zero cannot lower one.
+PEAK_KEYS = ('peakAnonBytes', 'peakWorkingSetBytes', 'peakEphemeralBytes')
 # Failed polls tolerated after a pod goes terminal before we stop asking. Its
 # log is not coming back, and spinning on it holds a task and a poll slot for
 # the rest of the run; a couple of retries still absorb a transient 500.
@@ -239,14 +242,24 @@ def write_metrics(end, attempt, values):
     """
     path = base(end, attempt) + '.metrics'
     tmp = path + '.tmp'
-    # Merge: a measurement already on disk must survive a later write that
-    # lacks it. The ephemeral peak is held in memory, so a collector restart
-    # would otherwise let a rewrite drop it.
+    # Merge, and never let a peak go backwards. A measurement already on disk
+    # must survive a later write that lacks it -- the peaks are held in memory,
+    # so a collector restart would otherwise drop them. But a plain overwrite is
+    # wrong for a monotonic quantity: after a restart the fresh poller starts
+    # its high-water at zero, and its first flush would replace the higher
+    # pre-restart value with a lower one. Lowering a peak undersizes the range
+    # next run, which is the one direction that costs an OOM.
     try:
         with open(path) as fh:
-            values = {**json.load(fh), **values}
+            prior = json.load(fh)
     except (OSError, ValueError):
-        pass
+        prior = {}
+    merged = {**prior, **values}
+    for k in PEAK_KEYS:
+        a, b = prior.get(k), values.get(k)
+        if a is not None and b is not None:
+            merged[k] = max(a, b)
+    values = merged
     try:
         with open(tmp, 'w') as fh:
             json.dump(values, fh)
