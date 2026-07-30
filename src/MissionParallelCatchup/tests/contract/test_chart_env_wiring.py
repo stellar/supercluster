@@ -60,6 +60,19 @@ def test_every_env_the_collector_reads_is_set_on_the_collector_container():
     assert not missing, f"the collector reads {missing} but the chart never sets them"
 
 
+def test_liveness_sampler_settings_reach_only_the_monitor():
+    monitor = art.env_of(art.containers()[art.MONITOR_CONTAINER])
+    collector = art.env_of(art.containers()[art.COLLECTOR_CONTAINER])
+    expected = {
+        'LIVENESS_PROBE_INTERVAL_SECONDS': '30',
+        'LIVENESS_PROBE_TIMEOUT_SECONDS': '5',
+        'LIVENESS_FAILURE_THRESHOLD': '3',
+        'LIVENESS_MAX_CONCURRENCY': '32',
+    }
+    assert {name: monitor.get(name) for name in expected} == expected
+    assert not set(expected) & set(collector)
+
+
 def test_the_node_targeting_the_mission_sends_reaches_the_monitor():
     """A label/taint the mission passes must arrive as env, not just as YAML.
 

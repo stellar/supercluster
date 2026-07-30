@@ -157,6 +157,14 @@ spec:
               value: {{ .Values.monitor.emitMissionLabel | quote }}
             - name: LOGGING_INTERVAL_SECONDS
               value: {{ .Values.monitor.loggingIntervalSeconds | quote }}
+            - name: LIVENESS_PROBE_INTERVAL_SECONDS
+              value: {{ .Values.monitor.livenessProbeIntervalSeconds | quote }}
+            - name: LIVENESS_PROBE_TIMEOUT_SECONDS
+              value: {{ .Values.monitor.livenessProbeTimeoutSeconds | quote }}
+            - name: LIVENESS_FAILURE_THRESHOLD
+              value: {{ .Values.monitor.livenessFailureThreshold | quote }}
+            - name: LIVENESS_MAX_CONCURRENCY
+              value: {{ .Values.monitor.livenessMaxConcurrency | quote }}
             - name: RANGE_GENERATOR
               value: {{ .Values.range.generator | quote }}
             - name: STARTING_LEDGER

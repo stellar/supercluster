@@ -20,6 +20,7 @@ import bisect
 import json
 import logging
 import os
+import queue
 import re
 import sys
 import tempfile
@@ -33,6 +34,7 @@ from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 from prometheus_client import (CONTENT_TYPE_LATEST, REGISTRY, Counter, Gauge,
                                Histogram, generate_latest)
+import requests
 
 # Histogram buckets
 #                  5m  15m   30m    1h  1.5h    2h
@@ -248,6 +250,33 @@ RECONCILE_INTERVAL_SECONDS = int(os.getenv('LOGGING_INTERVAL_SECONDS', 10))
 # stops all dispatch, so restart the container rather than run half-alive.
 RECONCILE_STALE_SECONDS = float(os.getenv('WATCH_STALE_SECONDS', 600))
 
+# Worker responsiveness is cosmetic and sampled independently from reconcile.
+# Thirty seconds and three failures restore the old ~90-second down threshold,
+# while a five-second request budget gives a busy admin endpoint substantially
+# more room than the old one-shot two-second probe.
+LIVENESS_PROBE_INTERVAL_SECONDS = os.getenv('LIVENESS_PROBE_INTERVAL_SECONDS', '30')
+LIVENESS_PROBE_TIMEOUT_SECONDS = os.getenv('LIVENESS_PROBE_TIMEOUT_SECONDS', '5')
+LIVENESS_FAILURE_THRESHOLD = os.getenv('LIVENESS_FAILURE_THRESHOLD', '3')
+LIVENESS_MAX_CONCURRENCY = os.getenv('LIVENESS_MAX_CONCURRENCY', '32')
+try:
+    LIVENESS_PROBE_INTERVAL_SECONDS = float(LIVENESS_PROBE_INTERVAL_SECONDS)
+    LIVENESS_PROBE_TIMEOUT_SECONDS = float(LIVENESS_PROBE_TIMEOUT_SECONDS)
+    LIVENESS_FAILURE_THRESHOLD = int(LIVENESS_FAILURE_THRESHOLD)
+    LIVENESS_MAX_CONCURRENCY = int(LIVENESS_MAX_CONCURRENCY)
+except ValueError as e:
+    raise ValueError(
+        "LIVENESS_PROBE_INTERVAL_SECONDS and LIVENESS_PROBE_TIMEOUT_SECONDS "
+        "must be numbers; LIVENESS_FAILURE_THRESHOLD and "
+        "LIVENESS_MAX_CONCURRENCY must be integers") from e
+
+for _name, _value in (
+        ('LIVENESS_PROBE_INTERVAL_SECONDS', LIVENESS_PROBE_INTERVAL_SECONDS),
+        ('LIVENESS_PROBE_TIMEOUT_SECONDS', LIVENESS_PROBE_TIMEOUT_SECONDS),
+        ('LIVENESS_FAILURE_THRESHOLD', LIVENESS_FAILURE_THRESHOLD),
+        ('LIVENESS_MAX_CONCURRENCY', LIVENESS_MAX_CONCURRENCY)):
+    if _value <= 0:
+        raise ValueError(f"{_name} must be greater than zero, got {_value!r}")
+
 # Shared with the log-collector sidecar, which owns writes here: it streams each
 # worker's log and records the .outcome verdict while the pod still exists.
 LOG_DIR = os.getenv('LOG_DIR', '/logs')
@@ -387,6 +416,290 @@ metric_pvc_released = Counter('ssc_parallel_catchup_pvc_released_count', 'PVCs d
 metric_jobs_reaped = Counter('ssc_parallel_catchup_jobs_reaped_count', 'Finished Jobs deleted after their record was durable')
 metric_oom_retries = Counter('ssc_parallel_catchup_job_oom_retried_count', 'Jobs retried with an escalated memory limit')
 metric_eph_retries = Counter('ssc_parallel_catchup_job_ephemeral_retried_count', 'Jobs retried with an escalated ephemeral-storage limit')
+
+
+def _worker_targets(pods):
+    """Current Running-with-IP pods, keyed by pod identity.
+
+    A UID change is a replacement even when the Job name or IP is reused. Tests
+    and unusually incomplete API objects may lack a UID, where the pod name is
+    still unique for its lifetime.
+    """
+    out = {}
+    for pod in pods:
+        pod_status = getattr(pod, 'status', None)
+        metadata = getattr(pod, 'metadata', None)
+        ip = getattr(pod_status, 'pod_ip', None)
+        if getattr(pod_status, 'phase', None) != 'Running' or not ip or metadata is None:
+            continue
+        name = getattr(metadata, 'name', None)
+        identity = getattr(metadata, 'uid', None) or name
+        if identity and name:
+            out[str(identity)] = (str(name), str(ip))
+    return out
+
+
+class WorkerLivenessSampler:
+    """Bounded, round-robin stellar-core `/info` sampler.
+
+    Candidate membership comes from the authoritative Kubernetes snapshot, but
+    all network I/O happens on this sampler's fixed worker pool. At most
+    `max_concurrency` requests run and the same number wait in the bounded queue;
+    there is no future, task, session, or thread per pod.
+
+    State is deliberately conservative:
+      * new or replaced pod: unknown
+      * any HTTP response from /info: up
+      * fewer than `failure_threshold` consecutive exceptions/timeouts: unknown
+      * `failure_threshold` consecutive failures: down
+      * any later response: up immediately
+
+    HTTP error statuses still prove the admin endpoint responded. A busy core
+    returning 5xx is responsive; only failure to receive an HTTP response counts
+    toward down.
+    """
+
+    def __init__(self, interval=LIVENESS_PROBE_INTERVAL_SECONDS,
+                 timeout=LIVENESS_PROBE_TIMEOUT_SECONDS,
+                 failure_threshold=LIVENESS_FAILURE_THRESHOLD,
+                 max_concurrency=LIVENESS_MAX_CONCURRENCY, probe=None):
+        if interval <= 0 or timeout <= 0 or failure_threshold <= 0 or max_concurrency <= 0:
+            raise ValueError("liveness sampler values must all be greater than zero")
+        self.interval = float(interval)
+        self.timeout = float(timeout)
+        self.failure_threshold = int(failure_threshold)
+        self.max_concurrency = int(max_concurrency)
+        self._probe = probe
+        self._records = {}
+        self._generation = 0
+        self._tasks = queue.Queue(maxsize=self.max_concurrency)
+        self._stop = threading.Event()
+        self._condition = threading.Condition()
+        self._scheduler = None
+        self._workers = []
+        self._started = False
+        self._failed = None
+        self._active = 0
+        self._failure_count = 0
+        self._last_failure_log = 0.0
+
+    def start(self):
+        with self._condition:
+            if self._started:
+                return
+            self._started = True
+            self._workers = [
+                threading.Thread(target=self._worker_main,
+                                 name=f"worker-liveness-{i}", daemon=True)
+                for i in range(self.max_concurrency)
+            ]
+            self._scheduler = threading.Thread(
+                target=self._scheduler_main, name="worker-liveness-scheduler",
+                daemon=True)
+            for worker in self._workers:
+                worker.start()
+            self._scheduler.start()
+
+    def close(self):
+        self._stop.set()
+        with self._condition:
+            self._condition.notify_all()
+        threads = ([self._scheduler] if self._scheduler is not None else []) + self._workers
+        deadline = time.monotonic() + self.timeout + 1.0
+        for thread in threads:
+            remaining = max(0.0, deadline - time.monotonic())
+            if thread is not None and thread is not threading.current_thread():
+                thread.join(remaining)
+
+    def replace_candidates(self, targets, now=None):
+        """Atomically replace membership without waiting for any probe."""
+        now = time.monotonic() if now is None else float(now)
+        targets = dict(targets)
+        with self._condition:
+            old = self._records
+            records = {}
+            new_identities = [
+                identity for identity in sorted(targets)
+                if identity not in old or old[identity]['target'] != targets[identity]
+            ]
+            offsets = {
+                identity: self.interval * index / max(1, len(new_identities))
+                for index, identity in enumerate(new_identities)
+            }
+            for identity, target in targets.items():
+                previous = old.get(identity)
+                if previous is not None and previous['target'] == target:
+                    records[identity] = previous
+                    continue
+                self._generation += 1
+                records[identity] = {
+                    'target': target,
+                    'generation': self._generation,
+                    'status': 'unknown',
+                    'failures': 0,
+                    'queued': False,
+                    'next_due': now + offsets[identity],
+                }
+            self._records = records
+            self._condition.notify_all()
+
+    def counts(self, expected_count=None):
+        with self._condition:
+            count = len(self._records) if expected_count is None else int(expected_count)
+            healthy = self._started and self._failed is None
+            if healthy:
+                healthy = (self._scheduler is not None and self._scheduler.is_alive()
+                           and all(worker.is_alive() for worker in self._workers))
+            if not healthy or count != len(self._records):
+                return {'up': 0, 'down': 0, 'unknown': count}
+            result = {'up': 0, 'down': 0, 'unknown': 0}
+            for record in self._records.values():
+                result[record['status']] += 1
+            return result
+
+    def stats(self):
+        """Small observability hook used by the scale contract test."""
+        with self._condition:
+            live_threads = sum(
+                1 for thread in ([self._scheduler] + self._workers)
+                if thread is not None and thread.is_alive())
+            return {
+                'records': len(self._records),
+                'active': self._active,
+                'queued': self._tasks.qsize(),
+                'outstanding': self._active + self._tasks.qsize(),
+                'threads': live_threads,
+                'failed': self._failed,
+            }
+
+    def _scheduler_main(self):
+        try:
+            self._schedule()
+        except Exception as e:
+            self._mark_failed("scheduler", e)
+
+    def _schedule(self):
+        while not self._stop.is_set():
+            with self._condition:
+                now = time.monotonic()
+                capacity = self.max_concurrency - self._tasks.qsize()
+                due = sorted(
+                    ((record['next_due'], identity, record)
+                     for identity, record in self._records.items()
+                     if not record['queued'] and record['next_due'] <= now),
+                    key=lambda item: (item[0], item[1]))
+                for _, identity, record in due[:max(0, capacity)]:
+                    task = (identity, record['generation'], record['target'])
+                    try:
+                        self._tasks.put_nowait(task)
+                    except queue.Full:
+                        break
+                    record['queued'] = True
+
+                waiting = [
+                    record['next_due'] for record in self._records.values()
+                    if not record['queued']
+                ]
+                delay = max(0.01, min(1.0, min(waiting) - now)) if waiting else 1.0
+                self._condition.wait(timeout=delay)
+
+    def _worker_main(self):
+        session = None
+        try:
+            if self._probe is None:
+                session = requests.Session()
+                adapter = requests.adapters.HTTPAdapter(
+                    pool_connections=4, pool_maxsize=1, max_retries=0)
+                session.mount('http://', adapter)
+            while not self._stop.is_set():
+                try:
+                    task = self._tasks.get(timeout=0.2)
+                except queue.Empty:
+                    continue
+                with self._condition:
+                    self._active += 1
+                identity, generation, target = task
+                success = False
+                error = None
+                try:
+                    _, ip = target
+                    if self._probe is None:
+                        host = f"[{ip}]" if ':' in ip else ip
+                        with session.get(f"http://{host}:11626/info",
+                                         timeout=self.timeout):
+                            pass
+                    else:
+                        self._probe(ip, self.timeout)
+                    success = True
+                except Exception as e:
+                    error = e
+                finally:
+                    self._record_result(identity, generation, target, success, error)
+                    self._tasks.task_done()
+                    with self._condition:
+                        self._active -= 1
+                        self._condition.notify_all()
+        except Exception as e:
+            self._mark_failed("probe worker", e)
+        finally:
+            if session is not None:
+                session.close()
+
+    def _record_result(self, identity, generation, target, success, error=None,
+                       now=None):
+        now = time.monotonic() if now is None else float(now)
+        log_failure = None
+        with self._condition:
+            record = self._records.get(identity)
+            if (record is None or record['generation'] != generation
+                    or record['target'] != target):
+                return
+            record['queued'] = False
+            record['next_due'] = now + self.interval
+            if success:
+                record['failures'] = 0
+                record['status'] = 'up'
+            else:
+                record['failures'] += 1
+                record['status'] = (
+                    'down' if record['failures'] >= self.failure_threshold
+                    else 'unknown')
+                self._failure_count += 1
+                if now - self._last_failure_log >= 60.0:
+                    log_failure = self._failure_count
+                    self._failure_count = 0
+                    self._last_failure_log = now
+            self._condition.notify_all()
+        if log_failure is not None:
+            logger.warning(
+                "stellar-core /info liveness probes are failing; %d failure(s) "
+                "across the fleet since the previous warning (latest: %s: %s)",
+                log_failure, target[0], error)
+
+    def _mark_failed(self, component, error):
+        with self._condition:
+            if self._failed is not None:
+                return
+            self._failed = f"{component}: {error}"
+            self._condition.notify_all()
+        logger.exception(
+            "worker liveness %s failed; all current workers will be reported "
+            "unknown and reconcile will continue", component)
+
+
+worker_liveness_sampler = WorkerLivenessSampler()
+
+
+def publish_worker_liveness(targets, sampler=None):
+    """Hand a pod snapshot to the sampler and return its current three counts.
+
+    This path copies O(current workers) state under a short lock but never makes
+    a request or waits for an in-flight request. Keeping it separate makes the
+    non-blocking boundary directly testable.
+    """
+    sampler = sampler or worker_liveness_sampler
+    sampler.replace_candidates(targets)
+    return sampler.counts(len(targets))
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -2266,6 +2579,9 @@ def reconcile(state):
                          if str(end) not in completed
                          and str(end) not in failed
                          and str(end) not in in_flight),
+        # A Kubernetes snapshot only. The caller hands this to the independent
+        # liveness sampler after every dispatch/progress decision is complete.
+        '_worker_targets': _worker_targets(job_pods.values()),
     }
 
 
@@ -2305,21 +2621,21 @@ def update_status_and_metrics():
 
             r = reconcile(state)
 
-            # Worker liveness, for the Grafana series only -- nothing in the
-            # driver reads it. A worker is a Job here, so a Running pod IS a
-            # live worker and its liveness is the Job's status; the count comes
-            # off the pod list the apiserver already has cached instead of one
-            # HTTP GET per worker every cycle.
+            # Grafana-only worker responsiveness. Candidate discovery reused the
+            # authoritative pod snapshot, but the handoff below never performs
+            # network I/O: /info probes run on a fixed, bounded sampler pool.
             refresh_start = time.time()
-            workers_up = sum(
-                1 for p in core_v1.list_namespaced_pod(
-                    NAMESPACE, label_selector=f"{LABEL_RUN}={RUN_NAME}",
-                    field_selector='status.phase=Running',
-                    # Served from the apiserver watch cache. Only safe here:
-                    # a stale liveness sample is cosmetic, whereas stale
-                    # dispatch state would re-run a range.
-                    resource_version='0').items
-                if p.status.pod_ip)
+            targets = r.pop('_worker_targets')
+            try:
+                worker_counts = publish_worker_liveness(targets)
+            except Exception as e:
+                worker_counts = {'up': 0, 'down': 0, 'unknown': len(targets)}
+                now = time.time()
+                if now - state.get('last_liveness_error_log', 0) >= 60:
+                    state['last_liveness_error_log'] = now
+                    logger.exception(
+                        "worker liveness publication failed (%s); reporting all "
+                        "current candidates unknown and continuing reconcile", e)
             workers_refresh_duration = time.time() - refresh_start
 
             mission_duration = time.time() - mission_start_time
@@ -2339,12 +2655,9 @@ def update_status_and_metrics():
             metric_catchup_queues.labels(queue="succeeded").set(r['completed'])
             metric_catchup_queues.labels(queue="failed").set(len(r['failed_ranges']))
             metric_catchup_queues.labels(queue="in_progress").set(len(r['in_progress']))
-            metric_workers.labels(status="up").set(workers_up)
-            # Held at 0 rather than dropped: the series is Grafana-facing, and a
-            # label that stops being set goes stale on the dashboard instead of
-            # reading zero. Nothing can report "down" now that liveness is the
-            # pod's phase -- a worker that is not up is simply not listed.
-            metric_workers.labels(status="down").set(0)
+            metric_workers.labels(status="up").set(worker_counts['up'])
+            metric_workers.labels(status="down").set(worker_counts['down'])
+            metric_workers.labels(status="unknown").set(worker_counts['unknown'])
             metric_refresh_duration.set(workers_refresh_duration)
             metric_mission_duration.set(mission_duration)
             logger.info("Status: %s", json.dumps(status))
@@ -2372,6 +2685,7 @@ def run(server_class=HTTPServer, handler_class=RequestHandler):
 if __name__ == '__main__':
     # Before any dispatch: the first Job built must already be sized from it.
     PROFILE = load_profile()
+    worker_liveness_sampler.start()
 
     # Not a logging thread despite the historical name -- this is the reconcile
     # loop: dispatch, progress record, metrics, status. Log capture and pod
@@ -2380,6 +2694,7 @@ if __name__ == '__main__':
     reconcile_thread.daemon = True
     reconcile_thread.start()
 
-    # Separate thread: a blocking watch must not sit behind dispatch and the
-    # liveness sweep, which is the whole point of it.
-    run()
+    try:
+        run()
+    finally:
+        worker_liveness_sampler.close()

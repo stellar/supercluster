@@ -106,6 +106,17 @@ monitor:
   # once the panels aggregate.
   emitMissionLabel: false
   loggingIntervalSeconds: 10
+  # Cosmetic stellar-core /info sampling. A fixed pool probes each Running pod
+  # about once per interval; three consecutive failures preserve the old
+  # approximately 90-second down threshold without coupling network I/O to the
+  # 10-second reconcile loop. Unprobed/intermediate workers report unknown.
+  livenessProbeIntervalSeconds: 30
+  livenessProbeTimeoutSeconds: 5
+  livenessFailureThreshold: 3
+  # At 2096 workers and a 30s interval this is ~70 requests/s. Thirty-two slots
+  # cover normal sub-second local responses while bounding slow requests,
+  # queued work, sessions and threads independently of fleet size.
+  livenessMaxConcurrency: 32
   maxAttempts: 5
   # Hangs are usually persistent (bad archive host, absent checkpoint), so they
   # get a lower cap than evictions -- otherwise a wedged range costs
