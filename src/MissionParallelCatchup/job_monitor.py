@@ -422,6 +422,9 @@ metric_retries = Counter(
 metric_evictions = Counter(
     'ssc_parallel_catchup_job_spot_eviction_count',
     'Pod attempts classified as lost to node disruption')
+metric_spot_disruption_retried = Counter(
+    'ssc_parallel_catchup_job_spot_disruption_retried_count',
+    'Unique ledger ranges that dispatched a successor after a node disruption verdict')
 metric_pvc_released = Counter('ssc_parallel_catchup_pvc_released_count', 'PVCs deleted after their range completed')
 metric_jobs_reaped = Counter('ssc_parallel_catchup_jobs_reaped_count', 'Finished Jobs deleted after their record was durable')
 metric_oom_retries = Counter(
@@ -2261,10 +2264,15 @@ def _retry_counter_totals(progress, current_attempts=()):
     for (end, attempt), reason in effective.items():
         if attempt < max_attempt.get(end, 0):
             reasons[reason] += 1
+    disruption_retried_ranges = {
+        end for (end, attempt), reason in effective.items()
+        if reason == 'disrupted' and attempt < max_attempt.get(end, 0)
+    }
 
     return {
         'retries': retries,
         'evicted': sum(1 for verdict in effective.values() if verdict == 'disrupted'),
+        'spot_disruption_retried': len(disruption_retried_ranges),
         'oom': reasons['oom'],
         'ephemeral': reasons['ephemeral'],
         'reasons': reasons,
@@ -2289,7 +2297,10 @@ def sync_counters(progress, counted, current_attempts=()):
     for key, total, metric in (('retries', totals['retries'], metric_retries),
                                ('oom', totals['oom'], metric_oom_retries),
                                ('ephemeral', totals['ephemeral'], metric_eph_retries),
-                               ('evicted', totals['evicted'], metric_evictions)):
+                               ('evicted', totals['evicted'], metric_evictions),
+                               ('spot_disruption_retried',
+                                totals['spot_disruption_retried'],
+                                metric_spot_disruption_retried)):
         delta = total - counted.get(key, 0)
         if delta > 0:
             metric.inc(delta)
