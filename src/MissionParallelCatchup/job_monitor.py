@@ -1519,6 +1519,63 @@ def _sized(value, margin, cap):
     return _bytes_to_quantity(min(want, _quantity_bytes(cap)))
 
 
+# CPU tiers, as request only. The request is not a demand estimate -- measured
+# unthrottled, REPLAY wants ~1.0 cores at every ledger position (1.04 at 63.7M,
+# 0.96 at 43.2M) and replay is 80-95% of a job, so demand barely varies. What
+# varies enormously is how much throttling a range can ABSORB: makespan is the
+# single longest job, so any range that still lands inside that shadow at a
+# lower request is giving away free packing density.
+#
+# Measured 2026-07-30 over 3859 profiled ranges: 3267 of them finish inside the
+# floor at 0.5 cores. Flat 1.0 needs 491 nodes and 3928 vCPU -- over the 2304
+# quota; tiered needs 291 nodes and 2328 vCPU at the same 3.13h makespan.
+#
+# Slowdown per tier is the measured cpu curve relative to saturation. Empty
+# PROFILE_CPU_TIERS disables the whole thing and every range keeps REQ_CPU.
+PROFILE_CPU_TIERS = os.getenv('PROFILE_CPU_TIERS', '')   # e.g. "0.5,0.75,1.0,1.25"
+PROFILE_CPU_SLOWDOWN = os.getenv('PROFILE_CPU_SLOWDOWN', '1.53,1.17,1.06,1.0')
+# Ranges whose own runtime sets the floor. Taken from the profile rather than
+# configured: it moves on its own as the chain grows.
+_PROFILE_FLOOR = None
+
+
+def _cpu_tiers():
+    if not PROFILE_CPU_TIERS.strip():
+        return []
+    tiers = [float(x) for x in PROFILE_CPU_TIERS.split(',') if x.strip()]
+    slow = [float(x) for x in PROFILE_CPU_SLOWDOWN.split(',') if x.strip()]
+    return list(zip(tiers, slow)) if len(slow) == len(tiers) else []
+
+
+def profile_floor():
+    """Longest measured range: the makespan every other range must fit inside."""
+    global _PROFILE_FLOOR
+    if _PROFILE_FLOOR is None:
+        secs = [(r.get('seconds') or 0) for _, r in (PROFILE or [])]
+        _PROFILE_FLOOR = max(secs) if secs else 0
+    return _PROFILE_FLOOR
+
+
+def _slack_cpu(seconds):
+    """Cheapest tier this range can run at and still finish inside the floor.
+
+    A range with no measured runtime gets the top tier, matching the dispatch
+    order: unprofiled means newer than anything measured, so assume worst.
+    """
+    tiers = _cpu_tiers()
+    if not tiers:
+        return None
+    if not seconds:
+        return str(tiers[-1][0])
+    floor = profile_floor()
+    if not floor:
+        return None
+    for cores, slowdown in tiers:
+        if seconds * slowdown <= floor:
+            return str(cores)
+    return str(tiers[-1][0])
+
+
 def _profile_overrides(end, escalated):
     """Request overrides for this range from the profile, or {} for none.
 
@@ -1542,6 +1599,9 @@ def _profile_overrides(end, escalated):
     disk = prof.get('peakEphemeralBytes')
     if disk and LIM_EPHEMERAL:
         out['ephemeral-storage'] = _sized(disk, PROFILE_MARGIN, LIM_EPHEMERAL)
+    cpu = _slack_cpu(prof.get('seconds'))
+    if cpu:
+        out['cpu'] = cpu
     return out
 
 
@@ -1596,7 +1656,9 @@ def _resources(mem=None, eph=None, end=None):
         # leaves the pod Burstable rather than Guaranteed -- Kubernetes needs
         # all three to match -- which is the intended trade.
         for key, value in overrides.items():
-            req[key] = lim[key] = value
+            req[key] = value
+            if key != 'cpu':
+                lim[key] = value
     # Unmeasured range: the configured defaults, requests below limits, exactly
     # as before -- a range with no profile entry must behave as if there were no
     # profile at all.

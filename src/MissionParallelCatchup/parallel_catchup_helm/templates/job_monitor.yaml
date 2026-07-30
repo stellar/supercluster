@@ -228,6 +228,10 @@ spec:
             {{- if .Values.monitor.profileConfigMap }}
             - name: PROFILE_PATH
               value: /profile/profile.json
+            - name: PROFILE_CPU_TIERS
+              value: {{ .Values.monitor.profileCpuTiers | quote }}
+            - name: PROFILE_CPU_SLOWDOWN
+              value: {{ .Values.monitor.profileCpuSlowdown | quote }}
             - name: PROFILE_MARGIN
               value: {{ .Values.monitor.profileMargin | quote }}
             - name: PROFILE_CPU_LIMIT

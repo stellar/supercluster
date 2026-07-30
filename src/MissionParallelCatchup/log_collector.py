@@ -380,6 +380,30 @@ _streaming = {}
 
 
 
+def _flush_peak(name, axis, field, value):
+    """Persist a high-water so a sidecar restart cannot lose it.
+
+    Every key in PEAK_KEYS needs this, not just the ones we remembered. The
+    peaks live in module dicts, so a restarted collector starts from zero and
+    re-accumulates only from whatever the pod is using at that moment. anon had
+    it, ephemeral got it when a restart was shown to lose the high-water, and
+    peakWorkingSetBytes was missed -- which is how a completed range came back
+    with a working set BELOW its own anon, which cannot happen in one sample and
+    is trivial across a restart. Measured on the 2026-07-30 run: 136 of 3095
+    ranges, 55 of them single-attempt so no retry chain could explain them.
+
+    write_metrics max-merges on PEAK_KEYS, so re-flushing a lower value later is
+    harmless; the ratio only keeps this to a handful of writes per pod.
+    """
+    key = name + '/' + axis
+    if value < _peak_flushed.get(key, 0) * PEAK_FLUSH_RATIO:
+        return
+    _peak_flushed[key] = value
+    ref = _streaming.get(name)
+    if ref:
+        write_metrics(ref[0], ref[1], {field: value})
+
+
 async def sample_kubelet(session, nodes):
     """Update each pod's peak ephemeral use and peak anon from one snapshot.
 
@@ -427,12 +451,7 @@ async def sample_kubelet(session, nodes):
                     # high-water. This figure sizes the next run's
                     # ephemeral-storage request, and one that comes back too
                     # small is an eviction.
-                    if int(used) >= _peak_flushed.get(name + '/eph', 0) * PEAK_FLUSH_RATIO:
-                        _peak_flushed[name + '/eph'] = int(used)
-                        ref = _streaming.get(name)
-                        if ref:
-                            write_metrics(ref[0], ref[1],
-                                          {'peakEphemeralBytes': int(used)})
+                    _flush_peak(name, 'eph', 'peakEphemeralBytes', int(used))
             for c in entry.get('containers', []):
                 # The worker container only. Sidecars share the pod, so summing
                 # across containers -- or letting the last one win -- would size
@@ -446,6 +465,7 @@ async def sample_kubelet(session, nodes):
                 ws = mem.get('workingSetBytes')
                 if ws is not None and int(ws) > _ws_peak.get(name, 0):
                     _ws_peak[name] = int(ws)
+                    _flush_peak(name, 'ws', 'peakWorkingSetBytes', int(ws))
                 rss = mem.get('rssBytes')
                 if rss is None:
                     continue
@@ -460,11 +480,7 @@ async def sample_kubelet(session, nodes):
                 # run too small. Flushing only on PEAK_FLUSH_RATIO growth keeps
                 # this to a handful of writes over a pod's life instead of one
                 # per sample per pod.
-                if int(rss) >= _peak_flushed.get(name, 0) * PEAK_FLUSH_RATIO:
-                    _peak_flushed[name] = int(rss)
-                    ref = _streaming.get(name)
-                    if ref:
-                        write_metrics(ref[0], ref[1], {'peakAnonBytes': int(rss)})
+                _flush_peak(name, 'anon', 'peakAnonBytes', int(rss))
 
 
 def _mark_done(end, attempt):

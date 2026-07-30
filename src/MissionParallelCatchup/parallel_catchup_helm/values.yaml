@@ -70,6 +70,15 @@ monitor:
   # path or an https URL) into one. Empty = size from the configured
   # requests below. Only tightens requests; limits are untouched.
   profileConfigMap: ""
+  # CPU request tiers, as a slack budget rather than a demand estimate. Measured
+  # unthrottled, replay wants ~1.0 cores at every ledger position and is 80-95%
+  # of a job, so demand barely varies -- what varies is how much throttling a
+  # range can absorb before it stops fitting inside the longest job's shadow.
+  # 3267 of 3859 profiled ranges still fit at 0.5 cores. Empty disables tiering
+  # and every range keeps the configured cpu request.
+  # Paired with profileCpuSlowdown: the measured runtime multiplier per tier.
+  profileCpuTiers: ""
+  profileCpuSlowdown: "1.53,1.17,1.06,1.0"
   profileMargin: 1.15
   # CPU limit for ranges the profile has measured. Above the configured
   # worker limit on purpose: at a 2-core limit every range pegs 2.0, so the
