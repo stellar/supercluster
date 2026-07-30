@@ -1,0 +1,470 @@
+"""MissionHistoryPubnetParallelCatchupV2.fs against the chart and the Python.
+
+The F# driver is the only caller. It installs the chart with a pile of --set
+overrides, polls the monitor through a ConfigMap, execs into the monitor pod to
+collect logs and to read progress.json, and writes the range-profile artifact
+that a LATER run's monitor reads back. Nothing in that loop is type-checked
+across the language boundary: a --set key the chart does not know is accepted by
+helm and does nothing, a JSON field the driver forgets to project is simply
+absent, and a ConfigMap key it looks up under the wrong name reads as "the
+monitor has not published yet".
+
+Every failure in that list is silent, and several have happened.
+
+The F# is read as text -- there is no dotnet in this suite -- but each test
+drives the extracted value through the real chart or the real Python, so what is
+pinned is the agreement and not the F#'s spelling of it.
+"""
+
+import json
+import os
+import re
+
+import pytest
+
+import job_monitor as jm
+import log_collector as lc
+
+import _artifacts as art
+
+FS = art.fsharp()
+
+
+def fs_extract(pattern, flags=re.S):
+    m = re.search(pattern, FS, flags)
+    assert m, f"not found in the F# driver: {pattern}"
+    return m
+
+
+# --- the --set keys the driver sends -----------------------------------------
+
+_SET_KEY = re.compile(
+    r'(?:worker|monitor|range|service_account)(?:\.[A-Za-z0-9_]+|\[%d\]|\[0\])+(?==)')
+
+
+def set_keys():
+    """Every chart value path the driver overrides, indices stripped.
+
+    An indexed path is truncated at the array: `worker.requireNodeLabels[0].key`
+    is the chart's `worker.requireNodeLabels` list, whose element shape is
+    checked by rendering it below rather than by looking it up in values.yaml.
+    """
+    out = {}
+    for raw in set(_SET_KEY.findall(FS)):
+        out.setdefault(raw.split('[')[0], set()).add(raw)
+    return out
+
+
+def test_the_driver_really_does_configure_the_chart():
+    """Guards the extraction: a regex that stopped matching would pass silently."""
+    keys = set_keys()
+    assert len(keys) >= 15, f"only found {sorted(keys)}; the --set scan has gone blind"
+    assert 'worker.stellar_core_image' in keys and 'range.ledgersPerJob' in keys
+
+
+def test_every_value_the_driver_sets_is_one_the_chart_knows():
+    """`helm --set` on an unknown path is accepted and ignored.
+
+    A rename in values.yaml, or a typo here, produces a run that installs
+    cleanly and quietly uses the default for whatever the driver meant to
+    override -- the wrong image, the wrong ledger range, the wrong storage mode.
+    """
+    values = _values_tree()
+    templates = _template_text()
+    unknown = [k for k in sorted(set_keys())
+               if not _in_values(values, k) and f".Values.{k}" not in templates]
+    assert not unknown, (
+        "the driver overrides chart values that do not exist; helm accepts them "
+        f"and does nothing: {unknown}")
+
+
+def test_every_value_the_driver_sets_reaches_a_template():
+    """Declared in values.yaml is not the same as consumed.
+
+    A key that exists but is read by nothing renders a perfectly valid manifest
+    with the setting missing.
+    """
+    templates = _template_text()
+    inert = [k for k in sorted(set_keys()) if f".Values.{k}" not in templates]
+    assert not inert, f"declared in values.yaml but read by no template: {inert}"
+
+
+def _values_tree():
+    import yaml
+    return yaml.safe_load(art.values_yaml())
+
+
+def _template_text():
+    tdir = os.path.join(art.CHART, 'templates')
+    parts = [art.text(os.path.join(tdir, n)) for n in sorted(os.listdir(tdir))]
+    parts.append(art.text(os.path.join(art.CHART, 'files', 'stellar-core.cfg')))
+    return "\n".join(parts)
+
+
+def _in_values(tree, path):
+    node = tree
+    for part in path.split('.'):
+        if not isinstance(node, dict) or part not in node:
+            return False
+        node = node[part]
+    return True
+
+
+# --- the indexed shapes only the mission sends -------------------------------
+
+def test_the_service_account_annotations_the_driver_sends_render_as_a_map():
+    """metadata.annotations must be a map; the driver sends an indexed array.
+
+    Passing it straight through toYaml produced a list and failed the whole
+    install with "cannot unmarshal array into ... map[string]string". The --set
+    strings below are built from the driver's own sprintf format, so a change to
+    the shape it emits is caught here rather than at install time.
+    """
+    fmt = fs_extract(r'let serviceAccountAnnotationsToHelmIndexed.*?sprintf\s+"([^"]+)"').group(1)
+    sets = tuple(_fill(fmt, 0, 'eks.amazonaws.com/role-arn', 'arn:aws:iam::1:role/r').split(','))
+    for sa in art.of_kind('ServiceAccount', sets):
+        annotations = sa['metadata'].get('annotations')
+        assert isinstance(annotations, dict), f"{sa['metadata']['name']}: {annotations!r}"
+        assert annotations['eks.amazonaws.com/role-arn'] == 'arn:aws:iam::1:role/r'
+
+
+def test_the_chart_still_renders_with_no_annotations_at_all():
+    """A hand-run install passes none, and the mission passes none by default."""
+    for sa in art.of_kind('ServiceAccount'):
+        assert not sa['metadata'].get('annotations')
+
+
+def test_the_node_selector_the_driver_sends_reaches_the_monitor():
+    """The driver emits structured {key, operator, values} like every other
+    supercluster mission; a hand-run helm install more naturally passes
+    "key:value" strings. Both shapes have to arrive as the same env pair."""
+    body = fs_extract(r'let requireNodeLabelToHelmIndexed(.*?)\nlet ').group(1)
+    for fragment in ('worker.requireNodeLabels[%d].key', 'operator=In', '.values[0]='):
+        assert fragment in body, f"the driver no longer emits {fragment!r}"
+    structured = ('worker.requireNodeLabels[0].key=purpose',
+                  'worker.requireNodeLabels[0].operator=In',
+                  'worker.requireNodeLabels[0].values[0]=catchup8-spot')
+    env = art.env_of(art.containers(structured)[art.MONITOR_CONTAINER])
+    assert (env['NODE_LABEL_KEY'], env['NODE_LABEL_VALUE']) == ('purpose', 'catchup8-spot')
+
+    plain = ('worker.requireNodeLabels[0]=purpose:catchup8-spot',)
+    env = art.env_of(art.containers(plain)[art.MONITOR_CONTAINER])
+    assert (env['NODE_LABEL_KEY'], env['NODE_LABEL_VALUE']) == ('purpose', 'catchup8-spot')
+
+
+def test_the_taint_the_driver_sends_reaches_the_monitor():
+    """The driver defaults the effect to NoSchedule and sends no value.
+
+    The monitor builds a Toleration with the default Equal operator, which does
+    not match "" against "true" -- so the value must stay absent on both sides.
+    """
+    fmt = fs_extract(r'let tolerateTaintToHelmIndexed.*?sprintf\s+"([^"]+)"').group(1)
+    assert '.effect=' in fmt and '.value' not in fmt
+    sets = ('worker.tolerateNodeTaints[0].key=catchup8-spot',
+            'worker.tolerateNodeTaints[0].effect=NoSchedule')
+    env = art.env_of(art.containers(sets)[art.MONITOR_CONTAINER])
+    assert env['TOLERATE_TAINT'] == 'catchup8-spot'
+
+
+def _fill(fmt, index, *values):
+    """Apply an F# sprintf format with %d indices and %s values."""
+    out, values = fmt.replace('\\"', '"'), list(values)
+    out = out.replace('%d', str(index))
+    for value in values:
+        out = out.replace('%s', value, 1)
+    return out
+
+
+# --- the worker command line the driver builds -------------------------------
+
+def test_the_driver_disables_the_aws_progress_meter():
+    """--no-progress is load-bearing, not cosmetic.
+
+    The AWS CLI draws its transfer meter with carriage returns and no newline,
+    so a 628 MiB bucket download arrives as one multi-megabyte "line". Measured
+    on ssc-test 2026-07-30 at 2096 workers: aiohttp aborts a line over 512 KiB,
+    so every large download killed its own collector stream, the reconnect hit
+    the same wall, and every retry pod was starved of a stream. The collector
+    now reads in chunks and splits on \\r too (see test_cross_process_files),
+    but the cure is not emitting the spam -- it was also the bulk of every large
+    range's archive.
+    """
+    flags = fs_extract(r'sprintf "aws s3 cp ([^"]*)--region %s"').group(1)
+    assert '--no-progress' in flags, f"aws s3 cp flags: {flags!r}"
+
+
+def test_the_history_get_command_lands_in_the_config_the_worker_mounts():
+    """The S3 mirror override is a per-archive `get` command in stellar-core.cfg.
+
+    Without it the workers fall back to the public archive, which throttles at
+    1024 -- silently, as a very slow run rather than an error.
+    """
+    template = fs_extract(r'setOptions\.Add\(sprintf "(worker\.historyGetCommandCore00%d)=').group(1)
+    for index in (1, 2, 3):
+        key = template.replace('%d', str(index))
+        assert f".Values.{key}" in art.text(
+            os.path.join(art.CHART, 'files', 'stellar-core.cfg')), \
+            f"{key} is set by the driver but never reaches stellar-core.cfg"
+
+
+# --- the ConfigMap the driver polls ------------------------------------------
+
+def test_the_driver_reads_the_configmap_the_monitor_writes():
+    """One name, derived on both sides from the helm release name.
+
+    The driver appends a literal suffix to the release; the monitor appends the
+    same suffix to RUN_NAME, which the chart sets from .Release.Name. A mismatch
+    reads as "the monitor has not published yet", forever -- and the driver's
+    only reaction to that is a 600s timeout and `job monitor not reachable`.
+    """
+    suffix = fs_extract(r'helmReleaseName \+ "(-[a-z-]+)"').group(1)
+    release = 'pc-abc'
+    # What the driver will ask for, and what the monitor will have created --
+    # the latter imported with the RUN_NAME the chart gives it for that release.
+    wanted = release + suffix
+    run_name = art.env_of(art.containers(release=release)[art.MONITOR_CONTAINER])['RUN_NAME']
+    written = art.defaults('job_monitor', (('RUN_NAME', run_name),))['PROGRESS_CM']
+    assert wanted == written, f"driver reads {wanted!r}, monitor writes {written!r}"
+
+
+def test_the_driver_reads_the_keys_the_monitor_publishes(cluster):
+    """status.json and progress.json are two keys in that one ConfigMap.
+
+    Checked against a ConfigMap the real monitor actually wrote, so a key that
+    is only mentioned in a comment does not count.
+    """
+    wanted = set(re.findall(r'let jobMonitor\w*Key = "([\w.]+)"', FS))
+    assert wanted, "the driver no longer names the ConfigMap keys"
+
+    cluster.reconcile()
+    cluster.advance(300, 'succeeded')
+    cluster.reconcile()                       # records a completion -> progress.json
+    jm.save_status(jm.status)                 # what the reconcile loop publishes
+    published = set(cluster.k8s.config_map_data(jm.PROGRESS_CM, cluster.namespace) or {})
+    missing = sorted(wanted - published)
+    assert not missing, (
+        f"the driver reads {missing}; the monitor published {sorted(published)}")
+
+
+def test_every_status_field_the_driver_reads_is_one_the_monitor_sets():
+    """The driver's loop terminates on num_remain and jobs_in_progress.
+
+    A field it reads that the monitor never sets throws inside the polling loop,
+    which the driver treats as fatal: cleanup, uninstall, mission failed -- with
+    the run's work discarded.
+    """
+    read = set(re.findall(r'status\.(?:\[|Value<\w+>\()"(\w+)"', FS))
+    assert read, "the status parse has changed shape -- update this test"
+    missing = sorted(read - set(jm.status))
+    assert not missing, f"the driver reads status fields the monitor never sets: {missing}"
+
+
+def test_the_driver_can_find_the_pod_name_in_a_failed_range_entry(cluster):
+    """jobs_failed entries are "<range key>|<pod>", split on '|' by the driver.
+
+    It uses element 1 as a pod name to dump logs from. An entry with no
+    separator makes that a silent no-op; an entry with the halves swapped makes
+    it request a pod named after a ledger range.
+    """
+    cluster.reconcile()
+    cluster.advance(300, 'condemned')
+    result = cluster.reconcile()
+
+    assert result['failed_ranges'], "no range was condemned; the fixture changed"
+    entry = result['failed_ranges'][0]
+    parts = entry.split('|')
+    assert len(parts) == 2, f"the driver's split('|')[1] cannot work on {entry!r}"
+    assert parts[1].startswith(f"{cluster.run_name}-r300-a"), (
+        f"element 1 is {parts[1]!r}, which is not a pod name")
+    assert '/' in parts[0], f"element 0 should be the <end>/<count> range key: {parts[0]!r}"
+
+
+# --- the exec paths the driver uses at teardown ------------------------------
+
+def test_the_driver_execs_into_a_container_that_exists():
+    """A wrong container name fails the exec, and the failure is caught and
+    logged as a warning -- so the run finishes with no collected logs and no
+    range profile."""
+    names = set(art.containers())
+    for name in set(re.findall(r'containerName = "([\w-]+)"', FS)):
+        assert name in names, f"the driver execs into {name!r}; the pod has {sorted(names)}"
+
+
+def test_the_driver_reads_the_progress_file_where_the_monitor_writes_it():
+    """`cat /logs/progress.json`, hard-coded on the driver side."""
+    path = fs_extract(r'command = \[\| "cat"; "([^"]+)" \|\]').group(1)
+    assert path == jm.PROGRESS_FILE, (
+        f"the driver cats {path}; the monitor writes {jm.PROGRESS_FILE}")
+
+
+def test_the_driver_tars_the_directory_the_collector_writes_into():
+    """One exec replaces the ~1024 the StatefulSet design needed."""
+    cd = fs_extract(r'"cd (/\w+) && tar').group(1)
+    assert cd == jm.LOG_DIR == lc.LOG_DIR
+
+
+def test_the_tar_excludes_only_the_collectors_resume_bookkeeping():
+    """.state is a resume cursor and is worthless outside the pod.
+
+    Every other suffix on that volume is a deliverable: the archive, the
+    per-attempt metrics, the verdict. An exclusion pattern that drifted onto one
+    of those would quietly shrink the collected tar.
+    """
+    def suffix_of(path_fn):
+        return os.path.basename(path_fn('E', 1)).partition('-a1')[2]
+
+    bookkeeping = {suffix_of(jm.state_path)}
+    deliverables = {suffix_of(f) for f in (jm.log_path, jm.metrics_path,
+                                           jm.outcome_path, jm.done_path)}
+    assert bookkeeping.isdisjoint(deliverables)
+
+    excludes = set(re.findall(r"--exclude='([^']+)'", FS))
+    assert excludes, "the tar no longer excludes anything -- update this test"
+    for pattern in excludes:
+        if not pattern.startswith('*'):
+            continue                          # ./lost+found, the PVC's ext4 root
+        assert pattern[1:] in bookkeeping, (
+            f"the tar excludes {pattern}, which is not resume bookkeeping")
+    for suffix in deliverables:
+        assert f"*{suffix}" not in excludes, f"the tar drops {suffix}, a deliverable"
+
+
+def test_the_driver_finds_the_monitor_pod_by_the_labels_the_chart_sets():
+    """Two releases share a namespace on a test cluster routinely.
+
+    A selector missing the release label would exec into the other run's monitor
+    -- and read its progress record.
+    """
+    selector = fs_extract(r'labelSelector = sprintf "([^"]+)"').group(1)
+    labels = art.monitor_deployment(release='pc-abc')['spec']['template']['metadata']['labels']
+    for clause in selector.split(','):
+        key, _, value = clause.partition('=')
+        assert key in labels, f"the driver selects on {key!r}; the pod has {sorted(labels)}"
+        if '%s' not in value:
+            assert labels[key] == value
+        else:
+            assert labels[key] == 'pc-abc'
+
+
+# --- the range-profile artifact: written by F#, read by Python next run ------
+
+def fs_profile_fields():
+    body = fs_extract(r'let rangeProfileFields =(.*?)\n\n').group(1)
+    return set(re.findall(r'"(\w+)"', body))
+
+
+def fs_document_keys():
+    return set(re.findall(r'doc\.\["(\w+)"\]\s*<-', FS))
+
+
+def test_the_artifact_carries_exactly_the_fields_the_mirror_strips():
+    """Two lists that must be one list.
+
+    The monitor strips _PROFILE_ONLY_FIELDS out of the ConfigMap mirror to stay
+    under its 1 MiB cap, so those fields exist only in the volume copy -- which
+    is precisely the copy the driver projects into the artifact. A field in one
+    list and not the other is either lost from the artifact or bloating the
+    mirror. peakAnonBytes was missing from the projection: measured 2026-07-30,
+    the artifact carried it for 0% of ranges while the volume copy had it for
+    99%.
+    """
+    assert fs_profile_fields() == set(jm._PROFILE_ONLY_FIELDS), (
+        "driver projects "
+        f"{sorted(fs_profile_fields() - set(jm._PROFILE_ONLY_FIELDS))} extra, "
+        f"drops {sorted(set(jm._PROFILE_ONLY_FIELDS) - fs_profile_fields())}")
+
+
+def test_every_field_the_sizing_consumer_reads_is_in_the_artifact():
+    """Derived from _profile_overrides, so a new sizing input fails here first."""
+    consumed = set(re.findall(r"prof\.get\('(\w+)'\)", art.module_source(jm)))
+    assert consumed, "the sizing consumer no longer reads named fields"
+    missing = sorted(consumed - fs_profile_fields())
+    assert not missing, f"the profile is sized from {missing}, which the artifact drops"
+
+
+def test_every_document_key_the_monitor_reads_is_one_the_driver_writes():
+    """storageMode decides whether the disk axis is usable; ranges is the data."""
+    read = set(re.findall(r"doc\.get\('(\w+)'\)", art.module_source(jm)))
+    assert read, "load_profile no longer reads named document keys"
+    missing = sorted(read - fs_document_keys())
+    assert not missing, f"load_profile reads {missing}, which the driver never writes"
+
+
+def _artifact(storage_mode='pvc', ranges=None):
+    """A profile document in the exact shape the driver writes."""
+    doc = {'schema': 1, 'generated': '2026-07-30T00:00:00.0000000Z',
+           'release': 'parallel-catchup-abc', 'storageMode': storage_mode,
+           'ledgersPerRange': 16320, 'ranges': ranges or {}}
+    assert set(doc) == fs_document_keys(), (
+        f"this stand-in has drifted from the driver: {set(doc) ^ fs_document_keys()}")
+    return doc
+
+
+def test_an_artifact_from_a_previous_run_loads_and_sizes_the_next_one(tmp_path, monkeypatch):
+    """The whole point of the artifact, end to end across the language boundary.
+
+    Values are the driver's own projection of a completed range: keyed by range
+    end as a STRING (JSON object keys always are), with count alongside the
+    measurements.
+    """
+    path = tmp_path / 'profile.json'
+    path.write_text(json.dumps(_artifact(ranges={
+        '16752063': {'peakAnonBytes': 2 * 1024 ** 3, 'peakWorkingSetBytes': 13 * 1024 ** 3,
+                     'txApply': 900.0, 'seconds': 1200.0, 'count': 16320}})))
+
+    monkeypatch.setattr(jm, 'PROFILE_PATH', str(path))
+    monkeypatch.setattr(jm, 'STORAGE_MODE', 'pvc')
+    monkeypatch.setattr(jm, 'PROFILE', jm.load_profile())
+    assert jm.PROFILE, "the driver's artifact did not load at all"
+
+    sized = jm._profile_overrides(16752063, escalated=False)
+    assert 'memory' in sized, "a measured range was not sized from the artifact"
+    assert (jm._quantity_bytes(sized['memory']) > 2 * 1024 ** 3), \
+        "the request came out below the measured peak"
+
+
+def test_a_cross_mode_artifact_keeps_memory_and_drops_the_disk_axis(tmp_path, monkeypatch):
+    """storageMode is in the document because the axes are not interchangeable.
+
+    cpu and memory measure the same work in either mode. Disk does not: a pvc
+    run puts /data on the volume and never measures node-local usage at all, so
+    an ephemeral run's figure says nothing about it.
+    """
+    path = tmp_path / 'profile.json'
+    path.write_text(json.dumps(_artifact(storage_mode='ephemeral', ranges={
+        '16752063': {'peakAnonBytes': 2 * 1024 ** 3,
+                     'peakEphemeralBytes': 30 * 1024 ** 3, 'count': 16320}})))
+
+    monkeypatch.setattr(jm, 'PROFILE_PATH', str(path))
+    monkeypatch.setattr(jm, 'STORAGE_MODE', 'pvc')
+    monkeypatch.setattr(jm, 'LIM_EPHEMERAL', '40Gi')
+    monkeypatch.setattr(jm, 'PROFILE', jm.load_profile())
+
+    sized = jm._profile_overrides(16752063, escalated=False)
+    assert 'memory' in sized, "a cross-mode profile was rejected outright"
+    assert 'ephemeral-storage' not in sized, "a pvc run was sized from ephemeral-mode disk"
+
+
+def test_an_empty_artifact_is_never_written_and_never_fatal(tmp_path, monkeypatch):
+    """An empty profile is worse than none: it looks complete.
+
+    The usual cause is readProgressRecord falling back to the ConfigMap mirror,
+    which has every profiling field stripped. Both sides guard it -- the driver
+    writes nothing, and the monitor treats a profile with no usable range as no
+    profile -- because either half alone leaves the next run sizing itself from
+    empty data instead of from its configured requests.
+    """
+    assert re.search(r'if ranges\.Count = 0 then None', FS), \
+        "the driver no longer suppresses an empty profile"
+
+    path = tmp_path / 'profile.json'
+    path.write_text(json.dumps(_artifact(ranges={})))
+    monkeypatch.setattr(jm, 'PROFILE_PATH', str(path))
+    monkeypatch.setattr(jm, 'STORAGE_MODE', 'pvc')
+    monkeypatch.setattr(jm, 'PROFILE', jm.load_profile())
+    assert jm.PROFILE == [], "an empty profile loaded as if it held something"
+    assert jm._profile_overrides(16752063, escalated=False) == {}
+
+    # ...and an artifact that never arrived at all is the same, not an error.
+    monkeypatch.setattr(jm, 'PROFILE_PATH', str(tmp_path / 'absent.json'))
+    assert jm.load_profile() == []

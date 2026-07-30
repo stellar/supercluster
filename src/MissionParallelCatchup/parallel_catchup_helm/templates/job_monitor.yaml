@@ -261,6 +261,19 @@ spec:
               value: {{ (splitList ":" .) | last | quote }}
             {{- end }}
             {{- end }}
+            {{- with (first .Values.worker.avoidNodeLabels) }}
+            {{- if kindIs "map" . }}
+            - name: AVOID_NODE_LABEL_KEY
+              value: {{ .key | quote }}
+            - name: AVOID_NODE_LABEL_VALUE
+              value: {{ (first (default (list "") .values)) | quote }}
+            {{- else }}
+            - name: AVOID_NODE_LABEL_KEY
+              value: {{ (splitList ":" .) | first | quote }}
+            - name: AVOID_NODE_LABEL_VALUE
+              value: {{ (splitList ":" .) | last | quote }}
+            {{- end }}
+            {{- end }}
             {{- with (first .Values.worker.tolerateNodeTaints) }}
             - name: TOLERATE_TAINT
               value: {{ if kindIs "map" . }}{{ .key | quote }}{{ else }}{{ (splitList ":" .) | first | quote }}{{ end }}

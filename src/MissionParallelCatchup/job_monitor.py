@@ -134,6 +134,8 @@ LIM_EPHEMERAL = os.getenv('LIM_EPHEMERAL', '')
 # the default Equal operator does not match "" against "true".
 NODE_LABEL_KEY = os.getenv('NODE_LABEL_KEY', '')
 NODE_LABEL_VALUE = os.getenv('NODE_LABEL_VALUE', '')
+AVOID_NODE_LABEL_KEY = os.getenv('AVOID_NODE_LABEL_KEY', '')
+AVOID_NODE_LABEL_VALUE = os.getenv('AVOID_NODE_LABEL_VALUE', '')
 TOLERATE_TAINT = os.getenv('TOLERATE_TAINT', '')
 
 # Worker /data. pvc keeps it across pods, so an evicted range resumes at L+1 --
@@ -475,8 +477,11 @@ _progress_owner = {}
 # The authoritative copy of the progress record lives on the logs PVC, not in
 # the ConfigMap. A ConfigMap is capped at 1 MiB and this record is ~172 bytes
 # per completed range, so it dies at ~6100 ranges -- reachable simply by halving
-# ledgersPerJob. Worse, every completion rewrote the whole document through the
-# API server, so a full run meant thousands of escalating-size etcd writes.
+# ledgersPerJob. Measured mid-run on ssc-test: 348KB at 2024 completed ranges,
+# which projects to ~65% of the cap at 3982 -- close enough that the next
+# slicing change would have hit it. Worse, every completion rewrote the whole
+# document through the API server, so a full run meant thousands of
+# escalating-size etcd writes.
 #
 # The ConfigMap is still written, because the mission driver reads it without
 # exec'ing into the pod, but it is now a best-effort mirror: if it fails, the
@@ -962,7 +967,9 @@ def _bytes_to_quantity(n):
 # every range that applies a real transaction load. The old [0-9.]+ pattern
 # matched "1.30722" then demanded "ms" and hit "e+06ms" instead, so tx_apply was
 # silently missing for 25% of ranges -- 91-99% of everything above ledger 35M,
-# exactly the expensive end.
+# exactly the expensive end. 698 completed ranges lost the metric that way in a
+# single run, which is the reference case for "a recoverable gap turned
+# permanent" everywhere else in this file.
 _SUM_RE = re.compile(r"sum\s*=\s*([0-9.]+(?:[eE][+-]?[0-9]+)?)ms")
 
 
@@ -1183,6 +1190,11 @@ def _tx_apply_for_attempt(end, attempt=1, pod_name=None):
     for i, line in enumerate(lines):
         if "metric 'ledger.transaction.apply'" not in line:
             continue
+        # Same reach as log_collector.TxApplyScanner.WINDOW, and it has to be:
+        # the two are independent readers of one block and progress.json takes
+        # whichever landed first. medida puts `sum` 10 lines under the header
+        # (27.1.1, ssc-test 2026-07-28), so five more percentiles in a release
+        # takes the metric out of range on both sides at once.
         for follow in lines[i + 1:i + 16]:
             m = _SUM_RE.search(follow)
             if m:
@@ -1358,13 +1370,21 @@ def delete_job(end, attempt):
     reconcile() lists every Job and Pod on each pass, so a finished Job is not
     free: it inflates two LIST calls for as long as it lingers. At 2048-4096
     parallelism with a real OOM or spot-eviction rate that is hundreds of dead
-    objects per hour of run, and the apiserver pressure shows up as truncated
-    list responses long before anything else complains.
+    objects per hour of run -- under the old 3600s TTL the dead ones outnumbered
+    the live ones within the first hour -- and the apiserver pressure shows up
+    as truncated list responses long before anything else complains.
+
+    Background propagation specifically: that is what removes the pod as well.
+    Orphan or the server default would leave the pod behind, so the next pass
+    lists exactly as much as it did before.
 
     Callers must have persisted whatever they need first -- the logs, .outcome
     and .metrics all live on the monitor's volume by then, so the Job and its
-    pod carry no information once the range is recorded. Best-effort: on
-    failure JOB_TTL_SECONDS still reclaims it.
+    pod carry no information once the range is recorded. Best-effort: a 404 is
+    the ordinary race with the TTL controller, and any other status warns and
+    carries on. Raising here would abort the whole reconcile pass mid-iteration
+    and strand every other range in it; on failure JOB_TTL_SECONDS still
+    reclaims the object, which costs disk and etcd, never correctness.
     """
     try:
         batch_v1.delete_namespaced_job(job_name(end, attempt), NAMESPACE,
@@ -1600,13 +1620,28 @@ def build_job(end, count, attempt, owner, mem=None, eph=None):
 
     env = [client.V1EnvVar(name='ASAN_OPTIONS', value=ASAN_OPTIONS)] if ASAN_OPTIONS else []
 
-    affinity = None
+    # Require and avoid go in ONE matchExpressions list: expressions within a
+    # term are ANDed, whereas separate terms are ORed and an avoid-only pod would
+    # then match every node. The original StatefulSet template rendered both into
+    # the same term; the rewrite carried requireNodeLabels across and dropped
+    # avoidNodeLabels, so the flag installed cleanly and scheduled workers onto
+    # exactly the nodes it was asked to keep them off.
+    match = []
     if NODE_LABEL_KEY:
+        match.append(client.V1NodeSelectorRequirement(
+            key=NODE_LABEL_KEY, operator='In', values=[NODE_LABEL_VALUE]))
+    if AVOID_NODE_LABEL_KEY:
+        # No value means "avoid the label however it is set", which is
+        # DoesNotExist; NotIn [""] would only exclude the empty value.
+        match.append(client.V1NodeSelectorRequirement(
+            key=AVOID_NODE_LABEL_KEY,
+            operator='NotIn' if AVOID_NODE_LABEL_VALUE else 'DoesNotExist',
+            values=[AVOID_NODE_LABEL_VALUE] if AVOID_NODE_LABEL_VALUE else None))
+    affinity = None
+    if match:
         affinity = client.V1Affinity(node_affinity=client.V1NodeAffinity(
             required_during_scheduling_ignored_during_execution=client.V1NodeSelector(
-                node_selector_terms=[client.V1NodeSelectorTerm(match_expressions=[
-                    client.V1NodeSelectorRequirement(key=NODE_LABEL_KEY, operator='In',
-                                                     values=[NODE_LABEL_VALUE])])])))
+                node_selector_terms=[client.V1NodeSelectorTerm(match_expressions=match)])))
     # Taint value must be absent: the mission emits {key, effect} with no value,
     # and the default Equal operator does not match "" against "true".
     tolerations = [client.V1Toleration(key=TOLERATE_TAINT, effect='NoSchedule')] if TOLERATE_TAINT else None
