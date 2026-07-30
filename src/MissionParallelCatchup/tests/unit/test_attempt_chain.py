@@ -204,11 +204,11 @@ def test_seconds_ignores_attempts_before_a_fresh_start(attempts):
     assert jm.seconds_for_range(999, 2, 300.0) == 300.0
 
 
-def test_seconds_survives_a_leg_with_no_recorded_duration(attempts):
-    # An attempt whose pod vanished before it was classified has no
-    # attemptSeconds. Better to under-report one leg than return nothing.
+def test_seconds_is_absent_when_a_resumed_leg_has_no_recorded_duration(attempts):
+    # Winner-only is a lower bound, not the chain total. Missing accurately
+    # tells the profile consumer not to size from it.
     attempts(999, {1: ({}, {'outcome': 'disrupted'}), 2: ({'resumed': True}, None)})
-    assert jm.seconds_for_range(999, 2, 300.0) == 300.0
+    assert jm.seconds_for_range(999, 2, 300.0) is None
 
 
 def test_seconds_is_none_when_nothing_is_known(attempts):
@@ -261,7 +261,7 @@ def test_repair_recovers_predecessor_peaks_and_seconds_idempotently(attempts):
     assert progress == snapshot
 
 
-def test_reconstruction_sums_available_txapply_legs_in_a_three_attempt_chain(attempts):
+def test_reconstruction_omits_txapply_when_one_chain_leg_is_missing(attempts):
     attempts(999, {
         1: ({'txApplySeconds': 10.0}, None),
         2: ({}, None),                              # this leg's metric was unavailable
@@ -271,7 +271,7 @@ def test_reconstruction_sums_available_txapply_legs_in_a_three_attempt_chain(att
     _archive(999, 3, 'RESUME: reached ledger 800; skipping new-db\n')
 
     rebuilt = jm.reconstruct_completed_profile(999, 3)
-    assert rebuilt['txApply'] == 13.0
+    assert 'txApply' not in rebuilt
 
 
 def test_reconstruction_leaves_txapply_absent_when_every_leg_is_missing(attempts):
@@ -317,6 +317,32 @@ def test_reconcile_repairs_a_completed_record_with_no_live_job(cluster):
     assert repaired['seconds'] == 1200.0
     assert repaired['txApply'] == 12.0
     assert repaired['peakAnonBytes'] == 2 * GIB
+
+
+def test_wall_seconds_is_winner_job_only_while_compute_spans_the_chain(cluster):
+    cluster.reconcile()
+    cluster.advance(300, 'disrupted')
+    cluster.finalize(300, 1, tx_apply=10.0, attempt_seconds=60.0)
+    cluster.reconcile()
+
+    cluster.advance(300, 'succeeded', attempt=2)
+    cluster.finalize(300, 2, tx_apply=2.0, attempt_seconds=60.0, resumed=True)
+    cluster.reconcile()
+
+    record = cluster.completed()['300']
+    assert record['seconds'] == 120.0
+    assert record['txApply'] == 12.0
+    assert record['wallSeconds'] == 60.0
+
+
+def test_disrupted_predecessor_without_final_medida_makes_txapply_absent(attempts):
+    attempts(999, {
+        1: ({'attemptSeconds': 900.0}, {'outcome': 'disrupted'}),
+        2: ({'resumed': True, 'txApplySeconds': 3.0}, None),
+    })
+
+    assert jm.tx_apply_for_range(999, 2) is None
+    assert 'txApply' not in jm.reconstruct_completed_profile(999, 2)
 
 
 # --- counting causes, not attempts --------------------------------------------

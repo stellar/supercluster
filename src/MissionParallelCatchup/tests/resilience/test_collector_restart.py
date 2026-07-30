@@ -194,6 +194,25 @@ def test_finalize_recovers_resume_after_the_scanner_is_recreated(vol):
     assert metrics(300, 2)['resumed'] is True
 
 
+def test_finalize_recovers_txapply_after_the_scanner_is_recreated(vol, monkeypatch):
+    """The first poll saw the final medida block, then its scanner vanished."""
+    monkeypatch.setattr(lc, 'SAVE_SUCCESS_LOGS', False)
+    path = lc.base('300', 2) + '.log.gz'
+    with gzip.open(path, 'wt') as fh:
+        fh.write('RESUME: local state reached ledger 250; skipping new-db\n')
+        fh.write("metric 'ledger.transaction.apply'\n")
+        fh.write('  count = 123\n')
+        fh.write('  sum = 4200.0ms\n')
+
+    finalize('w-300-a2', 300, attempt=2, succeeded=True,
+             tx=lc.TxApplyScanner(recreated=True))
+
+    assert metrics(300, 2)['resumed'] is True
+    assert metrics(300, 2)['txApplySeconds'] == 4.2
+    assert not os.path.exists(path), \
+        "the test must prove recovery happened before success-log discard"
+
+
 def test_finalize_does_not_promote_resume_declined(vol):
     path = lc.base('300', 2) + '.log.gz'
     with gzip.open(path, 'wt') as fh:
@@ -409,6 +428,7 @@ def test_finalizing_the_same_attempt_twice_keeps_its_measurements(vol, monkeypat
     finalize('w-300', 300, tx=tx)
     first = metrics(300)
     assert first['attemptSeconds'] == 3600.4
+    assert first['attemptSecondsExact'] is True
 
     restart(monkeypatch)
     # The main loop re-reads the pod's own timestamps every cycle it sees it
@@ -469,7 +489,10 @@ def test_a_poller_that_watched_the_whole_attempt_still_reports_its_duration(vol)
     started = _moments_ago() - 42.0
     finalize('w-300', 300, started=started)
 
-    assert metrics(300)['attemptSeconds'] == pytest.approx(42.0, abs=1.0)
+    stored = metrics(300)
+    assert stored['attemptSeconds'] == pytest.approx(42.0, abs=1.0)
+    assert stored['attemptSecondsExact'] is False
+    assert jm.seconds_for_range('300', 1) is None
 
 
 def test_the_duration_the_collector_records_is_the_pods_not_the_pollers(vol):
@@ -478,6 +501,7 @@ def test_the_duration_the_collector_records_is_the_pods_not_the_pollers(vol):
     finalize('w-300', 300, started=_moments_ago() - 5.0)
 
     assert metrics(300)['attemptSeconds'] == 3600.4
+    assert metrics(300)['attemptSecondsExact'] is True
 
 
 # -- .outcome is written once, by whoever got there first ---------------------

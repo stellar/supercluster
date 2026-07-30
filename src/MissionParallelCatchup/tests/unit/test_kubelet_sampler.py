@@ -189,6 +189,20 @@ def test_an_in_flight_peak_reaches_the_volume_before_the_stream_ends(sampler):
     assert jm.peaks_for_range('300', 1) == {'peakAnonBytes': 900 * MIB}
 
 
+def test_a_peak_sampled_before_stream_registration_is_flushed_on_open(sampler):
+    """main samples first, then opens new pollers; a restart between those steps
+    must not make that first high-water process-memory-only."""
+    sample(payload('w-1', [container(rss=900 * MIB, ws=1200 * MIB)]))
+    assert jm.peaks_for_range('300', 1) == {}
+
+    lc._register_stream('w-1', '300', '1')
+
+    assert jm.peaks_for_range('300', 1) == {
+        'peakAnonBytes': 900 * MIB,
+        'peakWorkingSetBytes': 1200 * MIB,
+    }
+
+
 def test_the_disk_axis_stays_mode_gated(sampler, monkeypatch):
     """ephemeral-storage is meaningless in pvc mode: /data is on the volume,
     not on the node."""

@@ -206,7 +206,7 @@ def test_a_fresh_start_drops_the_earlier_legs_from_the_total(logdir):
     assert jm.tx_apply_for_range(4000, 2) == 5.0
 
 
-def test_only_the_last_leg_may_fall_back_to_the_pod(logdir, monkeypatch):
+def test_the_winner_pod_fallback_cannot_fill_a_missing_predecessor(logdir, monkeypatch):
     # pod_name names the winning attempt's pod; handing it to an earlier leg
     # would read the wrong pod's log and attribute it to the wrong attempt.
     class FakePodLog:
@@ -216,5 +216,5 @@ def test_only_the_last_leg_may_fall_back_to_the_pod(logdir, monkeypatch):
     # a1 has no durable record at all; a2 resumed from it and has none either.
     with open(jm.metrics_path(4000, 2), 'w') as fh:
         json.dump({'resumed': True}, fh)
-    assert jm.tx_apply_for_range(4000, 2, pod_name='p') == pytest.approx(BIG_SECONDS), \
-        "the total must be a2's pod alone, not that pod counted for both legs"
+    assert jm.tx_apply_for_range(4000, 2, pod_name='p') is None, \
+        "winner-only txApply is a lower bound, not the resumed chain total"

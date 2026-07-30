@@ -172,15 +172,18 @@ def test_the_range_scoped_reap_still_waits_for_the_done_marker(cluster):
     cluster.reconcile()
     cluster.advance(300, 'succeeded')
 
-    cluster.reconcile()                        # recorded; collector not done
+    waiting = cluster.reconcile()              # recorded; collector not done
     assert '300' in cluster.completed()
     assert jobs_for(cluster, 300) == ['pc-r300-a1']
     assert cluster.deleted.names(verb='delete', kind='job') == []
+    assert waiting['finalizing'] == ['300/420'], \
+        "the mission could publish its final profile before metrics landed"
 
     cluster.finalize(300, 1, tx_apply=0.1, peaks={'peakRssBytes': 1})
-    cluster.reconcile()
+    finished = cluster.reconcile()
     assert jobs_for(cluster, 300) == []
     assert cluster.deleted.names(verb='delete', kind='job') == ['pc-r300-a1']
+    assert finished['finalizing'] == []
 
 
 def test_remaining_never_goes_negative_and_the_run_reports_done(cluster,

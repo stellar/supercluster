@@ -405,13 +405,13 @@ reconcile_alive = {'ts': 0.0}
 metric_catchup_queues = Gauge('ssc_parallel_catchup_queues', 'Exposes size of each job queues', ["queue"])
 metric_workers = Gauge('ssc_parallel_catchup_workers', 'Exposes catch up worker status', ["status"])
 metric_refresh_duration = Gauge('ssc_parallel_catchup_workers_refresh_duration_seconds', 'Time it took to refresh status of all workers')
-metric_full_duration = Histogram('ssc_parallel_catchup_job_full_duration_seconds', 'Exposes full job duration as histogram', buckets=metric_buckets)
+metric_full_duration = Histogram('ssc_parallel_catchup_job_full_duration_seconds', 'Compute seconds across the complete resumed attempt chain', buckets=metric_buckets)
 metric_tx_apply_duration = Histogram('ssc_parallel_catchup_job_tx_apply_duration_seconds', 'Exposes job TX apply duration as histogram', buckets=metric_buckets)
-# full_duration is the SUCCESSFUL attempt only, matching what worker.sh timed.
-# wall_duration spans first dispatch to success, so (wall - full) is exactly the
-# work lost to retries -- the cost of running on spot.
+# wallSeconds is Kubernetes's startTime -> completionTime for the winning Job
+# only. Failed-attempt timestamps and inter-attempt gaps were never persisted, so
+# it cannot be reconstructed as first dispatch -> success after those Jobs go.
 metric_wall_duration = Histogram('ssc_parallel_catchup_job_wall_duration_seconds',
-                                 'First dispatch to success, including failed attempts',
+                                 'Winning Kubernetes Job start to completion',
                                  buckets=metric_buckets)
 metric_mission_duration = Gauge('ssc_parallel_catchup_mission_duration_seconds', 'Number of seconds since the mission started ')
 metric_retries = Counter(
@@ -1456,7 +1456,7 @@ def _archive_resumed(end, attempt):
 
 
 def tx_apply_for_range(end, attempt=1, pod_name=None):
-    """Total 'ledger.transaction.apply' seconds for the whole range.
+    """Exact known 'ledger.transaction.apply' seconds for the whole range.
 
     Summed across the resumed chain, not read from the winning attempt alone.
     medida's total is per-process, so a pod that resumes at LCL+1 reports only
@@ -1474,8 +1474,12 @@ def tx_apply_for_range(end, attempt=1, pod_name=None):
         # fallbacks are offered to that one alone; earlier legs come from the
         # .metrics the collector already wrote.
         leg = _tx_apply_for_attempt(end, n, pod_name if n == int(attempt) else None)
-        if leg is not None:
-            total = leg if total is None else total + leg
+        if leg is None:
+            # A disrupted process often never prints its final medida block.
+            # Publishing the sum of surviving legs as a total silently
+            # under-reports; absence accurately says the chain is incomplete.
+            return None
+        total = leg if total is None else total + leg
     return total
 
 
@@ -1486,8 +1490,9 @@ def seconds_for_range(end, attempt=1, final=None):
     from the pod. Earlier legs come from their .outcome, written when the
     monitor classified the failure and still had the pod.
 
-    This is compute, not elapsed: the gaps between attempts -- scheduling, image
-    pull, a node coming up -- are not in it. wallSeconds covers those.
+    This is compute, not elapsed: scheduling, image pull, node startup and gaps
+    between attempts are not in it. wallSeconds is a separate winner-Job-only
+    diagnostic; whole-chain elapsed time was never persisted.
     """
     total = None
     for n in _resumed_chain(end, attempt):
@@ -1495,8 +1500,9 @@ def seconds_for_range(end, attempt=1, final=None):
             leg = final
         else:
             leg = _attempt_seconds(end, n)
-        if leg is not None:
-            total = leg if total is None else total + leg
+        if leg is None:
+            return None
+        total = leg if total is None else total + leg
     return total
 
 
@@ -1510,7 +1516,14 @@ def _attempt_seconds(end, attempt):
         return leg
     try:
         with open(metrics_path(end, attempt)) as fh:
-            return json.load(fh).get('attemptSeconds')
+            data = json.load(fh)
+        # A poller clock starts when that collector process attaches, so after a
+        # restart it is only a lower bound. Legacy files have no provenance and
+        # remain usable for best-effort reconstruction; new known estimates do
+        # not masquerade as complete chain compute.
+        if data.get('attemptSecondsExact') is False:
+            return None
+        return data.get('attemptSeconds')
     except (OSError, ValueError):
         return None
 
@@ -1520,13 +1533,14 @@ def reconstruct_completed_profile(end, attempt):
 
     Durations and tx-apply totals follow only the continuous resumed chain, so a
     fresh retry never double-counts discarded work. Peaks use that chain plus
-    every attempt that hit a resource ceiling. Missing legs remain missing; the
-    available legs are combined with the existing <=64-ledger tx-apply overlap.
+    every attempt that hit a resource ceiling. Missing duration or tx-apply legs
+    make that aggregate absent rather than publishing a lower bound as a total.
+    Complete tx-apply legs retain the existing <=64-ledger overlap.
 
-    Reconstructable: sampled peaks in .metrics, attemptSeconds in .outcome or
-    .metrics, and txApplySeconds in .metrics or retained .log.gz. Not
-    reconstructable: wallSeconds, samples that were never persisted, or a
-    missing tx-apply/duration leg whose process and archive are both gone.
+    Reconstructable: persisted sampled peaks, complete attemptSeconds chains in
+    .outcome/.metrics, and complete txApplySeconds chains in .metrics/.log.gz.
+    Not reconstructable: whole-chain wall time, samples never persisted, or a
+    duration/tx-apply leg whose process and archive are both gone.
     """
     rebuilt = peaks_for_range(end, attempt)
     seconds = seconds_for_range(end, attempt)
@@ -2447,6 +2461,7 @@ def reconcile(state):
             live[end] = (attempt, j)
 
     in_progress = []
+    finalizing = []
     # The same set of ranges as `in_progress`, keyed by end. `remaining` is a
     # COUNT over this run's range list, never `total - completed - ...`: the
     # progress record is read off a shared volume and can carry ends from a run
@@ -2478,11 +2493,20 @@ def reconcile(state):
                 if st.start_time and st.completion_time:
                     wall = (st.completion_time - st.start_time).total_seconds()
                 # Chain total, not this leg alone: a range that resumed spent
-                # real time in the attempts before the winner. Falls back to the
-                # single leg, then to wall, when nothing durable survived.
-                seconds = seconds_for_range(end, attempt, seconds) or seconds
-                if seconds is None:
-                    seconds = wall   # pod already gone; wall is the only figure left
+                # real time in the attempts before the winner. Only a fresh
+                # single-attempt range may fall back to its winner or Job wall;
+                # a resumed chain with a missing leg stays absent.
+                chain = list(_resumed_chain(end, attempt))
+                chain_seconds = seconds_for_range(end, attempt, seconds)
+                # For a fresh single attempt, the winner or Job wall is still a
+                # useful fallback. For a resumed chain, either every compute leg
+                # is known or the aggregate is absent -- never winner-only.
+                if chain_seconds is not None:
+                    seconds = chain_seconds
+                elif len(chain) == 1:
+                    seconds = seconds if seconds is not None else wall
+                else:
+                    seconds = None
                 # Not gated on `pod`: the collector's .metrics/.log.gz are
                 # written from the live stream and outlive the pod, so a reaped
                 # node must not cost us the metric.
@@ -2531,6 +2555,12 @@ def reconcile(state):
             # (and its pod, the last place the metric can be read) regardless.
             release_pvc(end)
             _reap_if_complete(end, attempt, completed[end])
+            if not _attempt_finalized(end, attempt):
+                # The mission driver writes the final profile as soon as
+                # jobs_in_progress becomes empty. Keep normal completion open
+                # until the collector's last atomic metrics write has landed;
+                # this does not consume dispatch capacity below.
+                finalizing.append(job_key(int(end), by_end.get(end, 0)))
         elif st.failed:
             # Completion is terminal for the range, so a Failed Job for a range
             # that is already recorded is garbage -- never an input to the retry
@@ -2784,6 +2814,7 @@ def reconcile(state):
         'failed_ranges': [f"{job_key(int(k), by_end.get(k, 0))}|{v.get('pod', '')}"
                           for k, v in failed.items()],
         'in_progress': in_progress,
+        'finalizing': finalizing,
         'created': created,
         'remaining': sum(1 for end, _ in ranges
                          if str(end) not in completed
@@ -2850,21 +2881,23 @@ def update_status_and_metrics():
 
             mission_duration = time.time() - mission_start_time
             with status_lock:
+                visible_in_progress = r['in_progress'] + r['finalizing']
                 status = {
                     'num_remain': r['remaining'],
                     'queue_remain_count': r['remaining'],
                     'queue_succeeded_count': r['completed'],
                     'queue_failed_count': len(r['failed_ranges']),
-                    'queue_in_progress_count': len(r['in_progress']),
+                    'queue_in_progress_count': len(visible_in_progress),
                     'jobs_failed': r['failed_ranges'],
-                    'jobs_in_progress': r['in_progress'],
+                    'jobs_in_progress': visible_in_progress,
                     'workers_refresh_duration': workers_refresh_duration,
                     'mission_duration': mission_duration,
                 }
             metric_catchup_queues.labels(queue="remain").set(r['remaining'])
             metric_catchup_queues.labels(queue="succeeded").set(r['completed'])
             metric_catchup_queues.labels(queue="failed").set(len(r['failed_ranges']))
-            metric_catchup_queues.labels(queue="in_progress").set(len(r['in_progress']))
+            metric_catchup_queues.labels(queue="in_progress").set(
+                len(visible_in_progress))
             metric_workers.labels(status="up").set(worker_counts['up'])
             metric_workers.labels(status="down").set(worker_counts['down'])
             metric_workers.labels(status="unknown").set(worker_counts['unknown'])
@@ -2873,7 +2906,8 @@ def update_status_and_metrics():
             logger.info("Status: %s", json.dumps(status))
             # Publish on change only -- a 10h run would otherwise issue ~3600
             # no-op ConfigMap writes.
-            counts = (r['remaining'], r['completed'], len(r['failed_ranges']), len(r['in_progress']))
+            counts = (r['remaining'], r['completed'], len(r['failed_ranges']),
+                      len(visible_in_progress))
             if counts != state.get('last_counts'):
                 state['last_counts'] = counts
                 with status_lock:

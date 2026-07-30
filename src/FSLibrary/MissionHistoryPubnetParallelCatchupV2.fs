@@ -444,6 +444,9 @@ let rangeProfileFields =
       "peakCpuCores"
       "peakEphemeralBytes"
       "seconds"
+      // Kubernetes startTime -> completionTime for the winning Job only. The
+      // monitor cannot reconstruct first dispatch -> success after predecessor
+      // Jobs and their inter-attempt gaps are gone.
       "wallSeconds"
       "txApply" ]
 
