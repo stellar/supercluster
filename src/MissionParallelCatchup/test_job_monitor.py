@@ -237,7 +237,8 @@ def test_tx_apply_survives_a_reaped_pod():
 
 
 def test_tx_apply_prefers_durable_sources_over_the_pod_api():
-    fn = _extract(r"def tx_apply_for_range\(.*?^def ").group(0)
+    # The per-attempt reader; tx_apply_for_range now sums these over the chain.
+    fn = _extract(r"def _tx_apply_for_attempt\(.*?^def ").group(0)
     assert fn.index('metrics_path') < fn.index('log_path') < fn.index('read_namespaced_pod_log')
 
 
@@ -1519,3 +1520,85 @@ def test_finalize_records_that_an_attempt_resumed():
 
     assert run(True).get('resumed') is True
     assert 'resumed' not in run(False), "a fresh attempt must not be marked resumed"
+
+
+# --- timings aggregate across the resumed chain too ------------------------
+# medida's total is per-process and a pod's duration is its own, so both are
+# tail-only for a resumed range in exactly the way the peaks were.
+
+def _chain_ns(attempts, extra=None):
+    """Exec the chain helpers over a temp dir. attempts: {n: (metrics, outcome)}."""
+    import tempfile, json as _json, os as _os
+    d = tempfile.mkdtemp()
+    for n, (metrics, outcome) in attempts.items():
+        if metrics is not None:
+            with open(_os.path.join(d, f"m-{n}"), 'w') as fh:
+                _json.dump(metrics, fh)
+        if outcome is not None:
+            with open(_os.path.join(d, f"o-{n}"), 'w') as fh:
+                _json.dump(outcome, fh)
+    ns = {
+        'json': _json,
+        'metrics_path': lambda e, n: _os.path.join(d, f"m-{n}"),
+        'outcome_path': lambda e, n: _os.path.join(d, f"o-{n}"),
+    }
+    for name in ('_attempt_resumed', '_resumed_chain', 'read_outcome',
+                 'seconds_for_range'):
+        ns[name] = None
+    exec(_extract(r"^(def _attempt_resumed\(.*?)(?=\ndef )").group(1), ns)
+    exec(_extract(r"^(def _resumed_chain\(.*?)(?=\ndef )").group(1), ns)
+    exec(_extract(r"^(def read_outcome\(.*?)(?=\ndef )").group(1), ns)
+    exec(_extract(r"^(def seconds_for_range\(.*?)(?=\ndef )").group(1), ns)
+    ns.update(extra or {})
+    return ns
+
+
+def test_seconds_sums_the_whole_resumed_chain():
+    # a1 ran 900s then was evicted mid-replay; a2 resumed and took 300s. The
+    # range cost 1200s of compute, not 300.
+    ns = _chain_ns({
+        1: ({}, {'outcome': 'disrupted', 'attemptSeconds': 900.0}),
+        2: ({'resumed': True}, None),
+    })
+    assert ns['seconds_for_range'](999, 2, 300.0) == 1200.0
+
+
+def test_seconds_ignores_attempts_before_a_fresh_start():
+    # a2 ran new-db and did the whole range itself, so a1's 900s is not part of
+    # the same pass.
+    ns = _chain_ns({
+        1: ({}, {'outcome': 'oom', 'attemptSeconds': 900.0}),
+        2: ({}, None),          # no 'resumed'
+    })
+    assert ns['seconds_for_range'](999, 2, 300.0) == 300.0
+
+
+def test_seconds_survives_a_leg_with_no_recorded_duration():
+    # An attempt whose pod vanished before it was classified has no
+    # attemptSeconds. Better to under-report one leg than return nothing.
+    ns = _chain_ns({
+        1: ({}, {'outcome': 'disrupted'}),        # no attemptSeconds
+        2: ({'resumed': True}, None),
+    })
+    assert ns['seconds_for_range'](999, 2, 300.0) == 300.0
+
+
+def test_seconds_is_none_when_nothing_is_known():
+    ns = _chain_ns({1: ({}, None)})
+    assert ns['seconds_for_range'](999, 1, None) is None
+
+
+def test_a_failed_attempts_duration_is_persisted_with_its_verdict():
+    # The only moment it is available: reconcile computes `seconds` solely on
+    # the success path, and the pod is about to be reaped.
+    fn = _extract(r"^(def record_outcome\(.*?)(?=\ndef )").group(1)
+    assert "data['attemptSeconds'] = _pod_seconds(pod)" in fn
+
+
+def test_tx_apply_sums_the_chain_and_offers_fallbacks_to_the_last_leg_only():
+    # pod_name names the winning attempt's pod; handing it to an earlier leg
+    # would read the wrong pod's log.
+    fn = _extract(r"^(def tx_apply_for_range\(.*?)(?=\ndef )").group(1)
+    assert '_resumed_chain(end, attempt)' in fn
+    assert 'pod_name if n == int(attempt) else None' in fn
+    assert 'total + leg' in fn, "legs are summed, not maxed"

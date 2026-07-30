@@ -674,6 +674,10 @@ def record_outcome(end, attempt, pod):
         return
     data = classify(pod)
     data['pod'] = pod.metadata.name
+    # The only place a failed attempt's duration is ever available: the pod is
+    # about to be reaped, and reconcile computes `seconds` solely on the success
+    # path. Without it a resumed chain can only report its final leg.
+    data['attemptSeconds'] = _pod_seconds(pod)
     try:
         tmp = path + '.tmp'
         with open(tmp, 'w') as fh:
@@ -852,16 +856,8 @@ def peaks_for_range(end, attempt=1):
     Advisory: used to size a LATER run's requests, never to decide anything
     about this one. Any field may be absent.
     """
-    # Walk back only over a contiguous chain of resumed attempts. An attempt
-    # that did NOT resume ran new-db and did the whole range, so its sample is
-    # complete and supersedes everything before it -- in ephemeral mode, where
-    # /data dies with the pod and resume can never fire, that collapses to the
-    # winning attempt alone, exactly as before.
-    first = int(attempt)
-    while first > 1 and _attempt_resumed(end, first):
-        first -= 1
     out = {}
-    for n in range(first, int(attempt) + 1):
+    for n in _resumed_chain(end, attempt):
         try:
             with open(metrics_path(end, n)) as fh:
                 data = json.load(fh)
@@ -872,6 +868,30 @@ def peaks_for_range(end, attempt=1):
             if v is not None and v > out.get(k, 0):
                 out[k] = v
     return out
+
+
+def _pod_seconds(pod):
+    """Container start -> finish for one attempt, or None if unreadable."""
+    start = pod.status.start_time if pod.status else None
+    if start is None:
+        return None
+    for cs in (pod.status.container_statuses or []):
+        t = cs.state.terminated if cs.state else None
+        if t is not None and t.finished_at:
+            return (t.finished_at - start).total_seconds()
+    return None
+
+
+def _resumed_chain(end, attempt):
+    """Attempts describing one continuous pass over the range, oldest first.
+
+    Stops at the last attempt that ran new-db: that one covered the whole range
+    on its own, so nothing before it is part of the same pass.
+    """
+    first = int(attempt)
+    while first > 1 and _attempt_resumed(end, first):
+        first -= 1
+    return range(first, int(attempt) + 1)
 
 
 def _attempt_resumed(end, attempt):
@@ -889,11 +909,55 @@ def _attempt_resumed(end, attempt):
 
 
 def tx_apply_for_range(end, attempt=1, pod_name=None):
-    """Final 'ledger.transaction.apply' sum for one attempt, in seconds.
+    """Total 'ledger.transaction.apply' seconds for the whole range.
+
+    Summed across the resumed chain, not read from the winning attempt alone.
+    medida's total is per-process, so a pod that resumes at LCL+1 reports only
+    the transactions it replayed -- on a range that was interrupted mid-replay
+    that is the tail, not the range.
+
+    Slightly over-counts: replay restarts at the checkpoint boundary containing
+    LCL, so up to 64 ledgers can be applied twice. Against a 16320-ledger range
+    that is <=0.4%, but it is a fixed ledger cost rather than a percentage, so
+    it grows as ranges shrink.
+    """
+    total = None
+    for n in _resumed_chain(end, attempt):
+        # pod_name only ever names the LAST attempt's pod, so the archive/pod
+        # fallbacks are offered to that one alone; earlier legs come from the
+        # .metrics the collector already wrote.
+        leg = _tx_apply_for_attempt(end, n, pod_name if n == int(attempt) else None)
+        if leg is not None:
+            total = leg if total is None else total + leg
+    return total
+
+
+def seconds_for_range(end, attempt=1, final=None):
+    """Compute time for the whole range, summed across the resumed chain.
+
+    `final` is the winning attempt's own duration, which reconcile has in hand
+    from the pod. Earlier legs come from their .outcome, written when the
+    monitor classified the failure and still had the pod.
+
+    This is compute, not elapsed: the gaps between attempts -- scheduling, image
+    pull, a node coming up -- are not in it. wallSeconds covers those.
+    """
+    total = None
+    for n in _resumed_chain(end, attempt):
+        if n == int(attempt):
+            leg = final
+        else:
+            leg = (read_outcome(end, n) or {}).get('attemptSeconds')
+        if leg is not None:
+            total = leg if total is None else total + leg
+    return total
+
+
+def _tx_apply_for_attempt(end, attempt=1, pod_name=None):
+    """Final 'ledger.transaction.apply' sum for ONE attempt, in seconds.
 
     stellar-core prints the medida block once at exit (we pass --metric), so
-    this is the exact total rather than a sample. Only ever called for a
-    SUCCEEDED attempt, so a failed one never contributes.
+    this is the exact total for that process rather than a sample.
 
     Three sources, cheapest and most durable first:
 
@@ -1429,16 +1493,14 @@ def reconcile(state):
                 # successful pod's own start -> container finish is what
                 # worker.sh used to report, and is the number comparable across
                 # the redis cutover.
-                seconds = None
-                if pod is not None and pod.status.start_time:
-                    for cs in (pod.status.container_statuses or []):
-                        t = cs.state.terminated if cs.state else None
-                        if t is not None and t.finished_at:
-                            seconds = (t.finished_at - pod.status.start_time).total_seconds()
-                            break
+                seconds = _pod_seconds(pod) if pod is not None else None
                 wall = None
                 if st.start_time and st.completion_time:
                     wall = (st.completion_time - st.start_time).total_seconds()
+                # Chain total, not this leg alone: a range that resumed spent
+                # real time in the attempts before the winner. Falls back to the
+                # single leg, then to wall, when nothing durable survived.
+                seconds = seconds_for_range(end, attempt, seconds) or seconds
                 if seconds is None:
                     seconds = wall   # pod already gone; wall is the only figure left
                 # Not gated on `pod`: the collector's .metrics/.log.gz are
