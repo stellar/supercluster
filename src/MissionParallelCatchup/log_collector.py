@@ -562,8 +562,21 @@ async def poll_pod(session, pod, end, attempt, done, done_ok):
     backoff = LOG_POLL_SECONDS
     failures = 0
 
+    first_pass = True
     while True:
         was_terminal = done(pod)
+        if first_pass and was_terminal:
+            # The pod was already terminal before this poller existed -- it
+            # finished while the collector was down, or between pod-list polls.
+            # `started` measures how long WE have been watching, which is about
+            # to be zero, not how long the container ran. Measured on ssc-test
+            # 2026-07-30 across two collector restarts: 150 metrics files
+            # recorded a sub-5s duration alongside a >500MiB anon peak. Report
+            # nothing rather than a fabricated near-zero; the monitor's own
+            # figure, from the pod's terminated timestamps, is authoritative and
+            # seconds_for_range prefers it anyway.
+            started = None
+        first_pass = False
         try:
             last_ts, gone = await _poll_once(session, pod, end, attempt, last_ts, tx)
             backoff = LOG_POLL_SECONDS

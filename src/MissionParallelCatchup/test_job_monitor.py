@@ -2234,3 +2234,16 @@ def test_the_lcl_probe_does_not_window_its_grep():
         "a line-windowed grep cannot reach \"num\" past the bucketlist"
     assert '"num"' in probe, "the probe no longer reads the ledger num"
     assert 'head -1' in probe, "unbounded match could pick up a later key"
+
+
+def test_a_pod_already_finished_reports_no_duration():
+    # `started` measures how long the COLLECTOR has watched, not how long the
+    # container ran. A pod that was already terminal when its poller began --
+    # finished while the collector was down, which happened across two restarts
+    # on ssc-test 2026-07-30 -- would otherwise record ~0s next to a real peak:
+    # 150 metrics files had a sub-5s duration with a >500MiB anon peak.
+    poller = _extract(r"^(async def poll_pod\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
+    assert 'first_pass' in poller, "nothing distinguishes the first poll"
+    assert re.search(r"if first_pass and was_terminal:\s*\n(?:\s*#[^\n]*\n)*\s*started = None", poller), \
+        "an already-finished pod still reports a fabricated duration"
+    assert poller.index('was_terminal = done(pod)') < poller.index('first_pass = False')
