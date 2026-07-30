@@ -1333,7 +1333,8 @@ def test_finalize_records_the_working_set_peak():
     written, ws = [], {'pod-1': 4096}
     ns = {
         '_anon_peak': {'pod-1': 900}, '_ws_peak': ws, '_eph_peak': {},
-        '_peak_flushed': {}, '_streaming': {}, '_wake': {}, 'SAVE_SUCCESS_LOGS': True,
+        '_peak_flushed': {}, '_streaming': {}, '_wake': {}, '_pod_secs': {},
+              'SAVE_SUCCESS_LOGS': True,
         'write_metrics': lambda e, a, v: written.append(v),
         'discard': lambda e, a: None, '_mark_done': lambda e, a: None,
         'logger': type('L', (), {'info': lambda s, *a: None})(),
@@ -1507,7 +1508,8 @@ def test_finalize_records_that_an_attempt_resumed():
     def run(resumed):
         written = []
         ns = {'_anon_peak': {'p': 1}, '_ws_peak': {}, '_eph_peak': {},
-              '_peak_flushed': {}, '_streaming': {}, '_wake': {}, 'SAVE_SUCCESS_LOGS': True,
+              '_peak_flushed': {}, '_streaming': {}, '_wake': {}, '_pod_secs': {},
+              'SAVE_SUCCESS_LOGS': True,
               'write_metrics': lambda e, a, v: written.append(v),
               'discard': lambda e, a: None, '_mark_done': lambda e, a: None,
               'logger': type('L', (), {'info': lambda s, *a: None})()}
@@ -1746,7 +1748,8 @@ def test_the_collector_records_a_duration_the_monitor_cannot():
     import asyncio
     written = []
     ns = {'asyncio': asyncio, '_anon_peak': {}, '_ws_peak': {}, '_eph_peak': {},
-          '_peak_flushed': {}, '_streaming': {}, '_wake': {}, 'SAVE_SUCCESS_LOGS': True,
+          '_peak_flushed': {}, '_streaming': {}, '_wake': {}, '_pod_secs': {},
+              'SAVE_SUCCESS_LOGS': True,
           'write_metrics': lambda e, a, v: written.append(v),
           'discard': lambda e, a: None, '_mark_done': lambda e, a: None,
           'logger': type('L', (), {'info': lambda s, *a: None})()}
@@ -2009,8 +2012,14 @@ def test_a_terminal_pod_wakes_its_poller_immediately():
                     COLLECTOR_SRC).group(1)
     # Structure, not just presence: mutating the guard to `if False:` leaves
     # the .set() line in place and sails past a substring check.
-    assert re.search(r"terminal\[name\] = phase in [^\n]*\n\s*if terminal\[name\][^\n]*:\s*\n(?:\s*#[^\n]*\n)*\s*_wake\[name\]\.set\(\)", loop), \
-        "a pod going terminal does not wake its poller"
+    # The duration capture now sits between the assignment and the wake, so
+    # check ordering and the guard rather than adjacency.
+    i_assign = loop.index('terminal[name] = phase in')
+    i_guard  = loop.index('if terminal[name] and name in _wake:')
+    # search AFTER the guard: the vanished-pod block also calls .set() and sits
+    # earlier in the loop, so a bare index() finds the wrong one.
+    i_set    = loop.index('_wake[name].set()', i_guard)
+    assert i_assign < i_guard < i_set, "a pod going terminal does not wake its poller"
     poller = _extract(r"^(async def poll_pod\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
     assert 'asyncio.wait_for(' in poller and '_wake.setdefault' in poller, \
         "the poller still sleeps blind between polls"
@@ -2275,3 +2284,28 @@ def test_a_peak_on_disk_is_never_lowered_by_a_later_write():
     # non-peak fields still take the newest value
     w(1, 1, {'txApplySeconds': 99.0})
     assert _json.load(open(ns['base'](1, 1) + '.metrics'))['txApplySeconds'] == 99.0
+
+
+def test_a_terminal_pod_still_yields_its_real_duration():
+    # A pod carries startTime and terminated.finishedAt until it is deleted, so
+    # even a pod that finished before this poller existed has a real duration.
+    # The poller's own elapsed time cannot know that -- it measures how long WE
+    # watched, which is ~0 in exactly that case.
+    ns = {'datetime': __import__('datetime').datetime}
+    exec(_extract(r"^(def pod_seconds\(.*?)(?=\ndef )", COLLECTOR_SRC).group(1), ns)
+    pod = {'status': {'startTime': '2026-07-30T04:16:26Z',
+                      'containerStatuses': [{'state': {'terminated': {
+                          'finishedAt': '2026-07-30T04:22:19Z'}}}]}}
+    assert ns['pod_seconds'](pod) == 353.0, ns['pod_seconds'](pod)
+    assert ns['pod_seconds']({'status': {'startTime': '2026-07-30T04:16:26Z'}}) is None
+    assert ns['pod_seconds']({'status': {}}) is None
+
+
+def test_the_pods_own_duration_wins_over_the_pollers_elapsed_time():
+    fn = _extract(r"^(async def finalize\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
+    assert '_pod_secs.pop(pod, None)' in fn
+    assert fn.index('observed = _pod_secs.pop') < fn.index('elif started is not None:'), \
+        "the poller's elapsed time must only be the fallback"
+    loop = _extract(r"while True:\n(.*?)await asyncio\.sleep\(POLL_SECONDS\)",
+                    COLLECTOR_SRC).group(1)
+    assert 'pod_seconds(pod)' in loop, "nothing captures it while the pod exists"

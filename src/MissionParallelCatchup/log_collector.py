@@ -33,6 +33,7 @@ import os
 import re
 import ssl
 import sys
+from datetime import datetime
 
 import aiohttp
 
@@ -97,6 +98,8 @@ _poll_slots = asyncio.Semaphore(MAX_CONCURRENT_POLLS)
 # That window is the only thing standing between a spot reclaim and the last
 # lines the container wrote.
 _wake = {}
+# pod name -> its own start->finish, read off the pod while it still exists.
+_pod_secs = {}
 # Fields that only ever grow. write_metrics maxes these instead of overwriting,
 # so a restarted poller starting its high-water at zero cannot lower one.
 PEAK_KEYS = ('peakAnonBytes', 'peakWorkingSetBytes', 'peakEphemeralBytes')
@@ -135,6 +138,30 @@ def ssl_ctx():
 
 def base(end, attempt):
     return os.path.join(LOG_DIR, f"range-{end}-a{attempt}")
+
+
+def pod_seconds(pod):
+    """Container start -> finish from the pod's own status, or None.
+
+    The same fields the monitor reads. A terminal pod still carries them until
+    it is deleted, so this works even when the collector never watched the
+    container run -- which the poller's own elapsed time cannot.
+    """
+    st = pod.get('status') or {}
+    start = st.get('startTime')
+    if not start:
+        return None
+    for cs in (st.get('containerStatuses') or []):
+        term = (cs.get('state') or {}).get('terminated') or {}
+        fin = term.get('finishedAt')
+        if fin:
+            try:
+                a = datetime.strptime(start, '%Y-%m-%dT%H:%M:%SZ')
+                b = datetime.strptime(fin, '%Y-%m-%dT%H:%M:%SZ')
+            except ValueError:
+                return None
+            return (b - a).total_seconds()
+    return None
 
 
 def done_path(end, attempt):
@@ -435,7 +462,11 @@ async def finalize(session, pod, end, attempt, tx, done_ok, started=None):
     """
     # Before discard: on success the archive is about to be deleted.
     measured = {}
-    if started is not None:
+    observed = _pod_secs.pop(pod, None)
+    if observed is not None:
+        # The pod's own timestamps, not how long this poller happened to watch.
+        measured['attemptSeconds'] = round(observed, 1)
+    elif started is not None:
         # Fallback only: the monitor's figure comes from the pod's terminated
         # timestamps and is preferred when it exists.
         measured['attemptSeconds'] = round(
@@ -716,6 +747,14 @@ async def main():
                         continue
                     phase = pod.get('status', {}).get('phase')
                     terminal[name] = phase in ('Succeeded', 'Failed')
+                    if terminal[name]:
+                        # Recorded while the pod object still exists. Beats the
+                        # poller's own elapsed time, which only measures how long
+                        # WE watched -- ~0 for a pod that finished before this
+                        # poller started.
+                        secs = pod_seconds(pod)
+                        if secs is not None:
+                            _pod_secs[name] = secs
                     if terminal[name] and name in _wake:
                         # Wake its poller now rather than at the next tick.
                         _wake[name].set()
