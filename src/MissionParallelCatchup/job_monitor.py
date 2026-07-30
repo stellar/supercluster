@@ -1081,6 +1081,25 @@ def release_pvc(end):
             logger.warning("could not release PVC for completed range %s: %s", end, e)
 
 
+def _has_peaks(record):
+    return any(record.get(k) is not None for k in PEAK_FIELDS)
+
+
+def _reap_if_complete(end, attempt, record):
+    """Delete a succeeded range's Job once nothing more can be learned from it.
+
+    Deleting reaps the pod, and .metrics is the only place peaks live, so a
+    reap before the collector finalizes makes the gap permanent -- that is
+    exactly how a whole run's profile came back with txApply on every range and
+    peaks on none. JOB_TTL_SECONDS still reclaims anything the collector never
+    gets to, so a pod reaped before it could be read costs a late Job, not a
+    stuck one.
+    """
+    if record.get('txApply') is None or not _has_peaks(record):
+        return
+    delete_job(end, attempt)
+
+
 def delete_job(end, attempt):
     """Drop a finished Job once nothing more is owed by it.
 
@@ -1535,8 +1554,21 @@ def reconcile(state):
                 # pod is the only place left to read it from -- deleting the
                 # Job would reap the pod and make that gap permanent. Leave
                 # those to JOB_TTL_SECONDS.
-                if tx is not None:
-                    delete_job(end, attempt)
+                _reap_if_complete(end, attempt, completed[end])
+            elif not _has_peaks(completed[end]):
+                # Backfill. The record is written the moment the Job flips to
+                # succeeded, which is usually before the collector has finalized
+                # -- and peaks_for_range has no fallback, unlike tx_apply, which
+                # reads the archive. Measured on ssc-test: 356 of 356 completed
+                # ranges carried txApply and 0 carried peakAnonBytes, while 1936
+                # .metrics files on the same volume held it. Retry while the Job
+                # is still here; delete_job below is what ends the chances.
+                late = peaks_for_range(end, attempt)
+                if late:
+                    completed[end].update(late)
+                    save_progress(progress)
+                    logger.info("range %s: peaks arrived late, backfilled", end)
+                _reap_if_complete(end, attempt, completed[end])
         elif st.failed:
             pod = job_pods.get(j.metadata.name)
             if pod is not None:

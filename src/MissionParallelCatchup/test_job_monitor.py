@@ -956,14 +956,17 @@ def test_the_retry_creates_the_successor_before_deleting_the_predecessor():
         "delete_job must come after the successor is created"
 
 
-def test_a_success_whose_metrics_are_missing_keeps_its_job():
+def test_a_success_whose_record_is_incomplete_keeps_its_job():
     # tx is read from the collector's .metrics, else the pod. Deleting the Job
     # reaps the pod, so reaping a success before the metrics land turns a
     # recoverable gap into a permanent one -- the same class of loss as the 698
     # ranges the tx_apply regex dropped.
     body = _extract(r"(release_pvc\(end\)\n.*?)(?=\s+elif st\.failed:)").group(1)
-    assert re.search(r"if tx is not None:\s*\n\s*delete_job\(end, attempt\)", body), \
-        "success path must gate the reap on the metric having landed"
+    assert '_reap_if_complete(end, attempt, completed[end])' in body, \
+        "success path must gate the reap on the record being complete"
+    fn = _extract(r"^(def _reap_if_complete\(.*?)(?=\ndef )").group(1)
+    assert "record.get('txApply') is None" in fn and 'not _has_peaks(record)' in fn, \
+        "the reap must require BOTH tx_apply and peaks, not just tx_apply"
 
 
 def test_the_chart_ttl_matches_the_code_default():
@@ -1921,3 +1924,27 @@ def test_a_pending_pod_is_not_polled_yet():
     assert {'Running', 'Succeeded', 'Failed'} == allowed, allowed
     # Pending has no container; Unknown means the node stopped reporting.
     assert 'Pending' not in allowed and 'Unknown' not in allowed
+
+
+def test_late_peaks_are_backfilled_into_a_completed_record():
+    # The record is written the moment the Job flips to succeeded, usually
+    # before the collector finalizes. peaks_for_range has no fallback the way
+    # tx_apply does, so a one-shot read loses them: measured on ssc-test, 356 of
+    # 356 completed ranges had txApply and 0 had peakAnonBytes, while 1936
+    # .metrics files on the same volume held it.
+    body = _extract(r"(elif not _has_peaks\(completed\[end\]\):.*?)(?=\n\s+elif st\.failed:)").group(1)
+    assert 'peaks_for_range(end, attempt)' in body, "no retry of the peak read"
+    assert 'save_progress(progress)' in body, "a backfilled peak is never persisted"
+    assert '_reap_if_complete' in body, "backfill never lets the Job go"
+
+
+def test_peaks_and_tx_apply_are_both_required_before_reaping():
+    ns = {'PEAK_FIELDS': ('peakAnonBytes', 'peakRssBytes'), 'reaped': []}
+    ns['delete_job'] = lambda e, a: ns['reaped'].append((e, a))
+    exec(_extract(r"^(def _has_peaks\(.*?)(?=\ndef )").group(1), ns)
+    exec(_extract(r"^(def _reap_if_complete\(.*?)(?=\ndef )").group(1), ns)
+    ns['_reap_if_complete'](1, 1, {'txApply': 5.0})                       # no peaks
+    ns['_reap_if_complete'](2, 1, {'peakAnonBytes': 99})                  # no tx
+    assert ns['reaped'] == [], "reaped an incomplete record"
+    ns['_reap_if_complete'](3, 1, {'txApply': 5.0, 'peakAnonBytes': 99})
+    assert ns['reaped'] == [(3, 1)], ns['reaped']
