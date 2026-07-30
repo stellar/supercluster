@@ -1804,3 +1804,29 @@ def test_the_worker_disables_the_aws_progress_meter():
     m = re.search(r'sprintf "aws s3 cp ([^"]*)--region %s"', fs)
     assert m, "s3 GET command not found"
     assert '--no-progress' in m.group(1), f"aws s3 cp flags: {m.group(1)!r}"
+
+
+def test_a_failed_attempt_is_not_reaped_before_the_collector_finalizes_it():
+    # delete_job reaps the pod, and backstop_save_pod_log stands down for any
+    # range the collector claimed -- so nothing else would ever read that log.
+    # Under follow=true the collector already holds everything; under polling it
+    # would lose the last interval. Gate it either way.
+    body = _extract(r"(try:\s*\n\s*batch_v1\.create_namespaced_job.*?)continue").group(1)
+    assert 'delete_job(end, attempt)' in body
+    assert re.search(r"if peaks_for_range\(end, attempt\):\s*\n\s*delete_job\(end, attempt\)", body), \
+        "the retry-path reap is not gated on the collector having finalized"
+    assert body.index('create_namespaced_job') < body.index('delete_job('), \
+        "successor must exist before the predecessor is reaped"
+
+
+def test_the_line_buffer_cap_is_charged_per_stream():
+    # Measured on ssc-test at 2096 follow streams: 1444 MiB of a 2048 MiB limit,
+    # memory.events max=2617. The cap is worst-case memory per live stream, so
+    # 256 KiB would add 1 GiB at 4096 streams and OOM the sidecar on its own.
+    cap = int(_extract(r"MAX_LINE_CHARS = int\(os\.getenv\('MAX_LINE_CHARS', (\d+)\)\)",
+                       COLLECTOR_SRC).group(1))
+    assert cap <= 65536, f"{cap} bytes x 4096 streams = {cap * 4096 // 2**20} MiB worst case"
+    assert cap >= 8192, "below this a legitimate long line would be truncated"
+    chart = open(__file__.replace(
+        'test_job_monitor.py', 'parallel_catchup_helm/values.yaml')).read()
+    assert int(_extract(r"maxLineChars: (\d+)", chart).group(1)) == cap

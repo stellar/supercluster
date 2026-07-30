@@ -1622,7 +1622,15 @@ def reconcile(state):
                 # at attempt 1 -- losing the escalated memory that is the whole
                 # point of the retry. live[] keys on the highest attempt, so the
                 # two coexisting for one pass is already handled.
-                delete_job(end, attempt)
+                #
+                # Gated like the success path: deleting the Job reaps the pod,
+                # and backstop_save_pod_log stands down for any range the
+                # collector has claimed, so there is no second reader. Waiting
+                # for .metrics means the collector has finalized this attempt --
+                # its peaks, its tx_apply and its duration are all durable.
+                # JOB_TTL_SECONDS reaps it if the collector never gets there.
+                if peaks_for_range(end, attempt):
+                    delete_job(end, attempt)
                 in_progress.append(job_key(int(end), by_end[end]))
                 continue
             if reason is not None:

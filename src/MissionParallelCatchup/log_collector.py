@@ -70,7 +70,13 @@ PEAK_FLUSH_RATIO = float(os.getenv('PEAK_FLUSH_RATIO', 1.05))
 # Most a single unterminated blob may buffer before we start discarding its
 # head. stellar-core's own lines are well under a kilobyte; anything larger is a
 # progress meter or a stack dump, and neither is worth killing the stream over.
-MAX_LINE_CHARS = int(os.getenv('MAX_LINE_CHARS', 262144))
+#
+# This is charged PER LIVE STREAM. Measured on ssc-test at 2096 follow streams
+# the collector already sat at 1444 MiB of a 2048 MiB limit with memory.events
+# max=2617, so a 256 KiB worst case here is another 512 MiB at 2096 and 1 GiB at
+# 4096 -- on its own enough to OOM the sidecar. 64 KiB is ~64x the longest line
+# stellar-core actually emits.
+MAX_LINE_CHARS = int(os.getenv('MAX_LINE_CHARS', 65536))
 
 LABEL_RUN = 'catchup.stellar.org/run'
 LABEL_RANGE = 'catchup.stellar.org/range-end'
