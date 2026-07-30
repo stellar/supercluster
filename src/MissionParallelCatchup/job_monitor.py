@@ -217,6 +217,10 @@ MAX_EPHEMERAL_ATTEMPTS = int(os.getenv('MAX_EPHEMERAL_ATTEMPTS', 4))
 EPH_BUMP_FACTOR = float(os.getenv('EPH_BUMP_FACTOR', 1.5))
 EPH_ESCALATION_CAP = os.getenv('EPH_ESCALATION_CAP', '200Gi')
 ENVIRONMENTAL_OUTCOMES = ('disrupted', 'rejected', 'unknown')
+# stellar-core's "did not complete". Ambiguous by construction: a corrupt bucket
+# and a SIGTERM during replay both produce it, so it must never be treated as
+# proof that a range is broken.
+CATCHUP_INCOMPLETE_EXIT = 3
 # An OOM means requests/limits are mis-sized for this range. Escalate so the run
 # can finish, but say so loudly -- surviving by escalating at runtime is a
 # configuration bug, not a success.
@@ -1673,7 +1677,9 @@ def reconcile(state):
                 # Job would reap the pod and make that gap permanent. Leave
                 # those to JOB_TTL_SECONDS.
                 _reap_if_complete(end, attempt, completed[end])
-            elif not _has_peaks(completed[end]) or not _attempt_finalized(end, attempt):
+            elif (not _has_peaks(completed[end])
+                  or completed[end].get('txApply') is None
+                  or not _attempt_finalized(end, attempt)):
                 # Backfill. The record is written the moment the Job flips to
                 # succeeded, which is usually before the collector has finalized
                 # -- and peaks_for_range has no fallback, unlike tx_apply, which
@@ -1682,10 +1688,22 @@ def reconcile(state):
                 # .metrics files on the same volume held it. Retry while the Job
                 # is still here; delete_job below is what ends the chances.
                 late = peaks_for_range(end, attempt)
+                if completed[end].get('txApply') is None:
+                    # Same one-shot race as the peaks, and the same fix. The
+                    # collector writes txApplySeconds into .metrics when it
+                    # finalizes, which can land after reconcile recorded the
+                    # range. Measured in the sandbox edge suite 2026-07-30:
+                    # progress.json carried txApply=null while the durable
+                    # .metrics file held txApplySeconds=0.000486848.
+                    late_tx = tx_apply_for_range(end, attempt)
+                    if late_tx is not None:
+                        late = dict(late or {})
+                        late['txApply'] = late_tx
                 if late:
                     completed[end].update(late)
                     save_progress(progress)
-                    logger.info("range %s: peaks arrived late, backfilled", end)
+                    logger.info("range %s: measurements arrived late, backfilled %s",
+                                end, sorted(late))
                 _reap_if_complete(end, attempt, completed[end])
         elif st.failed:
             pod = job_pods.get(j.metadata.name)
@@ -1698,6 +1716,16 @@ def reconcile(state):
             # 2. Job condition -- survives node consolidation, less precise
             # 3. unknown -- retry rather than condemn the run
             verdict = read_outcome(end, attempt) or classify_from_job(j)
+            # ...with one exception. A deadline kill sends SIGTERM, stellar-core
+            # drains and exits 3, and the pod-derived verdict therefore reads
+            # `failed` -- which outranks the Job's DeadlineExceeded and condemns
+            # a range that merely ran long. Only the Job knows the deadline
+            # fired, so on that condition the Job wins. Measured in the sandbox
+            # edge suite 2026-07-30: whichever of the two won the race decided
+            # whether the range was retried or condemned.
+            from_job = classify_from_job(j)
+            if from_job and from_job.get('outcome') == 'timeout':
+                verdict = from_job
             if verdict is None:
                 verdict = {'outcome': 'unknown', 'exitCode': None}
             elif verdict.get('source') == 'job-condition':
@@ -1731,6 +1759,25 @@ def reconcile(state):
                 # 10-hour job. Retry; a genuinely broken range will exhaust its
                 # attempts and fail with evidence.
                 reason = "failed with no surviving classification (monitor restart?)"
+            elif verdict.get('exitCode') == CATCHUP_INCOMPLETE_EXIT:
+                # Exit 3 means "did not complete" and covers BOTH a corrupt
+                # archive AND any interruption -- stellar-core catches SIGTERM,
+                # drains and exits 3 in ~7s. Nothing in the exit code separates
+                # them; only a DisruptionTarget condition does, and that is gone
+                # the moment the pod is.
+                #
+                # Condemning on it made every graceful kill fatal, and a
+                # condemned range aborts the whole mission. Measured in the
+                # sandbox edge suite 2026-07-30: a pod deleted mid-replay, a pod
+                # deleted mid-download, and an attempt-deadline kill were all
+                # classified `failed` at attempt 1 and never retried -- the
+                # resume path was unreachable through any of them.
+                #
+                # Retry on the ordinary range budget. A genuinely broken range
+                # exhausts MAX_ATTEMPTS and fails with evidence; an interrupted
+                # one succeeds, usually by resuming at LCL+1.
+                reason = (f"exited {CATCHUP_INCOMPLETE_EXIT} (did not complete -- "
+                          "corrupt archive or interruption, indistinguishable)")
             else:
                 reason = None   # genuine catchup failure: do not retry
 
@@ -1791,6 +1838,13 @@ def reconcile(state):
                 continue
             if reason is not None:
                 logger.error("range %s exhausted %d attempts (%s)", end, cap, reason)
+            else:
+                # The zero-retry path used to log nothing at all: the range just
+                # appeared under failed{} and the mission aborted with no line
+                # explaining why. Say it plainly.
+                logger.error("!!! RANGE CONDEMNED !!! %s failed with outcome=%s exitCode=%s "
+                             "on attempt %d and is NOT retryable; this fails the mission",
+                             end, verdict['outcome'], verdict.get('exitCode'), attempt)
 
             if end not in failed:
                 failed[end] = {'attempts': attempt,

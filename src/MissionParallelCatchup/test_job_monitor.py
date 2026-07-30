@@ -1941,7 +1941,7 @@ def test_late_peaks_are_backfilled_into_a_completed_record():
     # tx_apply does, so a one-shot read loses them: measured on ssc-test, 356 of
     # 356 completed ranges had txApply and 0 had peakAnonBytes, while 1936
     # .metrics files on the same volume held it.
-    body = _extract(r"(elif not _has_peaks\(completed\[end\]\).*?)(?=\n\s+elif st\.failed:)").group(1)
+    body = _extract(r"(elif \(not _has_peaks\(completed\[end\]\).*?)(?=\n\s+elif st\.failed:)").group(1)
     assert 'peaks_for_range(end, attempt)' in body, "no retry of the peak read"
     assert 'save_progress(progress)' in body, "a backfilled peak is never persisted"
     assert '_reap_if_complete' in body, "backfill never lets the Job go"
@@ -2324,3 +2324,58 @@ def test_the_oom_budget_stops_short_of_the_cap_on_purpose():
     chart = open(__file__.replace(
         'test_job_monitor.py', 'parallel_catchup_helm/values.yaml')).read()
     assert int(_extract(r"maxAttempts: (\d+)", chart).group(1)) == n
+
+
+# --- exit 3 is ambiguous and must never condemn a range --------------------
+# stellar-core catches SIGTERM, drains and exits 3 in ~7s, and a corrupt bucket
+# also exits 3. Nothing in the exit code separates them. Measured in the sandbox
+# edge suite 2026-07-30: a pod killed mid-replay, a pod killed mid-download, and
+# an attempt-deadline kill were ALL classified `failed` at attempt 1 and never
+# retried -- so the resume path was unreachable through every disruption that
+# leaves no DisruptionTarget behind, and one such range aborts the mission.
+
+def test_exit_three_is_retried_not_condemned():
+    body = _extract(r"(if verdict\['outcome'\] == 'timeout':.*?reason = None[^\n]*)").group(1)
+    assert "verdict.get('exitCode') == CATCHUP_INCOMPLETE_EXIT" in body, \
+        "exit 3 still falls through to the zero-retry branch"
+    assert body.index('CATCHUP_INCOMPLETE_EXIT') < body.index('reason = None'), \
+        "the exit-3 branch must precede the condemn branch"
+    assert int(_extract(r"CATCHUP_INCOMPLETE_EXIT = (\d+)").group(1)) == 3
+
+
+def test_exit_three_uses_the_ordinary_range_budget():
+    # Not the environmental budget: a genuinely corrupt range must still be able
+    # to exhaust and fail with evidence rather than retry 20 times.
+    env = set(re.findall(r"'(\w+)'", _extract(r"ENVIRONMENTAL_OUTCOMES = \(([^)]+)\)").group(1)))
+    assert 'failed' not in env, "exit 3 would inherit the 20-attempt disruption budget"
+
+
+def test_a_deadline_kill_is_not_read_as_a_catchup_failure():
+    # The deadline sends SIGTERM -> exit 3 -> pod verdict says `failed`, which
+    # outranks the Job's DeadlineExceeded. Only the Job knows the deadline fired.
+    body = _extract(r"(verdict = read_outcome\(end, attempt\) or classify_from_job\(j\).*?)(?=\n\s+if verdict is None)").group(1)
+    assert "from_job.get('outcome') == 'timeout'" in body, \
+        "a deadline kill can still be condemned as a catchup failure"
+    assert 'verdict = from_job' in body
+
+
+def test_a_condemned_range_is_logged_loudly():
+    # The zero-retry path logged nothing: the range appeared under failed{} and
+    # the mission aborted with no line saying why.
+    body = _extract(r"(if reason is not None:\s*\n\s*logger\.error\(\"range %s exhausted.*?)(?=\n\s+if end not in failed)").group(1)
+    assert 'RANGE CONDEMNED' in body, "condemnation is still silent"
+    assert 'else:' in body
+
+
+def test_a_late_tx_apply_is_backfilled_like_the_peaks():
+    # Same one-shot race the peaks had. The collector writes txApplySeconds when
+    # it finalizes, which can land after reconcile recorded the range. Measured
+    # in the sandbox edge suite 2026-07-30: progress.json held txApply=null while
+    # range-4000-a1.metrics durably held txApplySeconds=0.000486848, and the
+    # monitor even logged "could not read tx_apply for range 4000 (pod gone?)".
+    guard = _extract(r"(elif \(not _has_peaks\(completed\[end\]\).*?)(?=\n\s+late = peaks_for_range)").group(1)
+    assert "completed[end].get('txApply') is None" in guard, \
+        "a range with peaks but no txApply never re-enters the backfill"
+    body = _extract(r"(late = peaks_for_range\(end, attempt\).*?)(?=\n\s+_reap_if_complete)").group(1)
+    assert 'tx_apply_for_range(end, attempt)' in body, "txApply is never re-read"
+    assert "late['txApply'] = late_tx" in body
