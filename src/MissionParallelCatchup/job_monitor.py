@@ -782,8 +782,21 @@ def read_outcome(end, attempt):
         return None
 
 
+def _oom_count(end, attempt):
+    """How many earlier attempts at this range were OOM-killed.
+
+    Escalation must climb once per OOM, not once per attempt. On spot most
+    retries are evictions -- measured on ssc-test 2026-07-30, 288 disruption
+    retries against 7 OOM retries -- and a range disrupted three times then
+    OOMing once would otherwise jump to base * 1.5^4, a 5x request for a single
+    OOM. That inflation is fleet-wide and it is what exhausts the vCPU quota.
+    """
+    return sum(1 for n in range(1, int(attempt) + 1)
+               if (read_outcome(end, n) or {}).get('outcome') == 'oom')
+
+
 def mem_for_attempt(attempt, base=None):
-    """Memory limit for attempt N, escalating after an OOM, capped at MEM_ESCALATION_CAP.
+    """Memory limit after N OOMs, capped at MEM_ESCALATION_CAP.
 
     `base` is what attempt 1 actually ran with. It matters when a profile sized
     the range: escalating a 209Mi profiled range off the configured 24000Mi
@@ -1318,6 +1331,22 @@ def _resources(mem=None, eph=None, end=None):
     if LIM_EPHEMERAL:
         lim['ephemeral-storage'] = eph or LIM_EPHEMERAL
 
+    # No cpu limit on any worker unless one is configured explicitly. Packing is
+    # driven by the request; a limit only throttles a pod that could otherwise
+    # use idle cores, and throttling changes what the range measures -- less cpu
+    # means less download concurrency means a lower peak, so a throttled attempt
+    # records a figure an unthrottled one cannot reproduce.
+    #
+    # This used to be applied only when _profile_overrides returned something,
+    # which silently excluded two populations: unmeasured ranges, and escalated
+    # retries (escalated returns {} as well). Measured on ssc-test 2026-07-30,
+    # 214 a1 and 256 a2 pods were capped at cpu 2 while their peers ran free --
+    # and for the retries that meant more memory and less cpu at the same time,
+    # right after an OOM.
+    if PROFILE_CPU_LIMIT:
+        lim['cpu'] = PROFILE_CPU_LIMIT
+    else:
+        lim.pop('cpu', None)
     if overrides:
         # Memory and disk match request to limit: those are the dimensions worth
         # pinning, since exceeding either kills the pod outright.
@@ -1327,10 +1356,6 @@ def _resources(mem=None, eph=None, end=None):
         # packs by what it actually uses while keeping headroom to burst. That
         # leaves the pod Burstable rather than Guaranteed -- Kubernetes needs
         # all three to match -- which is the intended trade.
-        if PROFILE_CPU_LIMIT:
-            lim['cpu'] = PROFILE_CPU_LIMIT
-        else:
-            lim.pop('cpu', None)
         for key, value in overrides.items():
             req[key] = lim[key] = value
     # Unmeasured range: the configured defaults, requests below limits, exactly
@@ -1651,7 +1676,9 @@ def reconcile(state):
                 reason = "lost to node disruption"
             elif verdict['outcome'] == 'oom':
                 base = (_profile_overrides(end, escalated=False) or {}).get('memory')
-                retry_mem = mem_for_attempt(attempt + 1, base)
+                # Rungs climbed = OOMs seen, not attempts made. This attempt's
+                # own outcome is already on disk, so the count includes it.
+                retry_mem = mem_for_attempt(_oom_count(end, attempt) + 1, base)
                 reason = f"OOM-killed at memory limit {mem_for_attempt(attempt, base)}"
             elif verdict['outcome'] == 'ephemeral':
                 retry_eph = eph_for_attempt(attempt + 1)

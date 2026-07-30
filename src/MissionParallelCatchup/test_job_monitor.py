@@ -551,8 +551,10 @@ def test_an_unmeasured_range_keeps_the_mismatched_defaults():
     ns = _resources_ns(PROFILE_RANGES)
     r = ns['_resources'](end=99999)
     assert r.requests['memory'] == '9Gi' and r.limits['memory'] == '24000Mi'
-    assert r.requests['cpu'] == '1800m' and r.limits['cpu'] == '2', \
-        "an unprofiled range must keep the configured cpu limit"
+    # cpu is the exception: no worker is throttled, measured or not. A limit
+    # only stops a pod using idle cores, and it changes what the range measures.
+    assert r.requests['cpu'] == '1800m'
+    assert 'cpu' not in r.limits, "an unprofiled range must not be throttled"
     assert r.requests['ephemeral-storage'] == '35Gi'
     assert r.limits['ephemeral-storage'] == '40Gi'
     assert r.requests != r.limits
@@ -566,7 +568,7 @@ def test_an_escalated_retry_keeps_the_mismatched_defaults():
     assert r.requests['cpu'] == '1800m', "cpu must fall back to the configured request"
 
 
-def test_the_raised_cpu_limit_is_what_lets_the_peak_grow():
+def test_no_range_is_cpu_throttled_but_every_range_has_a_request():
     # At a 2-core limit every range pegs 2.0, so the measured peak is a ceiling
     # and the profile can never learn real demand. Headroom above the request is
     # the whole point -- the request is still capped for packing.
@@ -574,7 +576,9 @@ def test_the_raised_cpu_limit_is_what_lets_the_peak_grow():
     measured = ns['_resources'](end=2000)
     unmeasured = ns['_resources'](end=99999)
     assert 'cpu' not in measured.limits, "measured ranges run uncapped"
-    assert unmeasured.limits['cpu'] == '2', "unprofiled keeps the configured cap"
+    assert 'cpu' not in unmeasured.limits, "unmeasured ranges run uncapped too"
+    # The request is still what bounds packing, on both paths.
+    assert measured.requests['cpu'] and unmeasured.requests['cpu']
     assert ns['_cpu_millis'](measured.requests['cpu']) <= ns['_cpu_millis']('1800m')
 
 
@@ -2098,3 +2102,45 @@ def test_pod_and_job_agree_on_the_attempt_label_key():
     # Two readers, one key. A mismatch reproduces the same silent collision.
     assert _extract(r"LABEL_ATTEMPT = '([^']+)'").group(1) == \
            _extract(r"LABEL_ATTEMPT = '([^']+)'", COLLECTOR_SRC).group(1)
+
+
+def test_no_worker_gets_a_cpu_limit_unless_one_is_configured():
+    # _profile_overrides returns {} for BOTH "no profile entry" and "escalated
+    # attempt". Treating them the same handed an OOM retry more memory while
+    # capping it at LIM_CPU, when the attempt that just failed ran unlimited.
+    # Measured on ssc-test 2026-07-30: 256 of 679 a2 pods were capped at cpu 2.
+    # Less cpu means less download concurrency means a lower peak, so the retry
+    # succeeds at a figure the next run cannot reproduce unthrottled.
+    ns = _resources_ns(PROFILE_RANGES)
+    first = ns['_resources'](end=2000)
+    retry = ns['_resources'](mem='9000Mi', end=2000)          # escalated
+    assert 'cpu' not in first.limits, first.limits
+    assert 'cpu' not in retry.limits, f"escalated retry was throttled: {retry.limits}"
+    assert retry.requests['memory'] == retry.limits['memory'] == '9000Mi'
+    # ...and an unmeasured range is not throttled either. A limit only stops a
+    # pod using cores that are otherwise idle, and it changes what the range
+    # measures. Packing is driven by the request.
+    plain = ns['_resources'](end=999999999)
+    assert 'cpu' not in plain.limits, f"unprofiled range was throttled: {plain.limits}"
+    assert plain.requests.get('cpu') is not None, "the cpu request must remain"
+
+
+def test_escalation_counts_ooms_not_attempts():
+    # On spot most retries are evictions: 288 disruption retries against 7 OOM
+    # retries on ssc-test 2026-07-30. Keying the exponent on the attempt index
+    # meant a range disrupted three times then OOMing once jumped to
+    # base * 1.5^4 -- a 5x request for one OOM, inflated fleet-wide.
+    import tempfile, json as _json, os as _os
+    d = tempfile.mkdtemp()
+    ns = {'os': _os, 'json': _json,
+          'outcome_path': lambda e, n: _os.path.join(d, f"o-{n}")}
+    for name in ('read_outcome', '_oom_count'):
+        exec(_extract(r"^(def " + name + r"\(.*?)(?=\ndef )").group(1), ns)
+    for n, outcome in ((1, 'disrupted'), (2, 'disrupted'), (3, 'disrupted'), (4, 'oom')):
+        _json.dump({'outcome': outcome}, open(ns['outcome_path'](9, n), 'w'))
+    assert ns['_oom_count'](9, 4) == 1, "three evictions were counted as escalations"
+    for n in (5, 6):
+        _json.dump({'outcome': 'oom'}, open(ns['outcome_path'](9, n), 'w'))
+    assert ns['_oom_count'](9, 6) == 3
+    body = _extract(r"(base = \(_profile_overrides\(end, escalated=False\).*?retry_mem = [^\n]+)").group(1)
+    assert '_oom_count(end, attempt) + 1' in body, "escalation still keys on the attempt index"
