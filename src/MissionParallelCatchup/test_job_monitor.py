@@ -1382,9 +1382,10 @@ def _peaks_ns(attempts):
         'PEAK_FIELDS': ('peakAnonBytes', 'peakRssBytes', 'peakWorkingSetBytes',
                         'peakEphemeralBytes'),
     }
-    exec(_extract(r"^(def _attempt_resumed\(.*?)(?=\ndef )").group(1), ns)
-    exec(_extract(r"^(def peaks_for_range\(.*?)(?=\ndef _attempt_resumed)").group(1), ns)
-    ns['_attempt_resumed'] = ns['_attempt_resumed']
+    for name in ('read_outcome', '_attempt_resumed', '_resumed_chain',
+                 '_hit_a_ceiling', '_peak_attempts'):
+        exec(_extract(r"^(def " + name + r"\(.*?)(?=\ndef )").group(1), ns)
+    exec(_extract(r"^(def peaks_for_range\(.*?)(?=\ndef )").group(1), ns)
     return ns['peaks_for_range']
 
 
@@ -1451,23 +1452,22 @@ def test_spot_is_never_excluded_as_a_capacity_type():
     assert 'capacity-type' not in SRC
 
 
-def test_a_fresh_retry_supersedes_everything_before_it():
+def test_a_fresh_retry_supersedes_an_interrupted_one():
     # No RESUME line means new-db ran and this attempt did the whole range, so
-    # its sample is complete. The earlier attempt measured the same work and
-    # only adds noise -- and in ephemeral mode, where resume can never fire,
-    # this is every retry.
+    # its sample is complete. An earlier attempt that was merely interrupted
+    # measured the same work and only adds noise.
     f = _peaks_ns({
-        1: ({'peakAnonBytes': 8 * 1024**3}, {'outcome': 'oom'}),
+        1: ({'peakAnonBytes': 8 * 1024**3}, {'outcome': 'disrupted'}),
         2: ({'peakAnonBytes': 900 * 1024**2}, None),      # no 'resumed'
     })
     assert f(999, 2)['peakAnonBytes'] == 900 * 1024**2
 
 
 def test_the_chain_stops_at_the_last_fresh_start():
-    # a1 fresh (dropped), a2 fresh and evicted mid-replay, a3 resumed from it.
-    # Only a2+a3 describe the same continuous pass over the range.
+    # a1 interrupted then superseded by a fresh a2; a3 resumed from a2. Only
+    # a2+a3 describe the same continuous pass over the range.
     f = _peaks_ns({
-        1: ({'peakAnonBytes': 9 * 1024**3}, {'outcome': 'oom'}),
+        1: ({'peakAnonBytes': 9 * 1024**3}, {'outcome': 'disrupted'}),
         2: ({'peakAnonBytes': 2 * 1024**3}, {'outcome': 'disrupted'}),
         3: ({'peakAnonBytes': 500 * 1024**2, 'resumed': True}, None),
     })
@@ -2037,3 +2037,36 @@ def test_both_reap_paths_wait_for_the_same_marker():
     assert len(re.findall(r"_attempt_finalized\(end, attempt\)", SRC)) >= 2
     assert 'if peaks_for_range(end, attempt):' not in SRC, \
         "a reap still uses peaks as a proxy for the collector being done"
+
+
+def test_a_ceiling_hit_survives_a_fresh_start():
+    # An OOM peak is evidence about the range whichever pass produced it: the
+    # process really did allocate that much and want more. Dropping it breaks
+    # the self-correcting loop -- a range that OOMs at L must record L so that
+    # L * margin + headroom clears it next run. Measured on ssc-30: an OOM in
+    # replay resumes and stays in the chain (224 of 252), an OOM in download
+    # does not (25 of 252), and a higher-cpu run is download-bound.
+    f = _peaks_ns({
+        1: ({'peakAnonBytes': 8 * 1024**3}, {'outcome': 'oom'}),
+        2: ({'peakAnonBytes': 900 * 1024**2}, None),      # fresh start
+    })
+    assert f(999, 2)['peakAnonBytes'] == 8 * 1024**3
+
+
+def test_a_disk_ceiling_hit_survives_a_fresh_start_too():
+    f = _peaks_ns({
+        1: ({'peakEphemeralBytes': 40 * 1024**3}, {'outcome': 'ephemeral'}),
+        2: ({'peakEphemeralBytes': 9 * 1024**3}, None),
+    })
+    assert f(999, 2)['peakEphemeralBytes'] == 40 * 1024**3
+
+
+def test_the_ceiling_exception_is_peaks_only():
+    # tx_apply and seconds are summed, and a fresh start redoes the work the
+    # dropped attempt already did, so counting it there would double-count.
+    for fn_name in ('tx_apply_for_range', 'seconds_for_range'):
+        fn = _extract(r"^(def " + fn_name + r"\(.*?)(?=\ndef )").group(1)
+        assert '_resumed_chain(end, attempt)' in fn, f"{fn_name} lost the chain"
+        assert '_peak_attempts' not in fn, f"{fn_name} would double-count redone work"
+    peaks = _extract(r"^(def peaks_for_range\(.*?)(?=\ndef )").group(1)
+    assert '_peak_attempts(end, attempt)' in peaks

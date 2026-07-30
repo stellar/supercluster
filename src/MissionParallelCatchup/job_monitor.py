@@ -859,7 +859,7 @@ def peaks_for_range(end, attempt=1):
     about this one. Any field may be absent.
     """
     out = {}
-    for n in _resumed_chain(end, attempt):
+    for n in _peak_attempts(end, attempt):
         try:
             with open(metrics_path(end, n)) as fh:
                 data = json.load(fh)
@@ -882,6 +882,35 @@ def _pod_seconds(pod):
         if t is not None and t.finished_at:
             return (t.finished_at - start).total_seconds()
     return None
+
+
+def _hit_a_ceiling(end, attempt):
+    """Was this attempt killed at one of its own resource limits?"""
+    return (read_outcome(end, attempt) or {}).get('outcome') in ('oom', 'ephemeral')
+
+
+def _peak_attempts(end, attempt):
+    """Attempts whose peaks describe this range: the resumed chain, plus any
+    attempt that died at a limit, wherever it sits.
+
+    A ceiling-hit peak is evidence about the range no matter which pass
+    produced it -- the process really did allocate that much and want more, so
+    it is a lower bound on demand and the next run must size above it. That is
+    the whole self-correcting loop: a range that OOMs at L records L, and
+    L * PROFILE_MARGIN + PROFILE_CACHE_HEADROOM clears it next time.
+
+    Without this the fresh-start rule silently drops it. Measured on ssc-test
+    2026-07-30: an OOM during replay resumes (RESUME accepted, 224 of 252) and
+    stays in the chain, but an OOM during download does not (25 of 252) -- and
+    a run at higher cpu is download-bound, so the loop would go quiet exactly
+    when it is most needed.
+
+    Peaks only. tx_apply and seconds are summed, and a fresh start redoes work
+    the dropped attempt already did, so including it there would double-count.
+    """
+    chain = set(_resumed_chain(end, attempt))
+    return sorted(chain | {n for n in range(1, int(attempt) + 1)
+                           if n not in chain and _hit_a_ceiling(end, n)})
 
 
 def _resumed_chain(end, attempt):
