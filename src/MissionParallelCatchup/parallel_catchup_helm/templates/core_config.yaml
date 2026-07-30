@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-stellar-core-config
+data:
+  stellar-core.cfg: |-
+    {{- if .Values.worker.catchup_skip_known_results_for_testing }}
+    {{ "\n" }}
+    CATCHUP_SKIP_KNOWN_RESULTS_FOR_TESTING = true
+    {{- end }}
+    {{- if .Values.worker.check_events_are_consistent_with_entry_diffs }}
+    {{ "\n" }}
+    EMIT_CLASSIC_EVENTS = true
+    BACKFILL_STELLAR_ASSET_EVENTS = true
+    INVARIANT_CHECKS = [ "(?!BucketListIsConsistentWithDatabase).*" ]
+    {{- else }}
+    {{ "\n" }}
+    INVARIANT_CHECKS = [ "(?!BucketListIsConsistentWithDatabase|EventsAreConsistentWithEntryDiffs).*" ]
+    {{- end }}
+    {{- tpl (.Files.Get "files/stellar-core.cfg") . | nindent 4 }}

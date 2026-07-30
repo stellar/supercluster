@@ -13,6 +13,8 @@ open StellarKubeSpecs
 open StellarNetworkData
 open StellarNetworkDelays
 open MissionCatchupHelpers
+open MissionHistoryPubnetParallelCatchupV2
+open Newtonsoft.Json.Linq
 open Xunit.Abstractions
 
 
@@ -119,6 +121,10 @@ let ctx : MissionContext =
       pubnetParallelCatchupEndLedger = None
       pubnetParallelCatchupLedgersPerJob = 16000
       pubnetParallelCatchupNumWorkers = 192
+      pubnetParallelCatchupStorageMode = "pvc"
+      pubnetParallelCatchupProfile = ""
+      pubnetParallelCatchupRangeOrder = "tip-first"
+      pubnetParallelCatchupCpuRequest = ""
       tag = None
       numPregeneratedTxs = None
       enableTailLogging = true
@@ -542,3 +548,76 @@ type Tests(output: ITestOutputHelper) =
         Assert.Equal("51/6", jobArr3.[0].[1])
         Assert.Equal("56/6", jobArr3.[1].[1])
         Assert.Equal("61/6", jobArr3.[2].[1])
+
+
+[<Fact>]
+let ``range profile keeps only the measurements that exist`` () =
+    // The consumer falls back to its configured default when a field is
+    // absent, so a missing measurement must stay missing rather than become a
+    // null. peakEphemeralBytes is recorded only for ephemeral-mode runs that
+    // finished, so most records will not carry it.
+    let record = JObject()
+    record.["peakWorkingSetBytes"] <- JValue(1234L)
+    record.["peakCpuCores"] <- JValue(0.5)
+    record.["seconds"] <- JValue(42)
+
+    let entry = projectRangeEntry record
+
+    Assert.Equal(3, entry.Count)
+    Assert.Equal(1234L, entry.["peakWorkingSetBytes"].Value<int64>())
+    Assert.Null(entry.["peakEphemeralBytes"])
+
+    record.["peakEphemeralBytes"] <- JValue(9999L)
+    let withEph = projectRangeEntry record
+    Assert.Equal(4, withEph.Count)
+    Assert.Equal(9999L, withEph.["peakEphemeralBytes"].Value<int64>())
+
+
+[<Fact>]
+let ``range profile keeps count as a field so it can be keyed on end alone`` () =
+    // Measured: 4.2x the ledgers per range moved peak disk -1.6% and wall time
+    // 1.15x, so cost tracks ledger position rather than range length. Keying on
+    // end/count would discard the whole profile whenever overlapLedgers or
+    // ledgersPerJob changed, for a distinction the measurements say is small.
+    Assert.DoesNotContain("count", rangeProfileFields)
+
+    let record = JObject()
+    record.["peakWorkingSetBytes"] <- JValue(1L)
+    record.["count"] <- JValue(420)
+    // projectRangeEntry itself must not copy count -- writeRangeProfile attaches
+    // it separately, so a stale profile cannot smuggle it in as a measurement.
+    let entry = projectRangeEntry record
+    Assert.Null(entry.["count"])
+
+
+[<Fact>]
+let ``range profile does not carry a pvc volume peak`` () =
+    // A PVC's size is not a scheduling dimension, so growing it buys no
+    // packing and it is deliberately not profiled.
+    Assert.DoesNotContain("peakVolumeBytes", rangeProfileFields)
+
+
+[<Fact>]
+let ``pvc mode does not reserve node disk it never uses`` () =
+    // /data is on the volume in pvc mode; the node disk only holds logs and tmp.
+    // Asking for the ephemeral-mode figure makes disk rather than cpu the
+    // binding dimension and cuts pods per node.
+    let src =
+        System.IO.File.ReadAllText(
+            "../../../../FSLibrary/MissionHistoryPubnetParallelCatchupV2.fs")
+    Assert.Contains("pubnetParallelCatchupStorageMode = \"pvc\"", src)
+    Assert.Contains("\"2Gi\", \"4Gi\"", src)
+
+
+[<Fact>]
+let ``progress record is read from the volume before the configmap`` () =
+    // The ConfigMap is a 1 MiB-capped mirror (~6100 ranges); /logs/progress.json
+    // is authoritative and unbounded. Reading the mirror would silently
+    // truncate the artifact on a finer slicing.
+    let src =
+        System.IO.File.ReadAllText(
+            "../../../../FSLibrary/MissionHistoryPubnetParallelCatchupV2.fs")
+    let vol = src.IndexOf("/logs/progress.json")
+    let cm = src.IndexOf("queryJobMonitor (context, jobMonitorProgressKey)")
+    Assert.True(vol > 0, "must read the volume copy")
+    Assert.True(vol < cm, "volume read must precede the ConfigMap fallback")

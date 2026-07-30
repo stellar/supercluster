@@ -1,43 +1,101 @@
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: {{ .Release.Name }}-job-monitor-route
-spec:
-  parentRefs:
-  - group: gateway.networking.k8s.io
-    kind: Gateway
-    name: "{{ .Values.monitor.gateway_name }}"
-    namespace: "{{ .Values.monitor.gateway_namespace }}"
-  {{- if .Values.monitor.hostname }}
-  hostnames:
-  - "{{ .Values.monitor.hostname }}"
-  {{- end }}
-  rules:
-  - matches:
-    - path:
-        type: PathPrefix
-        value: "{{ .Values.monitor.path_prefix }}"
-    filters:
-    - type: URLRewrite
-      urlRewrite:
-        path:
-          type: ReplacePrefixMatch
-          replacePrefixMatch: /
-    backendRefs:
-    - name: {{ .Release.Name }}-job-monitor
-      port: 8080
----
 apiVersion: v1
-kind: Service
+kind: ServiceAccount
 metadata:
   name: {{ .Release.Name }}-job-monitor
+  {{- with .Values.service_account.annotations }}
+  annotations:
+    {{- /* The mission sends an indexed array of {key,value}; a plain map is
+           also accepted so the chart stays usable standalone. */}}
+    {{- if kindIs "slice" . }}
+    {{- range . }}
+    {{ .key }}: {{ .value | quote }}
+    {{- end }}
+    {{- else }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
+---
+# Worker pods run under this, not the monitor's SA: IRSA trust for the S3
+# history mirror is bound to this name/namespace. Same name the StatefulSet
+# used, so existing role trust policies keep matching.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: stellar-supercluster-{{ .Release.Name }}
+  {{- with .Values.service_account.annotations }}
+  annotations:
+    {{- /* The mission sends an indexed array of {key,value}; a plain map is
+           also accepted so the chart stays usable standalone. */}}
+    {{- if kindIs "slice" . }}
+    {{- range . }}
+    {{ .key }}: {{ .value | quote }}
+    {{- end }}
+    {{- else }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
+---
+# Namespaced and delete-free. The monitor creates Jobs and PVCs and reads their
+# state; it never patches finalizers and has no access to PersistentVolumes, so
+# it cannot orphan an EBS volume. Job/PVC cleanup happens through
+# ownerReferences and ttlSecondsAfterFinished, not through this ServiceAccount.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Release.Name }}-job-monitor
+rules:
+  # Create-only. Jobs and PVCs are reclaimed via ownerReferences and
+  # ttlSecondsAfterFinished, so this ServiceAccount never deletes or patches
+  # anything and cannot orphan an EBS volume.
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  # delete is required by release_pvc: a completed range's volume is dead weight
+  # and 4000 of them break the EBS CSI controller. Without it the monitor logs a
+  # 403 warning per completion and silently leaks every volume until teardown.
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "create", "delete"]
+  # create/patch is for the progress ConfigMap, which is the durable record of
+  # completed ranges. Jobs are reclaimed during a long run, so their absence
+  # must not be read as "never ran".
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Release.Name }}-job-monitor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .Release.Name }}-job-monitor
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Release.Name }}-job-monitor
+---
+# Holds every worker's log for the run. The monitor is the only long-lived pod,
+# which is what the driver used to rely on the StatefulSet workers for; with a
+# Job per range there is nothing else that outlives the work.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-job-monitor-logs
 spec:
-  type: ClusterIP
-  ports:
-    - port: 8080
-      targetPort: 8080
-  selector:
-    app: {{ .Release.Name }}-job-monitor
+  accessModes: [ReadWriteOnce]
+  {{- with .Values.monitor.logStorageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.monitor.logStorageSize }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -45,65 +103,269 @@ metadata:
   name: {{ .Release.Name }}-job-monitor
 spec:
   replicas: 1
+  # Single writer is what removes the claim/requeue races the redis queue had.
+  # Two replicas would reintroduce them; this must stay 1 without leader election.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
-      app: {{ .Release.Name }}-job-monitor
+      app: job-monitor
+      release: {{ .Release.Name }}
   template:
     metadata:
       labels:
-        app: {{ .Release.Name }}-job-monitor
+        app: job-monitor
+        release: {{ .Release.Name }}
       annotations:
-        # Add annotations to tell prometheus service discovery to scrape metrics.
-        # In k8s clusters without prometheus the annotations will be dormant
         prometheus.io/scrape: "true"
         prometheus.io/port: "8080"
         prometheus.io/path: "/prometheus"
     spec:
+      serviceAccountName: {{ .Release.Name }}-job-monitor
+      {{- with .Values.monitor.tolerateNodeTaints }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
-      - name: job-monitor
-        image: stellar/ssc-job-monitor:latest
-        imagePullPolicy: Always
-        ports:
-        - containerPort: 8080
-        resources:
-          requests:
-            cpu: "{{ .Values.monitor.resources.requests.cpu}}"
-            memory: "{{ .Values.monitor.resources.requests.memory}}"
-        env:
-        - name: NAMESPACE
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.namespace
-        envFrom:
-        - configMapRef:
-            name: {{ .Release.Name }}-job-monitor-config
-      initContainers:
-      - name: wait-for-preload
-        image: redis:7
-        command: ['/bin/sh', '-c']
-        args:
-        - |-
-          # Wait until the job queue has items
-          until [ $(redis-cli -h {{ .Values.redis.hostname }} -p {{ .Values.redis.port }} LLEN {{ .Values.redis.job_queue }}) -gt 0 ]; do
-            echo waiting for preload
-            sleep 2
-          done
-          echo job available
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ .Release.Name }}-job-monitor-config
-data:
-  REDIS_HOST: "{{ .Values.redis.hostname }}"
-  REDIS_PORT: "{{ .Values.redis.port }}"
-  JOB_QUEUE: "{{ .Values.redis.job_queue }}"
-  SUCCESS_QUEUE: "{{ .Values.redis.success_queue }}"
-  FAILED_QUEUE: "{{ .Values.redis.failed_queue }}"
-  PROGRESS_QUEUE: "{{ .Values.redis.progress_queue }}"
-  METRICS: "{{ .Values.redis.metrics }}"
-  JOB_OWNERS: "{{ .Values.redis.job_owners }}"
-  WORKER_PREFIX: "{{ .Release.Name }}-stellar-core"
-  WORKER_COUNT: "{{ .Values.worker.replicas }}"
-  LOGGING_INTERVAL_SECONDS: "{{ .Values.monitor.logging_interval_seconds }}"
-  LOGGING_LEVEL: "{{ .Values.monitor.logging_level }}"
+        - name: job-monitor
+          image: {{ .Values.monitor.image }}
+          imagePullPolicy: {{ .Values.monitor.imagePullPolicy }}
+          {{- if .Values.monitor.sourceConfigMap }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - >-
+              pip install --no-cache-dir -q 'kubernetes~=35.0' 'aiohttp~=3.9'
+              'requests~=2.31' 'prometheus-client~=0.19' &&
+              exec python3 /app/job_monitor.py
+          {{- end }}
+          ports:
+            - containerPort: 8080
+          env:
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: RUN_NAME
+              value: {{ .Release.Name | quote }}
+            - name: CORE_IMAGE
+              value: {{ .Values.worker.stellar_core_image | quote }}
+            - name: WORKER_SERVICE_ACCOUNT
+              value: stellar-supercluster-{{ .Release.Name }}
+            - name: MISSION
+              value: {{ .Values.monitor.mission | quote }}
+            - name: EMIT_MISSION_LABEL
+              value: {{ .Values.monitor.emitMissionLabel | quote }}
+            - name: LOGGING_INTERVAL_SECONDS
+              value: {{ .Values.monitor.loggingIntervalSeconds | quote }}
+            - name: RANGE_GENERATOR
+              value: {{ .Values.range.generator | quote }}
+            - name: STARTING_LEDGER
+              value: {{ .Values.range.startingLedger | quote }}
+            - name: LATEST_LEDGER_NUM
+              value: {{ .Values.range.latestLedgerNum | quote }}
+            - name: LEDGERS_PER_JOB
+              value: {{ .Values.range.ledgersPerJob | quote }}
+            - name: OVERLAP_LEDGERS
+              value: {{ .Values.range.overlapLedgers | quote }}
+            - name: RANGE_ORDER
+              value: {{ .Values.range.order | quote }}
+            - name: LOGARITHMIC_FLOOR_LEDGERS
+              value: {{ .Values.range.logarithmicFloorLedgers | quote }}
+            - name: PARALLELISM
+              value: {{ .Values.worker.replicas | quote }}
+            - name: STORAGE_MODE
+              value: {{ .Values.worker.storageMode | quote }}
+            - name: STORAGE_CLASS
+              value: {{ .Values.worker.storageClass | quote }}
+            - name: STORAGE_SIZE
+              value: {{ .Values.worker.storageSize | quote }}
+            - name: MAX_VOLUMES_PER_NODE
+              value: {{ .Values.worker.maxVolumesPerNode | quote }}
+            - name: ASAN_OPTIONS
+              value: {{ .Values.worker.asanOptions | quote }}
+            - name: REQ_CPU
+              value: {{ .Values.worker.resources.requests.cpu | quote }}
+            - name: REQ_MEM
+              value: {{ .Values.worker.resources.requests.memory | quote }}
+            # Only set in ephemeral mode: in PVC mode a large ephemeral request
+            # makes disk the binding dimension and halves workers-per-node.
+            - name: REQ_EPHEMERAL
+              value: {{ .Values.worker.resources.requests.ephemeral_storage | quote }}
+            - name: LIM_CPU
+              value: {{ .Values.worker.resources.limits.cpu | quote }}
+            - name: LIM_MEM
+              value: {{ .Values.worker.resources.limits.memory | quote }}
+            - name: LIM_EPHEMERAL
+              value: {{ .Values.worker.resources.limits.ephemeral_storage | quote }}
+            - name: MAX_ATTEMPTS
+              value: {{ .Values.monitor.maxAttempts | quote }}
+            - name: MAX_TIMEOUT_ATTEMPTS
+              value: {{ .Values.monitor.maxTimeoutAttempts | quote }}
+            - name: MAX_DISRUPTION_ATTEMPTS
+              value: {{ .Values.monitor.maxDisruptionAttempts | quote }}
+            - name: MEM_BUMP_FACTOR
+              value: {{ .Values.monitor.memBumpFactor | quote }}
+            - name: MAX_EPHEMERAL_ATTEMPTS
+              value: {{ .Values.monitor.maxEphemeralAttempts | quote }}
+            - name: EPH_BUMP_FACTOR
+              value: {{ .Values.monitor.ephBumpFactor | quote }}
+            - name: EPH_ESCALATION_CAP
+              value: {{ .Values.monitor.maxEphemeral | quote }}
+            # Escalating past the largest schedulable node makes the retry
+            # Pending forever, which looks like a hang rather than a failure.
+            - name: MAX_MEM
+              value: {{ .Values.monitor.maxMem | quote }}
+            - name: GRACE_SECONDS
+              value: {{ .Values.monitor.graceSeconds | quote }}
+            # A range stuck retrying the history archive never exits on its
+            # own; without this it holds a slot for the life of the run.
+            - name: ATTEMPT_DEADLINE_SECONDS
+              value: {{ .Values.monitor.attemptDeadlineSeconds | quote }}
+            - name: JOB_TTL_SECONDS
+              value: {{ .Values.monitor.jobTtlSeconds | quote }}
+            - name: PING_TIMEOUT_SECS
+              value: {{ .Values.monitor.pingTimeoutSecs | quote }}
+            - name: LOG_DIR
+              value: /logs
+            {{- if .Values.monitor.profileConfigMap }}
+            - name: PROFILE_PATH
+              value: /profile/profile.json
+            - name: PROFILE_MARGIN
+              value: {{ .Values.monitor.profileMargin | quote }}
+            - name: PROFILE_CPU_LIMIT
+              value: {{ .Values.monitor.profileCpuLimit | quote }}
+            - name: PROFILE_CPU_MARGIN
+              value: {{ .Values.monitor.profileCpuMargin | quote }}
+            - name: PROFILE_MAX_MEM
+              value: {{ .Values.monitor.profileMaxMemory | quote }}
+            - name: PROFILE_CACHE_HEADROOM
+              value: {{ .Values.monitor.profileCacheHeadroom | quote }}
+            {{- end }}
+            # Failed ranges are always saved; successful ones are the bulk of
+            # the volume and can be turned off for a cheap run.
+            - name: SAVE_SUCCESS_LOGS
+              value: {{ .Values.monitor.saveSuccessLogs | quote }}
+            {{- /*
+                 Two accepted shapes: the mission emits structured selectors
+                 ({key, operator, values}) like every other supercluster
+                 mission, while a hand-run helm install more naturally passes
+                 "key:value" strings. Only the first entry is used -- the
+                 monitor takes a single label pair.
+            */}}
+            {{- with (first .Values.worker.requireNodeLabels) }}
+            {{- if kindIs "map" . }}
+            - name: NODE_LABEL_KEY
+              value: {{ .key | quote }}
+            - name: NODE_LABEL_VALUE
+              value: {{ (first (default (list "") .values)) | quote }}
+            {{- else }}
+            - name: NODE_LABEL_KEY
+              value: {{ (splitList ":" .) | first | quote }}
+            - name: NODE_LABEL_VALUE
+              value: {{ (splitList ":" .) | last | quote }}
+            {{- end }}
+            {{- end }}
+            {{- with (first .Values.worker.tolerateNodeTaints) }}
+            - name: TOLERATE_TAINT
+              value: {{ if kindIs "map" . }}{{ .key | quote }}{{ else }}{{ (splitList ":" .) | first | quote }}{{ end }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.monitor.resources | nindent 12 }}
+          # job_monitor.py mirrors its log to /data so it survives the pod.
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: logs
+              mountPath: /logs
+            {{- if .Values.monitor.profileConfigMap }}
+            - name: profile
+              mountPath: /profile
+              readOnly: true
+            {{- end }}
+            {{- if .Values.monitor.sourceConfigMap }}
+            - name: monitor-src
+              mountPath: /app
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /status
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          # A dead pod watch stops all failure classification, which degrades
+          # silently: later failures record outcome=unknown and get retried
+          # blindly. Restart the container rather than run half-blind.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 60
+            failureThreshold: 3
+        # Streams each worker pod's log from the moment it starts, so nothing
+        # is lost when Karpenter reaps the node ~1 min after the pod exits --
+        # and a stuck range is readable while it is still stuck. Separate
+        # container so its memory limit is its own: holding ~1024 open streams
+        # must not be affected by, or affect, the reconcile loop.
+        - name: log-collector
+          image: {{ .Values.monitor.image }}
+          imagePullPolicy: {{ .Values.monitor.imagePullPolicy }}
+          {{- if .Values.monitor.sourceConfigMap }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - >-
+              pip install --no-cache-dir -q 'kubernetes~=35.0' 'aiohttp~=3.9'
+              'requests~=2.31' 'prometheus-client~=0.19' &&
+              exec python3 /app/log_collector.py
+          {{- else }}
+          command: ["/usr/bin/python3", "log_collector.py"]
+          {{- end }}
+          env:
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: RUN_NAME
+              value: {{ .Release.Name | quote }}
+            - name: LOG_DIR
+              value: /logs
+            - name: COLLECTOR_POLL_SECONDS
+              value: {{ .Values.monitor.collectorPollSeconds | quote }}
+            - name: PEAK_FLUSH_RATIO
+              value: {{ .Values.monitor.peakFlushRatio | quote }}
+            - name: COLLECTOR_VANISHED_GRACE_CYCLES
+              value: {{ .Values.monitor.collectorVanishedGraceCycles | quote }}
+            - name: COLLECTOR_MAX_STREAMS
+              value: {{ if gt (.Values.monitor.collectorMaxStreams | int) 0 }}{{ .Values.monitor.collectorMaxStreams | quote }}{{ else }}{{ add (.Values.worker.replicas | int) 256 | quote }}{{ end }}
+            # Failures are always kept; successes are the bulk of the volume.
+            - name: SAVE_SUCCESS_LOGS
+              value: {{ .Values.monitor.saveSuccessLogs | quote }}
+            # The peak-ephemeral sampler runs only in ephemeral mode. Without
+            # this the collector defaults to pvc and silently records nothing.
+            - name: STORAGE_MODE
+              value: {{ .Values.worker.storageMode | quote }}
+          resources:
+            {{- toYaml .Values.monitor.collectorResources | nindent 12 }}
+          volumeMounts:
+            - name: logs
+              mountPath: /logs
+            {{- if .Values.monitor.sourceConfigMap }}
+            - name: monitor-src
+              mountPath: /app
+            {{- end }}
+      volumes:
+        {{- if .Values.monitor.profileConfigMap }}
+        - name: profile
+          configMap:
+            name: {{ .Values.monitor.profileConfigMap }}
+        {{- end }}
+        {{- if .Values.monitor.sourceConfigMap }}
+        - name: monitor-src
+          configMap:
+            name: {{ .Values.monitor.sourceConfigMap }}
+        {{- end }}
+        - name: data
+          emptyDir: {}
+        - name: logs
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-job-monitor-logs

@@ -126,9 +126,17 @@ let SimulatePubnetTier1PerfCoreResourceRequirements : V1ResourceRequirements =
     makeResourceRequirements 500 128 4000 6000
 
 let ParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
-    // When doing parallel catchup, we give each container
-    // 0.25 vCPUs, 8GB RAM and 35 GB of disk bursting to 2vCPU, 24000MB and 40 GB
-    makeResourceRequirementsWithStorageLimit 250 8192 35 2000 24000 40
+    // 1.8 vCPU, 9GiB RAM and 35 GB of disk, bursting to 2 vCPU, 24000MB and 40 GB.
+    //
+    // The requests are picked so the scheduler lands a specific worker count on
+    // each node shape we run on: cpu binds where memory is plentiful, and memory
+    // binds where cpu is.
+    //   r8*.xlarge   (3.92 cpu / 29.7Gi alloc) -> 2 workers, cpu-bound
+    //   m8*.2xlarge  (7.91 cpu / 29.7Gi alloc) -> 3 workers, memory-bound
+    //   r8*.2xlarge  (7.91 cpu / 61.7Gi alloc) -> 4 workers, cpu-bound
+    // The counts hold for allocatable cpu in [7.2,9.0) and memory in [27,36)Gi, so
+    // kubelet-reservation differences between instance types cannot flip them.
+    makeResourceRequirementsWithStorageLimit 1800 9216 35 2000 24000 40
 
 let NonParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
     // When doing non-parallel catchup, we give each container

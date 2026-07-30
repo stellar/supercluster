@@ -1,20 +1,27 @@
-FROM --platform=linux/amd64 ubuntu:24.04
+FROM --platform=linux/amd64 python:3.12-slim
 
 VOLUME /data
 
 WORKDIR /app
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    python3 \
-    python3-redis \
-    python3-requests \
-    python3-prometheus-client && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+# Client major tracks a cluster minor (35.x <-> Kubernetes 1.35) and supports
+# one minor of skew either way, so 35 covers 1.34 through 1.36 -- the cluster
+# today and both upgrades already released. Revisit at 1.37.
+#
+# The floor matters independently: podFailurePolicy (V1PodFailurePolicy*) needs
+# >=26 and V1VolumeResourceRequirements needs >=29. Ubuntu's distro package is
+# 22.6.0 and has neither, so it cannot express this mission's failure
+# classification at all.
+RUN pip install --no-cache-dir \
+    'kubernetes~=35.0' \
+    'aiohttp~=3.9' \
+    'requests~=2.31' \
+    'prometheus-client~=0.19'
 
 COPY ./job_monitor.py /app
+# Same image, second entrypoint: runs as a sidecar streaming worker logs.
+COPY ./log_collector.py /app
 
 EXPOSE 8080
 
-CMD ["/usr/bin/python3", "job_monitor.py"]
+CMD ["python3", "job_monitor.py"]

@@ -119,6 +119,10 @@ type MissionContext =
       pubnetParallelCatchupEndLedger: int option
       pubnetParallelCatchupLedgersPerJob: int
       pubnetParallelCatchupNumWorkers: int
+      pubnetParallelCatchupStorageMode: string
+      pubnetParallelCatchupProfile: string
+      pubnetParallelCatchupRangeOrder: string
+      pubnetParallelCatchupCpuRequest: string
       genesisTestAccountCount: int option
 
       asanOptions: string option

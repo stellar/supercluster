@@ -1,20 +1,26 @@
-redis:
-  hostname: "" # to be set by the mission
-  port: 6379
-  job_queue: "ranges"
-  success_queue: "succeeded"
-  failed_queue: "failed"
-  progress_queue: "in_progress"
-  metrics: "metrics"
-  job_owners: "job_owners"
-  resources:
-    requests:
-      cpu: "100m"
-      memory: "100Mi"
-
 worker:
   stellar_core_image: "stellar/stellar-core:latest"
   replicas: 5
+  # pvc: /data survives the pod, so an evicted range resumes at L+1 -- this is
+  # what makes spot viable. ephemeral: /data is an emptyDir on the node, no
+  # resume, and ephemeral_storage must be sized to hold it.
+  storageMode: "pvc"
+  storageClass: ""
+  # Sized from what a range actually uses: the old node-local /data ran on a
+  # 35Gi request / 40Gi limit. 40Gi x 1024 workers is 40 TiB of gp3 rather than
+  # 100 TiB, which matters against the per-region storage quota.
+  # One PVC per ledger range, not per concurrency slot. Measured on ssc-test:
+  # 300 jobs each with their own PVC took 3151s vs 3210s reusing 40 -- 7.5x the
+  # volume lifecycles for no measurable cost and no CSI throttling. Reuse only
+  # bought bookkeeping, plus pinning every later range to the AZ the slot's
+  # first volume happened to land in.
+  storageSize: "40Gi"
+  # Cap on PVC-mounting workers per node, enforced with a topologySpread
+  # minDomains floor. A Nitro node allows ~26 EBS attachments and Karpenter does
+  # not size nodes for attachment capacity. Inert at realistic density (1800m
+  # CPU already yields ~4/node); only binds if CPU requests are small enough for
+  # 24+ pods to share a node. 0 disables. pvc mode only.
+  maxVolumesPerNode: 24
   requireNodeLabels: []
   avoidNodeLabels: []
   tolerateNodeTaints: []
@@ -35,26 +41,119 @@ worker:
   historyGetCommandCore003:
     "curl -sf http://history.stellar.org/prd/core-live/core_live_003/{0} -o {1}"
 
-monitor:
-  gateway_name: "traefik-gateway-private"
-  gateway_namespace: "traefik"
-  hostname: "" # to be set by the mission
-  path_prefix: "/default"
-  logging_interval_seconds: 300
-  logging_level: "INFO" # 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'
-  resources:
-    requests:
-      cpu: "100m"
-      memory: "100Mi"
+# Index -> ledger range is computed in the Job template; no queue to preload.
+range:
+  # uniform: equal ledger counts. logarithmic: big chunks over cheap early
+  # history, halving toward the tip, aiming for equal wall-time per job.
+  generator: "uniform"
+  logarithmicFloorLedgers: 64000
+  startingLedger: 0
+  latestLedgerNum: 100000
+  overlapLedgers: 320
+  # Dispatch order. Generators emit tip-first, which front-loads the most
+  # expensive ranges. "oldest-first" reverses that so a profiling run
+  # measures the cheap early ranges before it can be interrupted.
+  order: tip-first
+  ledgersPerJob: 16000
 
-range_generator:
-  strategy: "uniform" # "uniform" or "logarithmic"
-  params:
-    starting_ledger: 0
-    latest_ledger_num: 100000
-    overlap_ledgers: 320
-    uniform_ledgers_per_job: 16000 # only for strategy="uniform"
-    logarithmic_floor_ledgers: 16000 # only for strategy="logarithmic"
+monitor:
+  # Reuses the existing hand-built job-monitor image slot -- no new image and no
+  # new push path (nothing in .github/workflows builds these).
+  image: "stellar/ssc-job-monitor:latest"
+  # Dev loop: run the monitor and collector from a ConfigMap holding
+  # job_monitor.py and log_collector.py instead of a built image. Set it to the
+  # ConfigMap name and point monitor.image at a plain python base; the deps the
+  # Dockerfile bakes get pip-installed at start. Empty = use the image as built.
+  sourceConfigMap: ""
+  # Range profile from an earlier run, as a ConfigMap holding profile.json.
+  # The mission driver resolves --pubnet-parallel-catchup-profile (a local
+  # path or an https URL) into one. Empty = size from the configured
+  # requests below. Only tightens requests; limits are untouched.
+  profileConfigMap: ""
+  profileMargin: 1.15
+  # CPU limit for ranges the profile has measured. Above the configured
+  # worker limit on purpose: at a 2-core limit every range pegs 2.0, so the
+  # peak is a ceiling and the profile never learns real demand. Unprofiled
+  # ranges keep worker.resources.limits.cpu unchanged.
+  # Empty = measured ranges run with no cpu limit, which is fastest on an
+  # otherwise-free node (168s/111s/99s at limit 2/4/none). Set a value to cap.
+  profileCpuLimit: ""
+  # No margin on cpu: it is compressible, so under-requesting costs contention
+  # rather than an OOM kill. Memory keeps profileMargin.
+  profileCpuMargin: 1.0
+  # Ceiling for profile-derived memory. Above the configured worker limit on
+  # purpose: a range needing more than that must be able to ask for it
+  # rather than be pinned under its own measured peak.
+  profileMaxMemory: "32Gi"
+  # Fixed allowance added to a range's measured rss, on top of profileMargin.
+  # Not zero: memory.max bounds anon PLUS page cache, and a multiplicative
+  # margin is meaningless at small rss. Measured with headroom 0, ranges
+  # profiled at 190MiB rss got a 209MiB limit and 90 of them OOMKilled within
+  # 90s of dispatch.
+  profileCacheHeadroom: "512Mi"
+  imagePullPolicy: IfNotPresent
+  mission: "HistoryPubnetParallelCatchup"
+  # Adds a `mission` label to worker pods, which kube-state-metrics exposes as
+  # label_mission for the Grafana container panels. Default OFF: those panels
+  # are per-pod, so 1024 workers would swamp any view with mission=$__all and
+  # slow the shared dashboard for everyone. Turn on per-run for a small run, or
+  # once the panels aggregate.
+  emitMissionLabel: false
+  loggingIntervalSeconds: 10
+  maxAttempts: 5
+  # Hangs are usually persistent (bad archive host, absent checkpoint), so they
+  # get a lower cap than evictions -- otherwise a wedged range costs
+  # maxAttempts x attemptDeadlineSeconds before it is reported.
+  # For a hang caught by attemptDeadlineSeconds. stellar-core bounds its own
+  # retries (RETRY_A_FEW=5 / RETRY_A_LOT=32, backoff capped at 512s) and exits 3
+  # when they are exhausted, so the deadline is only a backstop for the
+  # pathological tail -- worst case ~3.4h for a RETRY_A_LOT work.
+  maxTimeoutAttempts: 2
+  # Evictions, admission rejections and monitor restarts are not the range's
+  # fault, so they do not share the failure budget above. Measured on ssc-test:
+  # ten evictions across 25 workers put four healthy ranges on attempt 3 of 5.
+  maxDisruptionAttempts: 20
+  memBumpFactor: 1.5
+  # An ephemeral-storage eviction repeats until the range gets more disk, so
+  # it gets its own small budget rather than the environmental one.
+  maxEphemeralAttempts: 4
+  ephBumpFactor: 1.5
+  maxEphemeral: "200Gi"
+  maxMem: "48Gi"
+  graceSeconds: 100
+  # Must exceed any plausible monitor outage: completion is recorded to the
+  # progress ConfigMap by the monitor, and a Job reclaimed before that happens
+  # reads as "never ran" and gets redone.
+  # 0 = no deadline. A prod range runs ~50 min, so ~3h is generous while still
+  # catching a range wedged in archive retries. Measured: stellar-core retries a
+  # missing/unreachable archive indefinitely rather than failing.
+  attemptDeadlineSeconds: 10800
+  jobTtlSeconds: 600
+  pingTimeoutSecs: 2
+  # Worker logs are pulled to the monitor's volume while each pod is still
+  # alive, then collected in one exec at teardown instead of ~1024.
+  logStorageClass: ""
+  logStorageSize: "100Gi"
+  saveSuccessLogs: true
+  collectorPollSeconds: 5
+  # Growth factor before an in-flight peak is flushed to its .metrics file, so a
+  # collector restart cannot silently reset a range's high-water to zero.
+  peakFlushRatio: 1.05
+  # Poll cycles a stream gets to finalize after its pod leaves the pod list,
+  # before it is cancelled and its connection slot reclaimed.
+  collectorVanishedGraceCycles: 3
+  # 0 = derive from worker.replicas. A fixed value here is how 2048-worker runs
+  # silently lost every retry pod's metrics: this caps the aiohttp connection
+  # pool, not the task count, so pods beyond it block forever rather than
+  # queueing -- and retries, created last, never got a slot.
+  collectorMaxStreams: 0
+  collectorResources:
+    requests: { cpu: "200m", memory: "512Mi" }
+    limits:   { cpu: "2",    memory: "2Gi" }
+  tolerateNodeTaints: []
+  resources:
+    requests: { cpu: "200m", memory: "512Mi" }
+    limits:   { cpu: "2",    memory: "2Gi" }
 
 service_account:
   annotations: []

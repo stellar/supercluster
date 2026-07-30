@@ -115,6 +115,10 @@ type MissionOptions
         pubnetParallelCatchupEndLedger: int option,
         pubnetParallelCatchupLedgersPerJob: int,
         pubnetParallelCatchupNumWorkers: int,
+        pubnetParallelCatchupStorageMode: string,
+        pubnetParallelCatchupProfile: string,
+        pubnetParallelCatchupRangeOrder: string,
+        pubnetParallelCatchupCpuRequest: string,
         tag: string option,
         numPregeneratedTxs: int option,
         genesisTestAccountCount: int option,
@@ -521,6 +525,30 @@ type MissionOptions
              Default = 192)>]
     member self.PubnetParallelCatchupNumWorkers = pubnetParallelCatchupNumWorkers
 
+    [<Option("pubnet-parallel-catchup-storage-mode",
+             HelpText = "worker /data backing: 'pvc' keeps it across pods so an evicted range resumes at L+1 (needed for spot); 'ephemeral' puts it on the node disk, which packs denser but cannot resume (only supported for V2)",
+             Required = false,
+             Default = "pvc")>]
+    member self.PubnetParallelCatchupStorageMode : string = pubnetParallelCatchupStorageMode
+
+    [<Option("pubnet-parallel-catchup-profile",
+             HelpText = "range profile from an earlier run, used to tighten per-range requests: a local path or an https URL to the JSON artifact. Only tightens requests; limits are unchanged (only supported for V2)",
+             Required = false,
+             Default = "")>]
+    member self.PubnetParallelCatchupProfile : string = pubnetParallelCatchupProfile
+
+    [<Option("pubnet-parallel-catchup-range-order",
+             HelpText = "dispatch order: 'tip-first' (default) or 'oldest-first'. Generators emit tip-first, which front-loads the most expensive ranges; oldest-first profiles the cheap early ones first (only supported for V2)",
+             Required = false,
+             Default = "tip-first")>]
+    member self.PubnetParallelCatchupRangeOrder : string = pubnetParallelCatchupRangeOrder
+
+    [<Option("pubnet-parallel-catchup-cpu-request",
+             HelpText = "override the worker cpu request, e.g. 1000m or 500m. Also the ceiling a profile-derived cpu request is clamped to, so it applies to profiled and unprofiled ranges alike. Empty = use StellarKubeSpecs (only supported for V2)",
+             Required = false,
+             Default = "")>]
+    member self.PubnetParallelCatchupCpuRequest : string = pubnetParallelCatchupCpuRequest
+
     [<Option("tag", HelpText = "optional name to tag the run with", Required = false)>]
     member self.Tag = tag
 
@@ -898,6 +926,10 @@ let main argv =
                                pubnetParallelCatchupEndLedger = mission.PubnetParallelCatchupEndLedger
                                pubnetParallelCatchupLedgersPerJob = mission.PubnetParallelCatchupLedgersPerJob
                                pubnetParallelCatchupNumWorkers = mission.PubnetParallelCatchupNumWorkers
+                               pubnetParallelCatchupStorageMode = mission.PubnetParallelCatchupStorageMode
+                               pubnetParallelCatchupProfile = mission.PubnetParallelCatchupProfile
+                               pubnetParallelCatchupRangeOrder = mission.PubnetParallelCatchupRangeOrder
+                               pubnetParallelCatchupCpuRequest = mission.PubnetParallelCatchupCpuRequest
                                tag = mission.Tag
                                numPregeneratedTxs = mission.NumPregeneratedTxs
                                enableTailLogging = true

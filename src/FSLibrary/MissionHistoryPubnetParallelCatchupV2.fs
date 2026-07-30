@@ -26,7 +26,12 @@ open k8s
 open CSLibrary
 
 // Constants
-let helmChartPath = "/supercluster/src/MissionParallelCatchup/parallel_catchup_helm"
+// Baked into the supercluster image at this path. Overridable so a local run
+// can point at a working copy without editing this file.
+let helmChartPath =
+    match Environment.GetEnvironmentVariable("SUPERCLUSTER_CHART_PATH") with
+    | null | "" -> "/supercluster/src/MissionParallelCatchup/parallel_catchup_helm"
+    | p -> p
 
 // Comment out the path below for local testing
 // Example command to run local testing (in the `supercluster/` directory):
@@ -34,10 +39,11 @@ let helmChartPath = "/supercluster/src/MissionParallelCatchup/parallel_catchup_h
 // let helmChartPath = "src/MissionParallelCatchup/parallel_catchup_helm"
 let valuesFilePath = helmChartPath + "/values.yaml"
 
-let defaultJobMonitorHostName = "ssc-job-monitor-eks.services.stellar-ops.com"
-let jobMonitorStatusEndPoint = "/status"
-let jobMonitorMetricsEndPoint = "/metrics"
-let jobMonitorLoggingIntervalSecs = 30 // frequency of job monitor's internal information gathering (querying core endpoint and redis metrics) and logging
+// Keys in the <release>-catchup-progress ConfigMap. These were HTTP paths when
+// the driver polled the monitor through a Gateway; it reads the ConfigMap now.
+let jobMonitorStatusKey = "status.json"     // live queue counts
+let jobMonitorProgressKey = "progress.json" // durable per-range completion record
+let jobMonitorLoggingIntervalSecs = 30 // frequency of the monitor reconcile loop: dispatch, liveness ping, status publish
 let jobMonitorStatusCheckIntervalSecs = 60 // frequency of us querying job monitor's `/status` end point
 let jobMonitorMetricsCheckIntervalSecs = 60 // frequency of us querying job monitor's `/metrics` end point
 let jobMonitorStatusCheckTimeOutSecs = 600
@@ -48,10 +54,66 @@ let failedJobLogStreamLineCount = 1000
 let mutable nonce : String = ""
 let mutable helmReleaseName : String = ""
 
-let jobMonitorHostName (context: MissionContext) =
-    match context.jobMonitorExternalHost with
-    | Some host -> host
-    | None -> defaultJobMonitorHostName // TODO: append it with a nounce to make it session specific
+// Resolve --pubnet-parallel-catchup-profile into a ConfigMap the monitor mounts.
+//
+// Accepts a local path or an https URL, so a profile can come off disk or
+// straight from a raw paste/gist link. Returns the ConfigMap name, or None to
+// size from the configured requests.
+//
+// Never fatal: a profile only tightens requests, so a run must still start when
+// one cannot be fetched. Failing the mission here would turn an optimisation
+// into a dependency.
+let resolveRangeProfile (context: MissionContext) : string option =
+    let spec = context.pubnetParallelCatchupProfile
+
+    if String.IsNullOrWhiteSpace spec then
+        None
+    else
+        // The options are built before the helm install sets this, and the
+        // ConfigMap has to land in the same cluster and namespace the release
+        // will use.
+        Environment.SetEnvironmentVariable("KUBECONFIG", ExpandHomeDirTilde context.kubeCfg)
+
+        try
+            let body =
+                if spec.StartsWith("https://", StringComparison.OrdinalIgnoreCase) then
+                    use client = new HttpClient()
+                    client.Timeout <- TimeSpan.FromSeconds(30.0)
+                    client.GetStringAsync(spec) |> Async.AwaitTask |> Async.RunSynchronously
+                else
+                    File.ReadAllText(ExpandHomeDirTilde spec)
+
+            // Parse before shipping it: a 404 page or a truncated download would
+            // otherwise reach the monitor as an unreadable mount.
+            let doc = JObject.Parse(body)
+            let count =
+                match doc.["ranges"] with
+                | :? JObject as r -> r.Count
+                | _ -> 0
+
+            if count = 0 then
+                LogWarn "Range profile %s has no ranges; sizing from configured requests" spec
+                None
+            else
+                let name = sprintf "%s-range-profile" helmReleaseName
+                let file = Path.Combine(Path.GetTempPath(), sprintf "%s-profile.json" helmReleaseName)
+                File.WriteAllText(file, body)
+
+                RunShellCommand [| "kubectl"
+                                   "create"
+                                   "configmap"
+                                   name
+                                   sprintf "--from-file=profile.json=%s" file |]
+                |> ignore
+
+                LogInfo "Range profile: %d ranges from %s -> configmap %s" count spec name
+                Some name
+        with ex ->
+            LogWarn "Could not load range profile %s (%s); sizing from configured requests"
+                spec
+                ex.Message
+            None
+
 
 // Helper functions to convert label/taint tuples to Helm-compatible format using indexed notation
 let requireNodeLabelToHelmIndexed (index: int) ((key: string), (value: string option)) =
@@ -94,20 +156,29 @@ let installProject (context: MissionContext) =
     setOptions.Add(sprintf "worker.stellar_core_image=%s" context.image)
     setOptions.Add(sprintf "worker.replicas=%d" context.pubnetParallelCatchupNumWorkers)
 
-    // Set Redis hostname to be unique per release
-    setOptions.Add(sprintf "redis.hostname=%s-redis" nonce)
+    // pvc: /data survives the pod so an evicted range resumes at L+1 (what makes
+    // spot viable). ephemeral: /data is an emptyDir on the node -- denser
+    // packing, no resume. The ephemeral-storage request below must match:
+    // ~2Gi for pvc, ~35Gi for ephemeral, or the monitor logs a loud mismatch.
+    setOptions.Add(sprintf "worker.storageMode=%s" context.pubnetParallelCatchupStorageMode)
 
-    setOptions.Add(sprintf "range_generator.params.starting_ledger=%d" context.pubnetParallelCatchupStartingLedger)
+    match resolveRangeProfile context with
+    | Some cm -> setOptions.Add(sprintf "monitor.profileConfigMap=%s" cm)
+    | None -> ()
+
+    setOptions.Add(sprintf "range.order=%s" context.pubnetParallelCatchupRangeOrder)
+
+    setOptions.Add(sprintf "range.startingLedger=%d" context.pubnetParallelCatchupStartingLedger)
 
     let endLedger =
         match context.pubnetParallelCatchupEndLedger with
         | Some value -> value
         | None -> GetLatestPubnetLedgerNumber()
 
-    setOptions.Add(sprintf "range_generator.params.latest_ledger_num=%d" endLedger)
+    setOptions.Add(sprintf "range.latestLedgerNum=%d" endLedger)
 
     setOptions.Add(
-        sprintf "range_generator.params.uniform_ledgers_per_job=%d" context.pubnetParallelCatchupLedgersPerJob
+        sprintf "range.ledgersPerJob=%d" context.pubnetParallelCatchupLedgersPerJob
     )
 
     // Skip known results by default
@@ -129,8 +200,16 @@ let installProject (context: MissionContext) =
     let memReqMebi = resourceRequirements.Requests.["memory"].ToString()
     let cpuLimMili = resourceRequirements.Limits.["cpu"].ToString()
     let memLimMebi = resourceRequirements.Limits.["memory"].ToString()
-    let storageReqGibi = resourceRequirements.Requests.["ephemeral-storage"].ToString()
-    let storageLimGibi = resourceRequirements.Limits.["ephemeral-storage"].ToString()
+    // StellarKubeSpecs sizes ephemeral-storage for ephemeral mode, where /data is
+    // an emptyDir on the node. In pvc mode /data is on the volume and the node
+    // disk only holds logs and tmp, so asking for the full amount reserves disk
+    // nothing uses -- and makes disk, not cpu, the binding dimension for packing.
+    let storageReqGibi, storageLimGibi =
+        if context.pubnetParallelCatchupStorageMode = "pvc" then
+            "2Gi", "4Gi"
+        else
+            resourceRequirements.Requests.["ephemeral-storage"].ToString(),
+            resourceRequirements.Limits.["ephemeral-storage"].ToString()
 
     LogInfo
         "Resource requirements from StellarKubeCfg:\n\
@@ -147,7 +226,14 @@ let installProject (context: MissionContext) =
         storageReqGibi
         storageLimGibi
 
-    setOptions.Add(sprintf "worker.resources.requests.cpu=%s" cpuReqMili)
+    // An explicit override applies to profiled and unprofiled ranges alike: the
+    // monitor clamps any profile-derived cpu request to REQ_CPU, so this is the
+    // ceiling as well as the default.
+    let cpuReqEffective =
+        if String.IsNullOrWhiteSpace context.pubnetParallelCatchupCpuRequest then cpuReqMili
+        else context.pubnetParallelCatchupCpuRequest
+
+    setOptions.Add(sprintf "worker.resources.requests.cpu=%s" cpuReqEffective)
     setOptions.Add(sprintf "worker.resources.requests.memory=%s" memReqMebi)
     setOptions.Add(sprintf "worker.resources.limits.cpu=%s" cpuLimMili)
     setOptions.Add(sprintf "worker.resources.limits.memory=%s" memLimMebi)
@@ -169,13 +255,15 @@ let installProject (context: MissionContext) =
     | Some mirrorUrl -> [ 1 .. 3 ] |> List.iter (setS3HistoryGetCommand mirrorUrl)
     | None -> ()
 
-    setOptions.Add(sprintf "monitor.hostname=%s" (jobMonitorHostName context))
-    setOptions.Add(sprintf "monitor.path_prefix=/%s/%s" context.namespaceProperty helmReleaseName)
-    setOptions.Add(sprintf "monitor.logging_interval_seconds=%d" jobMonitorLoggingIntervalSecs)
-    // Attach the job-monitor HTTPRoute to the same Gateway as the core route
-    // (--gateway-name/--gateway-namespace), instead of the values.yaml defaults.
-    setOptions.Add(sprintf "monitor.gateway_name=%s" context.gatewayName)
-    setOptions.Add(sprintf "monitor.gateway_namespace=%s" context.gatewayNamespace)
+    setOptions.Add(sprintf "monitor.loggingIntervalSeconds=%d" jobMonitorLoggingIntervalSecs)
+
+    // Every other mission gets this label from StellarKubeSpecs (Map.add
+    // "mission" missionName); parallel catchup builds its pods from a helm
+    // chart instead, so the old worker StatefulSet carried no mission label at
+    // all. kube-state-metrics turns it into label_mission, which every
+    // container-level Grafana panel joins on -- which is why this mission has
+    // never appeared in the dashboard's mission list.
+    setOptions.Add(sprintf "monitor.mission=%s" context.missionName)
 
     // Set ASAN_OPTIONS if provided
     match context.asanOptions with
@@ -242,32 +330,50 @@ let installProject (context: MissionContext) =
 // 2. For each pod, finds all files matching "stellar-core-*.log" in /data
 // 3. Creates a tar.gz archive and copies it to context.destination directory
 let collectLogsFromPods (context: MissionContext) =
-    // Generate pod names based on number of workers
-    // Pod names follow the pattern: <helmReleaseName>-stellar-core-0, <helmReleaseName>-stellar-core-1, etc.
-    let podNames =
-        [ 0 .. context.pubnetParallelCatchupNumWorkers - 1 ]
-        |> List.map (fun i -> sprintf "%s-stellar-core-%d" helmReleaseName i)
+    // Worker pods are per-range now and are reaped within about a minute of
+    // finishing, so there is nothing left to exec into at teardown. The monitor
+    // pulls each pod's log while it is still alive -- on failure before the
+    // retry, on success before the Job's TTL -- onto its own volume, so one
+    // exec here replaces the ~1024 that the StatefulSet design needed.
+    let monitorPods =
+        context.kube
+            .ListNamespacedPod(
+                context.namespaceProperty,
+                labelSelector = sprintf "app=job-monitor,release=%s" helmReleaseName
+            )
+            .Items
+        |> Seq.map (fun p -> p.Metadata.Name)
+        |> List.ofSeq
 
-    LogInfo "Collecting logs from %d worker pods to directory: %s" (List.length podNames) context.destination.Path
-
-    for podName in podNames do
+    match monitorPods with
+    | [] ->
+        LogWarn
+            "No job-monitor pod found for release %s; worker logs cannot be collected"
+            helmReleaseName
+    | podName :: _ ->
         try
-            LogInfo "Collecting logs from pod: %s" podName
+            LogInfo "Collecting worker logs from job-monitor pod %s to %s" podName context.destination.Path
 
-            // Build the tar command to archive log files
-            // The command tars all stellar-core-*.log files in /data
-            // Using `-f -` to write the file contents to stdout
-            let command = [| "sh"; "-c"; "cd /data && tar -czf - stellar-core-*.log" |]
+            let outputFile =
+                Path.Combine(context.destination.Path, sprintf "%s-worker-logs.tar" helmReleaseName)
 
-            // Output file path for this pod's logs
-            let outputFile = Path.Combine(context.destination.Path, sprintf "%s-logs.tar.gz" podName)
+            // Entries are already gzipped by the streaming collector, so this
+            // bundles without re-compressing. Named range-<end>-a<attempt>.log.gz,
+            // so a failing range is findable directly rather than by worker ordinal.
+            // Already gzipped by the collector, so no -z. Keeps the per-attempt
+            // .outcome verdicts (outcome/exitCode/pod -- useful post-mortem) and
+            // drops .state, which is only the collector's resume bookkeeping.
+            let command =
+                [| "sh"
+                   "-c"
+                   // lost+found is the ext4 root of the logs PVC, not ours.
+                   "cd /logs && tar -cf - --exclude='*.state' --exclude='./lost+found' ." |]
 
-            // Execute the command and capture the tar output to a local file
             RemoteCommandRunner.RunRemoteCommandAndCaptureOutput(
                 kube = context.kube,
                 ns = context.namespaceProperty,
                 podName = podName,
-                containerName = "stellar-core",
+                containerName = "job-monitor",
                 command = command,
                 outputFilePath = outputFile
             )
@@ -275,12 +381,12 @@ let collectLogsFromPods (context: MissionContext) =
             let fileInfo = FileInfo(outputFile)
 
             if fileInfo.Exists && fileInfo.Length > 0L then
-                LogInfo "Successfully collected logs from %s to %s (size: %d bytes)" podName outputFile fileInfo.Length
+                LogInfo "Collected worker logs to %s (size: %d bytes)" outputFile fileInfo.Length
             else
-                LogWarn "No logs found or empty archive for pod %s" podName
+                LogWarn "Worker log archive is empty: %s" outputFile
 
         with ex ->
-            LogWarn "Could not collect logs from pod %s (this is expected if pod doesn't exist): %s" podName ex.Message
+            LogWarn "Could not collect worker logs from %s: %s" podName ex.Message
 
 // Cleanup on exit. `signalTriggered` indicates we're running under a hard
 // deadline (Jenkins' SoftKillWaitSeconds, ~5s by default, before SIGKILL).
@@ -288,9 +394,200 @@ let collectLogsFromPods (context: MissionContext) =
 // of the much-slower log collection — otherwise we get SIGKILLed mid-
 // collection and leak every worker pod, which is what we saw in practice
 // with a 1024-worker run aborted from Jenkins.
+let queryJobMonitor (context: MissionContext, key: String) =
+    // The monitor publishes the same JSON it serves on /status into
+    // <release>-catchup-progress. Reading it through the kube API removes the
+    // Gateway/HTTPRoute dependency entirely -- the driver already has a client.
+    try
+        let cm =
+            context.kube.ReadNamespacedConfigMap(helmReleaseName + "-catchup-progress", context.namespaceProperty)
+
+        match cm.Data.TryGetValue key with
+        | true, body ->
+            LogInfo "job monitor status from configmap key '%s': %s" key body
+            Some(JObject.Parse(body))
+        | _ ->
+            LogInfo "job monitor configmap has no '%s' yet" key
+            None
+    with ex ->
+        LogError "Error reading job monitor configmap: %s" ex.Message
+        None
+
+
+// Emit what this run measured, next to the worker-log tar, so a later run can
+// be given tighter per-range requests. An artifact rather than a ConfigMap or
+// an S3 object: nothing for ArgoCD to reconcile, no second writer racing a
+// concurrent mission, and not bounded by Prometheus retention.
+// Fields carried from the monitor's progress record into the profile artifact.
+// A PVC's size is absent on purpose -- it is not a scheduling dimension, so
+// profiling it buys no packing. peakEphemeralBytes appears only for
+// ephemeral-mode runs, and only for ranges that finished.
+let rangeProfileFields =
+    [ "peakRssBytes"; "peakWorkingSetBytes"; "peakCpuCores"; "peakEphemeralBytes"
+      "seconds"; "txApply" ]
+
+// A missing measurement must stay missing rather than become a null: the
+// consumer falls back to its configured default when the field is absent.
+let projectRangeEntry (record: JObject) : JObject =
+    let entry = JObject()
+
+    for field in rangeProfileFields do
+        match record.[field] with
+        | null -> ()
+        | v -> entry.[field] <- v
+
+    entry
+
+
+// The progress record, preferring the copy on the monitor's volume.
+//
+// The ConfigMap is only a mirror and is capped at 1 MiB -- about 6100 ranges at
+// ~172 bytes each, reachable simply by halving ledgersPerJob. Past that the
+// mirror stops updating while /logs/progress.json stays correct, so reading the
+// ConfigMap would silently truncate the artifact.
+let readProgressRecord (context: MissionContext) : JObject option =
+    let monitorPods =
+        context.kube
+            .ListNamespacedPod(
+                context.namespaceProperty,
+                labelSelector = sprintf "app=job-monitor,release=%s" helmReleaseName
+            )
+            .Items
+        |> Seq.map (fun p -> p.Metadata.Name)
+        |> List.ofSeq
+
+    let fromVolume =
+        match monitorPods with
+        | [] -> None
+        | podName :: _ ->
+            try
+                let tmp = Path.Combine(Path.GetTempPath(), sprintf "%s-progress.json" helmReleaseName)
+
+                RemoteCommandRunner.RunRemoteCommandAndCaptureOutput(
+                    kube = context.kube,
+                    ns = context.namespaceProperty,
+                    podName = podName,
+                    containerName = "job-monitor",
+                    command = [| "cat"; "/logs/progress.json" |],
+                    outputFilePath = tmp
+                )
+
+                let fi = FileInfo(tmp)
+
+                if fi.Exists && fi.Length > 0L then
+                    LogInfo "Progress record read from the monitor volume (%d bytes)" fi.Length
+                    Some(JObject.Parse(File.ReadAllText(tmp)))
+                else
+                    None
+            with ex ->
+                LogWarn "Could not read /logs/progress.json (%s); falling back to the ConfigMap" ex.Message
+                None
+
+    match fromVolume with
+    | Some p -> Some p
+    | None -> queryJobMonitor (context, jobMonitorProgressKey)
+
+
+let writeRangeProfile (context: MissionContext) =
+    match readProgressRecord context with
+    | None -> LogInfo "No progress record to build a range profile from"
+    | Some progress ->
+        try
+            let completed = progress.["completed"] :?> JObject
+            let ranges = JObject()
+
+            // Keyed on the range end alone, with count kept as a field.
+            //
+            // Measured on ssc-test: 4.2x the ledgers per range (100 -> 420, the
+            // default 320 overlap) moved peak disk by -1.6% and wall time by
+            // 1.15x. Cost tracks ledger position -- how big the bucket set is to
+            // download and apply -- far more than range length. Putting count in
+            // the key would therefore discard the whole profile whenever
+            // overlapLedgers or ledgersPerJob changed, to preserve a distinction
+            // the measurements say is small.
+            //
+            // A consumer should resolve a range by exact end, else the nearest
+            // measured end, else a run-wide fallback -- so a re-sliced run still
+            // gets useful numbers instead of zero matches.
+            for prop in completed.Properties() do
+                let record = prop.Value :?> JObject
+                let entry = projectRangeEntry record
+
+                match record.["count"] with
+                | null -> ()
+                | v -> entry.["count"] <- v
+
+                if entry.Count > 0 then
+                    // Same end from two differently-sized ranges: keep the
+                    // larger, since sizing from the smaller would under-provision.
+                    let existing = ranges.[prop.Name]
+
+                    let keep =
+                        isNull existing
+                        || (let a = entry.["count"]
+                            let b = (existing :?> JObject).["count"]
+                            isNull b || (not (isNull a) && a.Value<int>() >= b.Value<int>()))
+
+                    if keep then ranges.[prop.Name] <- entry
+
+            // Slicing and storage mode both go in the name, because a profile is
+            // only valid for the shape it was measured at.
+            //
+            // Slicing: keys are range ends and cost tracks range length, so a
+            // 39382-ledger profile fed into a 16320-ledger run resolves through
+            // nearest-end fallback and sizes everything wrong. Measured on
+            // ssc-test -- it produced 1025 OOM retries in one run.
+            //
+            // Mode: an ephemeral profile carries peakEphemeralBytes and a pvc one
+            // does not, so crossing them silently defaults the disk axis.
+            let ledgersPerRange =
+                let counts =
+                    ranges.Properties()
+                    |> Seq.choose (fun p ->
+                        match (p.Value :?> JObject).["count"] with
+                        | null -> None
+                        | v -> Some(v.Value<int>()))
+                    |> Seq.toList
+
+                match counts with
+                | [] -> context.pubnetParallelCatchupLedgersPerJob
+                | _ -> counts |> List.countBy id |> List.maxBy snd |> fst
+
+
+            let doc = JObject()
+            doc.["schema"] <- JValue(1)
+            doc.["generated"] <- JValue(DateTime.UtcNow.ToString("o"))
+            doc.["release"] <- JValue(helmReleaseName)
+            doc.["storageMode"] <- JValue(context.pubnetParallelCatchupStorageMode)
+            doc.["ledgersPerRange"] <- JValue(ledgersPerRange)
+            doc.["ranges"] <- ranges
+
+            let path =
+                Path.Combine(
+                    context.destination.Path,
+                    sprintf
+                        "%s-profile-%dledgers-%s.json"
+                        helmReleaseName
+                        ledgersPerRange
+                        context.pubnetParallelCatchupStorageMode)
+
+            File.WriteAllText(path, doc.ToString())
+            LogInfo "Wrote range profile for %d ranges to %s" ranges.Count path
+        with ex -> LogWarn "Failed to write range profile: %s" ex.Message
+
+
 let cleanup (signalTriggered: bool) (context: MissionContext) =
     if toPerformCleanup then
         toPerformCleanup <- false
+
+        // Before either branch: `helm uninstall` deletes the progress ConfigMap
+        // the profile is built from, so an aborted run would otherwise lose every
+        // measurement it had already taken. One ConfigMap read and a local file
+        // write -- cheap enough for the abort path's few seconds, and a run
+        // stopped part-way is exactly when the partial profile is most wanted.
+        try
+            writeRangeProfile context
+        with ex -> LogWarn "Failed to write range profile: %s" ex.Message
 
         if signalTriggered then
             // Abort path: resources first, logs are nice-to-have.
@@ -344,20 +641,6 @@ Console.CancelKeyPress.Add
 
         Environment.Exit(0))
 
-let queryJobMonitor (context: MissionContext, path: String, endPoint: String) =
-    try
-        use client = new HttpClient()
-        let url = "http://" + jobMonitorHostName context + path + endPoint
-        let response = client.GetStringAsync(url).Result
-
-        LogInfo "job monitor query '%s', got response: %s" url response
-        let json = JObject.Parse(response)
-        Some(json)
-    with ex ->
-        LogError "Error querying job monitor '%s': %s" endPoint ex.Message
-        None
-
-
 let dumpLogs (context: MissionContext, podName: String) =
     let stream =
         context.kube.ReadNamespacedPodLog(
@@ -397,11 +680,10 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
     let mutable allJobsFinished = false
     let mutable timeoutLeft = jobMonitorStatusCheckTimeOutSecs
     let mutable timeBeforeNextMetricsCheck = jobMonitorMetricsCheckIntervalSecs
-    let jobMonitorPath = "/" + context.namespaceProperty + "/" + helmReleaseName
 
     while not allJobsFinished do
         Thread.Sleep(jobMonitorStatusCheckIntervalSecs * 1000)
-        let statusOpt = queryJobMonitor (context, jobMonitorPath, jobMonitorStatusEndPoint)
+        let statusOpt = queryJobMonitor (context, jobMonitorStatusKey)
 
         try
             match statusOpt with
@@ -426,7 +708,7 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
 
                 if remainSize = 0 && JobsInProgress.Count = 0 then
                     // All jobs completed — perform a final query on the metrics
-                    queryJobMonitor (context, jobMonitorPath, jobMonitorMetricsEndPoint) |> ignore
+                    queryJobMonitor (context, jobMonitorProgressKey) |> ignore
                     LogInfo "All queues empty. Mission complete."
                     allJobsFinished <- true
 
@@ -434,7 +716,7 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
                 timeBeforeNextMetricsCheck <- timeBeforeNextMetricsCheck - jobMonitorStatusCheckIntervalSecs
 
                 if timeBeforeNextMetricsCheck <= 0 then
-                    queryJobMonitor (context, jobMonitorPath, jobMonitorMetricsEndPoint) |> ignore
+                    queryJobMonitor (context, jobMonitorProgressKey) |> ignore
                     timeBeforeNextMetricsCheck <- jobMonitorMetricsCheckIntervalSecs
 
             | None ->
