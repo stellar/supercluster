@@ -1081,6 +1081,21 @@ def release_pvc(end):
             logger.warning("could not release PVC for completed range %s: %s", end, e)
 
 
+def done_path(end, attempt):
+    return os.path.join(LOG_DIR, f"range-{end}-a{attempt}.done")
+
+
+def _attempt_finalized(end, attempt):
+    """Has the collector written everything it will for this attempt?
+
+    It writes this file last, after .metrics. Anything inferred instead -- peaks
+    being present, tx_apply being readable -- is a guess: tx_apply falls back to
+    the archive so it is available long before the collector finishes, and an
+    attempt can legitimately finalize with no peaks at all.
+    """
+    return os.path.exists(done_path(end, attempt))
+
+
 def _has_peaks(record):
     return any(record.get(k) is not None for k in PEAK_FIELDS)
 
@@ -1095,7 +1110,7 @@ def _reap_if_complete(end, attempt, record):
     gets to, so a pod reaped before it could be read costs a late Job, not a
     stuck one.
     """
-    if record.get('txApply') is None or not _has_peaks(record):
+    if not _attempt_finalized(end, attempt):
         return
     delete_job(end, attempt)
 
@@ -1555,7 +1570,7 @@ def reconcile(state):
                 # Job would reap the pod and make that gap permanent. Leave
                 # those to JOB_TTL_SECONDS.
                 _reap_if_complete(end, attempt, completed[end])
-            elif not _has_peaks(completed[end]):
+            elif not _has_peaks(completed[end]) or not _attempt_finalized(end, attempt):
                 # Backfill. The record is written the moment the Job flips to
                 # succeeded, which is usually before the collector has finalized
                 # -- and peaks_for_range has no fallback, unlike tx_apply, which

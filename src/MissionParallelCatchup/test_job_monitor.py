@@ -965,8 +965,8 @@ def test_a_success_whose_record_is_incomplete_keeps_its_job():
     assert '_reap_if_complete(end, attempt, completed[end])' in body, \
         "success path must gate the reap on the record being complete"
     fn = _extract(r"^(def _reap_if_complete\(.*?)(?=\ndef )").group(1)
-    assert "record.get('txApply') is None" in fn and 'not _has_peaks(record)' in fn, \
-        "the reap must require BOTH tx_apply and peaks, not just tx_apply"
+    assert 'not _attempt_finalized(end, attempt)' in fn, \
+        "the reap must wait for the collector's own done marker"
 
 
 def test_the_chart_ttl_matches_the_code_default():
@@ -1329,7 +1329,7 @@ def test_finalize_records_the_working_set_peak():
         '_anon_peak': {'pod-1': 900}, '_ws_peak': ws, '_eph_peak': {},
         '_peak_flushed': {}, '_streaming': {}, 'SAVE_SUCCESS_LOGS': True,
         'write_metrics': lambda e, a, v: written.append(v),
-        'discard': lambda e, a: None,
+        'discard': lambda e, a: None, '_mark_done': lambda e, a: None,
         'logger': type('L', (), {'info': lambda s, *a: None})(),
     }
     exec(fn, ns)
@@ -1503,7 +1503,7 @@ def test_finalize_records_that_an_attempt_resumed():
         ns = {'_anon_peak': {'p': 1}, '_ws_peak': {}, '_eph_peak': {},
               '_peak_flushed': {}, '_streaming': {}, 'SAVE_SUCCESS_LOGS': True,
               'write_metrics': lambda e, a, v: written.append(v),
-              'discard': lambda e, a: None,
+              'discard': lambda e, a: None, '_mark_done': lambda e, a: None,
               'logger': type('L', (), {'info': lambda s, *a: None})()}
         exec(fn, ns)
         tx = type('T', (), {'seconds': None, 'resumed': resumed})()
@@ -1742,7 +1742,7 @@ def test_the_collector_records_a_duration_the_monitor_cannot():
     ns = {'asyncio': asyncio, '_anon_peak': {}, '_ws_peak': {}, '_eph_peak': {},
           '_peak_flushed': {}, '_streaming': {}, 'SAVE_SUCCESS_LOGS': True,
           'write_metrics': lambda e, a, v: written.append(v),
-          'discard': lambda e, a: None,
+          'discard': lambda e, a: None, '_mark_done': lambda e, a: None,
           'logger': type('L', (), {'info': lambda s, *a: None})()}
     exec(fn, ns)
     tx = type('T', (), {'seconds': None, 'resumed': False})()
@@ -1932,19 +1932,64 @@ def test_late_peaks_are_backfilled_into_a_completed_record():
     # tx_apply does, so a one-shot read loses them: measured on ssc-test, 356 of
     # 356 completed ranges had txApply and 0 had peakAnonBytes, while 1936
     # .metrics files on the same volume held it.
-    body = _extract(r"(elif not _has_peaks\(completed\[end\]\):.*?)(?=\n\s+elif st\.failed:)").group(1)
+    body = _extract(r"(elif not _has_peaks\(completed\[end\]\).*?)(?=\n\s+elif st\.failed:)").group(1)
     assert 'peaks_for_range(end, attempt)' in body, "no retry of the peak read"
     assert 'save_progress(progress)' in body, "a backfilled peak is never persisted"
     assert '_reap_if_complete' in body, "backfill never lets the Job go"
+    assert '_attempt_finalized(end, attempt)' in body, \
+        "backfill stops retrying before the collector has finished"
 
 
-def test_peaks_and_tx_apply_are_both_required_before_reaping():
-    ns = {'PEAK_FIELDS': ('peakAnonBytes', 'peakRssBytes'), 'reaped': []}
+def test_the_reap_waits_for_the_collectors_done_marker():
+    # Not inferred from peaks or tx_apply: tx_apply falls back to the archive so
+    # it lands long before the collector finishes, and an attempt can finalize
+    # with no peaks at all. Only the collector knows it is done.
+    import tempfile, os as _os
+    d = tempfile.mkdtemp()
+    ns = {'os': _os, 'LOG_DIR': d, 'PEAK_FIELDS': ('peakAnonBytes',), 'reaped': []}
     ns['delete_job'] = lambda e, a: ns['reaped'].append((e, a))
-    exec(_extract(r"^(def _has_peaks\(.*?)(?=\ndef )").group(1), ns)
-    exec(_extract(r"^(def _reap_if_complete\(.*?)(?=\ndef )").group(1), ns)
-    ns['_reap_if_complete'](1, 1, {'txApply': 5.0})                       # no peaks
-    ns['_reap_if_complete'](2, 1, {'peakAnonBytes': 99})                  # no tx
-    assert ns['reaped'] == [], "reaped an incomplete record"
-    ns['_reap_if_complete'](3, 1, {'txApply': 5.0, 'peakAnonBytes': 99})
-    assert ns['reaped'] == [(3, 1)], ns['reaped']
+    for name in ('done_path', '_attempt_finalized', '_has_peaks', '_reap_if_complete'):
+        exec(_extract(r"^(def " + name + r"\(.*?)(?=\ndef )").group(1), ns)
+    full = {'txApply': 5.0, 'peakAnonBytes': 99}
+    ns['_reap_if_complete'](1, 1, full)
+    assert ns['reaped'] == [], "reaped before the collector marked it done"
+    open(_os.path.join(d, 'range-1-a1.done'), 'w').close()
+    ns['_reap_if_complete'](1, 1, full)
+    assert ns['reaped'] == [(1, 1)], ns['reaped']
+
+
+def test_the_done_marker_is_written_after_everything_else():
+    # It licenses the monitor to reap the pod, which is the only place peaks can
+    # still be read from. Written before .metrics it would authorise exactly the
+    # reap it exists to prevent.
+    fn = _extract(r"^(async def finalize\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
+    assert '_mark_done(end, attempt)' in fn
+    assert fn.index('write_metrics(end, attempt, measured)') < fn.index('_mark_done('), \
+        "the done marker precedes the metrics it certifies"
+    assert fn.rstrip().endswith('_mark_done(end, attempt)'), \
+        "the done marker is not the last thing finalize does"
+
+
+def test_the_done_marker_is_written_atomically_and_is_best_effort():
+    fn = _extract(r"^(def _mark_done\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
+    assert '.tmp' in fn and 'os.replace(' in fn, "a half-written marker would be truthy"
+    assert 'except OSError' in fn, "a failed marker must not kill the stream"
+    import tempfile, os as _os
+    d = tempfile.mkdtemp()
+    ns = {'os': _os,
+          'base': lambda e, a: _os.path.join(d, f"range-{e}-a{a}"),
+          'logger': type('L', (), {'warning': lambda s, *a: None})()}
+    exec(_extract(r"^(def done_path\(.*?)(?=\ndef )", COLLECTOR_SRC).group(1), ns)
+    exec(fn, ns)
+    ns['_mark_done'](77, 2)
+    assert _os.path.exists(_os.path.join(d, 'range-77-a2.done'))
+    assert not _os.path.exists(_os.path.join(d, 'range-77-a2.done.tmp'))
+
+
+def test_both_sides_agree_on_the_marker_path():
+    # Two processes, one volume, one filename. A mismatch would mean the monitor
+    # never reaps and every Job waits out its TTL.
+    c = _extract(r"^(def done_path\(.*?)(?=\ndef )", COLLECTOR_SRC).group(1)
+    m = _extract(r"^(def done_path\(.*?)(?=\n\ndef )").group(1)
+    assert ".done" in c and ".done" in m
+    assert 'range-' in m and 'base(end, attempt)' in c

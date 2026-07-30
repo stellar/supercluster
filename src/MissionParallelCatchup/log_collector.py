@@ -128,6 +128,10 @@ def base(end, attempt):
     return os.path.join(LOG_DIR, f"range-{end}-a{attempt}")
 
 
+def done_path(end, attempt):
+    return base(end, attempt) + '.done'
+
+
 def read_state(end, attempt):
     try:
         with open(base(end, attempt) + '.state') as fh:
@@ -389,6 +393,18 @@ async def sample_kubelet(session, nodes):
                         write_metrics(ref[0], ref[1], {'peakAnonBytes': int(rss)})
 
 
+def _mark_done(end, attempt):
+    path = done_path(end, attempt)
+    tmp = path + '.tmp'
+    try:
+        with open(tmp, 'w') as fh:
+            fh.write('')
+        os.replace(tmp, path)
+    except OSError as e:
+        # Costs a Job that waits out JOB_TTL_SECONDS, never correctness.
+        logger.warning("could not mark range %s attempt %s done: %s", end, attempt, e)
+
+
 async def finalize(session, pod, end, attempt, tx, done_ok, started=None):
     """Persist everything this attempt owes, then let its stream go.
 
@@ -443,6 +459,14 @@ async def finalize(session, pod, end, attempt, tx, done_ok, started=None):
                     "(saveSuccessLogs=false)", end, attempt)
     else:
         logger.info("range %s attempt %s: stream complete", end, attempt)
+    # Last, deliberately. The monitor treats this file as "the collector will
+    # write nothing further for this attempt" and only then reaps the Job --
+    # which deletes the pod, the one place peaks can still be read from. It has
+    # to land after .metrics or it would license exactly the reap it exists to
+    # prevent. Inferring the same thing from peaks being present was wrong for
+    # an attempt that legitimately has none.
+    _mark_done(end, attempt)
+
 
 
 async def _poll_once(session, pod, end, attempt, last_ts, tx):
