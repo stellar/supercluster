@@ -694,6 +694,15 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
     let mutable timeoutLeft = jobMonitorStatusCheckTimeOutSecs
     let mutable timeBeforeNextMetricsCheck = jobMonitorMetricsCheckIntervalSecs
 
+    // Failures are reported once the run drains, not at first sight. Aborting on
+    // the first condemned range abandons every range still in flight, and the
+    // ranges that survive to the end of a run are the expensive tip ones this
+    // mission exists to measure. Measured 2026-07-30: one condemned range at 97%
+    // discarded 123 ranges of completed and in-flight work. The mission still
+    // fails -- it just finishes the work it can first.
+    let failedJobs = ResizeArray<string>()
+    let seenFailures = System.Collections.Generic.HashSet<string>()
+
     while not allJobsFinished do
         Thread.Sleep(jobMonitorStatusCheckIntervalSecs * 1000)
         let statusOpt = queryJobMonitor (context, jobMonitorStatusKey)
@@ -706,18 +715,12 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
                 let jobsFailed = status.["jobs_failed"] :?> JArray
                 let JobsInProgress = status.["jobs_in_progress"] :?> JArray
 
-                if jobsFailed.Count <> 0 then
-                    LogInfo "One or more jobs have failed:"
+                for job in jobsFailed do
+                    let text = job.ToString()
 
-                    for job in jobsFailed do
-                        let ident = job.ToString().Split('|')
-                        let key = ident.[0]
-                        let podName = ident.[1]
-                        LogInfo "%s, logs >>> " (job.ToString())
-                        dumpLogs (context, podName)
-                        LogInfo "<<<"
-
-                    failwith "Catch up failed, check logs for more info"
+                    if seenFailures.Add(text) then
+                        failedJobs.Add(text)
+                        LogError "RANGE FAILED: %s -- run continues, mission will fail once it drains" text
 
                 if remainSize = 0 && JobsInProgress.Count = 0 then
                     // All jobs completed — perform a final query on the metrics
@@ -739,5 +742,25 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
         with ex ->
             cleanup false context
             raise ex
+
+    if failedJobs.Count <> 0 then
+        LogInfo "%d job(s) failed:" failedJobs.Count
+
+        for job in failedJobs do
+            let ident = job.Split('|')
+            LogInfo "%s, logs >>> " job
+
+            // The pod is very likely reaped by now -- draining first means the
+            // wait is the length of the run. Its log is on the monitor volume
+            // either way, so a missing pod must not mask the failure below.
+            if ident.Length > 1 then
+                try
+                    dumpLogs (context, ident.[1])
+                with ex -> LogInfo "could not read pod log (%s); see collected logs" (ex.Message)
+
+            LogInfo "<<<"
+
+        cleanup false context
+        failwith "Catch up failed, check logs for more info"
 
     cleanup false context
