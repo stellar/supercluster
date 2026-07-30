@@ -106,3 +106,32 @@ def test_monitor_readiness_requires_both_containers():
         assert HARNESS.ready_monitor_pod('mpc-resume-a1b2c3', evidence) is pod
     finally:
         HARNESS.monitor_pod = original
+
+
+def test_startup_log_capture_is_limited_to_the_exact_monitor_pod():
+    pod = {'metadata': {'name': 'mpc-resume-a1b2c3-job-monitor-abc'}}
+    calls = []
+    original_pod = HARNESS.monitor_pod
+    original_kubectl = HARNESS.kubectl
+    try:
+        HARNESS.monitor_pod = lambda _release: pod
+
+        class Result:
+            returncode = 0
+            stdout = 'captured'
+            stderr = ''
+
+        def fake_kubectl(namespace, *args, **_kwargs):
+            calls.append((namespace, args))
+            return Result()
+
+        HARNESS.kubectl = fake_kubectl
+        logs = HARNESS.monitor_logs('mpc-resume-a1b2c3')
+    finally:
+        HARNESS.monitor_pod = original_pod
+        HARNESS.kubectl = original_kubectl
+
+    assert set(logs) == {'job-monitor', 'log-collector'}
+    assert len(calls) == 4
+    assert all(namespace == 'sandbox' for namespace, _ in calls)
+    assert all(args[:2] == ('logs', pod['metadata']['name']) for _, args in calls)

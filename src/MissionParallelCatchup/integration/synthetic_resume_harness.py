@@ -236,6 +236,26 @@ def ready_monitor_pod(release, evidence):
     return pod if len(statuses) == 2 and all(s.get('ready') for s in statuses) else None
 
 
+def monitor_logs(release):
+    pod = monitor_pod(release)
+    if not pod:
+        return {}
+    name = pod['metadata']['name']
+    captured = {}
+    for container in ('job-monitor', 'log-collector'):
+        current = kubectl(
+            NAMESPACE, 'logs', name, '-c', container,
+            '--tail=200', check=False, timeout=30)
+        previous = kubectl(
+            NAMESPACE, 'logs', name, '-c', container, '--previous',
+            '--tail=200', check=False, timeout=30)
+        captured[container] = {
+            'current': current.stdout if current.returncode == 0 else current.stderr,
+            'previous': previous.stdout if previous.returncode == 0 else previous.stderr,
+        }
+    return captured
+
+
 def worker_snapshot(release):
     selector = f'catchup.stellar.org/run={release}'
     jobs = (json_get('jobs', labels=selector) or {}).get('items', [])
@@ -606,6 +626,7 @@ def execute(args):
         evidence['error'] = f'{type(error).__name__}: {error}'
     finally:
         try:
+            evidence['monitorLogs'] = monitor_logs(args.release)
             evidence['cleanup'] = cleanup(
                 args.release, source_config_map, scope_started or installed, evidence)
         except Exception as cleanup_error:
