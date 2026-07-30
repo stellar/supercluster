@@ -513,6 +513,54 @@ def _sane_progress(progress):
     return out
 
 
+def _rehydrate_from_metrics(progress):
+    """Put the measurements back into a record that came from the mirror.
+
+    The two stores have different jobs. The ConfigMap is the control plane: it
+    is what the mission driver reads to follow the run and decide whether to
+    fail it, and it is capped at 1 MiB, so `_state_only` strips every
+    measurement out of it. The volume is the data plane: it holds the
+    per-attempt `.metrics` files and the profile built from them.
+
+    Loading the mirror therefore yields a record that is complete as *state*
+    and empty as *data* -- and the next save wrote that back over the volume,
+    which is how a finished run produced a profile with `attempts` and `count`
+    and nothing else. The measurements were never actually lost: only
+    progress.json was damaged, and `.metrics` is written per attempt and never
+    rewritten. So re-read them rather than persist the hole.
+    """
+    completed = progress.get('completed') or {}
+    if not completed:
+        return progress
+    recovered = 0
+    for end, rec in completed.items():
+        attempt = int(rec.get('attempts') or 1)
+        try:
+            peaks = peaks_for_range(int(end), attempt)
+            if peaks:
+                for k, v in peaks.items():
+                    rec.setdefault(k, v)
+            if rec.get('txApply') is None:
+                # Not named `tx`: a source-text test in the suite matches the
+                # first `tx = tx_apply_for_range(` in this file and means the
+                # one in reconcile().
+                recovered_tx = tx_apply_for_range(int(end), attempt)
+                if recovered_tx is not None:
+                    rec['txApply'] = recovered_tx
+            if rec.get('seconds') is None:
+                secs = seconds_for_range(int(end), attempt)
+                if secs is not None:
+                    rec['seconds'] = secs
+        except (OSError, ValueError):
+            continue
+        if _has_peaks(rec):
+            recovered += 1
+    logger.warning("progress.json was unreadable; recovered state from the ConfigMap "
+                   "mirror and re-read measurements for %d of %d completed ranges "
+                   "from .metrics on the volume", recovered, len(completed))
+    return progress
+
+
 def load_progress():
     try:
         with open(PROGRESS_FILE) as fh:
@@ -522,11 +570,12 @@ def load_progress():
     # First start on this volume, or an older run that only had the ConfigMap.
     try:
         cm = core_v1.read_namespaced_config_map(PROGRESS_CM, NAMESPACE)
-        return _sane_progress(json.loads((cm.data or {}).get('progress.json', '{}')))
+        mirrored = _sane_progress(json.loads((cm.data or {}).get('progress.json', '{}')))
     except ApiException as e:
         if e.status == 404:
             return {}
         raise
+    return _rehydrate_from_metrics(mirrored)
 
 
 def save_status(snapshot):

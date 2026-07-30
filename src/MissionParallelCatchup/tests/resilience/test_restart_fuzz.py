@@ -383,59 +383,22 @@ def test_restart_does_not_halt_on_its_own_progress(big_run):
 
 
 # --- two gaps the fuzz does not reach ---------------------------------------
-# Both are held in memory, so both are exactly as durable as the process. They
-# are marked xfail(strict) rather than asserted-as-is: the assertions below say
-# what the monitor SHOULD do, so they flip to a hard failure the day either gap
-# is closed, instead of quietly cementing today's behaviour.
+# The monotonic-progress guard that used to be pinned here is gone: it kept its
+# high-water mark in memory, so a restart disarmed it for exactly the event it
+# existed to survive, and re-running a range is idempotent anyway.
 
-@pytest.mark.xfail(strict=True, reason=(
-    "state['max_completed'] is memory-only, so the PROGRESS WENT BACKWARDS "
-    "guard is disabled for the life of a fresh process -- the one event it "
-    "most needs to survive"))
-def test_the_backwards_progress_guard_survives_a_restart(big_run):
-    """Destroy the record under a running monitor and it refuses to dispatch.
-
-    Destroy it under a monitor that then restarts and it re-runs the range from
-    genesis. Same fault, opposite outcome, decided purely by whether the
-    process happened to be the same one.
-    """
-    cluster = big_run
-    cluster.reconcile()
-    for end in ('1200', '1100'):
-        cluster.advance(int(end), 'succeeded')
-        cluster.finalize(end, 1)
-    cluster.reconcile()
-    assert set(cluster.completed()) == {'1200', '1100'}
-
-    # Both copies of the record go, the way the guard's own log line describes.
-    os.remove(jm.PROGRESS_FILE)
-    cluster.k8s.core_v1.delete_namespaced_config_map(jm.PROGRESS_CM, cluster.namespace)
-
-    restart(cluster)
-    cluster.reconcile()
-    # Free a slot so dispatch has capacity to misuse.
-    cluster.advance(1000, 'succeeded')
-    cluster.finalize('1000', 1)
-    mark = len(cluster.calls)
-    cluster.reconcile()
-
-    redispatched = [c.name for c in cluster.calls[mark:]
-                    if c.verb == 'create' and c.kind == 'job'
-                    and _range_of_job(c.name)[0] in {'1200', '1100'}]
-    assert cluster.state['halted'] is True
-    assert not redispatched, f"already-completed ranges re-dispatched: {redispatched}"
-
-
-@pytest.mark.xfail(strict=True, reason=(
-    "load_progress falls back to the ConfigMap mirror, which _state_only has "
-    "stripped of every measurement; the next save_progress then writes that "
-    "stripped record back over the authoritative file"))
 def test_a_measurement_survives_the_configmap_fallback(big_run):
-    """I5, in its purest form: a recorded peak that goes away.
+    """I5, in its purest form: a recorded peak that must not go away.
 
-    progress.json becomes unreadable, load_progress falls back to the mirror,
-    and range 1200's peakRssBytes / txApply / seconds are gone -- not stale,
-    absent -- and then persisted absent.
+    The two stores have different jobs. The ConfigMap is the control plane the
+    mission driver reads, capped at 1 MiB, so _state_only strips every
+    measurement from it. The volume is the data plane. Falling back to the
+    mirror therefore returns a record that is complete as state and empty as
+    data, and the next save wrote that back over the volume.
+
+    The measurements were never really gone: only progress.json was damaged,
+    and .metrics is written per attempt and never rewritten. load_progress
+    re-reads them from there rather than persisting the hole.
     """
     cluster = big_run
     cluster.reconcile()
