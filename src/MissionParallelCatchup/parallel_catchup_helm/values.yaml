@@ -145,10 +145,12 @@ monitor:
   # Must exceed any plausible monitor outage: completion is recorded to the
   # progress ConfigMap by the monitor, and a Job reclaimed before that happens
   # reads as "never ran" and gets redone.
-  # 0 = no deadline. A prod range runs ~50 min, so ~3h is generous while still
-  # catching a range wedged in archive retries. Measured: stellar-core retries a
-  # missing/unreachable archive indefinitely rather than failing.
-  attemptDeadlineSeconds: 10800
+  # 0 = no deadline. In the 2026-07-30 16,320-ledger Pubnet profile, 793 ranges
+  # exceeded 3h and the maximum wall time was 21,488s (~6h). A 12h deadline
+  # leaves ~2x the measured maximum while retaining a backstop for a range wedged
+  # in archive retries; stellar-core retries a missing/unreachable archive
+  # indefinitely rather than failing.
+  attemptDeadlineSeconds: 43200
   jobTtlSeconds: 600
   # Worker logs are pulled to the monitor's volume while each pod is still
   # alive, then collected in one exec at teardown instead of ~1024.

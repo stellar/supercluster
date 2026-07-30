@@ -135,6 +135,11 @@ def test_the_chart_value_is_the_code_default():
         + "\n  ".join(drift))
 
 
+def test_the_chart_enables_a_twelve_hour_attempt_backstop():
+    env = art.env_of(art.containers()[art.MONITOR_CONTAINER])
+    assert env['ATTEMPT_DEADLINE_SECONDS'] == '43200'
+
+
 def test_each_deliberate_divergence_is_still_a_real_env_var():
     """Keeps the allowlist above honest.
 

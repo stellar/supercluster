@@ -80,11 +80,11 @@ def test_the_deadline_is_on_the_pod_not_on_the_job(job, monkeypatch):
     "timeouts" having barely executed; a timeout gets only MAX_TIMEOUT_ATTEMPTS,
     so two stalls condemn a range and fail the mission.
     """
-    monkeypatch.setattr(jm, 'ATTEMPT_DEADLINE_SECONDS', 10800)
+    monkeypatch.setattr(jm, 'ATTEMPT_DEADLINE_SECONDS', 43200)
     j = jm.build_job(300, 420, 1, None)
     assert j.spec.active_deadline_seconds is None, \
         "the deadline is on the JobSpec, so Pending time is charged to the range"
-    assert j.spec.template.spec.active_deadline_seconds == 10800
+    assert j.spec.template.spec.active_deadline_seconds == 43200
 
 
 def test_no_deadline_means_no_field_at_all(job, monkeypatch):
