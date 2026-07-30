@@ -962,13 +962,26 @@ def _state_only(progress):
     return out
 
 
+def _write_atomic(path, body, opener=None):
+    """Write `body` through tmp+rename so a reader never sees a partial file.
+
+    Every state file here is read back by a restarted monitor, so a torn write
+    is indistinguishable from corruption: the .outcome and .verdict files decide
+    a range's remaining budget, and progress.json decides what gets dispatched.
+    """
+    tmp = path + '.tmp'
+    # `opener` resolves at call time, not as a default argument, so the write
+    # seam stays patchable -- the tmp+rename discipline is only worth having if
+    # a test can crash a write mid-flight and prove the real path is untouched.
+    with (opener or open)(tmp, 'wt') as fh:
+        fh.write(body)
+    os.replace(tmp, path)
+
+
 def save_progress(progress):
     blob = json.dumps(progress, separators=(',', ':'))
     # File first and atomically: it is what a restart reads back.
-    tmp = PROGRESS_FILE + '.tmp'
-    with open(tmp, 'w') as fh:
-        fh.write(blob)
-    os.replace(tmp, PROGRESS_FILE)
+    _write_atomic(PROGRESS_FILE, blob)
     # Mirror for the driver. Never fatal -- a 413 here used to throw inside
     # reconcile, and the loop swallows exceptions, so no completion would ever
     # be recorded again and every finished range would be dispatched forever.
@@ -1023,10 +1036,7 @@ def backstop_save_pod_log(pod_name, end, attempt):
         return False
     try:
         os.makedirs(LOG_DIR, exist_ok=True)
-        tmp = path + '.tmp'
-        with gzip.open(tmp, 'wt') as fh:
-            fh.write(body)
-        os.replace(tmp, path)   # never leave a half-written archive behind
+        _write_atomic(path, body, gzip.open)
         return True
     except OSError as e:
         logger.warning("could not write %s: %s", path, e)
@@ -1114,10 +1124,7 @@ def record_outcome(end, attempt, pod):
     # path. Without it a resumed chain can only report its final leg.
     data['attemptSeconds'] = _pod_seconds(pod)
     try:
-        tmp = path + '.tmp'
-        with open(tmp, 'w') as fh:
-            json.dump(data, fh)
-        os.replace(tmp, path)
+        _write_atomic(path, json.dumps(data))
     except OSError as e:
         logger.warning("could not persist outcome for range %s: %s", end, e)
 
@@ -1243,10 +1250,7 @@ def save_verdict(end, attempt, outcome):
     """
     path = verdict_path(end, attempt)
     try:
-        tmp = path + '.tmp'
-        with open(tmp, 'w') as fh:
-            fh.write(str(outcome))
-        os.replace(tmp, path)
+        _write_atomic(path, str(outcome))
     except OSError as e:
         logger.warning("could not persist verdict for range %s attempt %s: %s",
                        end, attempt, e)

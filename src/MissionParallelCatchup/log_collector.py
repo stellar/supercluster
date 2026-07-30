@@ -176,13 +176,25 @@ def read_state(end, attempt):
     return ts if ts and _TS_RE.match(ts) else None
 
 
+def _write_atomic(path, body, opener=None):
+    """Write `body` through tmp+rename so a reader never sees a partial file.
+
+    The monitor polls these files while this process writes them, so a torn
+    .metrics or .outcome would be read as corrupt and the measurement lost.
+    """
+    tmp = path + '.tmp'
+    # `opener` resolves at call time, not as a default argument, so the write
+    # seam stays patchable -- the tmp+rename discipline is only worth having if
+    # a test can crash a write mid-flight and prove the real path is untouched.
+    with (opener or open)(tmp, 'wt') as fh:
+        fh.write(body)
+    os.replace(tmp, path)
+
+
 def write_state(end, attempt, ts):
     path = base(end, attempt) + '.state'
-    tmp = path + '.tmp'
     try:
-        with open(tmp, 'w') as fh:
-            fh.write(ts)
-        os.replace(tmp, path)
+        _write_atomic(path, ts)
     except OSError as e:
         logger.warning("could not persist state for range %s: %s", end, e)
 
@@ -266,7 +278,6 @@ def write_metrics(end, attempt, values):
     meaningful for one that succeeded.
     """
     path = base(end, attempt) + '.metrics'
-    tmp = path + '.tmp'
     # Merge, and never let a peak go backwards. A measurement already on disk
     # must survive a later write that lacks it -- the peaks are held in memory,
     # so a collector restart would otherwise drop them. But a plain overwrite is
@@ -294,9 +305,7 @@ def write_metrics(end, attempt, values):
             merged[k] = max(a, b)
     values = merged
     try:
-        with open(tmp, 'w') as fh:
-            json.dump(values, fh)
-        os.replace(tmp, path)
+        _write_atomic(path, json.dumps(values))
         logger.info("range %s attempt %s metrics=%s", end, attempt, values)
     except OSError as e:
         logger.warning("could not persist metrics for range %s: %s", end, e)
@@ -350,10 +359,7 @@ def record_outcome(pod, end, attempt):
     data = classify(pod)
     data['pod'] = pod['metadata']['name']
     try:
-        tmp = path + '.tmp'
-        with open(tmp, 'w') as fh:
-            json.dump(data, fh)
-        os.replace(tmp, path)
+        _write_atomic(path, json.dumps(data))
         logger.info("range %s attempt %s classified: %s", end, attempt, data['outcome'])
     except OSError as e:
         logger.warning("could not persist outcome for range %s: %s", end, e)
@@ -485,11 +491,8 @@ async def sample_kubelet(session, nodes):
 
 def _mark_done(end, attempt):
     path = done_path(end, attempt)
-    tmp = path + '.tmp'
     try:
-        with open(tmp, 'w') as fh:
-            fh.write('')
-        os.replace(tmp, path)
+        _write_atomic(path, '')
     except OSError as e:
         # Costs a Job that waits out JOB_TTL_SECONDS, never correctness.
         logger.warning("could not mark range %s attempt %s done: %s", end, attempt, e)

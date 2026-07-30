@@ -31,6 +31,43 @@ import log_collector as lc
 GIB = 1073741824
 
 
+def _arm_half_write(monkeypatch, mod, suffix):
+    """Make the next write to `suffix` land half a file, then fail with ENOSPC.
+
+    Injected at the file object rather than at json.dump: a disk filling up
+    mid-write is the actual failure the tmp+rename is there for, and patching
+    the serializer only exercises whichever one the code happens to call.
+    """
+    real_open = open
+    seen = {}
+
+    class _HalfWrite:
+        def __init__(self, path):
+            self.fh = real_open(path, 'w')
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.fh.close()
+            return False
+
+        def write(self, blob):
+            self.fh.write(blob[:len(blob) // 2])
+            seen['torn'] = True
+            raise OSError(28, 'No space left on device')
+
+    def half_open(path, mode='r', *a, **kw):
+        # One-shot: the point is that the process carries on afterwards, so
+        # everything the collector writes after the failure must be real.
+        if not seen and mode in ('w', 'wt') and str(path).endswith(suffix):
+            return _HalfWrite(path)
+        return real_open(path, mode, *a, **kw)
+
+    monkeypatch.setattr(mod, 'open', half_open, raising=False)
+    return seen
+
+
 # -- the shared volume, and a collector with no memory of anything ------------
 
 @pytest.fixture
@@ -300,22 +337,11 @@ def test_done_never_appears_beside_a_half_written_metrics_file(vol, monkeypatch)
     record permanent."""
     lc.write_metrics('300', 1, {'peakAnonBytes': 6 * GIB, 'txApplySeconds': 30.0})
 
-    real_dump = lc.json.dump
-    seen = {}
-
-    def dump_then_die(obj, fh, *a, **kw):
-        # A write that dies with the file open: the failure mode the .tmp +
-        # rename is there for.
-        fh.write(json.dumps(obj)[:12])
-        seen['torn'] = True
-        raise OSError(28, 'No space left on device')
-
-    monkeypatch.setattr(lc.json, 'dump', dump_then_die)
+    seen = _arm_half_write(monkeypatch, lc, '.metrics.tmp')
     lc._anon_peak['w-300'] = 9 * GIB
     finalize('w-300', 300)
-    monkeypatch.setattr(lc.json, 'dump', real_dump)
 
-    assert seen['torn'], "the interrupted write never happened"
+    assert seen.get('torn'), "the interrupted write never happened"
     # The old record is intact and parseable -- not truncated, not empty.
     assert metrics(300) == {'peakAnonBytes': 6 * GIB, 'txApplySeconds': 30.0}
     # .done still lands: the collector really will write nothing more for this
@@ -501,11 +527,7 @@ def test_a_recorded_outcome_is_a_complete_file_or_no_file(vol, monkeypatch):
     """Same rename discipline as .metrics: the monitor branches its whole retry
     policy on this file, so a torn read would have to be a crash or a wrong
     verdict."""
-    def dump_then_die(obj, fh, *a, **kw):
-        fh.write(json.dumps(obj)[:9])
-        raise OSError(28, 'No space left on device')
-
-    monkeypatch.setattr(lc.json, 'dump', dump_then_die)
+    _arm_half_write(monkeypatch, lc, '.outcome.tmp')
     lc.record_outcome(_pod('w-300', exit_code=1), '300', 1)
 
     assert jm.read_outcome('300', 1) is None

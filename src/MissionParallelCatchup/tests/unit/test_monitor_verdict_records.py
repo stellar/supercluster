@@ -194,7 +194,7 @@ def test_the_progress_record_is_replaced_whole_or_not_at_all(cluster, monkeypatc
     armed = {'v': True}
 
     def half_open(path, mode='r', *a, **kw):
-        if armed['v'] and mode == 'w' and str(path).endswith('.json.tmp'):
+        if armed['v'] and mode in ('w', 'wt') and str(path).endswith('.json.tmp'):
             return _HalfWrite(path)
         return real_open(path, mode, *a, **kw)
 
