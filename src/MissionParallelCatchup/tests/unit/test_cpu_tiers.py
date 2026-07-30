@@ -50,6 +50,11 @@ def test_an_unmeasured_range_gets_the_top_tier(tiered):
     assert jm._slack_cpu(None) == '1.25'
 
 
+@pytest.mark.parametrize('seconds', [0, -1, 'bad', float('nan'), float('inf')])
+def test_an_invalid_runtime_safely_gets_the_top_tier(tiered, seconds):
+    assert jm._slack_cpu(seconds) == '1.25'
+
+
 def test_a_uniformly_slower_run_assigns_the_same_tiers(monkeypatch):
     """The property absolute-seconds keying does not have.
 

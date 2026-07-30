@@ -97,6 +97,10 @@ monitor:
   # profiled at 190MiB rss got a 209MiB limit and 90 of them OOMKilled within
   # 90s of dispatch.
   profileCacheHeadroom: "512Mi"
+  # Extra memory allowance weighted by a range's runtime relative to the
+  # longest valid runtime in the profile. Long-running ranges need more slack
+  # for page cache and allocator growth. 0 disables.
+  profileRuntimeMemoryInsurance: "3Gi"
   imagePullPolicy: IfNotPresent
   mission: "HistoryPubnetParallelCatchup"
   # Adds a `mission` label to worker pods, which kube-state-metrics exposes as

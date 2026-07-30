@@ -19,6 +19,7 @@ import gzip
 import bisect
 import json
 import logging
+import math
 import os
 import queue
 import re
@@ -128,6 +129,9 @@ PROFILE_MAX_MEM = os.getenv('PROFILE_MAX_MEM', '32Gi')
 # slack for all growth and cache -- and 90 of them OOMKilled within 90s. The
 # earlier 4Gi validation hid this because 1.1x of 2.4 GiB is 240 MiB of slack.
 PROFILE_CACHE_HEADROOM = os.getenv('PROFILE_CACHE_HEADROOM', '512Mi')
+# Extra allowance scaled by the range's measured runtime. Long ranges keep more
+# page cache and allocator slack live at once; 0 disables the allowance.
+PROFILE_RUNTIME_MEMORY_INSURANCE = os.getenv('PROFILE_RUNTIME_MEMORY_INSURANCE', '3Gi')
 
 REQ_EPHEMERAL = os.getenv('REQ_EPHEMERAL', '')
 LIM_EPHEMERAL = os.getenv('LIM_EPHEMERAL', '')
@@ -1857,13 +1861,33 @@ PROFILE_CPU_TIERS = os.getenv('PROFILE_CPU_TIERS', '')   # "85:0.5,98:0.75,99.5:
 _SORTED_SECONDS = None
 
 
+def _positive_seconds(value):
+    """A finite positive runtime, or None when the profile cannot supply one."""
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return None
+    return seconds if math.isfinite(seconds) and seconds > 0 else None
+
+
 def _profile_seconds():
-    """Every measured runtime in the profile, sorted, for percentile lookup."""
+    """Every valid measured runtime in the profile, sorted."""
     global _SORTED_SECONDS
     if _SORTED_SECONDS is None:
-        _SORTED_SECONDS = sorted(r['seconds'] for _, r in (PROFILE or [])
-                                 if r.get('seconds'))
+        values = (_positive_seconds(r.get('seconds')) for _, r in (PROFILE or []))
+        _SORTED_SECONDS = sorted(seconds for seconds in values if seconds is not None)
     return _SORTED_SECONDS
+
+
+def _runtime_memory_insurance(seconds):
+    """Runtime-weighted share of the configured memory allowance."""
+    seconds = _positive_seconds(seconds)
+    everything = _profile_seconds()
+    longest = everything[-1] if everything else None
+    insurance = _quantity_bytes(PROFILE_RUNTIME_MEMORY_INSURANCE)
+    if seconds is None or longest is None or longest <= 0 or insurance <= 0:
+        return 0
+    return int(insurance * (seconds / longest))
 
 
 def _slack_cpu(seconds):
@@ -1881,7 +1905,8 @@ def _slack_cpu(seconds):
         return None
     if not tiers:
         return None
-    if not seconds:
+    seconds = _positive_seconds(seconds)
+    if seconds is None:
         return tiers[-1][1]
     everything = _profile_seconds()
     if not everything:
@@ -1911,7 +1936,9 @@ def _profile_overrides(end, escalated):
     # tracked anon still sizes exactly as it used to.
     rss = prof.get('peakAnonBytes') or prof.get('peakRssBytes')
     if rss:
-        want = int(rss * PROFILE_MARGIN) + _quantity_bytes(PROFILE_CACHE_HEADROOM)
+        want = (int(rss * PROFILE_MARGIN)
+                + _quantity_bytes(PROFILE_CACHE_HEADROOM)
+                + _runtime_memory_insurance(prof.get('seconds')))
         out['memory'] = _bytes_to_quantity(min(want, _quantity_bytes(PROFILE_MAX_MEM)))
     disk = prof.get('peakEphemeralBytes')
     if disk and LIM_EPHEMERAL:

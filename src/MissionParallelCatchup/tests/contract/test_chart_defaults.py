@@ -193,6 +193,7 @@ def test_the_sizing_headroom_is_a_real_allowance_in_both_places():
     headroom = jm._quantity_bytes(code['PROFILE_CACHE_HEADROOM'])
     assert headroom >= 256 * 1024 ** 2, (
         f"{code['PROFILE_CACHE_HEADROOM']} of fixed headroom is what OOMed 90 small ranges")
+    assert code['PROFILE_RUNTIME_MEMORY_INSURANCE'] == '3Gi'
     # ...and the ceiling has to sit above the configured worker limit, or a
     # range needing more than that is pinned under its own measured peak.
     assert (jm._quantity_bytes(code['PROFILE_MAX_MEM'])

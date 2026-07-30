@@ -246,6 +246,8 @@ spec:
               value: {{ .Values.monitor.profileMaxMemory | quote }}
             - name: PROFILE_CACHE_HEADROOM
               value: {{ .Values.monitor.profileCacheHeadroom | quote }}
+            - name: PROFILE_RUNTIME_MEMORY_INSURANCE
+              value: {{ .Values.monitor.profileRuntimeMemoryInsurance | quote }}
             {{- end }}
             # Failed ranges are always saved; successful ones are the bulk of
             # the volume and can be turned off for a cheap run.
