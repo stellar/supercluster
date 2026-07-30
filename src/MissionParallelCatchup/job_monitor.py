@@ -1536,7 +1536,7 @@ PROFILE_CPU_TIERS = os.getenv('PROFILE_CPU_TIERS', '')   # e.g. "0.5,0.75,1.0,1.
 PROFILE_CPU_SLOWDOWN = os.getenv('PROFILE_CPU_SLOWDOWN', '1.53,1.17,1.06,1.0')
 # Ranges whose own runtime sets the floor. Taken from the profile rather than
 # configured: it moves on its own as the chain grows.
-_PROFILE_FLOOR = None
+_LONGEST_RANGE_SECONDS = None
 
 
 def _cpu_tiers():
@@ -1547,13 +1547,18 @@ def _cpu_tiers():
     return list(zip(tiers, slow)) if len(slow) == len(tiers) else []
 
 
-def profile_floor():
-    """Longest measured range: the makespan every other range must fit inside."""
-    global _PROFILE_FLOOR
-    if _PROFILE_FLOOR is None:
+def longest_range_seconds():
+    """Runtime of the longest measured range, in SECONDS.
+
+    The deadline every other range is sized against -- not to be confused with
+    the cpu ladder's own floor and ceiling (0.5 and 1.25 cores by default).
+    A range earns a cheaper tier by still finishing inside this.
+    """
+    global _LONGEST_RANGE_SECONDS
+    if _LONGEST_RANGE_SECONDS is None:
         secs = [(r.get('seconds') or 0) for _, r in (PROFILE or [])]
-        _PROFILE_FLOOR = max(secs) if secs else 0
-    return _PROFILE_FLOOR
+        _LONGEST_RANGE_SECONDS = max(secs) if secs else 0
+    return _LONGEST_RANGE_SECONDS
 
 
 def _slack_cpu(seconds):
@@ -1567,11 +1572,11 @@ def _slack_cpu(seconds):
         return None
     if not seconds:
         return str(tiers[-1][0])
-    floor = profile_floor()
-    if not floor:
+    budget = longest_range_seconds()
+    if not budget:
         return None
     for cores, slowdown in tiers:
-        if seconds * slowdown <= floor:
+        if seconds * slowdown <= budget:
             return str(cores)
     return str(tiers[-1][0])
 

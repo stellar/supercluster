@@ -15,14 +15,14 @@ import job_monitor as jm
 
 TIERS = '0.5,0.75,1.0,1.25'
 SLOW = '1.53,1.17,1.06,1.0'
-FLOOR = 10000.0          # the longest range in the pretend profile
+BUDGET = 10000.0         # longest range in the pretend profile, in SECONDS
 
 
 @pytest.fixture
 def tiered(monkeypatch):
     monkeypatch.setattr(jm, 'PROFILE_CPU_TIERS', TIERS)
     monkeypatch.setattr(jm, 'PROFILE_CPU_SLOWDOWN', SLOW)
-    monkeypatch.setattr(jm, '_PROFILE_FLOOR', FLOOR)
+    monkeypatch.setattr(jm, '_LONGEST_RANGE_SECONDS', BUDGET)
 
 
 def test_tiering_is_off_unless_configured(monkeypatch):
@@ -37,7 +37,7 @@ def test_a_short_range_gets_the_cheapest_tier(tiered):
 
 def test_the_floor_setting_range_gets_the_top_tier(tiered):
     # Nothing slower than saturation fits, so it must not be throttled at all.
-    assert jm._slack_cpu(FLOOR) == '1.25'
+    assert jm._slack_cpu(BUDGET) == '1.25'
 
 
 def test_each_tier_is_the_cheapest_that_still_fits(tiered):
@@ -56,15 +56,15 @@ def test_an_unmeasured_range_gets_the_top_tier(tiered):
 def test_the_floor_comes_from_the_profile_not_a_constant(monkeypatch):
     # It has to move on its own as the chain grows.
     monkeypatch.setattr(jm, 'PROFILE', [(100, {'seconds': 42}), (200, {'seconds': 900})])
-    monkeypatch.setattr(jm, '_PROFILE_FLOOR', None)
-    assert jm.profile_floor() == 900
+    monkeypatch.setattr(jm, '_LONGEST_RANGE_SECONDS', None)
+    assert jm.longest_range_seconds() == 900
 
 
 def test_cpu_is_requested_but_never_limited(tiered, monkeypatch, cluster):
     # A limit would cap the bucket phase, which measured up to 2.53 cores and is
     # the one part of a job that slicing cannot remove.
     monkeypatch.setattr(jm, 'PROFILE', [(300, {'seconds': 500, 'peakAnonBytes': 1 << 30})])
-    monkeypatch.setattr(jm, '_PROFILE_FLOOR', FLOOR)
+    monkeypatch.setattr(jm, '_LONGEST_RANGE_SECONDS', BUDGET)
     r = jm._resources(end=300)
     assert r.requests['cpu'] == '0.5'
     assert 'cpu' not in r.limits
