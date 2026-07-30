@@ -102,6 +102,8 @@ let resolveRangeProfile (context: MissionContext) : string option =
                                    "create"
                                    "configmap"
                                    name
+                                   "--namespace"
+                                   context.namespaceProperty
                                    sprintf "--from-file=profile.json=%s" file |]
                 |> ignore
 
@@ -314,10 +316,18 @@ let installProject (context: MissionContext) =
     let expandedKubeCfg = ExpandHomeDirTilde context.kubeCfg
     Environment.SetEnvironmentVariable("KUBECONFIG", expandedKubeCfg)
 
+    // --namespace is not optional. Without it helm uses the kubeconfig's current
+    // context, while every other call in this mission honours
+    // context.namespaceProperty -- so a run explicitly targeted at one namespace
+    // installs its monitor, Jobs and PVCs into a different one. Observed
+    // 2026-07-30: a mission run with --namespace sandbox put a monitor and four
+    // Jobs into the production namespace alongside a live run.
     RunShellCommand [| "helm"
                        "install"
                        helmReleaseName
                        helmChartPath
+                       "--namespace"
+                       context.namespaceProperty
                        "--values"
                        valuesFilePath
                        "--set"
@@ -327,7 +337,9 @@ let installProject (context: MissionContext) =
     match RunShellCommand [| "helm"
                              "get"
                              "values"
-                             helmReleaseName |] with
+                             helmReleaseName
+                             "--namespace"
+                             context.namespaceProperty |] with
     | Some valuesOutput -> LogInfo "%s" valuesOutput
     | _ -> ()
 
@@ -663,7 +675,9 @@ let cleanup (signalTriggered: bool) (context: MissionContext) =
 
             RunShellCommand [| "helm"
                                "uninstall"
-                               helmReleaseName |]
+                               helmReleaseName
+                               "--namespace"
+                               context.namespaceProperty |]
             |> ignore
         else
             // Normal / legitimate-failure path: pods are still alive through
@@ -680,7 +694,9 @@ let cleanup (signalTriggered: bool) (context: MissionContext) =
 
             RunShellCommand [| "helm"
                                "uninstall"
-                               helmReleaseName |]
+                               helmReleaseName
+                               "--namespace"
+                               context.namespaceProperty |]
             |> ignore
 
 let mutable cleanupContext : MissionContext option = None

@@ -468,3 +468,22 @@ def test_an_empty_artifact_is_never_written_and_never_fatal(tmp_path, monkeypatc
     # ...and an artifact that never arrived at all is the same, not an error.
     monkeypatch.setattr(jm, 'PROFILE_PATH', str(tmp_path / 'absent.json'))
     assert jm.load_profile() == []
+
+
+def test_every_helm_and_kubectl_call_is_namespaced():
+    """A namespace the mission was told to use must reach the shell too.
+
+    helm and kubectl default to the kubeconfig's current context, while the
+    mission's own Kubernetes client honours context.namespaceProperty. Without
+    an explicit --namespace those disagree, and a run targeted at one namespace
+    installs into another. Measured 2026-07-30: a mission run with
+    `--namespace sandbox` put a job-monitor Deployment and four Jobs into the
+    production namespace beside a live 2096-worker run.
+    """
+    fs = art.text(art.FSHARP_PATH)
+    import re
+    # Every RunShellCommand array invoking helm or kubectl must carry the flag.
+    calls = re.findall(r'RunShellCommand \[\|\s*"(?:helm|kubectl)".*?\|\]', fs, re.S)
+    assert calls, "no helm/kubectl shell calls found -- did the driver change shape?"
+    missing = [c.split('\n')[0] for c in calls if '"--namespace"' not in c]
+    assert not missing, f"shell calls without --namespace: {missing}"
