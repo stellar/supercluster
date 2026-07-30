@@ -431,8 +431,13 @@ let queryJobMonitor (context: MissionContext, key: String) =
 // profiling it buys no packing. peakEphemeralBytes appears only for
 // ephemeral-mode runs, and only for ranges that finished.
 let rangeProfileFields =
-    [ "peakRssBytes"; "peakWorkingSetBytes"; "peakCpuCores"; "peakEphemeralBytes"
-      "seconds"; "txApply" ]
+    // peakAnonBytes is the field the sizing consumer prefers (kubelet-sampled
+    // anon; peakRssBytes is the coarser Prometheus-era name for the same
+    // quantity). Omitting it here silently stripped it from the mission's
+    // profile artifact while the monitor's own progress.json carried it --
+    // measured 2026-07-30: artifact 0% peakAnonBytes, volume copy 99%.
+    [ "peakAnonBytes"; "peakRssBytes"; "peakWorkingSetBytes"; "peakCpuCores"
+      "peakEphemeralBytes"; "seconds"; "wallSeconds"; "txApply" ]
 
 // A missing measurement must stay missing rather than become a null: the
 // consumer falls back to its configured default when the field is absent.

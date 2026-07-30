@@ -574,6 +574,24 @@ let ``range profile keeps only the measurements that exist`` () =
 
 
 [<Fact>]
+let ``range profile carries the fields the sizing consumer prefers`` () =
+    // peakAnonBytes is what _profile_overrides reads FIRST (kubelet-sampled
+    // anon); peakRssBytes is only its fallback. Omitting it from the
+    // projection silently stripped it from the mission artifact while the
+    // monitor's progress.json carried it for 99% of ranges -- measured
+    // 2026-07-30, artifact 0% vs volume 99%. wallSeconds likewise.
+    Assert.Contains("peakAnonBytes", rangeProfileFields)
+    Assert.Contains("wallSeconds", rangeProfileFields)
+
+    let record = JObject()
+    record.["peakAnonBytes"] <- JValue(111L)
+    record.["wallSeconds"] <- JValue(50.0)
+    let entry = projectRangeEntry record
+    Assert.Equal(111L, entry.["peakAnonBytes"].Value<int64>())
+    Assert.Equal(50.0, entry.["wallSeconds"].Value<float>())
+
+
+[<Fact>]
 let ``range profile keeps count as a field so it can be keyed on end alone`` () =
     // Measured: 4.2x the ledgers per range moved peak disk -1.6% and wall time
     // 1.15x, so cost tracks ledger position rather than range length. Keying on
