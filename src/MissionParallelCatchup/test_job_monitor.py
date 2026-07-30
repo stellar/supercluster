@@ -288,24 +288,6 @@ def test_untimestamped_kubelet_text_never_becomes_a_resume_point():
         assert ts_re.match(good), good
 
 
-# --- peak working set, for sizing a later run's requests --------------------
-#
-# Queried from Prometheus rather than read from the worker's cgroup. Measured on
-# ssc-test: cgroup memory.peak reported 1.5GB for a process holding 0.3MB of
-# anon memory, because it counts page cache -- and catchup reads GBs of buckets.
-# Sampling inside the worker was the other option and is worse: it means dropping
-# the `exec`, which is what keeps stellar-core at PID 1 and able to see SIGTERM.
-
-def _collector_fn(*names):
-    """exec the named pure functions out of log_collector.py."""
-    src = ["import json"]
-    for n in names:
-        m = re.search(rf"^(def {n}\(.*?)(?=^\S|\Z)", COLLECTOR_SRC, re.S | re.M)
-        assert m, f"{n} not found in log_collector.py"
-        src.append(m.group(1))
-    ns = {}
-    exec("\n".join(src), ns)
-    return tuple(ns[n] for n in names)
 
 
 
@@ -1602,3 +1584,28 @@ def test_tx_apply_sums_the_chain_and_offers_fallbacks_to_the_last_leg_only():
     assert '_resumed_chain(end, attempt)' in fn
     assert 'pod_name if n == int(attempt) else None' in fn
     assert 'total + leg' in fn, "legs are summed, not maxed"
+
+
+def test_an_unclassifiable_job_failure_is_retried_not_condemned():
+    # BackoffLimitExceeded carries no rule index and no exit code, so classify()
+    # honestly returns nothing. That must not read as "this range is bad": a
+    # monitor restart while a node was reaped produces exactly this, and
+    # condemning on it would fail a 10-hour job on no evidence.
+    assert classify("Job has reached the specified backoff limit") == (None, None, None)
+    env = set(re.findall(r"'(\w+)'", _extract(r"ENVIRONMENTAL_OUTCOMES = \(([^)]+)\)").group(1)))
+    assert 'unknown' in env, "an unclassified failure must get the environmental budget"
+    assert {'disrupted', 'rejected'} <= env, "cluster-caused outcomes share that budget"
+    # ...and the environmental budget is the most generous of the three.
+    body = _extract(r"(if verdict\['outcome'\] == 'timeout':\s*\n\s*cap = .*?)(?=\n\s+if reason)").group(1)
+    assert 'ENVIRONMENTAL_OUTCOMES' in body and 'MAX_DISRUPTION_ATTEMPTS' in body
+
+
+def test_only_a_genuine_catchup_failure_is_condemned():
+    # `failed` is the one outcome with no retry reason. Everything else -- oom,
+    # ephemeral, timeout, and all three environmental outcomes -- sets one.
+    body = _extract(r"(if verdict\['outcome'\] == 'timeout':.*?reason = None[^\n]*)").group(1)
+    assert body.rstrip().endswith("reason = None   # genuine catchup failure: do not retry"), \
+        "a genuine catchup failure must be the only unretried outcome"
+    # every other branch in that chain sets a reason, i.e. retries
+    for outcome in ('rejected', 'disrupted', 'oom', 'ephemeral', 'unknown'):
+        assert f"== '{outcome}'" in body, f"{outcome} left the retry chain"
