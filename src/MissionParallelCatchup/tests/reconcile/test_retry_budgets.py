@@ -206,3 +206,33 @@ def test_a_genuine_catchup_failure_is_still_never_retried(cluster):
     assert condemned(cluster, end)
     assert cluster.failed()[str(end)]['attempts'] == 1
     assert not job_exists(cluster, end, 2)
+
+
+def test_a_terminated_pod_with_no_exit_code_is_not_condemned(cluster):
+    """A container that terminated without a populated exit code says nothing
+    about the ledger range, and must not be treated as a catchup failure.
+
+    Observed on the r5 run 2026-07-30: range 59018943 was condemned on attempt 1
+    with `outcome=failed exitCode=None`, failing a mission that was otherwise
+    554 for 554. The collector's classify() fell through every branch that
+    needs an exit code and labelled the leftover case `failed` -- the one
+    outcome that gets no retry at all.
+    """
+    end = dispatch(cluster)
+    hit(cluster, end, 'no_exit_code')
+
+    assert not condemned(cluster, end), (
+        "a pod reaped before classification condemned the range and failed the "
+        f"mission on no evidence. failed={cluster.failed()}")
+    assert job_exists(cluster, end, 2), (
+        f"no attempt 2 was dispatched; live jobs are {cluster.jobs()}")
+
+
+def test_a_real_catchup_failure_is_still_condemned(cluster):
+    """The guard above must not swallow the case it is next to: an exit code of
+    1 IS evidence, and a range that produces one still fails the mission."""
+    end = dispatch(cluster)
+    hit(cluster, end, 'condemned')
+
+    assert condemned(cluster, end), (
+        "exit 1 is a genuine catchup failure and must not be retried")

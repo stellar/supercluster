@@ -65,6 +65,7 @@ STATES = (
     'rejected',     # kubelet refused the pod before any container ran
     'timeout',      # activeDeadlineSeconds fired
     'unknown',      # job failed, pod already reaped, nothing classified it
+    'no_exit_code', # container terminated, kubelet never filled in the exit code
 )
 
 
@@ -168,6 +169,20 @@ class Driver:
             if pod_name:
                 self.k8s.delete_pod(pod_name)
             self.k8s.set_job_failed(name, reason=None)
+        elif state == 'no_exit_code':
+            # The container terminated but the kubelet never populated an exit
+            # code, so nothing on the pod says why it stopped. Real: observed on
+            # range 59018943, 2026-07-30.
+            if pod_name:
+                # The only terminated status left on the pod belongs to the
+                # sidecar, which exited cleanly; stellar-core's never landed. So
+                # classify() finds a terminated container, none of them non-zero,
+                # and falls off the end of its loop.
+                self.k8s.set_pod_terminated(pod_name, exit_code=0,
+                                            container='log-collector',
+                                            phase='Failed')
+            self.k8s.set_job_failed(name, reason='BackoffLimitExceeded',
+                                    message='Job has reached the specified backoff limit')
         return name
 
     def _policy_msg(self, pod_name, code, rule_index):

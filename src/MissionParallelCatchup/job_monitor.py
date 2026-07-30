@@ -2500,6 +2500,20 @@ def reconcile(state):
                 # one succeeds, usually by resuming at LCL+1.
                 reason = (f"exited {CATCHUP_INCOMPLETE_EXIT} (did not complete -- "
                           "corrupt archive or interruption, indistinguishable)")
+            elif verdict.get('exitCode') is None:
+                # No exit code means nothing read the container's status: the pod
+                # was reaped before classification and the verdict came from the
+                # Job condition alone, which says "Failed" and nothing about why.
+                # That is the same absence of evidence as `unknown` above and
+                # takes the same answer -- the only difference is that a Job
+                # condition happened to survive the pod, which says nothing about
+                # the ledger range.
+                #
+                # Observed on the r5 run 2026-07-30: range 59018943 was condemned
+                # on attempt 1 with outcome=failed exitCode=None and failed the
+                # mission, while a dozen sibling ranges reaped the same way
+                # classified as `unknown`, retried, and passed.
+                reason = "failed with no exit code (pod reaped before classification)"
             else:
                 reason = None   # genuine catchup failure: do not retry
 

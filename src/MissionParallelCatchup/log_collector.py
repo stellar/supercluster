@@ -348,7 +348,12 @@ def classify(pod):
             return {'outcome': 'oom', 'exitCode': t.get('exitCode')}
         if t.get('exitCode') not in (0, None):
             return {'outcome': 'failed', 'exitCode': t.get('exitCode')}
-    return {'outcome': 'failed', 'exitCode': None}
+    # Terminated, but not one container said with what. `failed` here is a lie
+    # that costs the whole run: it reads as a genuine catchup failure, which is
+    # the one outcome that gets no retry at all. Observed on the r5 run
+    # 2026-07-30, range 59018943 -- condemned on attempt 1 with exitCode null,
+    # failing a mission that was otherwise 554 for 554.
+    return {'outcome': 'unknown', 'exitCode': None}
 
 
 def record_outcome(pod, end, attempt):
