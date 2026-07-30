@@ -1148,7 +1148,7 @@ def test_both_exit_paths_share_one_finalize():
     # writing peakAnonBytes while the other keeps working.
     # Three: clean exit, pod-gone 404, and an interrupted read on a pod that
     # has since gone terminal.
-    assert len(re.findall(r"await finalize\(session, pod, end, attempt, tx, done_ok\)",
+    assert len(re.findall(r"await finalize\(session, pod, end, attempt, tx, done_ok, started\)",
                           COLLECTOR_SRC)) == 3
     assert len(re.findall(r"write_metrics\(end, attempt, measured\)", COLLECTOR_SRC)) == 1
 
@@ -1183,7 +1183,7 @@ def _run_stream_pod(status, terminal):
     class FakeSession:
         def get(self, url, params=None, headers=None): return FakeResp()
 
-    async def fake_finalize(session, pod, end, attempt, tx, done_ok):
+    async def fake_finalize(session, pod, end, attempt, tx, done_ok, started=None):
         calls.append((pod, end, attempt))
 
     d = tempfile.mkdtemp()
@@ -1715,3 +1715,48 @@ def test_attempt_budgets_are_ordered_by_whose_fault_the_failure_was():
     assert per_range > 1, "a range that OOMs once could never escalate"
     assert ephemeral > 1, "a range evicted on disk once could never grow"
     assert disruption >= 10, "spot eviction would condemn ranges at this budget"
+
+
+def test_the_collector_records_a_duration_the_monitor_cannot():
+    # Measured on ssc-test 2026-07-30: 212 of 212 spot disruptions were
+    # classified from the Job condition with the pod already reaped, so
+    # record_outcome never ran and no .outcome carried attemptSeconds. Peaks
+    # survived (the collector writes .metrics regardless) but the chain's time
+    # total silently lost every evicted leg. This process watched the container
+    # run, so it is the only observer left.
+    fn = _extract(r"^(async def finalize\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
+    assert "measured['attemptSeconds']" in fn
+    import asyncio
+    written = []
+    ns = {'asyncio': asyncio, '_anon_peak': {}, '_ws_peak': {}, '_eph_peak': {},
+          '_peak_flushed': {}, '_streaming': {}, 'SAVE_SUCCESS_LOGS': True,
+          'write_metrics': lambda e, a, v: written.append(v),
+          'discard': lambda e, a: None,
+          'logger': type('L', (), {'info': lambda s, *a: None})()}
+    exec(fn, ns)
+    tx = type('T', (), {'seconds': None, 'resumed': False})()
+    async def go():
+        now = asyncio.get_event_loop().time()
+        await ns['finalize'](None, 'p', '999', '1', tx, lambda p: True, now - 42.0)
+    asyncio.run(go())
+    assert written and written[0]['attemptSeconds'] == pytest.approx(42.0, abs=1.0)
+
+
+def test_seconds_falls_back_to_the_collectors_figure():
+    # The authoritative .outcome is missing for every reaped pod. Without this
+    # fallback the chain drops that leg entirely and under-reports the range.
+    ns = _chain_ns({
+        1: ({'attemptSeconds': 850.0}, None),          # no .outcome at all
+        2: ({'resumed': True}, None),
+    })
+    assert ns['seconds_for_range'](999, 2, 300.0) == 1150.0
+
+
+def test_the_authoritative_outcome_wins_over_the_collector_estimate():
+    # .outcome comes from the pod's terminated timestamps; the collector's is a
+    # stream-lifetime approximation that starts up to one poll late.
+    ns = _chain_ns({
+        1: ({'attemptSeconds': 850.0}, {'outcome': 'disrupted', 'attemptSeconds': 900.0}),
+        2: ({'resumed': True}, None),
+    })
+    assert ns['seconds_for_range'](999, 2, 300.0) == 1200.0

@@ -949,7 +949,17 @@ def seconds_for_range(end, attempt=1, final=None):
         if n == int(attempt):
             leg = final
         else:
+            # .outcome is authoritative -- the pod's own terminated timestamps.
+            # It is absent whenever the pod was reaped before the monitor could
+            # classify it, which is every spot eviction, so fall back to the
+            # collector's stream-lifetime figure rather than losing the leg.
             leg = (read_outcome(end, n) or {}).get('attemptSeconds')
+            if leg is None:
+                try:
+                    with open(metrics_path(end, n)) as fh:
+                        leg = json.load(fh).get('attemptSeconds')
+                except (OSError, ValueError):
+                    leg = None
         if leg is not None:
             total = leg if total is None else total + leg
     return total

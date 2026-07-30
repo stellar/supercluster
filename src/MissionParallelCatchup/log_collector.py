@@ -357,7 +357,7 @@ async def sample_kubelet(session, nodes):
                         write_metrics(ref[0], ref[1], {'peakAnonBytes': int(rss)})
 
 
-async def finalize(session, pod, end, attempt, tx, done_ok):
+async def finalize(session, pod, end, attempt, tx, done_ok, started=None):
     """Persist everything this attempt owes, then let its stream go.
 
     Reached from two places: a clean end of stream once the pod is terminal,
@@ -368,6 +368,11 @@ async def finalize(session, pod, end, attempt, tx, done_ok):
     """
     # Before discard: on success the archive is about to be deleted.
     measured = {}
+    if started is not None:
+        # Fallback only: the monitor's figure comes from the pod's terminated
+        # timestamps and is preferred when it exists.
+        measured['attemptSeconds'] = round(
+            asyncio.get_event_loop().time() - started, 1)
     if tx.resumed:
         # Not a peak -- PEAK_FIELDS filters it out of the profile. peaks_for_range
         # reads it to decide how far back to aggregate: a resumed attempt only
@@ -418,6 +423,14 @@ async def stream_pod(session, pod, end, attempt, done, done_ok):
         # the same log.
         write_state(end, attempt, '')
     backoff = 1.0
+    # Wall clock for this attempt. The monitor records attemptSeconds from the
+    # pod's own terminated timestamps, but only when it still has the pod -- and
+    # a spot eviction reaps the node first, so 212 of 212 disruptions on
+    # ssc-test were classified from the Job condition with no pod and no
+    # duration. This process watched the container run, so it is the only
+    # observer left. Approximate: the stream opens up to COLLECTOR_POLL_SECONDS
+    # after the container did.
+    started = asyncio.get_event_loop().time()
     # Outside the reconnect loop: the medida block could straddle a dropped
     # stream, and a fresh scanner per attempt would lose the half it saw.
     tx = TxApplyScanner()
@@ -440,7 +453,7 @@ async def stream_pod(session, pod, end, attempt, done, done_ok):
                     # are in Prometheus regardless. A bare return here dropped
                     # both for every pod that outlived its object.
                     logger.info("pod %s gone before/while streaming range %s", pod, end)
-                    await finalize(session, pod, end, attempt, tx, done_ok)
+                    await finalize(session, pod, end, attempt, tx, done_ok, started)
                     return
                 resp.raise_for_status()
                 backoff = 1.0
@@ -475,7 +488,7 @@ async def stream_pod(session, pod, end, attempt, done, done_ok):
                     last_ts = pending
             # A clean end of stream means the container exited.
             if done(pod):
-                await finalize(session, pod, end, attempt, tx, done_ok)
+                await finalize(session, pod, end, attempt, tx, done_ok, started)
                 return
         except asyncio.CancelledError:
             raise
@@ -488,7 +501,7 @@ async def stream_pod(session, pod, end, attempt, done, done_ok):
             # terminal. The partial stream may already hold the medida block,
             # and the peaks are query-side, so this owes exactly what the clean
             # path owes. It used to return bare and lose both.
-            await finalize(session, pod, end, attempt, tx, done_ok)
+            await finalize(session, pod, end, attempt, tx, done_ok, started)
             return
         await asyncio.sleep(backoff)
         backoff = min(backoff * 2, 30)
