@@ -15,8 +15,7 @@ import pytest
 
 import job_monitor as jm
 
-TIERS = '0.5,0.75,1.0,1.25'
-SHARES = '0.85,0.98,0.995,1.0'
+TIERS = '85:0.5,98:0.75,99.5:1.0,100:1.25'
 # 1000 ranges, 1s..1000s, so a range's value IS its percentile x 1000.
 PROFILE = [(i, {'seconds': float(i)}) for i in range(1, 1001)]
 
@@ -24,7 +23,6 @@ PROFILE = [(i, {'seconds': float(i)}) for i in range(1, 1001)]
 @pytest.fixture
 def tiered(monkeypatch):
     monkeypatch.setattr(jm, 'PROFILE_CPU_TIERS', TIERS)
-    monkeypatch.setattr(jm, 'PROFILE_CPU_SHARES', SHARES)
     monkeypatch.setattr(jm, 'PROFILE', PROFILE)
     monkeypatch.setattr(jm, '_SORTED_SECONDS', None)
 
@@ -60,7 +58,6 @@ def test_a_uniformly_slower_run_assigns_the_same_tiers(monkeypatch):
     true if the slowdown is perfectly uniform, which measurement shows it is not.
     """
     monkeypatch.setattr(jm, 'PROFILE_CPU_TIERS', TIERS)
-    monkeypatch.setattr(jm, 'PROFILE_CPU_SHARES', SHARES)
     monkeypatch.setattr(jm, 'PROFILE', [(i, {'seconds': i * 3.0}) for i in range(1, 1001)])
     monkeypatch.setattr(jm, '_SORTED_SECONDS', None)
     assert jm._slack_cpu(850 * 3) == '0.5'
@@ -68,10 +65,10 @@ def test_a_uniformly_slower_run_assigns_the_same_tiers(monkeypatch):
     assert jm._slack_cpu(1000 * 3) == '1.25'
 
 
-def test_shares_must_line_up_with_tiers(monkeypatch):
-    # A mismatched config disables tiering rather than guessing.
-    monkeypatch.setattr(jm, 'PROFILE_CPU_TIERS', '0.5,1.0')
-    monkeypatch.setattr(jm, 'PROFILE_CPU_SHARES', '0.9')
+def test_a_malformed_ladder_disables_tiering_rather_than_guessing(monkeypatch):
+    # One list of pairs cannot desync the way two parallel lists could, but a
+    # typo still has to fail safe rather than half-apply.
+    monkeypatch.setattr(jm, 'PROFILE_CPU_TIERS', '85,0.5')
     assert jm._slack_cpu(100) is None
 
 
@@ -81,7 +78,6 @@ def test_cpu_is_requested_but_never_limited(monkeypatch, cluster):
     prof = [(i, {'seconds': float(i)}) for i in range(1, 1001)]
     prof[299] = (300, {'seconds': 300.0, 'peakAnonBytes': 1 << 30})   # 30th pct
     monkeypatch.setattr(jm, 'PROFILE_CPU_TIERS', TIERS)
-    monkeypatch.setattr(jm, 'PROFILE_CPU_SHARES', SHARES)
     monkeypatch.setattr(jm, 'PROFILE', prof)
     monkeypatch.setattr(jm, '_SORTED_SECONDS', None)
     r = jm._resources(end=300)

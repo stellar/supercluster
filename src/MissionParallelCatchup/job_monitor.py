@@ -1537,10 +1537,10 @@ def _sized(value, margin, cap):
 # that ceiling is run-to-run noise in the measurement (Spearman 0.87), not
 # something the keying can fix.
 #
-# Shares are cumulative and cheapest-first: 0.85 means the cheapest 85% of
-# ranges take the first tier. Empty PROFILE_CPU_TIERS disables tiering.
-PROFILE_CPU_TIERS = os.getenv('PROFILE_CPU_TIERS', '')          # "0.5,0.75,1.0,1.25"
-PROFILE_CPU_SHARES = os.getenv('PROFILE_CPU_SHARES', '0.85,0.98,0.995,1.0')
+# One entry per tier, cheapest first: "<percentile>:<cores>". A range at or
+# below that percentile of the profile's runtimes takes that many cores. Empty
+# disables tiering and every range keeps the configured request.
+PROFILE_CPU_TIERS = os.getenv('PROFILE_CPU_TIERS', '')   # "85:0.5,98:0.75,99.5:1.0,100:1.25"
 _SORTED_SECONDS = None
 
 
@@ -1559,22 +1559,25 @@ def _slack_cpu(seconds):
     A range with no measured runtime gets the top tier, matching the dispatch
     order: unprofiled means newer than anything measured, so assume worst.
     """
-    tiers = [float(x) for x in PROFILE_CPU_TIERS.split(',') if x.strip()]
+    try:
+        tiers = [(float(p), c) for p, c in
+                 (t.split(':') for t in PROFILE_CPU_TIERS.split(',') if t.strip())]
+    except ValueError:
+        logger.error("PROFILE_CPU_TIERS is malformed (%r); cpu tiering disabled",
+                     PROFILE_CPU_TIERS)
+        return None
     if not tiers:
         return None
-    shares = [float(x) for x in PROFILE_CPU_SHARES.split(',') if x.strip()]
-    if len(shares) != len(tiers):
-        return None
     if not seconds:
-        return str(tiers[-1])
+        return tiers[-1][1]
     everything = _profile_seconds()
     if not everything:
         return None
-    pct = bisect.bisect_right(everything, seconds) / len(everything)
-    for cores, upto in zip(tiers, shares):
+    pct = 100.0 * bisect.bisect_right(everything, seconds) / len(everything)
+    for upto, cores in tiers:
         if pct <= upto:
-            return str(cores)
-    return str(tiers[-1])
+            return cores
+    return tiers[-1][1]
 
 
 def _profile_overrides(end, escalated):
