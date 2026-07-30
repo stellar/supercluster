@@ -1760,3 +1760,47 @@ def test_the_authoritative_outcome_wins_over_the_collector_estimate():
         2: ({'resumed': True}, None),
     })
     assert ns['seconds_for_range'](999, 2, 300.0) == 1200.0
+
+
+# --- a worker must not be able to kill its own log stream ------------------
+# Found live on the 2096-worker spot run: the AWS CLI draws its transfer meter
+# with carriage returns and no newline, so a 628 MiB bucket download arrives as
+# one multi-megabyte "line". aiohttp raises over 512 KiB, every large download
+# killed its own stream, and the reconnect hit the same wall -- which starved
+# every retry pod of a collector stream and left a2 metrics empty.
+
+def test_the_stream_is_read_in_chunks_not_lines():
+    fn = _extract(r"^(async def stream_pod\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
+    assert 'iter_chunked' in fn, "line-wise reads are bounded by aiohttp's 512KiB limit"
+    assert 'async for raw in resp.content:' not in fn
+
+
+def test_carriage_returns_split_lines_too():
+    # The progress meter is \r-delimited. Without \r in the split it stays one
+    # blob no matter how the bytes arrive.
+    fn = _extract(r"^(async def stream_pod\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
+    m = re.search(r"re\.split\(r'\[([^\]]+)\]'", fn)
+    assert m, "no line splitting found"
+    assert '\\r' in m.group(1) and '\\n' in m.group(1), f"splits on {m.group(1)!r}"
+
+
+def test_an_unterminated_blob_is_capped_not_buffered_forever():
+    # A meter that never emits a newline would otherwise grow the buffer until
+    # the collector OOMs -- 2096 streams doing it at once.
+    fn = _extract(r"^(async def stream_pod\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
+    assert 'MAX_LINE_CHARS' in fn
+    assert re.search(r"pending_buf\[-MAX_LINE_CHARS:\]", fn), "buffer is never trimmed"
+    cap = int(_extract(r"MAX_LINE_CHARS = int\(os\.getenv\('MAX_LINE_CHARS', (\d+)\)\)",
+                       COLLECTOR_SRC).group(1))
+    assert 1024 < cap < 524288, f"cap {cap} is outside a sane range"
+
+
+def test_the_worker_disables_the_aws_progress_meter():
+    # The real cure: never emit the \r spam. Also keeps it out of the archives,
+    # where it was the bulk of every large range's log.
+    fs = open(__file__.replace(
+        'src/MissionParallelCatchup/test_job_monitor.py',
+        'src/FSLibrary/MissionHistoryPubnetParallelCatchupV2.fs')).read()
+    m = re.search(r'sprintf "aws s3 cp ([^"]*)--region %s"', fs)
+    assert m, "s3 GET command not found"
+    assert '--no-progress' in m.group(1), f"aws s3 cp flags: {m.group(1)!r}"

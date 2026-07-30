@@ -329,6 +329,8 @@ spec:
               value: /logs
             - name: COLLECTOR_POLL_SECONDS
               value: {{ .Values.monitor.collectorPollSeconds | quote }}
+            - name: MAX_LINE_CHARS
+              value: {{ .Values.monitor.maxLineChars | quote }}
             - name: PEAK_FLUSH_RATIO
               value: {{ .Values.monitor.peakFlushRatio | quote }}
             - name: COLLECTOR_VANISHED_GRACE_CYCLES

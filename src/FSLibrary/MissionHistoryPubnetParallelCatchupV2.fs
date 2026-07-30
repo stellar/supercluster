@@ -246,7 +246,15 @@ let installProject (context: MissionContext) =
         if index < 1 || index > 3 then
             failwith "s3HistoryGetCommand: index must be between 1 and 3 inclusive"
 
-        let s3GetCommandBase = sprintf "aws s3 cp --region %s" context.s3HistoryMirrorRegionPcV2
+        // --no-progress is load-bearing, not cosmetic. The AWS CLI draws its
+        // transfer meter with carriage returns and no newline, so a 628 MiB
+        // bucket download arrives as one multi-megabyte "line". The log
+        // collector reads the pod stream line-wise and aiohttp aborts any line
+        // over 512 KiB, so every large download killed its own stream, which
+        // then reconnected and hit the same wall. Measured on ssc-test
+        // 2026-07-30: it starved every retry pod of a collector stream.
+        let s3GetCommandBase =
+            sprintf "aws s3 cp --no-progress --region %s" context.s3HistoryMirrorRegionPcV2
         let command = sprintf "%s s3://%s/core_live_00%d/{0} {1}" s3GetCommandBase url index
         setOptions.Add(sprintf "worker.historyGetCommandCore00%d=\"%s\"" index command)
 

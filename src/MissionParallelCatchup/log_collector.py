@@ -67,6 +67,10 @@ STORAGE_MODE = os.getenv('STORAGE_MODE', 'pvc')
 # at most PEAK_FLUSH_RATIO of a range's high-water rather than all of it --
 # Prometheus's server-side max_over_time needed no such state.
 PEAK_FLUSH_RATIO = float(os.getenv('PEAK_FLUSH_RATIO', 1.05))
+# Most a single unterminated blob may buffer before we start discarding its
+# head. stellar-core's own lines are well under a kilobyte; anything larger is a
+# progress meter or a stack dump, and neither is worth killing the stream over.
+MAX_LINE_CHARS = int(os.getenv('MAX_LINE_CHARS', 262144))
 
 LABEL_RUN = 'catchup.stellar.org/run'
 LABEL_RANGE = 'catchup.stellar.org/range-end'
@@ -462,27 +466,42 @@ async def stream_pod(session, pod, end, attempt, done, done_ok):
                 # valid archive, so restarts do not corrupt what is already there.
                 with gzip.open(path, 'at') as fh:
                     since_flush = asyncio.get_event_loop().time()
-                    async for raw in resp.content:
-                        line = raw.decode('utf-8', 'replace').rstrip('\n')
-                        if not line:
-                            continue
-                        ts, _, rest = line.partition(' ')
-                        if not _TS_RE.match(ts):
-                            # Untimestamped kubelet text. Keep it, but never let
-                            # it become the resume point.
-                            fh.write(line + '\n')
-                            continue
-                        if last_ts and ts <= last_ts:
-                            continue          # exact dedup of the resume overlap
-                        fh.write(rest + '\n')
-                        tx.feed(rest)
-                        pending = ts
-                        now = asyncio.get_event_loop().time()
-                        if now - since_flush >= STATE_FLUSH_SECONDS:
-                            fh.flush()
-                            write_state(end, attempt, pending)
-                            last_ts = pending
-                            since_flush = now
+                    # Chunked, not line-wise. `async for raw in resp.content`
+                    # yields lines and aiohttp raises over 512 KiB, which any
+                    # carriage-return progress meter in the worker's output
+                    # trivially exceeds -- one 628 MiB download is a single
+                    # "line". The worker now passes --no-progress, but a stream
+                    # must not be destroyable by whatever a worker happens to
+                    # print, so split on \r as well and cap what we buffer.
+                    pending_buf = ''
+                    async for chunk in resp.content.iter_chunked(65536):
+                        pending_buf += chunk.decode('utf-8', 'replace')
+                        if len(pending_buf) > MAX_LINE_CHARS:
+                            # A single unterminated blob. Keep the tail so the
+                            # real line ending is still found, drop the rest.
+                            pending_buf = pending_buf[-MAX_LINE_CHARS:]
+                        parts = re.split(r'[\r\n]', pending_buf)
+                        pending_buf = parts.pop()
+                        for line in parts:
+                            if not line:
+                                continue
+                            ts, _, rest = line.partition(' ')
+                            if not _TS_RE.match(ts):
+                                # Untimestamped kubelet text. Keep it, but never let
+                                # it become the resume point.
+                                fh.write(line + '\n')
+                                continue
+                            if last_ts and ts <= last_ts:
+                                continue          # exact dedup of the resume overlap
+                            fh.write(rest + '\n')
+                            tx.feed(rest)
+                            pending = ts
+                            now = asyncio.get_event_loop().time()
+                            if now - since_flush >= STATE_FLUSH_SECONDS:
+                                fh.flush()
+                                write_state(end, attempt, pending)
+                                last_ts = pending
+                                since_flush = now
                 if pending:
                     write_state(end, attempt, pending)
                     last_ts = pending

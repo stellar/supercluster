@@ -134,6 +134,10 @@ monitor:
   logStorageSize: "100Gi"
   saveSuccessLogs: true
   collectorPollSeconds: 5
+  # Most a single unterminated blob may buffer before its head is discarded.
+  # A worker printing a carriage-return progress meter would otherwise grow this
+  # without bound, on every stream at once.
+  maxLineChars: 262144
   # Growth factor before an in-flight peak is flushed to its .metrics file, so a
   # collector restart cannot silently reset a range's high-water to zero.
   peakFlushRatio: 1.05
