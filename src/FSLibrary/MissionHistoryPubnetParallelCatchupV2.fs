@@ -45,7 +45,6 @@ let jobMonitorStatusKey = "status.json"     // live queue counts
 let jobMonitorProgressKey = "progress.json" // durable per-range completion record
 let jobMonitorLoggingIntervalSecs = 30 // frequency of the monitor reconcile loop: dispatch, liveness ping, status publish
 let jobMonitorStatusCheckIntervalSecs = 60 // frequency of us querying job monitor's `/status` end point
-let jobMonitorMetricsCheckIntervalSecs = 60 // frequency of us querying job monitor's `/metrics` end point
 let jobMonitorStatusCheckTimeOutSecs = 600
 let mutable toPerformCleanup = true
 let failedJobLogFileLineCount = 10000
@@ -743,7 +742,6 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
 
     let mutable allJobsFinished = false
     let mutable timeoutLeft = jobMonitorStatusCheckTimeOutSecs
-    let mutable timeBeforeNextMetricsCheck = jobMonitorMetricsCheckIntervalSecs
 
     // Failures are reported once the run drains, not at first sight. Aborting on
     // the first condemned range abandons every range still in flight, and the
@@ -774,17 +772,8 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
                         LogError "RANGE FAILED: %s -- run continues, mission will fail once it drains" text
 
                 if remainSize = 0 && JobsInProgress.Count = 0 then
-                    // All jobs completed — perform a final query on the metrics
-                    queryJobMonitor (context, jobMonitorProgressKey) |> ignore
                     LogInfo "All queues empty. Mission complete."
                     allJobsFinished <- true
-
-                // check the metrics
-                timeBeforeNextMetricsCheck <- timeBeforeNextMetricsCheck - jobMonitorStatusCheckIntervalSecs
-
-                if timeBeforeNextMetricsCheck <= 0 then
-                    queryJobMonitor (context, jobMonitorProgressKey) |> ignore
-                    timeBeforeNextMetricsCheck <- jobMonitorMetricsCheckIntervalSecs
 
             | None ->
                 LogError "no status"

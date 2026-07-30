@@ -223,8 +223,6 @@ spec:
               value: {{ .Values.monitor.attemptDeadlineSeconds | quote }}
             - name: JOB_TTL_SECONDS
               value: {{ .Values.monitor.jobTtlSeconds | quote }}
-            - name: PING_TIMEOUT_SECS
-              value: {{ .Values.monitor.pingTimeoutSecs | quote }}
             - name: LOG_DIR
               value: /logs
             {{- if .Values.monitor.profileConfigMap }}
@@ -337,8 +335,6 @@ spec:
               value: {{ .Values.monitor.maxConcurrentPolls | quote }}
             - name: MAX_POLL_CHARS
               value: {{ .Values.monitor.maxPollChars | int64 | quote }}
-            - name: MAX_LINE_CHARS
-              value: {{ .Values.monitor.maxLineChars | int64 | quote }}
             - name: PEAK_FLUSH_RATIO
               value: {{ .Values.monitor.peakFlushRatio | quote }}
             - name: COLLECTOR_VANISHED_GRACE_CYCLES

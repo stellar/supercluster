@@ -332,8 +332,7 @@ def test_ephemeral_escalation_raises_request_and_limit_together():
 # missing there and the sampler silently did nothing -- it defaults to 'pvc'.
 COLLECTOR_ENV_WITH_DEFAULTS = {
     'KUBERNETES_SERVICE_HOST', 'KUBERNETES_SERVICE_PORT',   # injected by kubelet
-    'LOGGING_LEVEL', 'PEAK_WS_WINDOW', 'PROMETHEUS_URL',
-    'STATE_FLUSH_SECONDS', 'WORKER_CONTAINER',
+    'LOGGING_LEVEL', 'PEAK_WS_WINDOW', 'PROMETHEUS_URL', 'WORKER_CONTAINER',
 }
 
 
@@ -402,7 +401,7 @@ def _profile_ns(ranges, mode='ephemeral', margin=1.1):
     """profile_for + _sized, exec'd out of job_monitor with a fixed profile."""
     ns = {'bisect': __import__('bisect'), 'logger': __import__('logging').getLogger('t')}
     for name in ('_quantity_bytes', '_bytes_to_quantity', 'profile_for',
-                 '_cpu_millis', '_sized'):
+                 '_sized'):
         m = re.search(rf"^(def {name}\(.*?)(?=^\S|\Z)", SRC, re.S | re.M)
         exec(m.group(1), ns)
     ns['_UNITS'] = eval(_extract(r"_UNITS = (\{.*?\})").group(1))
@@ -579,9 +578,9 @@ def test_no_range_is_cpu_throttled_but_every_range_has_a_request():
     unmeasured = ns['_resources'](end=99999)
     assert 'cpu' not in measured.limits, "measured ranges run uncapped"
     assert 'cpu' not in unmeasured.limits, "unmeasured ranges run uncapped too"
-    # The request is still what bounds packing, on both paths.
-    assert measured.requests['cpu'] and unmeasured.requests['cpu']
-    assert ns['_cpu_millis'](measured.requests['cpu']) <= ns['_cpu_millis']('1800m')
+    # The request is still what bounds packing, on both paths, and the profile
+    # never moves it: cpu is not one of the overridden dimensions.
+    assert measured.requests['cpu'] == unmeasured.requests['cpu'] == '1800m'
 
 
 def test_pvc_mode_takes_no_ephemeral_override():
@@ -1810,9 +1809,6 @@ def test_an_unterminated_blob_is_capped_not_buffered_forever():
     # the collector OOMs -- 2096 streams doing it at once.
     fn = _extract(r"^(async def _poll_once\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
     assert 'MAX_POLL_CHARS' in fn, "a single poll response is unbounded"
-    cap = int(_extract(r"MAX_LINE_CHARS = int\(os\.getenv\('MAX_LINE_CHARS', (\d+)\)\)",
-                       COLLECTOR_SRC).group(1))
-    assert 1024 < cap < 524288, f"cap {cap} is outside a sane range"
 
 
 def test_the_worker_disables_the_aws_progress_meter():
@@ -1837,19 +1833,6 @@ def test_a_failed_attempt_is_not_reaped_before_the_collector_finalizes_it():
         "the retry-path reap is not gated on the collector's done marker"
     assert body.index('create_namespaced_job') < body.index('delete_job('), \
         "successor must exist before the predecessor is reaped"
-
-
-def test_the_line_buffer_cap_is_charged_per_stream():
-    # Measured on ssc-test at 2096 follow streams: 1444 MiB of a 2048 MiB limit,
-    # memory.events max=2617. The cap is worst-case memory per live stream, so
-    # 256 KiB would add 1 GiB at 4096 streams and OOM the sidecar on its own.
-    cap = int(_extract(r"MAX_LINE_CHARS = int\(os\.getenv\('MAX_LINE_CHARS', (\d+)\)\)",
-                       COLLECTOR_SRC).group(1))
-    assert cap <= 65536, f"{cap} bytes x 4096 streams = {cap * 4096 // 2**20} MiB worst case"
-    assert cap >= 8192, "below this a legitimate long line would be truncated"
-    chart = open(__file__.replace(
-        'test_job_monitor.py', 'parallel_catchup_helm/values.yaml')).read()
-    assert int(_extract(r"maxLineChars: (\d+)", chart).group(1)) == cap
 
 
 # --- polling replaces follow=true ------------------------------------------

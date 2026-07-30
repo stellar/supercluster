@@ -15,7 +15,6 @@ replica, Recreate) is what removes the claim/requeue races the redis queue had:
 work is *assigned*, never claimed.
 """
 
-import asyncio
 import gzip
 import bisect
 import json
@@ -30,7 +29,6 @@ import zlib
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-import aiohttp
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 from prometheus_client import (CONTENT_TYPE_LATEST, REGISTRY, Counter, Gauge,
@@ -247,10 +245,6 @@ RECONCILE_INTERVAL_SECONDS = int(os.getenv('LOGGING_INTERVAL_SECONDS', 10))
 # /healthz fails if the loop has not ticked within this long; a wedged loop
 # stops all dispatch, so restart the container rather than run half-alive.
 RECONCILE_STALE_SECONDS = float(os.getenv('WATCH_STALE_SECONDS', 600))
-# Liveness ping to each running worker's admin port, fanned out on one event
-# loop. Done serially with a 5s timeout this took a 192s median at 1024
-# (measured in prod), which is why it is async and the timeout is short.
-WORKER_PING_TIMEOUT_SECONDS = float(os.getenv('PING_TIMEOUT_SECS', 2))
 
 # Shared with the log-collector sidecar, which owns writes here: it streams each
 # worker's log and records the .outcome verdict while the pod still exists.
@@ -362,9 +356,6 @@ status = {
     'queue_in_progress_count': 0,
     'jobs_failed': [],
     'jobs_in_progress': [],
-    'workers': [],
-    'workers_up': 0,
-    'workers_down': 0,
     'workers_refresh_duration': 0,
     'mission_duration': 0,
 }
@@ -493,16 +484,45 @@ _progress_owner = {}
 PROGRESS_FILE = os.path.join(LOG_DIR, 'progress.json')
 
 
+def _sane_progress(progress):
+    """Drop anything in the record that is not a range -> record mapping.
+
+    This document is read off a volume that outlives the run and is mirrored
+    through a ConfigMap a second writer can clobber, so it comes back
+    structurally wrong as well as merely truncated. A truncated file raises
+    ValueError and is already handled; one that parses into the wrong SHAPE was
+    not. A single non-dict entry took every later pass down inside
+    observe_recorded/sync_counters -- after dispatch, so the exception the
+    reconcile loop swallows left the run with no status update and no
+    `remaining` ever again.
+
+    Corrupt is not progress, so an unreadable entry is dropped rather than
+    counted: the range is re-run, which is idempotent, and the
+    monotonic-progress guard still fires if dropping one shrinks a record that
+    was larger a pass ago.
+    """
+    if not isinstance(progress, dict):
+        return {}
+    out = dict(progress)
+    for bucket in ('completed', 'failed'):
+        entries = out.get(bucket)
+        if entries is None:
+            continue
+        out[bucket] = ({k: v for k, v in entries.items() if isinstance(v, dict)}
+                       if isinstance(entries, dict) else {})
+    return out
+
+
 def load_progress():
     try:
         with open(PROGRESS_FILE) as fh:
-            return json.load(fh)
+            return _sane_progress(json.load(fh))
     except (OSError, ValueError):
         pass
     # First start on this volume, or an older run that only had the ConfigMap.
     try:
         cm = core_v1.read_namespaced_config_map(PROGRESS_CM, NAMESPACE)
-        return json.loads((cm.data or {}).get('progress.json', '{}'))
+        return _sane_progress(json.loads((cm.data or {}).get('progress.json', '{}')))
     except ApiException as e:
         if e.status == 404:
             return {}
@@ -574,38 +594,6 @@ def _patch_cm(data, owner=None):
             metadata=client.V1ObjectMeta(name=PROGRESS_CM, labels={LABEL_RUN: RUN_NAME},
                                          owner_references=_progress_owner.get('ref')),
             data=body['data']))
-
-
-# --- worker liveness --------------------------------------------------------
-# Serially pinging 1024 workers with a 5s timeout was measured at a 192s median
-# and 773s max in prod (155 unreachable x 5s). Fanning out on one event loop
-# bounds it by the timeout itself.
-
-async def _ping_all(pods):
-    timeout = aiohttp.ClientTimeout(total=WORKER_PING_TIMEOUT_SECONDS)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async def one(pod, ip):
-            url = f"http://{ip}:11626/info"
-            try:
-                async with session.get(url):
-                    return pod, True
-            except Exception:
-                return pod, False
-        return dict(await asyncio.gather(*(one(p, ip) for p, ip in pods)))
-
-
-def ping_workers(pods):
-    """pods: (name, ip) pairs.
-
-    By IP, not DNS. The <pod>.<service>.<ns>.svc form needs a per-pod A record,
-    which a headless Service only publishes for endpoints whose EndpointSlice
-    carries a hostname -- and that comes from pod.spec.hostname, which a Job pod
-    cannot set to its own generated name. Measured on ssc-test: every ping
-    failed to resolve and workers_up sat at 0 for the whole run.
-    """
-    if not pods:
-        return {}
-    return asyncio.run(_ping_all(pods))
 
 
 # --- worker log capture -----------------------------------------------------
@@ -1427,11 +1415,6 @@ def profile_for(end):
     return PROFILE[idx][1] if idx < len(PROFILE) else None
 
 
-def _cpu_millis(q):
-    return int(float(q[:-1])) if str(q).endswith('m') else int(float(q) * 1000)
-
-
-
 def _sized(value, margin, cap):
     """A measured peak turned into a request: margin applied, never above cap."""
     want = int(value * margin)
@@ -1730,13 +1713,6 @@ def pods_by_job():
     return out
 
 
-def was_disrupted(pod):
-    for cond in (pod.status.conditions or []):
-        if cond.type == 'DisruptionTarget' and cond.status == 'True':
-            return True
-    return False
-
-
 def reconcile(state):
     ranges = generate_ranges()
     by_end = {str(end): count for end, count in ranges}
@@ -1757,6 +1733,18 @@ def reconcile(state):
             live[end] = (attempt, j)
 
     in_progress = []
+    # The same set of ranges as `in_progress`, keyed by end. `remaining` is a
+    # COUNT over this run's range list, never `total - completed - ...`: the
+    # progress record is read off a shared volume and can carry ends from a run
+    # with a different ledgersPerJob, and a subtraction lets those foreign keys
+    # move a number that is supposed to describe THIS run. Measured on the
+    # fixture: one foreign key made `remaining` read 0 on the very first pass
+    # with nothing dispatched yet, and three of them left it at -3 once every
+    # real range had finished -- so the mission's `num_remain == 0 &&
+    # jobs_in_progress == []` could never fire and the driver waited forever on
+    # a completed run. A count cannot be pushed below zero or above the range
+    # list by anything that is not one of our own ranges.
+    in_flight = set()
     for end, (attempt, j) in list(live.items()):
         st = j.status
         if st.succeeded:
@@ -1799,16 +1787,9 @@ def reconcile(state):
                 if by_end.get(end) is not None:
                     completed[end]['count'] = by_end[end]
                 completed[end].update(peaks_for_range(end, attempt))
-                # Durably recorded first: if this process dies between the two,
-                # the range is still complete and simply keeps its volume.
+                # Durably recorded first: the record is what makes the volume
+                # and the Job disposable, so it must land before either goes.
                 save_progress(progress)
-                release_pvc(end)
-                # Only once the record is complete. `tx is None` means the
-                # collector had not flushed this range's .metrics yet, and the
-                # pod is the only place left to read it from -- deleting the
-                # Job would reap the pod and make that gap permanent. Leave
-                # those to JOB_TTL_SECONDS.
-                _reap_if_complete(end, attempt, completed[end])
             elif (not _has_peaks(completed[end])
                   or completed[end].get('txApply') is None
                   or not _attempt_finalized(end, attempt)):
@@ -1836,7 +1817,20 @@ def reconcile(state):
                     save_progress(progress)
                     logger.info("range %s: measurements arrived late, backfilled %s",
                                 end, sorted(late))
-                _reap_if_complete(end, attempt, completed[end])
+            # Per SIGHTING of a recorded range, not per first sight. Both are
+            # idempotent (a 404 from either is swallowed) and both used to hang
+            # off the branch that runs exactly once, so a process that died
+            # anywhere between save_progress and here never reached them again:
+            # the record exists, so the first-sight branch is skipped forever
+            # and the backfill branch is skipped as soon as the record is
+            # complete. That leaked the range's 40Gi volume permanently and left
+            # a Job nothing would ever reap but JOB_TTL_SECONDS.
+            #
+            # `tx is None` still costs nothing here: _reap_if_complete waits for
+            # the collector's .done marker, so an unflushed range keeps its Job
+            # (and its pod, the last place the metric can be read) regardless.
+            release_pvc(end)
+            _reap_if_complete(end, attempt, completed[end])
         elif st.failed:
             # Completion is terminal for the range, so a Failed Job for a range
             # that is already recorded is garbage -- never an input to the retry
@@ -2009,6 +2003,7 @@ def reconcile(state):
                 if _attempt_finalized(end, attempt):
                     delete_job(end, attempt)
                 in_progress.append(job_key(int(end), by_end[end]))
+                in_flight.add(str(end))
                 continue
             if reason is not None:
                 logger.error("range %s exhausted %d attempts (%s)", end, cap, reason)
@@ -2028,6 +2023,7 @@ def reconcile(state):
                 save_progress(progress)
         else:
             in_progress.append(job_key(int(end), by_end.get(end, 0)))
+            in_flight.add(str(end))
 
     # Monotonic progress is invariant in a healthy run. A decrease means the
     # durable record or the Jobs were tampered with; redoing hours of work
@@ -2064,9 +2060,18 @@ def reconcile(state):
                 created += 1
                 capacity -= 1
                 in_progress.append(job_key(end, count))
+                in_flight.add(str(end))
             except ApiException as e:
                 if e.status != 409:   # AlreadyExists: name uniqueness is the mutex
                     raise
+                # Losing the mutex means the Job EXISTS and is in flight, so it
+                # occupies a slot exactly like one we created. Falling through
+                # without spending capacity dispatched PARALLELISM+1 workers --
+                # one extra per lost race -- and reported the range as
+                # `remaining` while it was already running.
+                capacity -= 1
+                in_progress.append(job_key(end, count))
+                in_flight.add(str(end))
 
     observe_recorded(progress, state['replayed'])
     sync_counters(progress, state['counted'])
@@ -2077,7 +2082,10 @@ def reconcile(state):
                           for k, v in failed.items()],
         'in_progress': in_progress,
         'created': created,
-        'remaining': len(ranges) - len(completed) - len(failed) - len(in_progress),
+        'remaining': sum(1 for end, _ in ranges
+                         if str(end) not in completed
+                         and str(end) not in failed
+                         and str(end) not in in_flight),
     }
 
 
@@ -2117,24 +2125,22 @@ def update_status_and_metrics():
 
             r = reconcile(state)
 
-            # Liveness of the workers that currently own a job -- idle slots are
-            # deliberately not counted, matching the original metric.
-            pods = [(p.metadata.name, p.status.pod_ip)
-                    for p in core_v1.list_namespaced_pod(
-                        NAMESPACE, label_selector=f"{LABEL_RUN}={RUN_NAME}",
-                        field_selector='status.phase=Running',
-                        # Served from the apiserver watch cache. Only safe here:
-                        # a stale liveness sample is cosmetic, whereas stale
-                        # dispatch state would re-run a range.
-                        resource_version='0').items
-                    if p.status.pod_ip]
+            # Worker liveness, for the Grafana series only -- nothing in the
+            # driver reads it. A worker is a Job here, so a Running pod IS a
+            # live worker and its liveness is the Job's status; the count comes
+            # off the pod list the apiserver already has cached instead of one
+            # HTTP GET per worker every cycle.
             refresh_start = time.time()
-            ping = ping_workers(pods)
+            workers_up = sum(
+                1 for p in core_v1.list_namespaced_pod(
+                    NAMESPACE, label_selector=f"{LABEL_RUN}={RUN_NAME}",
+                    field_selector='status.phase=Running',
+                    # Served from the apiserver watch cache. Only safe here:
+                    # a stale liveness sample is cosmetic, whereas stale
+                    # dispatch state would re-run a range.
+                    resource_version='0').items
+                if p.status.pod_ip)
             workers_refresh_duration = time.time() - refresh_start
-            worker_statuses = [{'pod': p, 'status': 'running' if ok else 'down'}
-                               for p, ok in ping.items()]
-            workers_up = sum(1 for ok in ping.values() if ok)
-            workers_down = len(ping) - workers_up
 
             mission_duration = time.time() - mission_start_time
             with status_lock:
@@ -2146,9 +2152,6 @@ def update_status_and_metrics():
                     'queue_in_progress_count': len(r['in_progress']),
                     'jobs_failed': r['failed_ranges'],
                     'jobs_in_progress': r['in_progress'],
-                    'workers': worker_statuses,
-                    'workers_up': workers_up,
-                    'workers_down': workers_down,
                     'workers_refresh_duration': workers_refresh_duration,
                     'mission_duration': mission_duration,
                 }
@@ -2157,7 +2160,11 @@ def update_status_and_metrics():
             metric_catchup_queues.labels(queue="failed").set(len(r['failed_ranges']))
             metric_catchup_queues.labels(queue="in_progress").set(len(r['in_progress']))
             metric_workers.labels(status="up").set(workers_up)
-            metric_workers.labels(status="down").set(workers_down)
+            # Held at 0 rather than dropped: the series is Grafana-facing, and a
+            # label that stops being set goes stale on the dashboard instead of
+            # reading zero. Nothing can report "down" now that liveness is the
+            # pod's phase -- a worker that is not up is simply not listed.
+            metric_workers.labels(status="down").set(0)
             metric_refresh_duration.set(workers_refresh_duration)
             metric_mission_duration.set(mission_duration)
             logger.info("Status: %s", json.dumps(status))

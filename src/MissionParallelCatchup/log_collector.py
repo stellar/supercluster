@@ -21,8 +21,9 @@ process:
 
 Residual: if this dies between flushing log bytes and rewriting the state file,
 the next run replays from a slightly older timestamp and a few lines duplicate.
-Bounded by STATE_FLUSH_SECONDS. "At least once, deduped to near-exact" rather
-than exactly once.
+Bounded by one poll's worth of lines, since the state file is rewritten at the
+end of every poll. "At least once, deduped to near-exact" rather than exactly
+once.
 """
 
 import asyncio
@@ -43,7 +44,6 @@ RUN_NAME = os.getenv('RUN_NAME', 'parallel-catchup')
 LOG_DIR = os.getenv('LOG_DIR', '/logs')
 CONTAINER = os.getenv('WORKER_CONTAINER', 'stellar-core')
 POLL_SECONDS = float(os.getenv('COLLECTOR_POLL_SECONDS', 5))
-STATE_FLUSH_SECONDS = float(os.getenv('STATE_FLUSH_SECONDS', 10))
 # Poll cycles a stream gets to finalize itself after its pod leaves the pod list
 # before it is cancelled outright. One cycle is usually enough; the margin is for
 # a stream still finalizing: writing its .metrics and closing its archive.
@@ -68,16 +68,6 @@ STORAGE_MODE = os.getenv('STORAGE_MODE', 'pvc')
 # at most PEAK_FLUSH_RATIO of a range's high-water rather than all of it --
 # Prometheus's server-side max_over_time needed no such state.
 PEAK_FLUSH_RATIO = float(os.getenv('PEAK_FLUSH_RATIO', 1.05))
-# Most a single unterminated blob may buffer before we start discarding its
-# head. stellar-core's own lines are well under a kilobyte; anything larger is a
-# progress meter or a stack dump, and neither is worth killing the stream over.
-#
-# This is charged PER LIVE STREAM. Measured on ssc-test at 2096 follow streams
-# the collector already sat at 1444 MiB of a 2048 MiB limit with memory.events
-# max=2617, so a 256 KiB worst case here is another 512 MiB at 2096 and 1 GiB at
-# 4096 -- on its own enough to OOM the sidecar. 64 KiB is ~64x the longest line
-# stellar-core actually emits.
-MAX_LINE_CHARS = int(os.getenv('MAX_LINE_CHARS', 65536))
 # Seconds between polls of one pod's log. Latency here is archive lag, not
 # anything a decision waits on; 4096 pods at 10s is ~90 concurrent polls.
 LOG_POLL_SECONDS = float(os.getenv('LOG_POLL_SECONDS', 10))
@@ -283,7 +273,15 @@ def write_metrics(end, attempt, values):
     except (OSError, ValueError):
         prior = {}
     merged = {**prior, **values}
-    for k in PEAK_KEYS:
+    # attemptSeconds is not a peak, but it takes the same rule for the same
+    # reason: it is a fixed quantity once the attempt ends, and every source is
+    # a lower bound on it -- the pod's own start->finish is exact, the poller's
+    # elapsed time covers only the part of the attempt that process was alive
+    # for. An attempt is finalized more than once whenever a poller is re-opened
+    # for a pod that is still listed (a restarted sidecar, or a 404 on the log
+    # endpoint while the pod list is stale), and there the fallback clock starts
+    # at the restart: newest-wins turned a recorded 3600s into 0.0s.
+    for k in PEAK_KEYS + ('attemptSeconds',):
         a, b = prior.get(k), values.get(k)
         if a is not None and b is not None:
             merged[k] = max(a, b)
@@ -366,6 +364,9 @@ def record_outcome(pod, end, attempt):
 _eph_peak = {}
 _anon_peak = {}
 _ws_peak = {}
+# Last value flushed to the volume, per axis: keyed by pod name for anon and by
+# "<pod>/eph" for ephemeral. A pod name cannot contain '/', so the two key
+# spaces cannot collide.
 _peak_flushed = {}
 # pod name -> (end, attempt), so a mid-flight peak flush can find its file.
 _streaming = {}
@@ -411,6 +412,20 @@ async def sample_kubelet(session, nodes):
                 if int(used) > prev:
                     _eph_peak[name] = int(used)
                     logger.info("peak ephemeral for %s: %.2f GiB", name, used / 1073741824)
+                    # Flushed on growth for the same reason as anon below, and
+                    # re-measuring does not recover it: disk use is not
+                    # monotonic -- stellar-core drops its download staging once
+                    # buckets are applied -- so a replacement sidecar watching
+                    # the tail of the same pod sees a fraction of the real
+                    # high-water. This figure sizes the next run's
+                    # ephemeral-storage request, and one that comes back too
+                    # small is an eviction.
+                    if int(used) >= _peak_flushed.get(name + '/eph', 0) * PEAK_FLUSH_RATIO:
+                        _peak_flushed[name + '/eph'] = int(used)
+                        ref = _streaming.get(name)
+                        if ref:
+                            write_metrics(ref[0], ref[1],
+                                          {'peakEphemeralBytes': int(used)})
             for c in entry.get('containers', []):
                 if c.get('name') != CONTAINER:
                     continue
@@ -469,7 +484,9 @@ async def finalize(session, pod, end, attempt, tx, done_ok, started=None):
         measured['attemptSeconds'] = round(observed, 1)
     elif started is not None:
         # Fallback only: the monitor's figure comes from the pod's terminated
-        # timestamps and is preferred when it exists.
+        # timestamps and is preferred when it exists. write_metrics keeps this
+        # from lowering a duration already on the volume -- an attempt can be
+        # finalized twice, and the second poller's clock started at the restart.
         measured['attemptSeconds'] = round(
             asyncio.get_event_loop().time() - started, 1)
     if tx.resumed:
@@ -480,6 +497,7 @@ async def finalize(session, pod, end, attempt, tx, done_ok, started=None):
     if tx.seconds is not None:
         measured['txApplySeconds'] = tx.seconds
     _peak_flushed.pop(pod, None)
+    _peak_flushed.pop(pod + '/eph', None)
     _streaming.pop(pod, None)
     _wake.pop(pod, None)
     anon = _anon_peak.pop(pod, None)
@@ -760,15 +778,14 @@ async def main():
                 # Unconditional: this used to be gated on ephemeral mode, back
                 # when it only sampled disk. Memory is sized in both modes, so
                 # gating it here left every pvc run with no anon peak at all.
-                if True:
-                    # Once per cycle, before the per-pod branches below: those
-                    # end in `continue` for every pod already being streamed, so
-                    # anything after them runs only on the cycle a stream opens
-                    # -- when the range has barely written anything yet.
-                    await sample_kubelet(session, {
-                        p['spec']['nodeName'] for p in pods
-                        if p.get('spec', {}).get('nodeName')
-                        and p.get('status', {}).get('phase') == 'Running'})
+                # Once per cycle, before the per-pod branches below: those end
+                # in `continue` for every pod already being streamed, so
+                # anything after them runs only on the cycle a stream opens --
+                # when the range has barely written anything yet.
+                await sample_kubelet(session, {
+                    p['spec']['nodeName'] for p in pods
+                    if p.get('spec', {}).get('nodeName')
+                    and p.get('status', {}).get('phase') == 'Running'})
                 for pod in pods:
                     name = pod['metadata']['name']
                     labels = pod['metadata'].get('labels', {})

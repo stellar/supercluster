@@ -127,17 +127,12 @@ monitor:
   # missing/unreachable archive indefinitely rather than failing.
   attemptDeadlineSeconds: 10800
   jobTtlSeconds: 600
-  pingTimeoutSecs: 2
   # Worker logs are pulled to the monitor's volume while each pod is still
   # alive, then collected in one exec at teardown instead of ~1024.
   logStorageClass: ""
   logStorageSize: "100Gi"
   saveSuccessLogs: true
   collectorPollSeconds: 5
-  # Most a single unterminated blob may buffer before its head is discarded.
-  # A worker printing a carriage-return progress meter would otherwise grow this
-  # without bound, on every stream at once.
-  maxLineChars: 65536
   # Log collection polls rather than holding a follow=true stream per pod, so
   # concurrency is independent of worker.replicas. At 4096 pods and a 10s
   # interval this is ~90 in-flight polls.
