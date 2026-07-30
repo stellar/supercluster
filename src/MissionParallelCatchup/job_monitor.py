@@ -57,7 +57,7 @@ RANGE_GENERATOR = os.getenv('RANGE_GENERATOR', 'uniform')      # uniform | logar
 # the bucket set only grows with ledger position. 'oldest-first' reverses that,
 # so a profiling run measures the cheap early ranges before it can be
 # interrupted, and the expensive tip ranges last.
-RANGE_ORDER = os.getenv('RANGE_ORDER', 'tip-first')            # tip-first | oldest-first
+RANGE_ORDER = os.getenv('RANGE_ORDER', 'tip-first')  # tip-first | oldest-first | longest-first
 STARTING_LEDGER = int(os.getenv('STARTING_LEDGER', 0))
 LATEST_LEDGER_NUM = int(os.getenv('LATEST_LEDGER_NUM', 0))
 LEDGERS_PER_JOB = int(os.getenv('LEDGERS_PER_JOB', 16000))
@@ -434,8 +434,37 @@ def _uniform_segment(start_ledger, end_ledger, seg_size):
 
 
 def _ordered(ranges):
-    """Dispatch order. Generators emit tip-first; reverse for oldest-first."""
-    return list(reversed(ranges)) if RANGE_ORDER == 'oldest-first' else ranges
+    """Dispatch order. Generators emit tip-first; reverse for oldest-first.
+
+    'longest-first' is the one that shortens the run. Makespan is bounded below
+    by the single longest job, so every range that starts after it is free and
+    every hour it starts late is an hour on the end. That is classic
+    longest-processing-time scheduling.
+
+    tip-first only approximates it. Position predicts cost on average and badly
+    in the tail: measured 2026-07-30, ranges at 41-45M ran as long as the tip
+    (3.1h) on a third of the memory, and the 50-60M band is CHEAPER than 40-50M.
+    Sorting on the profile's own measured seconds uses the real number instead
+    of a proxy for it.
+
+    A range the profile has never seen sorts FIRST. profile_for returns the
+    nearest measured end ABOVE the target, so an unprofiled range is by
+    construction newer than anything ever measured -- the newest ranges are the
+    most expensive, so "unknown" means "assume worst", not "assume average".
+    That also makes the next profile better: those ranges run early, under the
+    most generous sizing, instead of being the ones a run dies before reaching.
+    """
+    if RANGE_ORDER == 'oldest-first':
+        return list(reversed(ranges))
+    if RANGE_ORDER != 'longest-first':
+        return ranges
+    def cost(item):
+        prof = profile_for(item[0])
+        secs = (prof or {}).get('seconds')
+        # None sorts first; ties keep tip-first order, which is the better guess
+        # among ranges the profile cannot separate.
+        return (0 if secs is None else 1, -(secs or 0))
+    return sorted(ranges, key=cost)
 
 
 def generate_ranges():
