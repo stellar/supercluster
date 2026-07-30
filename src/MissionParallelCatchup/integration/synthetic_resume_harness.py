@@ -98,11 +98,11 @@ def helm_sets(release, source_config_map, image):
         'monitor.collectorResources.requests.cpu=25m',
         'monitor.collectorResources.requests.memory=128Mi',
         'monitor.collectorResources.limits.cpu=250m',
-        'monitor.collectorResources.limits.memory=256Mi',
+        'monitor.collectorResources.limits.memory=512Mi',
         'monitor.resources.requests.cpu=25m',
         'monitor.resources.requests.memory=128Mi',
         'monitor.resources.limits.cpu=250m',
-        'monitor.resources.limits.memory=256Mi',
+        'monitor.resources.limits.memory=512Mi',
         'range.generator=uniform',
         'range.startingLedger=0',
         f'range.latestLedgerNum={RANGE_END}',
@@ -206,6 +206,34 @@ def monitor_pod(release):
     if len(items) != 1:
         return None
     return items[0]
+
+
+def monitor_startup(pod):
+    if not pod:
+        return None
+    statuses = {}
+    for status in pod.get('status', {}).get('containerStatuses', []):
+        state = status.get('state') or {}
+        statuses[status['name']] = {
+            'ready': status.get('ready', False),
+            'restartCount': status.get('restartCount', 0),
+            'state': state,
+        }
+    return {
+        'name': pod['metadata']['name'],
+        'phase': pod.get('status', {}).get('phase'),
+        'conditions': pod.get('status', {}).get('conditions', []),
+        'containers': statuses,
+    }
+
+
+def ready_monitor_pod(release, evidence):
+    pod = monitor_pod(release)
+    evidence['monitorStartup'] = monitor_startup(pod)
+    if not pod:
+        return None
+    statuses = pod.get('status', {}).get('containerStatuses', [])
+    return pod if len(statuses) == 2 and all(s.get('ready') for s in statuses) else None
 
 
 def worker_snapshot(release):
@@ -494,14 +522,14 @@ def execute(args):
 
         run(
             ['helm', 'install', args.release, str(CHART),
-             '--namespace', NAMESPACE, '--wait', '--timeout', '3m']
+             '--namespace', NAMESPACE, '--timeout', '3m']
             + helm_args(sets),
             timeout=210)
         installed = True
 
         pod = wait_for(
             'one ready monitor pod',
-            lambda: monitor_pod(args.release), timeout=60)
+            lambda: ready_monitor_pod(args.release, evidence), timeout=120)
         initial_restarts = container_restarts(pod)
         evidence['restartCountsBefore'] = initial_restarts
 

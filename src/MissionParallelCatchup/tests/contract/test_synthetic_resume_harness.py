@@ -87,3 +87,22 @@ def test_runner_uses_a_handled_signal_for_collector_only_restart():
     source = PATH.read_text()
     assert 'kill -TERM 1' in source
     assert 'kill -9 1' not in source
+
+
+def test_monitor_readiness_requires_both_containers():
+    pod = {
+        'metadata': {'name': 'monitor'},
+        'status': {'phase': 'Running', 'containerStatuses': [
+            {'name': 'job-monitor', 'ready': True, 'restartCount': 0, 'state': {}},
+            {'name': 'log-collector', 'ready': False, 'restartCount': 1, 'state': {}},
+        ]},
+    }
+    evidence = {}
+    original = HARNESS.monitor_pod
+    try:
+        HARNESS.monitor_pod = lambda _release: pod
+        assert HARNESS.ready_monitor_pod('mpc-resume-a1b2c3', evidence) is None
+        pod['status']['containerStatuses'][1]['ready'] = True
+        assert HARNESS.ready_monitor_pod('mpc-resume-a1b2c3', evidence) is pod
+    finally:
+        HARNESS.monitor_pod = original
