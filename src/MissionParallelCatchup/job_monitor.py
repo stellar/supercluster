@@ -23,8 +23,10 @@ import logging
 import os
 import re
 import sys
+import tempfile
 import threading
 import time
+import zlib
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -217,6 +219,15 @@ MAX_EPHEMERAL_ATTEMPTS = int(os.getenv('MAX_EPHEMERAL_ATTEMPTS', 4))
 EPH_BUMP_FACTOR = float(os.getenv('EPH_BUMP_FACTOR', 1.5))
 EPH_ESCALATION_CAP = os.getenv('EPH_ESCALATION_CAP', '200Gi')
 ENVIRONMENTAL_OUTCOMES = ('disrupted', 'rejected', 'unknown')
+# Verdicts only the pod can produce, and which a Job-level DeadlineExceeded must
+# never overwrite. Each names a specific mechanism -- the kubelet OOM-killed it,
+# the node was draining, the ephemeral limit blew -- and each earns a different
+# retry budget and a different remediation. "The Job ran too long" is also true
+# of every one of them and says nothing about which. An OOM downgraded to a
+# timeout retries at the same memory limit that just killed it and gets 2
+# attempts instead of 5; a spot eviction downgraded to a timeout gets 2 instead
+# of 20.
+POD_AUTHORITATIVE_OUTCOMES = ('oom', 'disrupted', 'ephemeral', 'timeout')
 # stellar-core's "did not complete". Ambiguous by construction: a corrupt bucket
 # and a SIGTERM during replay both produce it, so it must never be treated as
 # proof that a range is broken.
@@ -265,14 +276,29 @@ def get_logging_level():
 # destination directory. Falls back to /data if LOG_DIR is not mounted.
 log_file_name = f"job_monitor_{datetime.now(timezone.utc).strftime('%Y-%m-%d_%H-%M-%S')}.log"
 _log_dir = os.getenv('LOG_DIR', '/logs')
-log_file_path = os.path.join(_log_dir if os.path.isdir(_log_dir) else '/data', log_file_name)
+_chosen_log_dir = _log_dir if os.path.isdir(_log_dir) else '/data'
+# Last resort, and unreachable in a pod: /data is the monitor's own emptyDir, so
+# one of the two above always exists there. Off-cluster neither does, and a
+# FileHandler on a missing directory made this module impossible to import --
+# which is why nothing here was ever tested against a real reconcile().
+if not os.path.isdir(_chosen_log_dir):
+    _chosen_log_dir = tempfile.gettempdir()
+log_file_path = os.path.join(_chosen_log_dir, log_file_name)
 logging.basicConfig(level=get_logging_level(), format='%(asctime)s - %(levelname)s - %(message)s', handlers=[
     logging.StreamHandler(sys.stdout),
     logging.FileHandler(log_file_path),
 ])
 logger = logging.getLogger()
 
-config.load_incluster_config()
+# The env var is exactly what load_incluster_config() itself keys on, so in a pod
+# this is the unconditional call it always was -- a missing token or CA still
+# raises here and crash-loops the container rather than running blind. Outside a
+# pod there is nothing to load and import stays pure; the caller injects clients.
+if os.getenv('KUBERNETES_SERVICE_HOST'):
+    config.load_incluster_config()
+else:
+    logger.warning("KUBERNETES_SERVICE_HOST is unset: no in-cluster config loaded. "
+                   "Every API call will fail until core_v1/batch_v1 are replaced.")
 # client-go's Python equivalent defaults are fine for a few LISTs per cycle, but
 # dispatching ~1024 Jobs + PVCs at once needs headroom.
 _cfg = client.Configuration.get_default_copy()
@@ -664,6 +690,12 @@ def classify(pod):
                              'OutOfpods', 'UnexpectedAdmissionError', 'NodeAffinity',
                              'Shutdown', 'Evicted'):
         return {'outcome': 'rejected', 'exitCode': None, 'reason': pod.status.reason}
+    if pod.status.reason == 'DeadlineExceeded':
+        # The deadline lives on the PodSpec, so it is the kubelet that fires it
+        # and the pod that carries the reason -- the Job just sees a non-zero
+        # exit through its podFailurePolicy. Without this the drain-to-exit-3
+        # matches the generic rule and reads as a plain catchup failure.
+        return {'outcome': 'timeout', 'exitCode': None, 'reason': pod.status.reason}
     started = any(cs.state and cs.state.terminated for cs in (pod.status.container_statuses or []))
     if not started:
         # No container ever reached a terminal state: nothing ran, so this is
@@ -806,6 +838,54 @@ def _oom_count(end, attempt):
     """
     return sum(1 for n in range(1, int(attempt) + 1)
                if (read_outcome(end, n) or {}).get('outcome') == 'oom')
+
+
+def verdict_path(end, attempt):
+    return os.path.join(LOG_DIR, f"range-{end}-a{attempt}.verdict")
+
+
+def save_verdict(end, attempt, outcome):
+    """Persist the EFFECTIVE verdict for one attempt, so budgets can be tallied.
+
+    The .outcome file is not enough on its own: it is classified from the pod,
+    and a deadline kill reads as a plain exit-3 `failed` there -- only the Job's
+    DeadlineExceeded condition says `timeout`. Reconcile resolves that conflict
+    once, and this is where the answer is kept, on the same durable logs volume
+    as everything else, so a monitor restart does not reset a range's budgets.
+    """
+    path = verdict_path(end, attempt)
+    try:
+        tmp = path + '.tmp'
+        with open(tmp, 'w') as fh:
+            fh.write(str(outcome))
+        os.replace(tmp, path)
+    except OSError as e:
+        logger.warning("could not persist verdict for range %s attempt %s: %s",
+                       end, attempt, e)
+
+
+def _verdict_of(end, attempt):
+    try:
+        with open(verdict_path(end, attempt)) as fh:
+            return fh.read().strip() or None
+    except OSError:
+        # Pre-fix runs, or an attempt whose verdict write lost the volume:
+        # the pod-derived classification is the next best thing.
+        return (read_outcome(end, attempt) or {}).get('outcome')
+
+
+def _cause_count(end, attempt, causes):
+    """How many of attempts 1..N at this range failed for one of `causes`.
+
+    Budgets are per cause, not per attempt. One shared attempt index meant
+    cluster churn -- which has its own deliberately large budget -- drained the
+    small budgets belonging to the causes that say something about the range: a
+    range evicted MAX_ATTEMPTS times had an effective OOM and disk budget of
+    zero, was condemned on its first real OOM without ever being escalated, and
+    took the whole mission with it.
+    """
+    return sum(1 for n in range(1, int(attempt) + 1)
+               if _verdict_of(end, n) in causes)
 
 
 def mem_for_attempt(attempt, base=None):
@@ -1047,7 +1127,13 @@ def _tx_apply_for_attempt(end, attempt=1, pod_name=None):
         try:
             with gzip.open(candidate, 'rt') as fh:
                 raw = fh.read()
-        except OSError:
+        except (OSError, EOFError, zlib.error):
+            # A corrupt archive costs THIS RANGE its metric, never the pass.
+            # EOFError is a truncated member -- the collector appending right
+            # now, or one that was killed mid-append -- and is not an OSError,
+            # so it used to escape the per-range work and abort the whole
+            # reconcile: no recording, no reap, no dispatch for any of the
+            # ~4000 ranges, repeating for as long as the torn bytes sat there.
             raw = None
     if raw is None:
         if pod_name is None:
@@ -1197,7 +1283,36 @@ def _reap_if_complete(end, attempt, record):
     """
     if not _attempt_finalized(end, attempt):
         return
-    delete_job(end, attempt)
+    reap_range_jobs(end)
+
+
+def reap_range_jobs(end):
+    """Delete every Job this range has, not just the attempt that won.
+
+    Completion is terminal for the RANGE. An attempt-scoped reap leaves an
+    older Failed Job standing -- the common case is an attempt lost to node
+    disruption whose collector died with the node, so it was never finalized
+    and was deliberately not deleted. Once the winner's Job is gone, that
+    leftover is the range's highest live attempt, and the next pass feeds it
+    straight into the retry decision and re-runs an already-recorded range
+    against a freshly recreated, empty PVC.
+    """
+    try:
+        jobs = batch_v1.list_namespaced_job(
+            NAMESPACE,
+            label_selector=f"{LABEL_RUN}={RUN_NAME},{LABEL_RANGE}={end}").items
+    except ApiException as e:
+        logger.warning("could not list jobs for completed range %s: %s", end, e)
+        return
+    for j in jobs:
+        try:
+            batch_v1.delete_namespaced_job(j.metadata.name, NAMESPACE,
+                                           propagation_policy='Background')
+            metric_jobs_reaped.inc()
+        except ApiException as e:
+            if e.status != 404:
+                logger.warning("could not delete finished job %s for range %s: %s",
+                               j.metadata.name, end, e)
 
 
 def delete_job(end, attempt):
@@ -1493,10 +1608,20 @@ def build_job(end, count, attempt, owner, mem=None, eph=None):
             pod_failure_policy=client.V1PodFailurePolicy(
                 rules=[r for _, r in _failure_rules()]),
             ttl_seconds_after_finished=JOB_TTL_SECONDS,
-            active_deadline_seconds=ATTEMPT_DEADLINE_SECONDS or None,
             template=client.V1PodTemplateSpec(
                 metadata=client.V1ObjectMeta(labels=pod_labels(end, attempt)),
                 spec=client.V1PodSpec(
+                    # On the POD, not the JobSpec. JobSpec.activeDeadlineSeconds
+                    # runs from the Job's startTime, so every second the pod
+                    # spends Pending -- waiting for Karpenter, pulling the image
+                    # -- is charged against a budget that is meant to bound how
+                    # long the range RUNS. During a node-class outage this run
+                    # sat ~15 minutes Pending and ranges died as "timeouts"
+                    # having barely executed; a timeout gets
+                    # MAX_TIMEOUT_ATTEMPTS, so two stalls condemn a range and
+                    # fail the mission. The pod-level field starts at container
+                    # start, which is the thing being bounded.
+                    active_deadline_seconds=ATTEMPT_DEADLINE_SECONDS or None,
                     # IRSA for the S3 history mirror. Without it workers fall
                     # back to the public archive, which throttles at 1024.
                     service_account_name=WORKER_SERVICE_ACCOUNT or None,
@@ -1567,20 +1692,27 @@ def observe_recorded(progress, replayed):
     Prometheus histograms are append-only and reset to zero when the process
     restarts, so replaying every recorded range rebuilds the exact cumulative
     total rather than double counting. Guarded per-process by `replayed`.
+
+    Keyed on (range, field), not on the range alone: a range is usually
+    recorded before the collector has flushed its .metrics, so txApply is null
+    at first sight and backfilled a pass or two later. Marking the whole range
+    as replayed on first sight meant that backfill could never be observed, and
+    the histogram permanently disagreed with progress.json.
     """
     for end, rec in progress.get('completed', {}).items():
-        if end in replayed:
-            continue
-        replayed.add(end)
         # `is not None`, not truthiness: a range with sum = 0ms records
         # txApply 0.0, which is a real observation and must not be dropped
         # silently. Same for a sub-second duration.
-        if rec.get('seconds') is not None:
-            metric_full_duration.observe(rec['seconds'])
-        if rec.get('wallSeconds') is not None:
-            metric_wall_duration.observe(rec['wallSeconds'])
-        if rec.get('txApply') is not None:
-            metric_tx_apply_duration.observe(rec['txApply'])
+        for field, metric in (('seconds', metric_full_duration),
+                              ('wallSeconds', metric_wall_duration),
+                              ('txApply', metric_tx_apply_duration)):
+            if (end, field) in replayed:
+                continue
+            value = rec.get(field)
+            if value is None:
+                continue
+            replayed.add((end, field))
+            metric.observe(value)
 
 
 def pods_by_job():
@@ -1706,6 +1838,18 @@ def reconcile(state):
                                 end, sorted(late))
                 _reap_if_complete(end, attempt, completed[end])
         elif st.failed:
+            # Completion is terminal for the range, so a Failed Job for a range
+            # that is already recorded is garbage -- never an input to the retry
+            # decision. Without this, a losing attempt that outlived the winner
+            # gets re-classified (disrupted, unknown, ...) and the range is
+            # dispatched all over again, against a PVC that was already
+            # released, i.e. a full replay from genesis of work already paid
+            # for. Sweep the leftover and move on.
+            if end in completed:
+                logger.info("range %s already recorded complete; discarding "
+                            "leftover Job for attempt %d", end, attempt)
+                reap_range_jobs(end)
+                continue
             pod = job_pods.get(j.metadata.name)
             if pod is not None:
                 record_outcome(end, attempt, pod)
@@ -1723,8 +1867,16 @@ def reconcile(state):
             # fired, so on that condition the Job wins. Measured in the sandbox
             # edge suite 2026-07-30: whichever of the two won the race decided
             # whether the range was retried or condemned.
+            #
+            # Ranked, not unconditional. The Job wins only where the pod has
+            # nothing more specific to say -- an exit-3 drain, a rejection, no
+            # surviving classification. Where the pod named the mechanism
+            # (OOMKilled, DisruptionTarget, an ephemeral eviction) the pod wins,
+            # because "ran too long" is also true of all of those and picking it
+            # loses both the remediation and the correct retry budget.
             from_job = classify_from_job(j)
-            if from_job and from_job.get('outcome') == 'timeout':
+            if (from_job and from_job.get('outcome') == 'timeout'
+                    and (verdict or {}).get('outcome') not in POD_AUTHORITATIVE_OUTCOMES):
                 verdict = from_job
             if verdict is None:
                 verdict = {'outcome': 'unknown', 'exitCode': None}
@@ -1732,6 +1884,10 @@ def reconcile(state):
                 logger.info("range %s attempt %d classified from Job condition "
                             "(exit %s); pod was already gone",
                             end, attempt, verdict.get('exitCode'))
+
+            # Durable before anything reads a tally -- _oom_count and the
+            # budget check below both count this attempt.
+            save_verdict(end, attempt, verdict['outcome'])
 
             retry_mem = retry_eph = None
             if verdict['outcome'] == 'timeout':
@@ -1781,19 +1937,37 @@ def reconcile(state):
             else:
                 reason = None   # genuine catchup failure: do not retry
 
-            # Three budgets, by whose fault the attempt was: a hang is usually
+            # Four budgets, by whose fault the attempt was: a hang is usually
             # persistent and gets the lowest, a range that is genuinely broken
             # gets the middle one, and anything the cluster did to us gets the
             # highest.
+            #
+            # Each is spent by ITS OWN cause, never by the global attempt index.
+            # Sharing one counter meant the cap was chosen by the latest verdict
+            # and then compared against every retry the range had ever had: a
+            # range that survived five spot evictions (legal, budget 20) reached
+            # attempt 6, and its first genuine OOM was compared 6 >= 5 and
+            # condemned -- never retried for an OOM, never escalated, and a
+            # condemned range fails the mission. On spot, where evictions are
+            # routine, that made the OOM and disk budgets effectively zero.
             if verdict['outcome'] == 'timeout':
                 cap = MAX_TIMEOUT_ATTEMPTS
+                spent = _cause_count(end, attempt, ('timeout',))
             elif verdict['outcome'] == 'ephemeral':
                 cap = MAX_EPHEMERAL_ATTEMPTS
+                spent = _cause_count(end, attempt, ('ephemeral',))
             elif verdict['outcome'] in ENVIRONMENTAL_OUTCOMES:
                 cap = MAX_DISRUPTION_ATTEMPTS
+                spent = _cause_count(end, attempt, ENVIRONMENTAL_OUTCOMES)
             else:
+                # The range's own budget: an OOM and a "did not complete" are
+                # both statements about this ledger range, so they share it.
                 cap = MAX_ATTEMPTS_PER_RANGE
-            if reason is not None and attempt < cap:
+                spent = _cause_count(end, attempt, ('oom', 'failed'))
+            # This attempt's verdict is already on disk, so `spent` includes it:
+            # the Nth failure of a cause is the one that exhausts a budget of N,
+            # exactly as `attempt < cap` behaved for a single-cause range.
+            if reason is not None and spent < cap:
                 if verdict['outcome'] == 'oom':
                     logger.error(
                         "!!! OOM RETRY !!! range %s was OOM-killed on attempt %d/%d; retrying with "

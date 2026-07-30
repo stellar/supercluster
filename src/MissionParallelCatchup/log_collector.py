@@ -27,6 +27,7 @@ than exactly once.
 
 import asyncio
 import gzip
+import io
 import json
 import logging
 import os
@@ -555,22 +556,44 @@ async def _poll_once(session, pod, end, attempt, last_ts, tx):
     lines = [l for l in re.split(r'[\r\n]', body) if l]
     if not lines:
         return last_ts, False
-    # Opened per poll, not held for the pod's life. A live gzip deflate buffer
-    # per stream is what put the sidecar at 1444 MiB of a 2048 MiB limit at 2096
-    # follow streams; here nothing is retained between polls.
-    with gzip.open(base(end, attempt) + '.log.gz', 'at') as fh:
+    # Compressed into memory first, then appended in ONE write.
+    #
+    # Appending straight into the file with gzip.open(..., 'at') meant the
+    # deflate buffer flushed partial output to disk repeatedly across the whole
+    # loop, so for most of a large poll the archive on disk ended in a member
+    # with no end-of-stream marker. job_monitor reads that same file to recover
+    # txApplySeconds and gzip raises EOFError on a truncated member -- one
+    # in-flight poll could abort a reconcile pass for every range. The window is
+    # now a single append instead of the length of the write loop, and the file
+    # only ever gains whole members.
+    #
+    # Costs no more memory than is already held: `body` above is the entire
+    # poll uncompressed, and this is the same bytes compressed. Nothing is
+    # retained between polls, which is the property that got the sidecar off
+    # 1444 MiB of a 2048 MiB limit at 2096 follow streams.
+    member = io.BytesIO()
+    wrote = False
+    with gzip.GzipFile(fileobj=member, mode='wb') as fh:
         for line in lines:
             ts, _, rest = line.partition(' ')
             if not _TS_RE.match(ts):
                 # Untimestamped kubelet text. Keep it, but never let it become
                 # the resume point.
-                fh.write(line + '\n')
+                fh.write((line + '\n').encode('utf-8'))
+                wrote = True
                 continue
             if last_ts and ts <= last_ts:
                 continue          # exact dedup of the resume overlap
-            fh.write(rest + '\n')
+            fh.write((rest + '\n').encode('utf-8'))
+            wrote = True
             tx.feed(rest)
             pending = ts
+    path = base(end, attempt) + '.log.gz'
+    with open(path, 'ab') as out:
+        # A poll whose lines were all deduped still touches the archive: its
+        # existence is what job_monitor's backstop keys on.
+        if wrote:
+            out.write(member.getvalue())
     if pending:
         write_state(end, attempt, pending)
         return pending, False
@@ -657,11 +680,18 @@ async def poll_pod(session, pod, end, attempt, done, done_ok):
         # would not help -- sinceTime has second granularity, so anything under
         # ~1s re-reads the same second -- and the delay that matters is between
         # the container exiting and the last read, not between routine polls.
+        ev = _wake.setdefault(pod, asyncio.Event())
         try:
-            await asyncio.wait_for(_wake.setdefault(pod, asyncio.Event()).wait(),
-                                   timeout=backoff)
+            await asyncio.wait_for(ev.wait(), timeout=backoff)
         except asyncio.TimeoutError:
             pass
+        finally:
+            # Standard set/clear pairing. Left set, the Event makes every later
+            # wait return instantly, so the terminal-poll backoff never sleeps
+            # and TERMINAL_POLL_ATTEMPTS is spent in one millisecond -- the pod
+            # is given no time to have its final log become readable. A wake is
+            # consumed by the poll it triggers.
+            ev.clear()
 
 
 async def list_pods(session):

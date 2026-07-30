@@ -1878,11 +1878,18 @@ def test_polls_are_bounded_by_a_semaphore():
 
 def test_the_archive_is_not_held_open_between_polls():
     # A live gzip deflate buffer per stream is most of what put the sidecar at
-    # 1444 MiB. Opening per poll means nothing is retained between them.
+    # 1444 MiB. The member is built in a function-local buffer and appended in
+    # one write, so nothing is retained between polls.
+    #
+    # Asserts the invariant rather than the call: this test used to pin the
+    # literal gzip.open(..., 'at'), which the atomic-append fix replaced, and it
+    # went red over a change that preserved everything it existed to protect.
     fn = _extract(r"^(async def _poll_once\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
-    assert "gzip.open(base(end, attempt) + '.log.gz', 'at')" in fn
+    assert 'io.BytesIO()' in fn and 'gzip.GzipFile' in fn, \
+        "the member is no longer built in a function-local buffer"
     loop = _extract(r"^(async def poll_pod\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
-    assert 'gzip.open' not in loop, "the archive is held across polls"
+    for held in ('gzip.open', 'gzip.GzipFile', 'io.BytesIO'):
+        assert held not in loop, f"the archive is held across polls ({held})"
 
 
 def test_terminal_is_read_before_the_poll_not_after():
@@ -1956,7 +1963,8 @@ def test_the_reap_waits_for_the_collectors_done_marker():
     import tempfile, os as _os
     d = tempfile.mkdtemp()
     ns = {'os': _os, 'LOG_DIR': d, 'PEAK_FIELDS': ('peakAnonBytes',), 'reaped': []}
-    ns['delete_job'] = lambda e, a: ns['reaped'].append((e, a))
+    # Completion is terminal for the RANGE, so the reap is range-scoped now.
+    ns['reap_range_jobs'] = lambda e: ns['reaped'].append((e, 1))
     for name in ('done_path', '_attempt_finalized', '_has_peaks', '_reap_if_complete'):
         exec(_extract(r"^(def " + name + r"\(.*?)(?=\ndef )").group(1), ns)
     full = {'txApply': 5.0, 'peakAnonBytes': 99}

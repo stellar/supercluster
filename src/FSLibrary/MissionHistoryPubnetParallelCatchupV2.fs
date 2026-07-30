@@ -498,7 +498,113 @@ let readProgressRecord (context: MissionContext) : JObject option =
 
     match fromVolume with
     | Some p -> Some p
-    | None -> queryJobMonitor (context, jobMonitorProgressKey)
+    | None ->
+        // Degraded read, and it must not be silent. The ConfigMap is a state
+        // mirror: the monitor strips every profiling field out of it to stay
+        // under the 1 MiB cap, so a record sourced here carries attempts and
+        // count and nothing else. Any range profile built from it will be
+        // empty, and rangeProfileDocument will decline to write one.
+        LogWarn
+            "Falling back to the progress ConfigMap; it is a state mirror with no measurements, so no range profile can be built from it"
+
+        queryJobMonitor (context, jobMonitorProgressKey)
+
+
+// The `ranges` map of a profile artifact, built from a progress record's
+// `completed` map. Pure, so the projection can be exercised without a cluster.
+let buildRangeProfile (completed: JObject) : JObject =
+    let ranges = JObject()
+
+    // Keyed on the range end alone, with count kept as a field.
+    //
+    // Measured on ssc-test: 4.2x the ledgers per range (100 -> 420, the
+    // default 320 overlap) moved peak disk by -1.6% and wall time by
+    // 1.15x. Cost tracks ledger position -- how big the bucket set is to
+    // download and apply -- far more than range length. Putting count in
+    // the key would therefore discard the whole profile whenever
+    // overlapLedgers or ledgersPerJob changed, to preserve a distinction
+    // the measurements say is small.
+    //
+    // A consumer should resolve a range by exact end, else the nearest
+    // measured end, else a run-wide fallback -- so a re-sliced run still
+    // gets useful numbers instead of zero matches.
+    for prop in completed.Properties() do
+        let record = prop.Value :?> JObject
+        let entry = projectRangeEntry record
+
+        // The guard decides on measurements alone. count is bookkeeping, not a
+        // measurement, so it is attached only after the entry has been found to
+        // carry something real. Attaching it first made every entry non-empty
+        // and defeated the guard completely: a ConfigMap-sourced record, which
+        // has had all eight profiling fields stripped by the monitor's
+        // _state_only(), still sailed through and produced a range with nothing
+        // in it but a count.
+        if entry.Count > 0 then
+            match record.["count"] with
+            | null -> ()
+            | v -> entry.["count"] <- v
+
+            // Same end from two differently-sized ranges: keep the
+            // larger, since sizing from the smaller would under-provision.
+            let existing = ranges.[prop.Name]
+
+            let keep =
+                isNull existing
+                || (let a = entry.["count"]
+                    let b = (existing :?> JObject).["count"]
+                    isNull b || (not (isNull a) && a.Value<int>() >= b.Value<int>()))
+
+            if keep then ranges.[prop.Name] <- entry
+
+    ranges
+
+
+// The profile document to write, or None when there is nothing worth writing.
+let rangeProfileDocument
+    (storageMode: string)
+    (defaultLedgersPerRange: int)
+    (completed: JObject)
+    : JObject option =
+    let ranges = buildRangeProfile completed
+
+    // Slicing and storage mode both go in the name, because a profile is
+    // only valid for the shape it was measured at.
+    //
+    // Slicing: keys are range ends and cost tracks range length, so a
+    // 39382-ledger profile fed into a 16320-ledger run resolves through
+    // nearest-end fallback and sizes everything wrong. Measured on
+    // ssc-test -- it produced 1025 OOM retries in one run.
+    //
+    // Mode: an ephemeral profile carries peakEphemeralBytes and a pvc one
+    // does not, so crossing them silently defaults the disk axis.
+    let ledgersPerRange =
+        let counts =
+            ranges.Properties()
+            |> Seq.choose (fun p ->
+                match (p.Value :?> JObject).["count"] with
+                | null -> None
+                | v -> Some(v.Value<int>()))
+            |> Seq.toList
+
+        match counts with
+        | [] -> defaultLedgersPerRange
+        | _ -> counts |> List.countBy id |> List.maxBy snd |> fst
+
+    let doc = JObject()
+    doc.["schema"] <- JValue(1)
+    doc.["generated"] <- JValue(DateTime.UtcNow.ToString("o"))
+    doc.["release"] <- JValue(helmReleaseName)
+    doc.["storageMode"] <- JValue(storageMode)
+    doc.["ledgersPerRange"] <- JValue(ledgersPerRange)
+    doc.["ranges"] <- ranges
+
+    // A profile with no measurements is worse than no profile at all: it looks
+    // complete, so nothing downstream can tell it from a good one, and the next
+    // run sizes itself from empty data. The usual cause is readProgressRecord
+    // falling back to the progress ConfigMap, which is a state mirror with
+    // every profiling field stripped. Writing nothing lets the consumer fall
+    // back to its configured defaults, which is the safe outcome.
+    if ranges.Count = 0 then None else Some doc
 
 
 let writeRangeProfile (context: MissionContext) =
@@ -507,85 +613,30 @@ let writeRangeProfile (context: MissionContext) =
     | Some progress ->
         try
             let completed = progress.["completed"] :?> JObject
-            let ranges = JObject()
 
-            // Keyed on the range end alone, with count kept as a field.
-            //
-            // Measured on ssc-test: 4.2x the ledgers per range (100 -> 420, the
-            // default 320 overlap) moved peak disk by -1.6% and wall time by
-            // 1.15x. Cost tracks ledger position -- how big the bucket set is to
-            // download and apply -- far more than range length. Putting count in
-            // the key would therefore discard the whole profile whenever
-            // overlapLedgers or ledgersPerJob changed, to preserve a distinction
-            // the measurements say is small.
-            //
-            // A consumer should resolve a range by exact end, else the nearest
-            // measured end, else a run-wide fallback -- so a re-sliced run still
-            // gets useful numbers instead of zero matches.
-            for prop in completed.Properties() do
-                let record = prop.Value :?> JObject
-                let entry = projectRangeEntry record
+            let docOpt =
+                rangeProfileDocument
+                    context.pubnetParallelCatchupStorageMode
+                    context.pubnetParallelCatchupLedgersPerJob
+                    completed
 
-                match record.["count"] with
-                | null -> ()
-                | v -> entry.["count"] <- v
+            match docOpt with
+            | None -> LogWarn "Progress record carried no measurements; not writing a range profile"
+            | Some doc ->
+                let ranges = doc.["ranges"] :?> JObject
+                let ledgersPerRange = doc.["ledgersPerRange"].Value<int>()
 
-                if entry.Count > 0 then
-                    // Same end from two differently-sized ranges: keep the
-                    // larger, since sizing from the smaller would under-provision.
-                    let existing = ranges.[prop.Name]
+                let path =
+                    Path.Combine(
+                        context.destination.Path,
+                        sprintf
+                            "%s-profile-%dledgers-%s.json"
+                            helmReleaseName
+                            ledgersPerRange
+                            context.pubnetParallelCatchupStorageMode)
 
-                    let keep =
-                        isNull existing
-                        || (let a = entry.["count"]
-                            let b = (existing :?> JObject).["count"]
-                            isNull b || (not (isNull a) && a.Value<int>() >= b.Value<int>()))
-
-                    if keep then ranges.[prop.Name] <- entry
-
-            // Slicing and storage mode both go in the name, because a profile is
-            // only valid for the shape it was measured at.
-            //
-            // Slicing: keys are range ends and cost tracks range length, so a
-            // 39382-ledger profile fed into a 16320-ledger run resolves through
-            // nearest-end fallback and sizes everything wrong. Measured on
-            // ssc-test -- it produced 1025 OOM retries in one run.
-            //
-            // Mode: an ephemeral profile carries peakEphemeralBytes and a pvc one
-            // does not, so crossing them silently defaults the disk axis.
-            let ledgersPerRange =
-                let counts =
-                    ranges.Properties()
-                    |> Seq.choose (fun p ->
-                        match (p.Value :?> JObject).["count"] with
-                        | null -> None
-                        | v -> Some(v.Value<int>()))
-                    |> Seq.toList
-
-                match counts with
-                | [] -> context.pubnetParallelCatchupLedgersPerJob
-                | _ -> counts |> List.countBy id |> List.maxBy snd |> fst
-
-
-            let doc = JObject()
-            doc.["schema"] <- JValue(1)
-            doc.["generated"] <- JValue(DateTime.UtcNow.ToString("o"))
-            doc.["release"] <- JValue(helmReleaseName)
-            doc.["storageMode"] <- JValue(context.pubnetParallelCatchupStorageMode)
-            doc.["ledgersPerRange"] <- JValue(ledgersPerRange)
-            doc.["ranges"] <- ranges
-
-            let path =
-                Path.Combine(
-                    context.destination.Path,
-                    sprintf
-                        "%s-profile-%dledgers-%s.json"
-                        helmReleaseName
-                        ledgersPerRange
-                        context.pubnetParallelCatchupStorageMode)
-
-            File.WriteAllText(path, doc.ToString())
-            LogInfo "Wrote range profile for %d ranges to %s" ranges.Count path
+                File.WriteAllText(path, doc.ToString())
+                LogInfo "Wrote range profile for %d ranges to %s" ranges.Count path
         with ex -> LogWarn "Failed to write range profile: %s" ex.Message
 
 
