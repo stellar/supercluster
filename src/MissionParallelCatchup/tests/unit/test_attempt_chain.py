@@ -281,6 +281,22 @@ def test_reconstruction_leaves_txapply_absent_when_every_leg_is_missing(attempts
     assert 'txApply' not in jm.reconstruct_completed_profile(999, 2)
 
 
+def test_repair_removes_legacy_winner_only_chain_aggregates(attempts):
+    attempts(999, {
+        1: ({}, {'outcome': 'disrupted'}),
+        2: ({'resumed': True, 'attemptSeconds': 300.0,
+             'txApplySeconds': 3.0}, None),
+    })
+    progress = {'completed': {'999': {
+        'attempts': 2, 'seconds': 300.0, 'txApply': 3.0,
+    }}}
+
+    assert jm.repair_completed_profiles(progress) == 1
+    assert 'seconds' not in progress['completed']['999']
+    assert 'txApply' not in progress['completed']['999']
+    assert jm.repair_completed_profiles(progress) == 0
+
+
 def test_reconstruction_does_not_cross_a_fresh_restart_boundary(attempts):
     attempts(999, {
         1: ({'attemptSeconds': 900.0, 'txApplySeconds': 100.0,

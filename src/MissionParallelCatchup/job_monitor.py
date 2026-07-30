@@ -1563,17 +1563,31 @@ def _apply_profile_reconstruction(record, rebuilt):
     return updates
 
 
+def _repair_completed_profile(end, attempt, record):
+    """Merge exact reconstruction and remove unverifiable chain aggregates."""
+    rebuilt = reconstruct_completed_profile(end, attempt)
+    updates = _apply_profile_reconstruction(record, rebuilt)
+    if len(list(_resumed_chain(end, attempt))) > 1:
+        for key in ('seconds', 'txApply'):
+            if key not in rebuilt and record.get(key) is not None:
+                # Older code published the sum of whatever legs survived. Once
+                # resume proves this is a chain, that number is a lower bound,
+                # not a total; omission is the only honest repair.
+                record.pop(key)
+                updates[key] = None
+    return updates
+
+
 def repair_completed_profiles(progress):
     """Apply artifact reconstruction to old completed records idempotently."""
     repaired = 0
     for end, record in (progress.get('completed') or {}).items():
         try:
             attempt = int(record.get('attempts') or 1)
-            rebuilt = reconstruct_completed_profile(end, attempt)
+            updates = _repair_completed_profile(end, attempt, record)
         except (TypeError, ValueError):
             logger.warning("cannot reconstruct malformed completed record for range %s", end)
             continue
-        updates = _apply_profile_reconstruction(record, rebuilt)
         if updates:
             repaired += 1
     return repaired
@@ -2535,8 +2549,7 @@ def reconcile(state):
                 # attemptSeconds, and the resume marker together. Reconstruct the
                 # same profile used on first completion, not a field-by-field
                 # subset that can leave a pre-marker record permanently short.
-                late = _apply_profile_reconstruction(
-                    completed[end], reconstruct_completed_profile(end, attempt))
+                late = _repair_completed_profile(end, attempt, completed[end])
                 if late:
                     save_progress(progress)
                     logger.info("range %s: measurements arrived late, backfilled %s",
