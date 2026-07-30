@@ -234,8 +234,6 @@ spec:
               value: {{ .Values.monitor.profileMargin | quote }}
             - name: PROFILE_CPU_LIMIT
               value: {{ .Values.monitor.profileCpuLimit | quote }}
-            - name: PROFILE_CPU_MARGIN
-              value: {{ .Values.monitor.profileCpuMargin | quote }}
             - name: PROFILE_MAX_MEM
               value: {{ .Values.monitor.profileMaxMemory | quote }}
             - name: PROFILE_CACHE_HEADROOM

@@ -79,8 +79,6 @@ monitor:
   # otherwise-free node (168s/111s/99s at limit 2/4/none). Set a value to cap.
   profileCpuLimit: ""
   # No margin on cpu: it is compressible, so under-requesting costs contention
-  # rather than an OOM kill. Memory keeps profileMargin.
-  profileCpuMargin: 1.0
   # Ceiling for profile-derived memory. Above the configured worker limit on
   # purpose: a range needing more than that must be able to ask for it
   # rather than be pinned under its own measured peak.

@@ -107,7 +107,6 @@ PROFILE_MARGIN = float(os.getenv('PROFILE_MARGIN', 1.15))
 PROFILE_CPU_LIMIT = os.getenv('PROFILE_CPU_LIMIT', '')
 # No safety margin on cpu, unlike memory. Under-requesting cpu costs contention
 # and the pod can still burst; under-requesting memory gets it OOMKilled.
-PROFILE_CPU_MARGIN = float(os.getenv('PROFILE_CPU_MARGIN', 1.0))
 # Ceiling for profile-derived memory, above the unprofiled limit for the same
 # reason: a range that really needs more than the configured limit must be able
 # to ask for it rather than be pinned under its own measured peak. The OOM
@@ -487,6 +486,9 @@ def save_status(snapshot):
 # profiling fields alone push it toward the 1 MiB cap at ~6100 ranges. Stripped
 # to attempts/count it is ~30 bytes, so state stays readable at any slicing
 # while the profile has no ceiling at all.
+# A strip list, not a produce list: peakCpuCores is no longer measured, but a
+# progress record resumed from an older run still carries it, and letting it
+# through is what pushes the ConfigMap mirror toward the 1 MiB cap.
 _PROFILE_ONLY_FIELDS = ('peakAnonBytes', 'peakRssBytes', 'peakWorkingSetBytes', 'peakCpuCores',
                         'peakEphemeralBytes', 'txApply', 'seconds', 'wallSeconds')
 
@@ -1185,10 +1187,6 @@ def _cpu_millis(q):
     return int(float(q[:-1])) if str(q).endswith('m') else int(float(q) * 1000)
 
 
-def _sized_cpu(cores, margin, cap):
-    """A measured core count turned into a request, never above the limit."""
-    return f"{min(int(cores * 1000 * margin), _cpu_millis(cap))}m"
-
 
 def _sized(value, margin, cap):
     """A measured peak turned into a request: margin applied, never above cap."""
@@ -1256,9 +1254,6 @@ def _resources(mem=None, eph=None, end=None):
         # packs by what it actually uses while keeping headroom to burst. That
         # leaves the pod Burstable rather than Guaranteed -- Kubernetes needs
         # all three to match -- which is the intended trade.
-        cpu = overrides.pop('cpu', None)
-        if cpu:
-            req['cpu'] = cpu
         if PROFILE_CPU_LIMIT:
             lim['cpu'] = PROFILE_CPU_LIMIT
         else:

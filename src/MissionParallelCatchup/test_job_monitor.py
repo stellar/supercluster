@@ -400,7 +400,7 @@ def _profile_ns(ranges, mode='ephemeral', margin=1.1):
     """profile_for + _sized, exec'd out of job_monitor with a fixed profile."""
     ns = {'bisect': __import__('bisect'), 'logger': __import__('logging').getLogger('t')}
     for name in ('_quantity_bytes', '_bytes_to_quantity', 'profile_for',
-                 '_cpu_millis', '_sized_cpu', '_sized'):
+                 '_cpu_millis', '_sized'):
         m = re.search(rf"^(def {name}\(.*?)(?=^\S|\Z)", SRC, re.S | re.M)
         exec(m.group(1), ns)
     ns['_UNITS'] = eval(_extract(r"_UNITS = (\{.*?\})").group(1))
@@ -468,7 +468,6 @@ def _overrides_ns(ranges, lim_mem='24000Mi', lim_eph='40Gi', margin=1.1,
     ns['LIM_CPU'] = '2'
     ns['REQ_CPU'] = '1800m'
     ns['PROFILE_CPU_LIMIT'] = ''
-    ns['PROFILE_CPU_MARGIN'] = 1.0
     ns['PROFILE_MAX_MEM'] = max_mem
     ns['PROFILE_CACHE_HEADROOM'] = '512Mi'
     m = re.search(r"^(def _profile_overrides\(.*?)(?=^\S|\Z)", SRC, re.S | re.M)
@@ -1609,3 +1608,110 @@ def test_only_a_genuine_catchup_failure_is_condemned():
     # every other branch in that chain sets a reason, i.e. retries
     for outcome in ('rejected', 'disrupted', 'oom', 'ephemeral', 'unknown'):
         assert f"== '{outcome}'" in body, f"{outcome} left the retry chain"
+
+
+# --- gaps found by a mutation sweep, 2026-07-30 ----------------------------
+# Each of these guards a decision the design depends on, and each was mutable
+# without breaking a single test before this block existed.
+
+def test_the_job_controller_never_owns_retries():
+    # backoffLimit 0 is load-bearing: above 0 the Job controller replaces the pod
+    # on its own schedule, so we could not classify disruption vs catchup
+    # failure, could not count evictions, and could not guarantee the log was
+    # archived before the next attempt started.
+    spec = _extract(r"spec=client\.V1JobSpec\((.*?)template=").group(1)
+    assert re.search(r"backoff_limit\s*=\s*0\b", spec), "backoffLimit must be 0"
+    assert re.search(r"ttl_seconds_after_finished\s*=\s*JOB_TTL_SECONDS", spec), \
+        "finished Jobs need a TTL backstop even though reconcile deletes them"
+
+
+def test_a_worker_pod_is_never_restarted_in_place():
+    # restartPolicy OnFailure restarts the container inside the same pod, which
+    # keeps the pod name and reuses the same resource limits -- so an OOM would
+    # loop forever at the limit that killed it instead of escalating, and the
+    # attempt counter would never advance.
+    spec = _extract(r"spec=client\.V1PodSpec\((.*?)containers=\[container\]").group(1)
+    assert "restart_policy='Never'" in spec
+
+
+@pytest.mark.parametrize('attempt,want', [(1, 1.0), (2, 1.5), (3, 2.25), (4, 3.375)])
+def test_the_memory_escalation_ladder_compounds(attempt, want):
+    # 1.5x per attempt off what the attempt actually ran with. A factor of 1.0
+    # would retry an OOM at the identical limit, forever.
+    ns = {'os': __import__('os'), 're': re}
+    for name in ('_quantity_bytes', '_bytes_to_quantity', 'mem_for_attempt'):
+        exec(_extract(r"^(def " + name + r"\(.*?)(?=\ndef )").group(1), ns)
+    ns['_UNITS'] = {'Ki': 1024, 'Mi': 1024**2, 'Gi': 1024**3, 'Ti': 1024**4,
+                    'K': 1000, 'M': 1000**2, 'G': 1000**3, 'T': 1000**4}
+    ns['MEM_BUMP_FACTOR'] = float(_extract(
+        r"MEM_BUMP_FACTOR = float\(os\.getenv\('MEM_BUMP_FACTOR', ([\d.]+)\)\)").group(1))
+    ns['MEM_ESCALATION_CAP'] = '48Gi'
+    ns['LIM_MEM'] = '1000Mi'
+    got = ns['mem_for_attempt'](attempt, '1000Mi')
+    assert got == f"{int(1000 * want)}Mi", got
+
+
+def test_the_escalation_ladder_is_capped():
+    ns = {'os': __import__('os'), 're': re}
+    for name in ('_quantity_bytes', '_bytes_to_quantity', 'mem_for_attempt'):
+        exec(_extract(r"^(def " + name + r"\(.*?)(?=\ndef )").group(1), ns)
+    ns['_UNITS'] = {'Ki': 1024, 'Mi': 1024**2, 'Gi': 1024**3, 'Ti': 1024**4,
+                    'K': 1000, 'M': 1000**2, 'G': 1000**3, 'T': 1000**4}
+    ns['MEM_BUMP_FACTOR'] = 1.5
+    ns['MEM_ESCALATION_CAP'] = '4Gi'
+    ns['LIM_MEM'] = '1000Mi'
+    assert ns['mem_for_attempt'](20, '1000Mi') == '4096Mi', "cap not applied"
+
+
+def test_progress_is_written_atomically():
+    # The mission reads progress.json off the volume while the monitor is still
+    # writing it. A partial file is unparseable JSON, which reads as "no
+    # progress" -- and reconcile halts the run when progress goes backwards.
+    fn = _extract(r"^(def save_progress\(.*?)(?=\ndef )").group(1)
+    assert '.tmp' in fn and 'os.replace(' in fn, "progress.json is not written atomically"
+    assert fn.index('.tmp') < fn.index('os.replace('), "replace must follow the temp write"
+
+
+def test_the_log_stream_resumes_from_the_last_durable_timestamp():
+    # Without sinceTime a reconnect re-reads the whole log from the start: one
+    # full re-read per pod per reconnect, at 2096 pods.
+    fn = _extract(r"^(async def stream_pod\(.*?)(?=\n\nasync def )", COLLECTOR_SRC).group(1)
+    assert "params['sinceTime']" in fn, "reconnect does not resume"
+    # ...and the second-granularity overlap it creates is removed per line.
+    assert re.search(r"if last_ts and ts <= last_ts:\s*\n\s*continue", fn), \
+        "the deliberate resume overlap is never deduped"
+
+
+def test_every_durable_write_is_atomic():
+    # Three writers put files on the shared volume while the mission and the
+    # collector read them. A half-written .outcome or archive is unparseable,
+    # and an unreadable outcome downgrades a classified failure to "unknown".
+    for fn_name in ('save_progress', 'backstop_save_pod_log', 'record_outcome',
+                    'write_metrics'):
+        for src in (SRC, COLLECTOR_SRC):
+            m = re.search(r"^(def " + fn_name + r"\(.*?)(?=\ndef )", src, re.S | re.M)
+            if m:
+                break
+        assert m, f"{fn_name} not found"
+        body = m.group(1)
+        assert '.tmp' in body, f"{fn_name} does not write via a temp file"
+        assert 'os.replace(' in body, f"{fn_name} does not rename atomically"
+        assert body.index('.tmp') < body.index('os.replace('), \
+            f"{fn_name} renames before it writes"
+
+
+def test_attempt_budgets_are_ordered_by_whose_fault_the_failure_was():
+    # A hang is usually persistent, so it gets the fewest tries. A genuinely
+    # broken range gets the middle budget. Anything the cluster did to us gets
+    # the most -- on spot, evictions are routine and must not condemn a range.
+    def const(name, env):
+        return int(_extract(name + r" = int\(os\.getenv\('" + env + r"', (\d+)\)\)").group(1))
+    timeout = const('MAX_TIMEOUT_ATTEMPTS', 'MAX_TIMEOUT_ATTEMPTS')
+    per_range = const('MAX_ATTEMPTS_PER_RANGE', 'MAX_ATTEMPTS')
+    disruption = const('MAX_DISRUPTION_ATTEMPTS', 'MAX_DISRUPTION_ATTEMPTS')
+    ephemeral = const('MAX_EPHEMERAL_ATTEMPTS', 'MAX_EPHEMERAL_ATTEMPTS')
+    assert timeout < per_range < disruption, \
+        f"budgets out of order: timeout={timeout} range={per_range} disruption={disruption}"
+    assert per_range > 1, "a range that OOMs once could never escalate"
+    assert ephemeral > 1, "a range evicted on disk once could never grow"
+    assert disruption >= 10, "spot eviction would condemn ranges at this budget"
