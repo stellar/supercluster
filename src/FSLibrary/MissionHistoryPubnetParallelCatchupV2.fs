@@ -199,8 +199,6 @@ let installProject (context: MissionContext) =
     let resourceRequirements = ParallelCatchupCoreResourceRequirements
     let cpuReqMili = resourceRequirements.Requests.["cpu"].ToString()
     let memReqMebi = resourceRequirements.Requests.["memory"].ToString()
-    let cpuLimMili = resourceRequirements.Limits.["cpu"].ToString()
-    let memLimMebi = resourceRequirements.Limits.["memory"].ToString()
     // StellarKubeSpecs sizes ephemeral-storage for ephemeral mode, where /data is
     // an emptyDir on the node. In pvc mode /data is on the volume and the node
     // disk only holds logs and tmp, so asking for the full amount reserves disk
@@ -215,15 +213,12 @@ let installProject (context: MissionContext) =
     LogInfo
         "Resource requirements from StellarKubeCfg:\n\
              CPU request: %s\n\
-             CPU limit: %s\n\
              Memory request: %s\n\
-             Memory limit: %s\n\
              Storage request: %s\n\
-             Storage limit: %s"
+             Storage limit: %s\n\
+             (workers run with no cpu or memory limit)"
         cpuReqMili
-        cpuLimMili
         memReqMebi
-        memLimMebi
         storageReqGibi
         storageLimGibi
 
@@ -236,8 +231,6 @@ let installProject (context: MissionContext) =
 
     setOptions.Add(sprintf "worker.resources.requests.cpu=%s" cpuReqEffective)
     setOptions.Add(sprintf "worker.resources.requests.memory=%s" memReqMebi)
-    setOptions.Add(sprintf "worker.resources.limits.cpu=%s" cpuLimMili)
-    setOptions.Add(sprintf "worker.resources.limits.memory=%s" memLimMebi)
     setOptions.Add(sprintf "worker.resources.requests.ephemeral_storage=%s" storageReqGibi)
     setOptions.Add(sprintf "worker.resources.limits.ephemeral_storage=%s" storageLimGibi)
 

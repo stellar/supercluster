@@ -13,7 +13,7 @@ import job_monitor as jm
 @pytest.fixture
 def mem(monkeypatch):
     def configure(lim='1000Mi', bump=None, cap='48Gi'):
-        monkeypatch.setattr(jm, 'LIM_MEM', lim)
+        monkeypatch.setattr(jm, 'REQ_MEM', lim)
         monkeypatch.setattr(jm, 'MEM_BUMP_FACTOR',
                             jm.MEM_BUMP_FACTOR if bump is None else bump)
         monkeypatch.setattr(jm, 'MEM_ESCALATION_CAP', cap)

@@ -228,10 +228,10 @@ def test_an_oom_inside_a_deadline_exceeded_job_escalates_memory(cluster, monkeyp
     assert jm.read_outcome('300', 1)['outcome'] == 'oom'
     assert 'pc-r300-a2' in cluster.jobs()
     resources = _memory(cluster, 'pc-r300-a2')
-    assert resources.limits['memory'] == '36000Mi', (
+    assert resources.requests['memory'] == '13824Mi', (
         "the retry went out at the same limit that OOM-killed it: the Job's "
         "DeadlineExceeded overwrote the kubelet's OOMKilled")
-    assert resources.requests['memory'] == '36000Mi'
+    assert resources.requests['memory'] == '13824Mi'
 
 
 def test_two_ooms_inside_deadline_exceeded_jobs_do_not_condemn_the_range(cluster, monkeypatch):
@@ -250,7 +250,7 @@ def test_two_ooms_inside_deadline_exceeded_jobs_do_not_condemn_the_range(cluster
         "of retrying on the 5-attempt range budget")
     assert 'pc-r300-a3' in cluster.jobs()
     # Two rungs climbed, capped at MAX_MEM (48Gi).
-    assert _memory(cluster, 'pc-r300-a3').limits['memory'] == '49152Mi'
+    assert _memory(cluster, 'pc-r300-a3').requests['memory'] == '20736Mi'
 
 
 def test_a_disruption_inside_a_deadline_exceeded_job_keeps_its_own_budget(cluster, monkeypatch):
@@ -274,7 +274,7 @@ def test_a_disruption_inside_a_deadline_exceeded_job_keeps_its_own_budget(cluste
         "downgraded them to the 2-attempt timeout budget")
     assert 'pc-r300-a3' in cluster.jobs()
     # An eviction says nothing about how much memory the range wants.
-    assert _memory(cluster, 'pc-r300-a3').limits['memory'] == jm.LIM_MEM
+    assert _memory(cluster, 'pc-r300-a3').requests['memory'] == jm.REQ_MEM
 
 
 def test_an_ephemeral_eviction_inside_a_deadline_exceeded_job_still_grows_the_disk(cluster, monkeypatch):

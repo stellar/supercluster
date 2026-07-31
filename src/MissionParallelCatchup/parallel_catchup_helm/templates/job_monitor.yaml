@@ -191,10 +191,6 @@ spec:
             # makes disk the binding dimension and halves workers-per-node.
             - name: REQ_EPHEMERAL
               value: {{ .Values.worker.resources.requests.ephemeral_storage | quote }}
-            - name: LIM_CPU
-              value: {{ .Values.worker.resources.limits.cpu | quote }}
-            - name: LIM_MEM
-              value: {{ .Values.worker.resources.limits.memory | quote }}
             - name: LIM_EPHEMERAL
               value: {{ .Values.worker.resources.limits.ephemeral_storage | quote }}
             - name: MAX_ATTEMPTS
@@ -230,8 +226,6 @@ spec:
               value: {{ .Values.monitor.profileCpuTiers | quote }}
             - name: PROFILE_MARGIN
               value: {{ .Values.monitor.profileMargin | quote }}
-            - name: PROFILE_CPU_LIMIT
-              value: {{ .Values.monitor.profileCpuLimit | quote }}
             - name: PROFILE_MAX_MEM
               value: {{ .Values.monitor.profileMaxMemory | quote }}
             - name: PROFILE_CACHE_HEADROOM

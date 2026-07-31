@@ -327,7 +327,7 @@ def test_restart_mid_retry_keeps_the_attempt_number(big_run):
     cluster.reconcile()
     assert cluster.attempt_of(1200) == 2
     limit = (cluster.k8s.job('pc-r1200-a2')
-             .spec.template.spec.containers[0].resources.limits['memory'])
+             .spec.template.spec.containers[0].resources.requests['memory'])
 
     restart(cluster)
     cluster.advance(1200, 'oom', attempt=2)
@@ -337,7 +337,7 @@ def test_restart_mid_retry_keeps_the_attempt_number(big_run):
     # so the restart must not reset it to the first rung.
     assert cluster.attempt_of(1200) == 3
     escalated = (cluster.k8s.job('pc-r1200-a3')
-                 .spec.template.spec.containers[0].resources.limits['memory'])
+                 .spec.template.spec.containers[0].resources.requests['memory'])
     assert jm._quantity_bytes(escalated) > jm._quantity_bytes(limit)
     assert cluster.failed() == {}
 

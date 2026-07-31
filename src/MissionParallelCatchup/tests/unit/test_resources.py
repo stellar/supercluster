@@ -25,18 +25,15 @@ MI = 1024 ** 2
 @pytest.fixture
 def sizing(monkeypatch):
     """The worker's configured shape, plus a loaded profile."""
-    def configure(ranges=PROFILE_RANGES, margin=1.1, lim_mem='24000Mi',
+    def configure(ranges=PROFILE_RANGES, margin=1.1, req_mem='9Gi',
                   req_eph='35Gi', lim_eph='40Gi', max_mem='32Gi',
-                  headroom='512Mi', cpu_limit=''):
+                  headroom='512Mi'):
         monkeypatch.setattr(jm, 'PROFILE', sorted(ranges))
         monkeypatch.setattr(jm, 'PROFILE_MARGIN', margin)
         monkeypatch.setattr(jm, 'PROFILE_MAX_MEM', max_mem)
         monkeypatch.setattr(jm, 'PROFILE_CACHE_HEADROOM', headroom)
-        monkeypatch.setattr(jm, 'PROFILE_CPU_LIMIT', cpu_limit)
         monkeypatch.setattr(jm, 'REQ_CPU', '1800m')
-        monkeypatch.setattr(jm, 'LIM_CPU', '2')
-        monkeypatch.setattr(jm, 'REQ_MEM', '9Gi')
-        monkeypatch.setattr(jm, 'LIM_MEM', lim_mem)
+        monkeypatch.setattr(jm, 'REQ_MEM', req_mem)
         monkeypatch.setattr(jm, 'REQ_EPHEMERAL', req_eph)
         monkeypatch.setattr(jm, 'LIM_EPHEMERAL', lim_eph)
     return configure
@@ -67,21 +64,21 @@ def test_profile_gives_nothing_past_its_high_water_mark(sizing):
     assert jm._profile_overrides(None, escalated=False) == {}
 
 
-def test_profile_memory_is_capped_at_its_own_ceiling_not_the_worker_limit(sizing):
-    # A range needing more than the configured limit must be able to ask for it,
-    # or it is pinned under its own measured peak and OOMs every attempt. The
+def test_profile_memory_is_capped_at_its_own_ceiling_not_the_configured_request(sizing):
+    # A range measured above the configured request must be able to ask for more,
+    # or it packs as though it were small and lands somewhere it cannot fit. The
     # ceiling is what bounds it, and the OOM ladder can still climb past that.
     sizing(ranges=[(1, {'peakRssBytes': 500_000_000_000})],
-           lim_mem='24000Mi', max_mem='32Gi')
+           req_mem='9Gi', max_mem='32Gi')
     assert jm._profile_overrides(1, escalated=False)['memory'] == '32768Mi'
 
 
-def test_profile_memory_can_exceed_the_configured_worker_limit(sizing):
-    # 28 GB peak against a 24000Mi configured limit: the profile must raise it.
+def test_profile_memory_can_exceed_the_configured_request(sizing):
+    # 28 GB peak against a 9Gi configured request: the profile must raise it.
     sizing(ranges=[(1, {'peakRssBytes': 28_000_000_000})],
-           lim_mem='24000Mi', max_mem='32Gi')
+           req_mem='9Gi', max_mem='32Gi')
     got = jm._profile_overrides(1, escalated=False)['memory']
-    assert jm._quantity_bytes(got) > jm._quantity_bytes('24000Mi')
+    assert jm._quantity_bytes(got) > jm._quantity_bytes('9Gi')
 
 
 def test_memory_is_sized_from_rss_never_from_working_set(sizing):
@@ -132,37 +129,39 @@ def test_the_sizing_formula_is_peak_times_margin_plus_headroom(sizing, peak_mi):
 
 # --- what lands on the container ---------------------------------------------
 
-def test_a_measured_range_matches_memory_and_disk_and_leaves_cpu_configured(sizing):
-    # Memory and disk match request to limit -- exceeding either kills the pod.
-    # CPU keeps its configured request and is left uncapped, so the range packs
-    # by what it uses and can still burst.
+def test_a_measured_range_requests_its_measurement_and_limits_only_disk(sizing):
+    # The profile moves requests. Disk is the one dimension still limited, and
+    # its limit is matched so a range measured to need more is allowed to use it.
     sizing()
     r = jm._resources(end=2000)
-    assert r.requests['memory'] == r.limits['memory'] == '3659Mi'
+    assert r.requests['memory'] == '3659Mi'
     assert r.requests['ephemeral-storage'] == r.limits['ephemeral-storage'] == '4196Mi'
     # The configured request, not a measured one -- a profiled range now packs
     # at exactly the same cpu as an unprofiled one.
     assert r.requests['cpu'] == '1800m'
-    assert 'cpu' not in r.limits, "a measured range runs uncapped"
+    assert set(r.limits) == {'ephemeral-storage'}, \
+        f"a worker may only ever be limited on disk, got {sorted(r.limits)}"
 
 
-def test_an_unmeasured_range_keeps_the_mismatched_defaults(sizing):
+def test_an_unmeasured_range_keeps_the_configured_requests(sizing):
     # No profile entry must behave exactly as if there were no profile at all.
     sizing()
     r = jm._resources(end=99999)
-    assert r.requests['memory'] == '9Gi' and r.limits['memory'] == '24000Mi'
+    assert r.requests['memory'] == '9Gi'
+    assert 'memory' not in r.limits
     assert r.requests['ephemeral-storage'] == '35Gi'
     assert r.limits['ephemeral-storage'] == '40Gi'
-    assert r.requests != r.limits
 
 
-def test_an_escalated_retry_keeps_its_own_size_and_raises_the_request_with_it(sizing):
+def test_an_escalated_retry_keeps_its_own_size(sizing):
     # The escalation already chose the size; the profile must not overwrite it.
-    # The request moves too: a pod that OOMed at the old limit will not fit
-    # where it was scheduled before.
+    # It lands on the request, which is the whole mechanism now: a bigger request
+    # places the pod where the memory is actually free, and raises the bar before
+    # the kubelet picks it as an eviction victim.
     sizing()
     r = jm._resources(mem='36000Mi', end=2000)
-    assert r.requests['memory'] == r.limits['memory'] == '36000Mi'
+    assert r.requests['memory'] == '36000Mi'
+    assert 'memory' not in r.limits, "an escalated retry must not be capped either"
     assert r.requests['cpu'] == '1800m', "cpu must fall back to the configured request"
 
 
@@ -174,7 +173,7 @@ def test_ephemeral_escalation_raises_request_and_limit_together(sizing):
     assert r.requests['ephemeral-storage'] == r.limits['ephemeral-storage'] == '60Gi'
 
 
-def test_no_worker_gets_a_cpu_limit_unless_one_is_configured(sizing):
+def test_no_worker_gets_a_cpu_or_memory_limit(sizing):
     # _profile_overrides returns {} for BOTH "no profile entry" and "escalated
     # attempt". Treating them the same handed an OOM retry more memory while
     # capping it at LIM_CPU, when the attempt that just failed ran unlimited.
@@ -192,12 +191,9 @@ def test_no_worker_gets_a_cpu_limit_unless_one_is_configured(sizing):
     for r, why in ((measured, 'measured'), (escalated, 'escalated retry'),
                    (unmeasured, 'unprofiled')):
         assert 'cpu' not in r.limits, f"{why} range was throttled: {r.limits}"
+        assert 'memory' not in r.limits, f"{why} range was capped: {r.limits}"
         assert r.requests['cpu'] == '1800m', why
 
-
-def test_a_configured_cpu_limit_is_still_honoured(sizing):
-    sizing(cpu_limit='3')
-    assert jm._resources(end=2000).limits['cpu'] == '3'
 
 
 def test_pvc_mode_takes_no_ephemeral_request_or_override(sizing):

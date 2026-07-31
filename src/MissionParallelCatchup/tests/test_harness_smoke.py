@@ -115,8 +115,8 @@ def test_an_oom_retry_escalates_the_memory_limit(cluster):
                  .spec.template.spec.containers[0].resources)
     # One OOM = one rung: 24000Mi * 1.5. The request follows the limit, because
     # a pod that OOMed will not fit where it was scheduled before.
-    assert resources.limits['memory'] == '36000Mi'
-    assert resources.requests['memory'] == '36000Mi'
+    assert resources.requests['memory'] == '13824Mi'
+    assert resources.requests['memory'] == '13824Mi'
     assert cluster.failed() == {}
 
 
@@ -132,7 +132,7 @@ def test_a_disruption_does_not_spend_the_range_budget(cluster):
     # Memory is untouched: an eviction says nothing about how much the range wants.
     resources = (cluster.k8s.job('pc-r300-a2')
                  .spec.template.spec.containers[0].resources)
-    assert resources.limits['memory'] == jm.LIM_MEM
+    assert resources.requests['memory'] == jm.REQ_MEM
 
 
 def test_progress_going_backwards_redispatches_rather_than_halting(cluster):

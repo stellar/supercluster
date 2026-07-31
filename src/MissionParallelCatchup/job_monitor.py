@@ -84,30 +84,32 @@ LABEL_ATTEMPT = 'catchup.stellar.org/attempt'
 # IRSA trust policies keep matching.
 WORKER_SERVICE_ACCOUNT = os.getenv('WORKER_SERVICE_ACCOUNT', '')
 
-# Pod resources.
+# Pod resources. Requests only: workers are given no cpu limit and no memory
+# limit at all.
+#
+# CPU because a limit only throttles a pod that could otherwise use idle cores,
+# and throttling changes what the range measures -- less cpu means less download
+# concurrency means a lower peak, so a throttled attempt records a figure an
+# unthrottled one cannot reproduce.
+#
+# Memory because a limit is a hard cap on anon PLUS page cache, and sizing it
+# per-range from a profile got it wrong in the one direction that has no alarm
+# on it. Measured 2026-07-31, range 39210943: sized at 1729Mi from a neighbour,
+# genuinely needed 1620Mi of anon, which left ~110Mi for cache. It never OOMed
+# -- it thrashed. 544k major page faults, 0.22 cores used on a node it had
+# entirely to itself, 0.95 ledgers/s against a neighbour norm of 3.3, and it
+# held 1092 idle slots open for three hours at the end of the run.
+#
+# Without a limit the request still does the real work: it places the pod and
+# it sets eviction order under node pressure. What goes away is the cliff.
 REQ_CPU = os.getenv('REQ_CPU', '1800m')
 REQ_MEM = os.getenv('REQ_MEM', '9Gi')
-LIM_CPU = os.getenv('LIM_CPU', '2')
-LIM_MEM = os.getenv('LIM_MEM', '24000Mi')
 # Only meaningful in ephemeral storage mode; see check_storage_config().
 # Range profile from an earlier run: tightens per-range requests so more
 # workers fit per node. Requests only -- limits stay as configured, so the
 # failure semantics and the OOM/disk escalation ladders are unchanged.
 PROFILE_PATH = os.getenv('PROFILE_PATH', '')
 PROFILE_MARGIN = float(os.getenv('PROFILE_MARGIN', 1.15))
-# CPU limit for a range the profile has measured. Higher than the unprofiled
-# default on purpose: at a 2-core limit every range pegs 2.0, so the measured
-# peak is a ceiling and the profile can never learn real demand. Room above the
-# request lets each run's peak climb until it finds the true one.
-# Empty = no cpu limit at all on a measured range. Measured on ssc-test with
-# one pod per node (m8id/NVMe, 16320-ledger range): 168s at limit 2, 111s at 4,
-# 99s uncapped. cpu.weight still derives from the request, so a burst only uses
-# cycles the neighbours are not using. Set a value to cap it again.
-#
-# The gain is in bucket-apply and replay, not download: at 65280 ledgers, two
-# pods at limit 2 and limit 4 had written 8001 and 8013 MiB after 43 minutes --
-# identical -- because the download phase is storage-bound, not CPU-bound.
-PROFILE_CPU_LIMIT = os.getenv('PROFILE_CPU_LIMIT', '')
 # No safety margin on cpu, unlike memory. Under-requesting cpu costs contention
 # and the pod can still burst; under-requesting memory gets it OOMKilled.
 # Ceiling for profile-derived memory, above the unprofiled limit for the same
@@ -1300,14 +1302,19 @@ def _cause_count(end, attempt, causes):
 
 
 def mem_for_attempt(attempt, base=None):
-    """Memory limit after N OOMs, capped at MEM_ESCALATION_CAP.
+    """Memory REQUEST after N OOMs, capped at MEM_ESCALATION_CAP.
 
     `base` is what attempt 1 actually ran with. It matters when a profile sized
-    the range: escalating a 209Mi profiled range off the configured 24000Mi
-    limit jumps straight to 36000Mi, a 172x overshoot that throws away the whole
+    the range: escalating a 209Mi profiled range off the configured default
+    jumps straight to 36000Mi, a 172x overshoot that throws away the whole
     packing win on the first OOM.
+
+    Escalating the request, not a limit, because there is no limit any more. It
+    still buys the same two things an OOMing range needs -- placement somewhere
+    with the memory actually free, and a higher bar before the kubelet picks it
+    as an eviction victim.
     """
-    base_q = _quantity_bytes(base or LIM_MEM)
+    base_q = _quantity_bytes(base or REQ_MEM)
     want = int(base_q * (MEM_BUMP_FACTOR ** max(0, attempt - 1)))
     cap = _quantity_bytes(MEM_ESCALATION_CAP)
     return _bytes_to_quantity(min(want, cap))
@@ -1976,12 +1983,12 @@ def _resources(mem=None, eph=None, end=None):
     # Before mem is defaulted below -- reading it afterwards can never see None,
     # which silently disabled profile sizing entirely.
     overrides = _profile_overrides(end, escalated=(mem is not None or eph is not None))
-    mem = mem or LIM_MEM
-    # Raise the request alongside the limit on an escalated retry: a pod that
-    # OOMed at the old limit will not fit where it was scheduled before.
-    req_mem = REQ_MEM if mem == LIM_MEM else mem
-    req = {'cpu': REQ_CPU, 'memory': req_mem}
-    lim = {'cpu': LIM_CPU, 'memory': mem}
+    # `mem` is the escalated request on an OOM retry, else the configured one.
+    req = {'cpu': REQ_CPU, 'memory': mem or REQ_MEM}
+    # Nothing but ephemeral-storage is ever limited. That one stays: it is the
+    # only dimension where an unbounded pod takes the whole NODE down with it
+    # rather than just itself, and it has its own escalation ladder.
+    lim = {}
 
     # Only meaningful in ephemeral mode. In PVC mode a large request makes disk
     # the binding dimension and halves workers-per-node for no reason.
@@ -1997,39 +2004,16 @@ def _resources(mem=None, eph=None, end=None):
     if LIM_EPHEMERAL:
         lim['ephemeral-storage'] = eph or LIM_EPHEMERAL
 
-    # No cpu limit on any worker unless one is configured explicitly. Packing is
-    # driven by the request; a limit only throttles a pod that could otherwise
-    # use idle cores, and throttling changes what the range measures -- less cpu
-    # means less download concurrency means a lower peak, so a throttled attempt
-    # records a figure an unthrottled one cannot reproduce.
-    #
-    # This used to be applied only when _profile_overrides returned something,
-    # which silently excluded two populations: unmeasured ranges, and escalated
-    # retries (escalated returns {} as well). Measured on ssc-test 2026-07-30,
-    # 214 a1 and 256 a2 pods were capped at cpu 2 while their peers ran free --
-    # and for the retries that meant more memory and less cpu at the same time,
-    # right after an OOM.
-    if PROFILE_CPU_LIMIT:
-        lim['cpu'] = PROFILE_CPU_LIMIT
-    else:
-        lim.pop('cpu', None)
-    if overrides:
-        # Memory and disk match request to limit: those are the dimensions worth
-        # pinning, since exceeding either kills the pod outright.
-        #
-        # CPU is deliberately not matched. Its limit stays where it is
-        # configured and only the request follows the measurement, so a range
-        # packs by what it actually uses while keeping headroom to burst. That
-        # leaves the pod Burstable rather than Guaranteed -- Kubernetes needs
-        # all three to match -- which is the intended trade.
-        for key, value in overrides.items():
-            req[key] = value
-            if key != 'cpu':
-                lim[key] = value
-    # Unmeasured range: the configured defaults, requests below limits, exactly
-    # as before -- a range with no profile entry must behave as if there were no
+    # The profile only ever moves requests now. Disk is the one exception, and
+    # only because its limit is what the kubelet enforces -- match it so a range
+    # measured to need more disk is actually allowed to use it.
+    for key, value in overrides.items():
+        req[key] = value
+        if key == 'ephemeral-storage' and LIM_EPHEMERAL:
+            lim[key] = value
+    # Unmeasured range: the configured requests, exactly as if there were no
     # profile at all.
-    return client.V1ResourceRequirements(requests=req, limits=lim)
+    return client.V1ResourceRequirements(requests=req, limits=lim or None)
 
 
 def volume_spread_constraints():

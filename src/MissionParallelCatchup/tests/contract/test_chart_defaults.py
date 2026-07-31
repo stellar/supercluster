@@ -48,8 +48,6 @@ DELIBERATE = {
     # purpose and the mission fills them in on every install.
     'REQ_CPU': 'left empty in the chart; StellarKubeSpecs.fs supplies it',
     'REQ_MEM': 'left empty in the chart; StellarKubeSpecs.fs supplies it',
-    'LIM_CPU': 'left empty in the chart; StellarKubeSpecs.fs supplies it',
-    'LIM_MEM': 'left empty in the chart; StellarKubeSpecs.fs supplies it',
 }
 
 
@@ -193,9 +191,10 @@ def test_the_sizing_headroom_is_a_real_allowance_in_both_places():
     headroom = jm._quantity_bytes(code['PROFILE_CACHE_HEADROOM'])
     assert headroom >= 256 * 1024 ** 2, (
         f"{code['PROFILE_CACHE_HEADROOM']} of fixed headroom is what OOMed 90 small ranges")
-    # ...and the ceiling has to sit above the configured worker limit, or a
-    # range needing more than that is pinned under its own measured peak.
+    # ...and the ceiling has to sit above the configured request, or a range
+    # measured above it can never ask for what it actually uses and will pack as
+    # though it were small.
     assert (jm._quantity_bytes(code['PROFILE_MAX_MEM'])
-            > jm._quantity_bytes(code['LIM_MEM'])), (
-        "the profile ceiling is at or below the worker limit, so a hungry range "
-        "can never ask for what it measured")
+            > jm._quantity_bytes(code['REQ_MEM'])), (
+        "the profile ceiling is at or below the configured request, so a hungry "
+        "range can never ask for what it measured")

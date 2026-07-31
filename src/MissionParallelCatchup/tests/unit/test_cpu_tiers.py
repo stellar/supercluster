@@ -82,7 +82,7 @@ def test_cpu_is_requested_but_never_limited(monkeypatch, cluster):
     monkeypatch.setattr(jm, '_SORTED_SECONDS', None)
     r = jm._resources(end=300)
     assert r.requests['cpu'] == '0.5'
-    assert 'cpu' not in r.limits
+    assert not r.limits or 'cpu' not in r.limits
 
 
 def test_a_one_range_profile_gives_that_range_the_top_tier(tiered, monkeypatch):

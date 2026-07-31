@@ -31,8 +31,9 @@ worker:
       memory: ""
       ephemeral_storage: ""
     limits:
-      cpu: ""
-      memory: ""
+      # cpu and memory are deliberately absent -- workers run unlimited on both.
+      # See REQ_CPU/REQ_MEM in job_monitor.py. Only disk is capped, because that
+      # is the one dimension where an unbounded pod takes the node with it.
       ephemeral_storage: ""
   historyGetCommandCore001:
     "curl -sf http://history.stellar.org/prd/core-live/core_live_001/{0} -o {1}"
@@ -79,13 +80,6 @@ monitor:
   # Paired with profileCpuSlowdown: the measured runtime multiplier per tier.
   profileCpuTiers: ""
   profileMargin: 1.15
-  # CPU limit for ranges the profile has measured. Above the configured
-  # worker limit on purpose: at a 2-core limit every range pegs 2.0, so the
-  # peak is a ceiling and the profile never learns real demand. Unprofiled
-  # ranges keep worker.resources.limits.cpu unchanged.
-  # Empty = measured ranges run with no cpu limit, which is fastest on an
-  # otherwise-free node (168s/111s/99s at limit 2/4/none). Set a value to cap.
-  profileCpuLimit: ""
   # No margin on cpu: it is compressible, so under-requesting costs contention
   # Ceiling for profile-derived memory. Above the configured worker limit on
   # purpose: a range needing more than that must be able to ask for it

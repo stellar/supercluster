@@ -77,8 +77,8 @@ def test_five_evictions_do_not_burn_the_whole_oom_budget(cluster):
 
     # And the whole point of an OOM retry: more memory. One OOM = one rung.
     res = mem_of(cluster, end, 7)
-    assert res.limits['memory'] == '36000Mi'
-    assert res.requests['memory'] == '36000Mi'
+    assert res.requests['memory'] == '13824Mi'
+    assert res.requests['memory'] == '13824Mi'
 
 
 def test_evictions_do_not_burn_the_disk_budget(cluster, monkeypatch):
@@ -151,7 +151,7 @@ def test_memory_ladder_follows_ooms_not_evictions(cluster, monkeypatch):
     hit(cluster, end, 'disrupted', times=3)     # attempts 1-3, now on 4
     hit(cluster, end, 'oom')                    # OOM #1 on attempt 4 -> a5
     assert job_exists(cluster, end, 5)
-    assert mem_of(cluster, end, 5).limits['memory'] == '36000Mi'
+    assert mem_of(cluster, end, 5).requests['memory'] == '13824Mi'
 
     hit(cluster, end, 'disrupted', times=2)     # attempts 5-6, now on 7
     hit(cluster, end, 'oom')                    # OOM #2 on attempt 7 -> a8
@@ -159,7 +159,7 @@ def test_memory_ladder_follows_ooms_not_evictions(cluster, monkeypatch):
     assert not condemned(cluster, end), f"failed={cluster.failed()}"
     assert job_exists(cluster, end, 8)
     # 24000Mi * 1.5^2 -- two OOMs, six evictions, two rungs.
-    assert mem_of(cluster, end, 8).limits['memory'] == '54000Mi'
+    assert mem_of(cluster, end, 8).requests['memory'] == '20736Mi'
 
 
 # --- the caps must still bind (a fix that just removes them is not a fix) ----

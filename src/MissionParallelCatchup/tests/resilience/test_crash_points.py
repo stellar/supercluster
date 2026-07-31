@@ -442,7 +442,7 @@ def test_crash_between_the_verdict_and_the_retry_create(cluster, monkeypatch):
                  .spec.template.spec.containers[0].resources)
     # One OOM seen, so exactly one rung: 24000Mi * 1.5. Two would mean the
     # replayed attempt was counted twice.
-    assert resources.limits['memory'] == '36000Mi'
+    assert resources.requests['memory'] == '13824Mi'
     assert jm._cause_count('300', 1, ('oom', 'failed')) == 1
     assert cluster.failed() == {}
 
