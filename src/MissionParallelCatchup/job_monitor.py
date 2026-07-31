@@ -181,6 +181,29 @@ JOB_TTL_SECONDS = int(os.getenv('JOB_TTL_SECONDS', 600))
 # no exit code, no failure, the slot held for the life of the run. A hang is a
 # more likely real failure than a non-zero exit, and this deadline is the only
 # thing that makes it observable. 0 disables.
+#
+# Flat, deliberately -- NOT scaled by the range's profiled runtime. That was
+# tried and removed. A deadline has to bound a range's WORST case, but a profile
+# only offers a neighbour's TYPICAL case, and the two are far apart here:
+# runtimes span 190x (p25 771s, max 5.9h), range keys are anchored to the
+# network tip so a profile from an earlier run matches ZERO keys exactly and
+# every lookup lands on a neighbour, and ~2% of those neighbours are 3-38x
+# cheaper than their surroundings. Backtested honestly across that grid offset
+# (run4 profile -> r5 actuals, 3983 ranges): a 2x factor falsely kills 134
+# ranges, 4x kills 46, 6x kills 21. Flat 12h kills none.
+#
+# The asymmetry decides it. A false kill loses a range, and a timeout is
+# terminal, so it fails the mission. A genuine wedge holds ONE slot out of
+# 1092-1500 for 12h -- around 0.1% of a run's capacity. Never trade a certain
+# catastrophe against a rounding error.
+#
+# 12h is a safe bound, not a good detector: it takes half a day to catch
+# something provably dead in 4 minutes. The right signal is ledger-close
+# progress, not elapsed time -- a wedged core closes zero ledgers while still
+# logging, so `.state` (last log line) cannot see it and a new
+# lastLedgerCloseAt would. Left undone on purpose; it needs a threshold above
+# the initial bucket-apply phase, which legitimately closes nothing for ~20min
+# on the longest ranges.
 ATTEMPT_DEADLINE_SECONDS = int(os.getenv('ATTEMPT_DEADLINE_SECONDS', 0))
 
 # kube-state-metrics turns a pod's `mission` label into label_mission, which the
@@ -209,10 +232,6 @@ PARALLELISM = int(os.getenv('PARALLELISM', 3))
 # The cost of stopping is that the range is condemned, and today a condemned
 # range aborts the run. That coupling is the thing to fix, not this number.
 MAX_ATTEMPTS_PER_RANGE = int(os.getenv('MAX_ATTEMPTS', 5))
-# A hang gets far fewer retries than an eviction. The measured causes -- an
-# unreachable archive host, an absent checkpoint, a bucket that will not
-# decompress -- are persistent, so retrying mostly burns another full deadline.
-MAX_TIMEOUT_ATTEMPTS = int(os.getenv('MAX_TIMEOUT_ATTEMPTS', 2))
 # Evictions, admission rejections and monitor restarts say nothing about the
 # ledger range, so they get their own, larger budget. Sharing MAX_ATTEMPTS with
 # real failures means cluster churn can fail a healthy range: measured on
@@ -1266,38 +1285,6 @@ def _verdict_of(end, attempt):
         return (read_outcome(end, attempt) or {}).get('outcome')
 
 
-# Multiple of a range's own measured runtime to allow before calling it wedged.
-# The deadline exists for ONE failure mode, reproduced 2026-07-30: with an
-# unreachable archive, stellar-core retries the bucket download forever. It logs
-# "Missing HAS for ledger N: maybe stale archive", re-selects a different mirror
-# and goes again -- RETRY_A_FEW is per archive, so the budget never exhausts.
-# Zero ledgers close, no give-up wording, no exit. Nothing but this kills it.
-#
-# One number cannot bound that, because runtimes span 190x (p25 771s, max 5.9h).
-# A 3h deadline killed 941 legitimate ranges; a 12h one kills none but lets a
-# wedged 771s range burn 56x its expected runtime first. So take whichever bound
-# is tighter: the configured ceiling for the unforeseen, and a multiple of this
-# range's own profiled cost for the failure we know about. Backtested against
-# the previous run, 2x/3x/4x would each have produced ZERO false kills -- the
-# measured wall never approached even twice the profile.
-PROFILE_DEADLINE_FACTOR = float(os.getenv('PROFILE_DEADLINE_FACTOR', 0))
-
-
-def _attempt_deadline(end):
-    """Seconds this attempt may run, or None for no bound."""
-    ceiling = ATTEMPT_DEADLINE_SECONDS or None
-    if not PROFILE_DEADLINE_FACTOR:
-        return ceiling
-    prof = profile_for(end) or {}
-    secs = prof.get('seconds')
-    if not secs:
-        # Unprofiled means newer than anything measured, so there is no honest
-        # estimate to tighten with -- fall back to the configured ceiling.
-        return ceiling
-    scaled = int(secs * PROFILE_DEADLINE_FACTOR)
-    return min(scaled, ceiling) if ceiling else scaled
-
-
 def _cause_count(end, attempt, causes):
     """How many of attempts 1..N at this range failed for one of `causes`.
 
@@ -2147,7 +2134,7 @@ def build_job(end, count, attempt, owner, mem=None, eph=None):
             # live run. Measured 2026-07-30: 1007 Job-level deadlines were
             # repointed 3h->12h in place while their pods kept running; 850
             # pod-level ones could not be touched at all.
-            active_deadline_seconds=_attempt_deadline(end),
+            active_deadline_seconds=ATTEMPT_DEADLINE_SECONDS or None,
             backoff_limit=0,
             pod_failure_policy=client.V1PodFailurePolicy(
                 rules=[r for _, r in _failure_rules()]),
@@ -2161,10 +2148,9 @@ def build_job(end, count, attempt, owner, mem=None, eph=None):
                     # -- is charged against a budget that is meant to bound how
                     # long the range RUNS. During a node-class outage this run
                     # sat ~15 minutes Pending and ranges died as "timeouts"
-                    # having barely executed; a timeout gets
-                    # MAX_TIMEOUT_ATTEMPTS, so two stalls condemn a range and
-                    # fail the mission. The pod-level field starts at container
-                    # start, which is the thing being bounded.
+                    # having barely executed -- and a timeout is terminal, so
+                    # each one fails the mission. The pod-level field starts at
+                    # container start, which is the thing being bounded.
                     # IRSA for the S3 history mirror. Without it workers fall
                     # back to the public archive, which throttles at 1024.
                     service_account_name=WORKER_SERVICE_ACCOUNT or None,
@@ -2458,7 +2444,7 @@ def reconcile(state):
                              "on attempt %s; this fails the mission. Check its archived "
                              "log for 'maybe stale archive' -- an unreachable history "
                              "mirror is the usual cause.",
-                             end, _attempt_deadline(end), attempt)
+                             end, ATTEMPT_DEADLINE_SECONDS, attempt)
             elif verdict['outcome'] == 'rejected':
                 reason = f"rejected by the node before starting ({verdict.get('reason', '?')})"
             elif verdict['outcome'] == 'disrupted':
@@ -2530,10 +2516,10 @@ def reconcile(state):
             # condemned -- never retried for an OOM, never escalated, and a
             # condemned range fails the mission. On spot, where evictions are
             # routine, that made the OOM and disk budgets effectively zero.
-            if verdict['outcome'] == 'timeout':
-                cap = MAX_TIMEOUT_ATTEMPTS
-                spent = _cause_count(end, attempt, ('timeout',))
-            elif verdict['outcome'] == 'ephemeral':
+            # No timeout branch: a timeout sets reason = None above, which is
+            # terminal, so it never reaches the retry gate below. It had a budget
+            # of 2 when it was retryable.
+            if verdict['outcome'] == 'ephemeral':
                 cap = MAX_EPHEMERAL_ATTEMPTS
                 spent = _cause_count(end, attempt, ('ephemeral',))
             elif verdict['outcome'] in ENVIRONMENTAL_OUTCOMES:

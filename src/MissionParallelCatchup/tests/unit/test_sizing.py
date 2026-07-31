@@ -91,12 +91,12 @@ def test_ephemeral_storage_escalates_and_caps_the_same_way(eph):
 # --- the budgets the ladders are climbing ------------------------------------
 
 def test_attempt_budgets_are_ordered_by_whose_fault_the_failure_was():
-    # A hang is usually persistent, so it gets the fewest tries. A genuinely
-    # broken range gets the middle budget. Anything the cluster did to us gets
-    # the most -- on spot, evictions are routine and must not condemn a range.
-    assert jm.MAX_TIMEOUT_ATTEMPTS < jm.MAX_ATTEMPTS_PER_RANGE < jm.MAX_DISRUPTION_ATTEMPTS, (
-        f"budgets out of order: timeout={jm.MAX_TIMEOUT_ATTEMPTS} "
-        f"range={jm.MAX_ATTEMPTS_PER_RANGE} disruption={jm.MAX_DISRUPTION_ATTEMPTS}")
+    # A genuinely broken range gets the middle budget. Anything the cluster did
+    # to us gets the most -- on spot, evictions are routine and must not condemn
+    # a range. A hang has no budget at all: a timeout is terminal.
+    assert jm.MAX_ATTEMPTS_PER_RANGE < jm.MAX_DISRUPTION_ATTEMPTS, (
+        f"budgets out of order: range={jm.MAX_ATTEMPTS_PER_RANGE} "
+        f"disruption={jm.MAX_DISRUPTION_ATTEMPTS}")
     assert jm.MAX_ATTEMPTS_PER_RANGE > 1, "a range that OOMs once could never escalate"
     assert jm.MAX_EPHEMERAL_ATTEMPTS > 1, "a range evicted on disk once could never grow"
     assert jm.MAX_DISRUPTION_ATTEMPTS >= 10, \

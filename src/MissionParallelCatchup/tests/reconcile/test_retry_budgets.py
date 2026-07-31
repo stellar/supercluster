@@ -176,15 +176,21 @@ def test_the_oom_budget_still_binds(cluster):
         f"a 6th OOM attempt was dispatched past the budget: {cluster.jobs()}")
 
 
-def test_the_timeout_budget_still_binds(cluster):
-    """Two real timeouts exhaust MAX_TIMEOUT_ATTEMPTS."""
+def test_one_timeout_condemns_the_range(cluster):
+    """A timeout is terminal -- it has no budget to bind.
+
+    The deadline exists only for a range wedged on an unreachable archive, and
+    retrying that just spends another 12h to learn the same thing. This used to
+    allow 2 attempts; the assertion is that a SECOND one is never dispatched.
+    """
     end = dispatch(cluster)
-    hit(cluster, end, 'timeout', times=2)
+    hit(cluster, end, 'timeout')
 
     assert condemned(cluster, end), (
-        f"two consecutive timeouts were not condemned; jobs={cluster.jobs()}")
+        f"the first timeout did not condemn the range; jobs={cluster.jobs()}")
     assert cluster.failed()[str(end)]['outcome'] == 'timeout'
-    assert not job_exists(cluster, end, 3)
+    assert not job_exists(cluster, end, 2), (
+        f"a second attempt was dispatched after a terminal timeout: {cluster.jobs()}")
 
 
 def test_the_disruption_budget_still_binds(cluster):

@@ -13,8 +13,8 @@ A. `activeDeadlineSeconds` sits on the JobSpec, so the clock starts when the Job
 B. When the Job reports DeadlineExceeded the monitor takes that verdict
    unconditionally, over the pod's own terminated reason. A pod the kubelet
    OOM-killed inside a Job that also tripped its deadline is filed as a timeout:
-   no memory escalation, and MAX_TIMEOUT_ATTEMPTS (2) instead of the budget the
-   real cause earns. Two such events condemn the range and fail the mission.
+   no memory escalation, and no budget at all, because a timeout is terminal.
+   One such event condemns the range and fails the mission.
 
 Nothing here asserts on source text. Facet B is fully drivable with the shipped
 harness. Facet A needs the one thing the fake cluster does not have -- the piece
@@ -140,8 +140,8 @@ def test_a_range_that_never_ran_still_fails_when_it_hits_the_deadline(cluster, m
 def test_a_stall_long_enough_to_hit_the_deadline_condemns_the_range(cluster, monkeypatch):
     """The run-ending shape: every attempt stalls, so every attempt "times out".
 
-    A timeout gets MAX_TIMEOUT_ATTEMPTS (2), so two stalls are enough to condemn
-    the range outright -- and a condemned range fails the mission.
+    A timeout is terminal, so the first stall condemns the range outright -- and
+    a condemned range fails the mission.
     """
     monkeypatch.setattr(jm, 'ATTEMPT_DEADLINE_SECONDS', DEADLINE)
     cluster.reconcile()

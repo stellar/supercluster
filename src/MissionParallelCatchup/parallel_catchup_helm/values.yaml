@@ -77,11 +77,6 @@ monitor:
   # 3267 of 3859 profiled ranges still fit at 0.5 cores. Empty disables tiering
   # and every range keeps the configured cpu request.
   # Paired with profileCpuSlowdown: the measured runtime multiplier per tier.
-  # Multiple of a range's own profiled runtime to allow before it is called
-  # wedged, taking whichever is tighter: this or attemptDeadlineSeconds. One
-  # global number cannot bound runtimes that span 190x -- 3h killed 941 real
-  # ranges, 12h lets a wedged 13-minute range burn 56x its cost. 0 disables.
-  profileDeadlineFactor: 0
   profileCpuTiers: ""
   profileMargin: 1.15
   # CPU limit for ranges the profile has measured. Above the configured
@@ -123,14 +118,6 @@ monitor:
   emitMissionLabel: false
   loggingIntervalSeconds: 10
   maxAttempts: 5
-  # Hangs are usually persistent (bad archive host, absent checkpoint), so they
-  # get a lower cap than evictions -- otherwise a wedged range costs
-  # maxAttempts x attemptDeadlineSeconds before it is reported.
-  # For a hang caught by attemptDeadlineSeconds. stellar-core bounds its own
-  # retries (RETRY_A_FEW=5 / RETRY_A_LOT=32, backoff capped at 512s) and exits 3
-  # when they are exhausted, so the deadline is only a backstop for the
-  # pathological tail -- worst case ~3.4h for a RETRY_A_LOT work.
-  maxTimeoutAttempts: 2
   # Evictions, admission rejections and monitor restarts are not the range's
   # fault, so they do not share the failure budget above. Measured on ssc-test:
   # ten evictions across 25 workers put four healthy ranges on attempt 3 of 5.
@@ -146,10 +133,16 @@ monitor:
   # Must exceed any plausible monitor outage: completion is recorded to the
   # progress ConfigMap by the monitor, and a Job reclaimed before that happens
   # reads as "never ran" and gets redone.
-  # 0 = no deadline. A prod range runs ~50 min, so ~3h is generous while still
-  # catching a range wedged in archive retries. Measured: stellar-core retries a
-  # missing/unreachable archive indefinitely rather than failing.
-  attemptDeadlineSeconds: 10800
+  # 0 = no deadline. Catches a range wedged in archive retries: stellar-core
+  # retries a missing/unreachable archive indefinitely rather than failing.
+  #
+  # 12h, not the 3h this used to be. "A prod range runs ~50 min" was the median
+  # talking -- runtimes span 190x, p25 771s to a measured max of 5.9h, so 3h
+  # killed 941 legitimate ranges and had to be hand-patched to 12h mid-run on
+  # 2026-07-30. A timeout is terminal, so each of those would fail the mission.
+  # Flat for every range; see ATTEMPT_DEADLINE_SECONDS in job_monitor.py for why
+  # scaling it per-range by the profile was tried and removed.
+  attemptDeadlineSeconds: 43200
   jobTtlSeconds: 600
   # Worker logs are pulled to the monitor's volume while each pod is still
   # alive, then collected in one exec at teardown instead of ~1024.

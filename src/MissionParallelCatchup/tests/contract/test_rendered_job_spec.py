@@ -84,7 +84,6 @@ def test_the_deadline_is_on_the_job_so_it_can_be_patched_live(job, monkeypatch):
     a capacity stall cannot condemn a range.
     """
     monkeypatch.setattr(jm, 'ATTEMPT_DEADLINE_SECONDS', 10800)
-    monkeypatch.setattr(jm, 'PROFILE_DEADLINE_FACTOR', 0)
     j = jm.build_job(300, 420, 1, None)
     assert j.spec.active_deadline_seconds == 10800, \
         "the deadline must be patchable, so it belongs on the JobSpec"

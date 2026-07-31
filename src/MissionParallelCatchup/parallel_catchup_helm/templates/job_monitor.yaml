@@ -199,8 +199,6 @@ spec:
               value: {{ .Values.worker.resources.limits.ephemeral_storage | quote }}
             - name: MAX_ATTEMPTS
               value: {{ .Values.monitor.maxAttempts | quote }}
-            - name: MAX_TIMEOUT_ATTEMPTS
-              value: {{ .Values.monitor.maxTimeoutAttempts | quote }}
             - name: MAX_DISRUPTION_ATTEMPTS
               value: {{ .Values.monitor.maxDisruptionAttempts | quote }}
             - name: MEM_BUMP_FACTOR
@@ -228,8 +226,6 @@ spec:
             {{- if .Values.monitor.profileConfigMap }}
             - name: PROFILE_PATH
               value: /profile/profile.json
-            - name: PROFILE_DEADLINE_FACTOR
-              value: {{ .Values.monitor.profileDeadlineFactor | quote }}
             - name: PROFILE_CPU_TIERS
               value: {{ .Values.monitor.profileCpuTiers | quote }}
             - name: PROFILE_MARGIN
