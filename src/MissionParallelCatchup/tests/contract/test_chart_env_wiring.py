@@ -171,3 +171,30 @@ def test_the_namespace_comes_from_the_pod_not_from_a_value():
         assert entry, f"{name} has no NAMESPACE"
         field = entry[0]['valueFrom']['fieldRef']['fieldPath']
         assert field == 'metadata.namespace', f"{name} reads NAMESPACE from {field}"
+
+
+def test_no_container_declares_the_same_env_var_twice():
+    """A duplicate env entry is rejected by the API server, not by helm.
+
+    `helm template` renders duplicates happily and every reader here collapses
+    env into a dict, so a merge that lands the same block twice looks fine right
+    up until `helm install`, which fails with
+
+        .spec.template.spec.containers[name="job-monitor"].env:
+            duplicate entries for key [name="LIVENESS_PROBE_INTERVAL_SECONDS"]
+
+    and leaves a half-created release behind. That is exactly what happened
+    merging the liveness sampler in on 2026-07-31: both branches carried the
+    block, in different positions, so neither side conflicted.
+
+    Rendered with FULL so the conditional blocks are present too -- a duplicate
+    that only appears when a profile ConfigMap is mounted is still a duplicate.
+    """
+    for values in ((), FULL):
+        for name, container in art.containers(values).items():
+            seen = [e['name'] for e in (container.get('env') or [])]
+            dupes = sorted({n for n in seen if seen.count(n) > 1})
+            assert not dupes, (
+                f"container {name} declares {dupes} more than once "
+                f"(values={'FULL' if values else 'defaults'}); "
+                "the API server rejects the Deployment outright")
