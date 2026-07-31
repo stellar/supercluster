@@ -46,6 +46,10 @@ DELIBERATE = {
     'ATTEMPT_DEADLINE_SECONDS': 'a backstop the chart turns on and the code leaves off',
     # StellarKubeSpecs.fs owns worker sizing, so the chart ships these empty on
     # purpose and the mission fills them in on every install.
+    # The code default is 'off' so a bare import stays inert, but nothing in the
+    # F# ever sets this -- the chart value IS the configuration, and shipping it
+    # empty silently drops every worker to the flat REQ_CPU.
+    'PROFILE_CPU_TIERS': 'code defaults to off; the chart is the only thing that enables tiering',
     'REQ_CPU': 'left empty in the chart; StellarKubeSpecs.fs supplies it',
     'REQ_MEM': 'left empty in the chart; StellarKubeSpecs.fs supplies it',
 }

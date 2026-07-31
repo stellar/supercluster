@@ -198,3 +198,25 @@ def test_no_container_declares_the_same_env_var_twice():
                 f"container {name} declares {dupes} more than once "
                 f"(values={'FULL' if values else 'defaults'}); "
                 "the API server rejects the Deployment outright")
+
+
+def test_the_chart_ships_cpu_tiering_switched_on():
+    """An empty PROFILE_CPU_TIERS is a silent 2x cost regression, not a no-op.
+
+    Nothing in MissionHistoryPubnetParallelCatchupV2.fs sets this value, so the
+    chart default IS the configuration. Left empty, every worker falls back to
+    the flat REQ_CPU: measured 2026-07-31, that issued 1250m to all 2048 pods --
+    2560 vCPU of requests against a 2304 spot quota -- and packed 6 workers per
+    node where tiering gets 14.
+    """
+    # Rendered with FULL: the tier env lives inside the profileConfigMap block,
+    # which is correct -- tiering is keyed on measured runtimes, so it only
+    # applies when a profile is actually mounted.
+    tiers = art.env_of(art.containers(FULL)[art.MONITOR_CONTAINER]).get('PROFILE_CPU_TIERS')
+    assert tiers, "the chart ships cpu tiering disabled; every worker will request REQ_CPU"
+    pairs = [t.split(':') for t in tiers.split(',')]
+    pcts = [float(p) for p, _ in pairs]
+    cpus = [float(c) for _, c in pairs]
+    assert pcts == sorted(pcts), f"tier percentiles out of order: {tiers}"
+    assert cpus == sorted(cpus), f"tier cpu values out of order: {tiers}"
+    assert pcts[-1] == 100, f"tiers must cover the top percentile: {tiers}"

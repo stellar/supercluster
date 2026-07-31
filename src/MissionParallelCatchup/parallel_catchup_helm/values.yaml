@@ -83,7 +83,12 @@ monitor:
   # 3267 of 3859 profiled ranges still fit at 0.5 cores. Empty disables tiering
   # and every range keeps the configured cpu request.
   # Paired with profileCpuSlowdown: the measured runtime multiplier per tier.
-  profileCpuTiers: ""
+  # Empty means tiering OFF and every worker falls back to the flat REQ_CPU,
+  # which is not a safe default: on 2026-07-31 that put 1250m on all 2048 pods,
+  # 2560 vCPU of requests against a 2304 spot quota, and packed 6 workers per
+  # node instead of 14. Nothing in the F# sets this, so an unset value here is
+  # the whole configuration -- ship the measured tiers.
+  profileCpuTiers: "85:0.5,98:0.75,99.5:1.0,100:1.25"
   profileMargin: 1.15
   # No margin on cpu: it is compressible, so under-requesting costs contention
   # Ceiling for profile-derived memory. Above the configured worker limit on
