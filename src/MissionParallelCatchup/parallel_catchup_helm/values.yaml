@@ -25,10 +25,22 @@ worker:
   avoidNodeLabels: []
   tolerateNodeTaints: []
   asanOptions: "quarantine_size_mb=1:malloc_context_size=5:alloc_dealloc_mismatch=0"
-  resources: # resources below are left empty on purpose, they are read and overridden from `StellarKubeCfg.fs`
+  resources:
     requests:
-      cpu: ""
-      memory: ""
+      # V2's worker sizing lives HERE, not in StellarKubeSpecs.fs. That spec is
+      # shared with the V1 parallel catchup missions (parallelism 128 and 256,
+      # a different execution model), and sizing V2 there silently resized them
+      # too -- it took their cpu request from 250m to 1800m.
+      #
+      # 1800m/9Gi is the unprofiled default: on r8*.2xlarge (7.91 cpu, 61.7Gi
+      # allocatable) that lands 4 workers per node, cpu-bound; on m8*.2xlarge
+      # (7.91 cpu, 29.7Gi) it lands 3, memory-bound. A range the profile has
+      # measured overrides both. --pubnet-parallel-catchup-cpu-request overrides
+      # the cpu for a whole run.
+      cpu: "1800m"
+      memory: "9Gi"
+      # Still filled in by the mission: ephemeral-storage is 2Gi/4Gi in pvc mode
+      # and the StellarKubeSpecs value in ephemeral mode.
       ephemeral_storage: ""
     limits:
       # cpu and memory are deliberately absent -- workers run unlimited on both.

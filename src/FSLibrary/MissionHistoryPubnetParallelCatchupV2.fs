@@ -194,10 +194,13 @@ let installProject (context: MissionContext) =
             (Option.defaultValue true context.checkEventsAreConsistentWithEntryDiffs)
     )
 
-    // read the resource requirements defined in StellarKubeSpecs.fs (where resource for various missions are centralized)
+    // Only the ephemeral-storage pair is taken from StellarKubeSpecs. Its cpu and
+    // memory belong to the V1 parallel catchup missions, which share that spec and
+    // run a different execution model at parallelism 128/256 -- sizing V2 there
+    // silently resized them too. V2's own worker cpu/memory are the chart defaults
+    // in parallel_catchup_helm/values.yaml, overridable per run with
+    // --pubnet-parallel-catchup-cpu-request.
     let resourceRequirements = ParallelCatchupCoreResourceRequirements
-    let cpuReqMili = resourceRequirements.Requests.["cpu"].ToString()
-    let memReqMebi = resourceRequirements.Requests.["memory"].ToString()
     // StellarKubeSpecs sizes ephemeral-storage for ephemeral mode, where /data is
     // an emptyDir on the node. In pvc mode /data is on the volume and the node
     // disk only holds logs and tmp, so asking for the full amount reserves disk
@@ -210,14 +213,10 @@ let installProject (context: MissionContext) =
             resourceRequirements.Limits.["ephemeral-storage"].ToString()
 
     LogInfo
-        "Resource requirements from StellarKubeCfg:\n\
-             CPU request: %s\n\
-             Memory request: %s\n\
+        "Worker storage from StellarKubeCfg:\n\
              Storage request: %s\n\
              Storage limit: %s\n\
-             (workers run with no cpu or memory limit)"
-        cpuReqMili
-        memReqMebi
+             (cpu and memory come from the chart; workers run with no cpu or memory limit)"
         storageReqGibi
         storageLimGibi
 
@@ -226,14 +225,13 @@ let installProject (context: MissionContext) =
     // through, so a PROFILE_CPU_TIERS band above this value really is issued --
     // verified 2026-07-31, tiers of 1.5 and 2.0 rendered under a 1250m REQ_CPU.
     // It applies to ranges the profile cannot size at all.
-    let cpuReqEffective =
-        if String.IsNullOrWhiteSpace context.pubnetParallelCatchupCpuRequest then
-            cpuReqMili
-        else
-            context.pubnetParallelCatchupCpuRequest
+    // Pushed only when the run explicitly asks. Otherwise the chart default stands,
+    // so the chart is the single place V2's worker sizing is written down.
+    if not (String.IsNullOrWhiteSpace context.pubnetParallelCatchupCpuRequest) then
+        setOptions.Add(
+            sprintf "worker.resources.requests.cpu=%s" context.pubnetParallelCatchupCpuRequest
+        )
 
-    setOptions.Add(sprintf "worker.resources.requests.cpu=%s" cpuReqEffective)
-    setOptions.Add(sprintf "worker.resources.requests.memory=%s" memReqMebi)
     setOptions.Add(sprintf "worker.resources.requests.ephemeral_storage=%s" storageReqGibi)
     setOptions.Add(sprintf "worker.resources.limits.ephemeral_storage=%s" storageLimGibi)
 

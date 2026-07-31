@@ -1,18 +1,26 @@
 """Parallel catchup job monitor.
 
-Owns dispatch as well as reporting. Redis, worker.sh and the range-generator
-scripts are gone; a Kubernetes Job per ledger range replaces them.
+Drives a full-history catchup by splitting the ledger range into slices and
+running one Kubernetes Job per slice, then reports what happened. It owns
+dispatch, retry policy and sizing, not just observation.
 
-State model -- the controller itself keeps nothing authoritative in memory:
+State model -- nothing authoritative is held in memory:
 
   desired    computed from config by a pure function (uniform | logarithmic)
-  completed  durable, in a ConfigMap -- Jobs are reclaimed during a long run,
-             so their absence must NOT be read as "never ran"
+  completed  durable on the shared volume (progress.json), mirrored to a
+             ConfigMap for the mission driver to read. Jobs are reclaimed
+             during a long run, so a missing Job must NOT be read as
+             "never ran"
   in-flight  live Jobs, by label selector
 
-A restart recomputes all three and carries on. The single-writer property (one
-replica, Recreate) is what removes the claim/requeue races the redis queue had:
-work is *assigned*, never claimed.
+Per-attempt facts -- why an attempt ended, how long it ran, what it peaked at --
+live beside progress.json as small files written by the collector sidecar. A
+restarted monitor rebuilds every decision from those plus the live Job list, so
+losing the process costs nothing but the time to re-list.
+
+Work is assigned rather than claimed: the monitor is a single writer (one
+replica, Recreate), so a range's owner is decided by the range itself and never
+by a race between consumers.
 """
 
 import gzip
@@ -121,7 +129,7 @@ WORKER_SERVICE_ACCOUNT = os.getenv('WORKER_SERVICE_ACCOUNT', '')
 #
 # Without a limit the request still does the real work: it places the pod and
 # it sets eviction order under node pressure. What goes away is the cliff.
-REQ_CPU = os.getenv('REQ_CPU', '1800m')
+REQ_CPU = os.getenv('REQ_CPU', '1250m')
 REQ_MEM = os.getenv('REQ_MEM', '9Gi')
 # Only meaningful in ephemeral storage mode; see check_storage_config().
 # Range profile from an earlier run: tightens per-range requests so more
