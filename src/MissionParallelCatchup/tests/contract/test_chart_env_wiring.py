@@ -220,3 +220,27 @@ def test_the_chart_ships_cpu_tiering_switched_on():
     assert pcts == sorted(pcts), f"tier percentiles out of order: {tiers}"
     assert cpus == sorted(cpus), f"tier cpu values out of order: {tiers}"
     assert pcts[-1] == 100, f"tiers must cover the top percentile: {tiers}"
+
+
+def test_neither_module_defines_the_same_symbol_twice():
+    """A merge can land the same block twice and Python will not complain.
+
+    Both branches carried the worker-liveness subsystem, positioned differently,
+    so git merged them into two byte-identical copies of _worker_targets,
+    WorkerLivenessSampler and publish_worker_liveness -- 285 lines that shipped
+    in the monitor and were never executed, because the later definition binds.
+
+    Nothing catches this on its own: it imports, it renders, it runs. The only
+    reason it was benign is that the copies happened to be identical; had the
+    merge taken one edited copy and one stale one, the stale one would silently
+    have won or lost depending on file order.
+    """
+    import ast, collections, pathlib
+    here = pathlib.Path(__file__).resolve().parents[2]
+    for name in ('job_monitor.py', 'log_collector.py'):
+        tree = ast.parse((here / name).read_text())
+        seen = collections.Counter(
+            node.name for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)))
+        dupes = sorted(n for n, k in seen.items() if k > 1)
+        assert not dupes, f"{name} defines {dupes} more than once; the later one silently wins"

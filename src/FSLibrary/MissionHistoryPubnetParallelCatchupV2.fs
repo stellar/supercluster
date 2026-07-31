@@ -221,9 +221,11 @@ let installProject (context: MissionContext) =
         storageReqGibi
         storageLimGibi
 
-    // An explicit override applies to profiled and unprofiled ranges alike: the
-    // monitor clamps any profile-derived cpu request to REQ_CPU, so this is the
-    // ceiling as well as the default.
+    // This is the DEFAULT cpu request, not a ceiling. The monitor does NOT clamp
+    // profile-derived cpu to it: _slack_cpu returns the tier value straight
+    // through, so a PROFILE_CPU_TIERS band above this value really is issued --
+    // verified 2026-07-31, tiers of 1.5 and 2.0 rendered under a 1250m REQ_CPU.
+    // It applies to ranges the profile cannot size at all.
     let cpuReqEffective =
         if String.IsNullOrWhiteSpace context.pubnetParallelCatchupCpuRequest then
             cpuReqMili

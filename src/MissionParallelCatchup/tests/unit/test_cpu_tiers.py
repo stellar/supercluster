@@ -45,14 +45,19 @@ def test_each_band_maps_to_its_tier(tiered):
     assert jm._slack_cpu(1000) == '1.25'    # the longest range
 
 
-def test_an_unmeasured_range_gets_the_top_tier(tiered):
-    # Matches dispatch order: unprofiled is newer than anything measured.
-    assert jm._slack_cpu(None) == '1.25'
+def test_an_unmeasured_range_gets_no_tier_at_all(tiered):
+    """No usable runtime means no basis for a tier -- fall through to REQ_CPU.
+
+    Returning the TOP tier here cost 206 vCPU on the 2026-07-31 run: 103 ranges
+    lacked `seconds` not because they were new but because a resumed chain made
+    their runtime unverifiable, and several were demonstrably small.
+    """
+    assert jm._slack_cpu(None) is None
 
 
 @pytest.mark.parametrize('seconds', [0, -1, 'bad', float('nan'), float('inf')])
-def test_an_invalid_runtime_safely_gets_the_top_tier(tiered, seconds):
-    assert jm._slack_cpu(seconds) == '1.25'
+def test_an_invalid_runtime_safely_gets_no_tier(tiered, seconds):
+    assert jm._slack_cpu(seconds) is None
 
 
 def test_a_uniformly_slower_run_assigns_the_same_tiers(monkeypatch):
