@@ -87,8 +87,19 @@ monitor:
   # which is not a safe default: on 2026-07-31 that put 1250m on all 2048 pods,
   # 2560 vCPU of requests against a 2304 spot quota, and packed 6 workers per
   # node instead of 14. Nothing in the F# sets this, so an unset value here is
-  # the whole configuration -- ship the measured tiers.
-  profileCpuTiers: "85:0.5,98:0.75,99.5:1.0,100:1.25"
+  # the whole configuration.
+  #
+  # Values are absolute cores and are NOT clamped to REQ_CPU -- verified, the
+  # top bands really do issue 1.5-2.0. Widened 2026-07-31 after measuring the
+  # previous ladder on saturated nodes: the 500m band ran at 1.09x its profiled
+  # time (cheap, it is IO-bound) while the top band was delivered 0.88 cores
+  # against ~1.13 of unthrottled demand -- and the top band sets the makespan,
+  # so throttling it is the one place the ladder costs wall-clock.
+  #
+  # Nodes are memory-bound at ~7 workers each, so cpu sat 54% idle; this spends
+  # that headroom rather than adding nodes. Modelled first-wave average moves
+  # 0.62 -> 0.92 cores, still under the ~1.13 where cpu would start to bind.
+  profileCpuTiers: "50:0.5,85:0.75,95:1.0,98:1.25,99:1.5,99.5:1.75,100:2.0"
   profileMargin: 1.15
   # No margin on cpu: it is compressible, so under-requesting costs contention
   # Ceiling for profile-derived memory. Above the configured worker limit on
