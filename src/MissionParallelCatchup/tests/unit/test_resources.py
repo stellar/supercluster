@@ -27,11 +27,13 @@ def sizing(monkeypatch):
     """The worker's configured shape, plus a loaded profile."""
     def configure(ranges=PROFILE_RANGES, margin=1.1, req_mem='9Gi',
                   req_eph='35Gi', lim_eph='40Gi', max_mem='32Gi',
-                  headroom='512Mi'):
+                  headroom='512Mi', runtime_insurance='3Gi'):
         monkeypatch.setattr(jm, 'PROFILE', sorted(ranges))
+        monkeypatch.setattr(jm, '_SORTED_SECONDS', None)
         monkeypatch.setattr(jm, 'PROFILE_MARGIN', margin)
         monkeypatch.setattr(jm, 'PROFILE_MAX_MEM', max_mem)
         monkeypatch.setattr(jm, 'PROFILE_CACHE_HEADROOM', headroom)
+        monkeypatch.setattr(jm, 'PROFILE_RUNTIME_MEMORY_INSURANCE', runtime_insurance)
         monkeypatch.setattr(jm, 'REQ_CPU', '1800m')
         monkeypatch.setattr(jm, 'REQ_MEM', req_mem)
         monkeypatch.setattr(jm, 'REQ_EPHEMERAL', req_eph)
@@ -125,6 +127,39 @@ def test_the_sizing_formula_is_peak_times_margin_plus_headroom(sizing, peak_mi):
            headroom='512Mi', max_mem='32Gi')
     got = jm._profile_overrides(1, escalated=False)['memory']
     assert got == f"{int(peak_mi * MI * 1.15) // MI + 512}Mi"
+
+
+def test_runtime_insurance_is_weighted_by_the_longest_profiled_range(sizing):
+    sizing(ranges=[
+        (1, {'peakAnonBytes': 1024 * MI, 'seconds': 100}),
+        (2, {'peakAnonBytes': 1024 * MI, 'seconds': 400}),
+    ], margin=1.15, headroom='512Mi', runtime_insurance='3Gi')
+
+    short = jm._quantity_bytes(jm._profile_overrides(1, escalated=False)['memory'])
+    longest = jm._quantity_bytes(jm._profile_overrides(2, escalated=False)['memory'])
+    base = int(1024 * MI * 1.15) + 512 * MI
+    assert short == (base + 768 * MI) // MI * MI
+    assert longest == (base + 3 * 1024 * MI) // MI * MI
+
+
+@pytest.mark.parametrize('seconds', [None, 0, -1, 'bad', float('nan'), float('inf')])
+def test_invalid_or_nonpositive_runtime_adds_no_insurance(sizing, seconds):
+    sizing(ranges=[(1, {'peakAnonBytes': 1024 * MI, 'seconds': seconds})],
+           margin=1.15, headroom='512Mi', runtime_insurance='3Gi')
+    got = jm._quantity_bytes(jm._profile_overrides(1, escalated=False)['memory'])
+    assert got == (int(1024 * MI * 1.15) + 512 * MI) // MI * MI
+
+
+def test_zero_runtime_insurance_disables_it_and_the_cap_still_applies_last(sizing):
+    ranges = [(1, {'peakAnonBytes': 1024 * MI, 'seconds': 100})]
+    sizing(ranges=ranges, margin=1.15, headroom='512Mi',
+           runtime_insurance='0', max_mem='2Gi')
+    without = jm._profile_overrides(1, escalated=False)['memory']
+    assert without == f"{int(1024 * MI * 1.15) // MI + 512}Mi"
+
+    sizing(ranges=ranges, margin=1.15, headroom='512Mi',
+           runtime_insurance='3Gi', max_mem='2Gi')
+    assert jm._profile_overrides(1, escalated=False)['memory'] == '2048Mi'
 
 
 # --- what lands on the container ---------------------------------------------

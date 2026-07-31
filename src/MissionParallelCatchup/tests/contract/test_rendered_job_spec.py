@@ -79,15 +79,17 @@ def test_the_deadline_is_on_the_job_so_it_can_be_patched_live(job, monkeypatch):
     at all -- the only way out would have been deleting every pod. The JobSpec
     field is mutable, which is worth more than the Pending time it also counts.
 
-    That Pending time is handled instead by _really_ran(): a deadline kill on a
-    container that barely executed is charged as a disruption, not a timeout, so
-    a capacity stall cannot condemn a range.
+    The cost is that Pending time is charged against the budget. Accepted: at a
+    flat 12h the worst stall observed (~15 min waiting on Karpenter) spends 2%
+    of the allowance, against a pod-level field that could not be corrected at
+    all on 850 already-running pods.
     """
-    monkeypatch.setattr(jm, 'ATTEMPT_DEADLINE_SECONDS', 10800)
+    monkeypatch.setattr(jm, 'ATTEMPT_DEADLINE_SECONDS', 43200)
     j = jm.build_job(300, 420, 1, None)
-    assert j.spec.active_deadline_seconds == 10800, \
+    assert j.spec.active_deadline_seconds == 43200, \
         "the deadline must be patchable, so it belongs on the JobSpec"
     assert j.spec.template.spec.active_deadline_seconds is None
+
 
 def test_no_deadline_means_no_field_at_all(job, monkeypatch):
     """0 is "off". Rendering it literally would kill every pod instantly."""
@@ -259,6 +261,34 @@ def test_the_worker_runs_the_resume_script_for_its_own_range(job):
     key = jm.job_key(31005951, 16320)
     assert f'KEY="{key}"' in script
     assert f'catchup "$KEY"' in script
+
+
+def test_synthetic_worker_is_absent_from_the_default_job(job):
+    container = job.spec.template.spec.containers[0]
+    assert container.image_pull_policy is None
+    assert 'synthetic-worker' not in {v.name for v in job.spec.template.spec.volumes}
+    assert not any(e.name.startswith('SYNTHETIC_') for e in container.env)
+
+
+def test_opt_in_synthetic_worker_uses_only_the_fixed_chart_script(job, monkeypatch):
+    monkeypatch.setattr(jm, 'SYNTHETIC_WORKER_CONFIG_MAP', 'pc-synthetic-worker')
+    monkeypatch.setattr(jm, 'SYNTHETIC_WORKER_IMAGE_PULL_POLICY', 'IfNotPresent')
+
+    synthetic = jm.build_job(31005951, 16320, 2, None)
+    container = synthetic.spec.template.spec.containers[0]
+    env = {e.name: e.value for e in container.env}
+    volumes = {v.name: v for v in synthetic.spec.template.spec.volumes}
+    mounts = {m.name: m.mount_path for m in container.volume_mounts}
+
+    assert container.command == ['python3', '/synthetic/worker.py']
+    assert container.image == 'stellar/stellar-core:test'
+    assert container.image_pull_policy == 'IfNotPresent'
+    assert env['SYNTHETIC_ATTEMPT'] == '2'
+    assert env['SYNTHETIC_TARGET'] == '31005951'
+    assert env['SYNTHETIC_COUNT'] == '16320'
+    assert env['SYNTHETIC_KEY'] == jm.job_key(31005951, 16320)
+    assert volumes['synthetic-worker'].config_map.name == 'pc-synthetic-worker'
+    assert mounts['synthetic-worker'] == '/synthetic'
 
 
 def test_the_worker_mounts_the_config_the_chart_renders(job):

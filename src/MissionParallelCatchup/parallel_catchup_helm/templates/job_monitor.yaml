@@ -134,8 +134,10 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - >-
+              {{- if .Values.monitor.sourceInstallDependencies }}
               pip install --no-cache-dir -q 'kubernetes~=35.0' 'aiohttp~=3.9'
               'requests~=2.31' 'prometheus-client~=0.19' &&
+              {{- end }}
               exec python3 /app/job_monitor.py
           {{- end }}
           ports:
@@ -157,6 +159,14 @@ spec:
               value: {{ .Values.monitor.emitMissionLabel | quote }}
             - name: LOGGING_INTERVAL_SECONDS
               value: {{ .Values.monitor.loggingIntervalSeconds | quote }}
+            - name: LIVENESS_PROBE_INTERVAL_SECONDS
+              value: {{ .Values.monitor.livenessProbeIntervalSeconds | quote }}
+            - name: LIVENESS_PROBE_TIMEOUT_SECONDS
+              value: {{ .Values.monitor.livenessProbeTimeoutSeconds | quote }}
+            - name: LIVENESS_FAILURE_THRESHOLD
+              value: {{ .Values.monitor.livenessFailureThreshold | quote }}
+            - name: LIVENESS_MAX_CONCURRENCY
+              value: {{ .Values.monitor.livenessMaxConcurrency | quote }}
             - name: RANGE_GENERATOR
               value: {{ .Values.range.generator | quote }}
             - name: STARTING_LEDGER
@@ -217,6 +227,30 @@ spec:
               value: {{ .Values.monitor.attemptDeadlineSeconds | quote }}
             - name: JOB_TTL_SECONDS
               value: {{ .Values.monitor.jobTtlSeconds | quote }}
+            {{- if .Values.integration.syntheticWorker.enabled }}
+            - name: SYNTHETIC_WORKER_CONFIG_MAP
+              value: {{ .Release.Name }}-synthetic-worker
+            - name: SYNTHETIC_WORKER_IMAGE_PULL_POLICY
+              value: {{ .Values.integration.syntheticWorker.imagePullPolicy | quote }}
+            - name: SYNTHETIC_PREDECESSOR_SECONDS
+              value: {{ .Values.integration.syntheticWorker.predecessorSeconds | quote }}
+            - name: SYNTHETIC_SUCCESSOR_MINIMUM_SECONDS
+              value: {{ .Values.integration.syntheticWorker.successorMinimumSeconds | quote }}
+            - name: SYNTHETIC_MAXIMUM_WAIT_SECONDS
+              value: {{ .Values.integration.syntheticWorker.maximumWaitSeconds | quote }}
+            - name: SYNTHETIC_PREDECESSOR_ANON_MIB
+              value: {{ .Values.integration.syntheticWorker.predecessorAnonMiB | quote }}
+            - name: SYNTHETIC_PREDECESSOR_WORKING_SET_MIB
+              value: {{ .Values.integration.syntheticWorker.predecessorWorkingSetMiB | quote }}
+            - name: SYNTHETIC_SUCCESSOR_ANON_MIB
+              value: {{ .Values.integration.syntheticWorker.successorAnonMiB | quote }}
+            - name: SYNTHETIC_SUCCESSOR_WORKING_SET_MIB
+              value: {{ .Values.integration.syntheticWorker.successorWorkingSetMiB | quote }}
+            - name: SYNTHETIC_PREDECESSOR_TX_APPLY_MS
+              value: {{ .Values.integration.syntheticWorker.predecessorTxApplyMilliseconds | quote }}
+            - name: SYNTHETIC_SUCCESSOR_TX_APPLY_MS
+              value: {{ .Values.integration.syntheticWorker.successorTxApplyMilliseconds | quote }}
+            {{- end }}
             - name: LOG_DIR
               value: /logs
             {{- if .Values.monitor.profileConfigMap }}
@@ -329,8 +363,10 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - >-
+              {{- if .Values.monitor.sourceInstallDependencies }}
               pip install --no-cache-dir -q 'kubernetes~=35.0' 'aiohttp~=3.9'
               'requests~=2.31' 'prometheus-client~=0.19' &&
+              {{- end }}
               exec python3 /app/log_collector.py
           {{- else }}
           command: ["/usr/bin/python3", "log_collector.py"]
@@ -365,6 +401,10 @@ spec:
             # this the collector defaults to pvc and silently records nothing.
             - name: STORAGE_MODE
               value: {{ .Values.worker.storageMode | quote }}
+            {{- if .Values.integration.syntheticWorker.enabled }}
+            - name: SYNTHETIC_WORKER
+              value: "true"
+            {{- end }}
           resources:
             {{- toYaml .Values.monitor.collectorResources | nindent 12 }}
           volumeMounts:

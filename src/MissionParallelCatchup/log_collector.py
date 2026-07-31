@@ -33,8 +33,10 @@ import json
 import logging
 import os
 import re
+import signal
 import ssl
 import sys
+import zlib
 from datetime import datetime
 
 import aiohttp
@@ -224,6 +226,15 @@ _TX_METRIC = "metric 'ledger.transaction.apply'"
 # silently missing for 25% of ranges -- 91-99% of everything above ledger 35M,
 # exactly the expensive end.
 _SUM_RE = re.compile(r"sum\s*=\s*([0-9.]+(?:[eE][+-]?[0-9]+)?)ms")
+_SYNTHETIC_PEAK_RE = re.compile(
+    r"SYNTHETIC PEAK: anonBytes=(\d+) workingSetBytes=(\d+)")
+SYNTHETIC_WORKER = os.getenv('SYNTHETIC_WORKER', '').lower() == 'true'
+
+
+def _install_synthetic_restart_handler():
+    """Allow a collector-only container restart in the opt-in live harness."""
+    if SYNTHETIC_WORKER:
+        signal.signal(signal.SIGTERM, lambda _signum, _frame: sys.exit(0))
 
 
 class TxApplyScanner:
@@ -243,15 +254,30 @@ class TxApplyScanner:
     # "RESUME DECLINED", means new-db ran and this attempt did the whole range,
     # so the colon is load-bearing -- it is what separates the two.
     RESUME_MARK = 'RESUME: '
+    RESUME_DECLINED_MARK = 'RESUME DECLINED:'
 
-    def __init__(self):
+    def __init__(self, recreated=False):
         self.seconds = None
         self.resumed = False
+        self.resume_decided = False
+        self.synthetic_anon = None
+        self.synthetic_working_set = None
+        # A new poller starting from durable .state missed every earlier line.
+        # Finalization must recover scanner-only facts from the archive.
+        self.recreated = recreated
         self._left = 0
 
     def feed(self, line):
+        if SYNTHETIC_WORKER:
+            peak = _SYNTHETIC_PEAK_RE.search(line)
+            if peak:
+                self.synthetic_anon = int(peak.group(1))
+                self.synthetic_working_set = int(peak.group(2))
         if self.RESUME_MARK in line:
             self.resumed = True
+            self.resume_decided = True
+        elif self.RESUME_DECLINED_MARK in line:
+            self.resume_decided = True
         if _TX_METRIC in line:
             self._left = self.WINDOW
             return
@@ -264,10 +290,27 @@ class TxApplyScanner:
             self._left = 0
 
 
-
-
-
-
+def scan_archive(end, attempt, need_tx=False):
+    """Recover scanner state from complete gzip members already on disk."""
+    path = base(end, attempt) + '.log.gz'
+    scanner = TxApplyScanner()
+    try:
+        with gzip.open(path, 'rt', errors='replace') as fh:
+            for line in fh:
+                scanner.feed(line)
+                # The resume decision is at process startup. Avoid decompressing
+                # a multi-gigabyte worker log when that is all the caller needs.
+                if scanner.resume_decided and not need_tx:
+                    break
+    except FileNotFoundError:
+        return scanner
+    except (EOFError, gzip.BadGzipFile, zlib.error) as e:
+        # Keep facts found in complete prefix members. A torn final member cannot
+        # invalidate an earlier RESUME line or complete medida block.
+        logger.warning("could only partially recover scanner state from %s: %s", path, e)
+    except OSError as e:
+        logger.warning("could not open scanner archive %s: %s", path, e)
+    return scanner
 
 
 def write_metrics(end, attempt, values):
@@ -303,6 +346,14 @@ def write_metrics(end, attempt, values):
         a, b = prior.get(k), values.get(k)
         if a is not None and b is not None:
             merged[k] = max(a, b)
+    # Once any poller or archive read proves that this attempt resumed, a later
+    # restarted poller cannot un-prove it. In particular, a merge containing
+    # resumed=False must never lower the durable decision back to fresh.
+    if prior.get('resumed') is True or values.get('resumed') is True:
+        merged['resumed'] = True
+    if (prior.get('attemptSecondsExact') is True
+            or values.get('attemptSecondsExact') is True):
+        merged['attemptSecondsExact'] = True
     values = merged
     try:
         _write_atomic(path, json.dumps(values))
@@ -406,13 +457,26 @@ def _flush_peak(name, axis, field, value):
     write_metrics max-merges on PEAK_KEYS, so re-flushing a lower value later is
     harmless; the ratio only keeps this to a handful of writes per pod.
     """
+    ref = _streaming.get(name)
+    if not ref:
+        return
     key = name + '/' + axis
     if value < _peak_flushed.get(key, 0) * PEAK_FLUSH_RATIO:
         return
     _peak_flushed[key] = value
-    ref = _streaming.get(name)
-    if ref:
-        write_metrics(ref[0], ref[1], {field: value})
+    write_metrics(ref[0], ref[1], {field: value})
+
+
+def _register_stream(name, end, attempt):
+    """Register a poller and durably flush peaks sampled just before it opened."""
+    _streaming[name] = (end, attempt)
+    for axis, field, values in (
+            ('anon', 'peakAnonBytes', _anon_peak),
+            ('ws', 'peakWorkingSetBytes', _ws_peak),
+            ('eph', 'peakEphemeralBytes', _eph_peak)):
+        value = values.get(name)
+        if value is not None:
+            _flush_peak(name, axis, field, value)
 
 
 async def sample_kubelet(session, nodes):
@@ -433,6 +497,8 @@ async def sample_kubelet(session, nodes):
     OOM. The `time` field on this payload runs 1-3s behind wall clock; the ~80s
     lag applies only to the du-based ephemeral figure alongside it.
     """
+    if SYNTHETIC_WORKER:
+        return
     for node in nodes:
         url = f"{API}/api/v1/nodes/{node}/proxy/stats/summary"
         try:
@@ -525,6 +591,7 @@ async def finalize(session, pod, end, attempt, tx, done_ok, started=None):
     if observed is not None:
         # The pod's own timestamps, not how long this poller happened to watch.
         measured['attemptSeconds'] = round(observed, 1)
+        measured['attemptSecondsExact'] = True
     elif started is not None:
         # Fallback only: the monitor's figure comes from the pod's terminated
         # timestamps and is preferred when it exists. write_metrics keeps this
@@ -532,13 +599,30 @@ async def finalize(session, pod, end, attempt, tx, done_ok, started=None):
         # finalized twice, and the second poller's clock started at the restart.
         measured['attemptSeconds'] = round(
             asyncio.get_event_loop().time() - started, 1)
-    if tx.resumed:
+        measured['attemptSecondsExact'] = False
+    # RESUME is printed before stellar-core starts and medida once at exit, so a
+    # recreated poller can miss either forever. The archive was appended before
+    # finalization; recover only the state this scanner could have missed.
+    archived = None
+    need_resume = int(attempt) > 1 and not tx.resume_decided
+    need_tx = (tx.recreated and tx.seconds is None) or (
+        SYNTHETIC_WORKER and tx.recreated)
+    if need_resume or need_tx:
+        archived = scan_archive(end, attempt, need_tx=need_tx)
+    if tx.resumed or (archived is not None and archived.resumed):
         # Not a peak -- PEAK_FIELDS filters it out of the profile. peaks_for_range
         # reads it to decide how far back to aggregate: a resumed attempt only
         # measured the tail of its range, so the attempt before it still counts.
         measured['resumed'] = True
-    if tx.seconds is not None:
-        measured['txApplySeconds'] = tx.seconds
+    tx_seconds = tx.seconds
+    if tx_seconds is None and archived is not None:
+        tx_seconds = archived.seconds
+    if tx_seconds is not None:
+        measured['txApplySeconds'] = tx_seconds
+    synthetic = archived if archived is not None else tx
+    if SYNTHETIC_WORKER and synthetic.synthetic_anon is not None:
+        measured['peakAnonBytes'] = synthetic.synthetic_anon
+        measured['peakWorkingSetBytes'] = synthetic.synthetic_working_set
     _peak_flushed.pop(pod, None)
     _peak_flushed.pop(pod + '/eph', None)
     _streaming.pop(pod, None)
@@ -688,7 +772,7 @@ async def poll_pod(session, pod, end, attempt, done, done_ok):
     started = asyncio.get_event_loop().time()
     # Outside the poll loop: the medida block can straddle two polls, and a
     # fresh scanner per poll would lose the half it saw.
-    tx = TxApplyScanner()
+    tx = TxApplyScanner(recreated=bool(last_ts))
     backoff = LOG_POLL_SECONDS
     failures = 0
 
@@ -818,10 +902,24 @@ async def main():
                     vanished[name] = vanished.get(name, 0) + 1
                     if vanished[name] >= VANISHED_GRACE_CYCLES:
                         t.cancel()
+                        try:
+                            await t
+                        except asyncio.CancelledError:
+                            pass
                         del tasks[name]
                         vanished.pop(name, None)
+                        ref = _streaming.get(name)
+                        if ref is not None:
+                            # The poller was wedged, but its archive and the
+                            # sampler's process-local peaks still contain useful
+                            # truth. Finalize them before licensing a reap.
+                            await finalize(
+                                session, name, ref[0], ref[1],
+                                TxApplyScanner(recreated=True),
+                                lambda p: succeeded.get(p, False))
                         streamed.add(name)
-                        logger.info("cancelled stream for vanished pod %s", name)
+                        logger.info("cancelled and finalized stream for vanished pod %s",
+                                    name)
                 # Unconditional: this used to be gated on ephemeral mode, back
                 # when it only sampled disk. Memory is sized in both modes, so
                 # gating it here left every pvc run with no anon peak at all.
@@ -877,7 +975,7 @@ async def main():
                         # become pollable. Succeeded and Failed stay in: a
                         # terminal pod is where the final output lives.
                         continue
-                    _streaming[name] = (end, attempt)
+                    _register_stream(name, end, attempt)
                     tasks[name] = asyncio.create_task(
                         poll_pod(session, name, end, attempt,
                                    lambda p: terminal.get(p, False),
@@ -890,4 +988,5 @@ async def main():
 
 
 if __name__ == '__main__':
+    _install_synthetic_restart_handler()
     asyncio.run(main())

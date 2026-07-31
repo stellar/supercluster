@@ -20,6 +20,7 @@ these drive log_collector's file-writing entry points directly.
 """
 
 import asyncio
+import gzip
 import json
 import os
 
@@ -210,6 +211,83 @@ def test_a_write_that_omits_a_peak_leaves_it_alone(vol):
     assert stored['peakAnonBytes'] == 5 * GIB
     assert stored['peakEphemeralBytes'] == 30 * GIB
     assert stored['txApplySeconds'] == 12.5
+
+
+def test_resumed_true_is_monotonic_across_restarted_writers(vol):
+    lc.write_metrics('300', 2, {'resumed': True})
+    lc.write_metrics('300', 2, {'resumed': False, 'attemptSeconds': 10.0})
+
+    assert metrics(300, 2)['resumed'] is True
+
+
+def test_finalize_recovers_resume_after_the_scanner_is_recreated(vol):
+    """The first poll saw RESUME, then its scanner vanished before finalize."""
+    path = lc.base('300', 2) + '.log.gz'
+    with gzip.open(path, 'wt') as fh:
+        fh.write('RESUME: local state reached ledger 250; skipping new-db\n')
+
+    finalize('w-300-a2', 300, attempt=2, tx=lc.TxApplyScanner())
+
+    assert metrics(300, 2)['resumed'] is True
+
+
+def test_finalize_recovers_txapply_after_the_scanner_is_recreated(vol, monkeypatch):
+    """The first poll saw the final medida block, then its scanner vanished."""
+    monkeypatch.setattr(lc, 'SAVE_SUCCESS_LOGS', False)
+    path = lc.base('300', 2) + '.log.gz'
+    with gzip.open(path, 'wt') as fh:
+        fh.write('RESUME: local state reached ledger 250; skipping new-db\n')
+        fh.write("metric 'ledger.transaction.apply'\n")
+        fh.write('  count = 123\n')
+        fh.write('  sum = 4200.0ms\n')
+
+    finalize('w-300-a2', 300, attempt=2, succeeded=True,
+             tx=lc.TxApplyScanner(recreated=True))
+
+    assert metrics(300, 2)['resumed'] is True
+    assert metrics(300, 2)['txApplySeconds'] == 4.2
+    assert not os.path.exists(path), \
+        "the test must prove recovery happened before success-log discard"
+
+
+def test_synthetic_peaks_survive_the_same_scanner_recreation(vol, monkeypatch):
+    monkeypatch.setattr(lc, 'SYNTHETIC_WORKER', True)
+    path = lc.base('300', 2) + '.log.gz'
+    with gzip.open(path, 'wt') as fh:
+        fh.write('RESUME: local state reached ledger 250; skipping new-db\n')
+        fh.write('SYNTHETIC PEAK: anonBytes=50331648 workingSetBytes=58720256\n')
+        fh.write("metric 'ledger.transaction.apply'\n")
+        fh.write('sum = 2500ms\n')
+
+    finalize('w-300-a2', 300, attempt=2, tx=lc.TxApplyScanner(recreated=True))
+
+    assert metrics(300, 2) == {
+        'peakAnonBytes': 50331648,
+        'peakWorkingSetBytes': 58720256,
+        'resumed': True,
+        'txApplySeconds': 2.5,
+    }
+
+
+def test_synthetic_mode_never_overwrites_fixed_peaks_from_kubelet(vol, monkeypatch):
+    monkeypatch.setattr(lc, 'SYNTHETIC_WORKER', True)
+    session = FakeSession(summary(
+        'w-300-a1', rss=80 * GIB, ws=90 * GIB))
+
+    run(lc.sample_kubelet(session, ['node-1']))
+
+    assert session.urls == []
+    assert metrics(300) is None
+
+
+def test_finalize_does_not_promote_resume_declined(vol):
+    path = lc.base('300', 2) + '.log.gz'
+    with gzip.open(path, 'wt') as fh:
+        fh.write('RESUME DECLINED: no usable local state; running new-db\n')
+
+    finalize('w-300-a2', 300, attempt=2, tx=lc.TxApplyScanner())
+
+    assert (metrics(300, 2) or {}).get('resumed') is not True
 
 
 def test_peaks_from_different_writes_accumulate_into_one_record(vol):
@@ -406,6 +484,7 @@ def test_finalizing_the_same_attempt_twice_keeps_its_measurements(vol, monkeypat
     finalize('w-300', 300, tx=tx)
     first = metrics(300)
     assert first['attemptSeconds'] == 3600.4
+    assert first['attemptSecondsExact'] is True
 
     restart(monkeypatch)
     # The main loop re-reads the pod's own timestamps every cycle it sees it
@@ -466,7 +545,10 @@ def test_a_poller_that_watched_the_whole_attempt_still_reports_its_duration(vol)
     started = _moments_ago() - 42.0
     finalize('w-300', 300, started=started)
 
-    assert metrics(300)['attemptSeconds'] == pytest.approx(42.0, abs=1.0)
+    stored = metrics(300)
+    assert stored['attemptSeconds'] == pytest.approx(42.0, abs=1.0)
+    assert stored['attemptSecondsExact'] is False
+    assert jm.seconds_for_range('300', 1) is None
 
 
 def test_the_duration_the_collector_records_is_the_pods_not_the_pollers(vol):
@@ -475,6 +557,7 @@ def test_the_duration_the_collector_records_is_the_pods_not_the_pollers(vol):
     finalize('w-300', 300, started=_moments_ago() - 5.0)
 
     assert metrics(300)['attemptSeconds'] == 3600.4
+    assert metrics(300)['attemptSecondsExact'] is True
 
 
 # -- .outcome is written once, by whoever got there first ---------------------

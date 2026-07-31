@@ -66,6 +66,11 @@ monitor:
   # ConfigMap name and point monitor.image at a plain python base; the deps the
   # Dockerfile bakes get pip-installed at start. Empty = use the image as built.
   sourceConfigMap: ""
+  # Source-mode development normally installs dependencies at container start.
+  # Disable only when the selected image already contains them, for example in
+  # the opt-in synthetic integration harness where external package access is
+  # intentionally avoided.
+  sourceInstallDependencies: true
   # Range profile from an earlier run, as a ConfigMap holding profile.json.
   # The mission driver resolves --pubnet-parallel-catchup-profile (a local
   # path or an https URL) into one. Empty = size from the configured
@@ -91,17 +96,10 @@ monitor:
   # profiled at 190MiB rss got a 209MiB limit and 90 of them OOMKilled within
   # 90s of dispatch.
   profileCacheHeadroom: "512Mi"
-  # Runtime-weighted allowance, scaled by seconds/longest so a 6h range gets
-  # the full amount and a 13min one gets almost none. A flat margin misprices
-  # both ends: the short ranges are measured tightly and need nothing, while
-  # the long ones sit exposed to archive growth and cache drift for hours.
+  # Extra memory allowance weighted by a range's runtime relative to the
+  # longest valid runtime in the profile. Long-running ranges need more slack
+  # for page cache and allocator growth. 0 disables.
   profileRuntimeMemoryInsurance: "3Gi"
-  # Probing 1000+ workers serially takes longer than the poll interval, so the
-  # sampler runs threaded and bounded rather than inline.
-  livenessProbeIntervalSeconds: 30
-  livenessProbeTimeoutSeconds: 5
-  livenessFailureThreshold: 3
-  livenessMaxConcurrency: 32
   imagePullPolicy: IfNotPresent
   mission: "HistoryPubnetParallelCatchup"
   # Adds a `mission` label to worker pods, which kube-state-metrics exposes as
@@ -111,6 +109,17 @@ monitor:
   # once the panels aggregate.
   emitMissionLabel: false
   loggingIntervalSeconds: 10
+  # Cosmetic stellar-core /info sampling. A fixed pool probes each Running pod
+  # about once per interval; three consecutive failures preserve the old
+  # approximately 90-second down threshold without coupling network I/O to the
+  # 10-second reconcile loop. Unprobed/intermediate workers report unknown.
+  livenessProbeIntervalSeconds: 30
+  livenessProbeTimeoutSeconds: 5
+  livenessFailureThreshold: 3
+  # At 2096 workers and a 30s interval this is ~70 requests/s. Thirty-two slots
+  # cover normal sub-second local responses while bounding slow requests,
+  # queued work, sessions and threads independently of fleet size.
+  livenessMaxConcurrency: 32
   maxAttempts: 5
   # Evictions, admission rejections and monitor restarts are not the range's
   # fault, so they do not share the failure budget above. Measured on ssc-test:
@@ -131,9 +140,11 @@ monitor:
   # retries a missing/unreachable archive indefinitely rather than failing.
   #
   # 12h, not the 3h this used to be. "A prod range runs ~50 min" was the median
-  # talking -- runtimes span 190x, p25 771s to a measured max of 5.9h, so 3h
-  # killed 941 legitimate ranges and had to be hand-patched to 12h mid-run on
-  # 2026-07-30. A timeout is terminal, so each of those would fail the mission.
+  # talking -- runtimes span 190x. In the 2026-07-30 16320-ledger pubnet profile
+  # 793 ranges exceeded 3h and the longest wall time was 21488s, so 3h killed 941
+  # legitimate ranges and had to be hand-patched to 12h mid-run. A timeout is
+  # terminal, so each of those would have failed the mission. 12h leaves ~2x the
+  # measured maximum.
   # Flat for every range; see ATTEMPT_DEADLINE_SECONDS in job_monitor.py for why
   # scaling it per-range by the profile was tried and removed.
   attemptDeadlineSeconds: 43200
@@ -166,6 +177,24 @@ monitor:
   resources:
     requests: { cpu: "200m", memory: "512Mi" }
     limits:   { cpu: "2",    memory: "2Gi" }
+
+# Fixed, chart-owned worker used only by the bounded Kubernetes integration
+# harness. It never invokes stellar-core or history services. Keeping the script
+# in the chart instead of accepting a command value avoids turning this into a
+# general arbitrary-command surface.
+integration:
+  syntheticWorker:
+    enabled: false
+    imagePullPolicy: IfNotPresent
+    predecessorSeconds: 12
+    successorMinimumSeconds: 12
+    maximumWaitSeconds: 180
+    predecessorAnonMiB: 48
+    predecessorWorkingSetMiB: 56
+    successorAnonMiB: 24
+    successorWorkingSetMiB: 32
+    predecessorTxApplyMilliseconds: 1250
+    successorTxApplyMilliseconds: 2500
 
 service_account:
   annotations: []

@@ -51,6 +51,25 @@ metric_buckets = (300, 900, 1800, 3600, 5400, 7200, float("inf"))
 # =============================================================================
 CORE_IMAGE = os.getenv('CORE_IMAGE')
 ASAN_OPTIONS = os.getenv('ASAN_OPTIONS', '')
+# Test-only worker configuration. Empty is the production path; the chart sets
+# these only for its fixed, opt-in synthetic integration worker.
+SYNTHETIC_WORKER_CONFIG_MAP = os.getenv('SYNTHETIC_WORKER_CONFIG_MAP', '')
+SYNTHETIC_WORKER_IMAGE_PULL_POLICY = os.getenv(
+    'SYNTHETIC_WORKER_IMAGE_PULL_POLICY', 'IfNotPresent')
+SYNTHETIC_PREDECESSOR_SECONDS = os.getenv('SYNTHETIC_PREDECESSOR_SECONDS', '12')
+SYNTHETIC_SUCCESSOR_MINIMUM_SECONDS = os.getenv(
+    'SYNTHETIC_SUCCESSOR_MINIMUM_SECONDS', '12')
+SYNTHETIC_MAXIMUM_WAIT_SECONDS = os.getenv('SYNTHETIC_MAXIMUM_WAIT_SECONDS', '180')
+SYNTHETIC_PREDECESSOR_ANON_MIB = os.getenv('SYNTHETIC_PREDECESSOR_ANON_MIB', '48')
+SYNTHETIC_PREDECESSOR_WORKING_SET_MIB = os.getenv(
+    'SYNTHETIC_PREDECESSOR_WORKING_SET_MIB', '56')
+SYNTHETIC_SUCCESSOR_ANON_MIB = os.getenv('SYNTHETIC_SUCCESSOR_ANON_MIB', '24')
+SYNTHETIC_SUCCESSOR_WORKING_SET_MIB = os.getenv(
+    'SYNTHETIC_SUCCESSOR_WORKING_SET_MIB', '32')
+SYNTHETIC_PREDECESSOR_TX_APPLY_MS = os.getenv(
+    'SYNTHETIC_PREDECESSOR_TX_APPLY_MS', '1250')
+SYNTHETIC_SUCCESSOR_TX_APPLY_MS = os.getenv(
+    'SYNTHETIC_SUCCESSOR_TX_APPLY_MS', '2500')
 
 # Which ledger ranges to run. These are pure inputs to the range generator:
 # dispatch recomputes the whole list every reconcile, so a restart must
@@ -246,6 +265,8 @@ MAX_EPHEMERAL_ATTEMPTS = int(os.getenv('MAX_EPHEMERAL_ATTEMPTS', 4))
 EPH_BUMP_FACTOR = float(os.getenv('EPH_BUMP_FACTOR', 1.5))
 EPH_ESCALATION_CAP = os.getenv('EPH_ESCALATION_CAP', '200Gi')
 ENVIRONMENTAL_OUTCOMES = ('disrupted', 'rejected', 'unknown')
+ATTEMPT_OUTCOMES = ('disrupted', 'oom', 'ephemeral', 'timeout',
+                    'rejected', 'unknown', 'failed')
 # Verdicts only the pod can produce, and which a Job-level DeadlineExceeded must
 # never overwrite. Each names a specific mechanism -- the kubelet OOM-killed it,
 # the node was draining, the ephemeral limit blew -- and each earns a different
@@ -424,23 +445,322 @@ reconcile_alive = {'ts': 0.0}
 metric_catchup_queues = Gauge('ssc_parallel_catchup_queues', 'Exposes size of each job queues', ["queue"])
 metric_workers = Gauge('ssc_parallel_catchup_workers', 'Exposes catch up worker status', ["status"])
 metric_refresh_duration = Gauge('ssc_parallel_catchup_workers_refresh_duration_seconds', 'Time it took to refresh status of all workers')
-metric_full_duration = Histogram('ssc_parallel_catchup_job_full_duration_seconds', 'Exposes full job duration as histogram', buckets=metric_buckets)
+metric_full_duration = Histogram('ssc_parallel_catchup_job_full_duration_seconds', 'Compute seconds across the complete resumed attempt chain', buckets=metric_buckets)
 metric_tx_apply_duration = Histogram('ssc_parallel_catchup_job_tx_apply_duration_seconds', 'Exposes job TX apply duration as histogram', buckets=metric_buckets)
-# full_duration is the SUCCESSFUL attempt only, matching what worker.sh timed.
-# wall_duration spans first dispatch to success, so (wall - full) is exactly the
-# work lost to retries -- the cost of running on spot.
+# wallSeconds is Kubernetes's startTime -> completionTime for the winning Job
+# only. Failed-attempt timestamps and inter-attempt gaps were never persisted, so
+# it cannot be reconstructed as first dispatch -> success after those Jobs go.
 metric_wall_duration = Histogram('ssc_parallel_catchup_job_wall_duration_seconds',
-                                 'First dispatch to success, including failed attempts',
+                                 'Winning Kubernetes Job start to completion',
                                  buckets=metric_buckets)
 metric_mission_duration = Gauge('ssc_parallel_catchup_mission_duration_seconds', 'Number of seconds since the mission started ')
-metric_retries = Counter('ssc_parallel_catchup_job_retried_count', 'Number of jobs that were retried')
+metric_retries = Counter(
+    'ssc_parallel_catchup_job_retried_count',
+    'Retry attempts dispatched after a predecessor attempt failed')
 # Separates infrastructure churn from application failure: many evictions with
 # zero app failures is spot behaving as intended.
-metric_evictions = Counter('ssc_parallel_catchup_job_spot_eviction_count', 'Pod attempts lost to node disruption')
+metric_evictions = Counter(
+    'ssc_parallel_catchup_job_spot_eviction_count',
+    'Pod attempts classified as lost to node disruption')
+metric_spot_disruption_retried = Counter(
+    'ssc_parallel_catchup_job_spot_disruption_retried_count',
+    'Unique ledger ranges that dispatched a successor after a node disruption verdict')
 metric_pvc_released = Counter('ssc_parallel_catchup_pvc_released_count', 'PVCs deleted after their range completed')
 metric_jobs_reaped = Counter('ssc_parallel_catchup_jobs_reaped_count', 'Finished Jobs deleted after their record was durable')
-metric_oom_retries = Counter('ssc_parallel_catchup_job_oom_retried_count', 'Jobs retried with an escalated memory limit')
-metric_eph_retries = Counter('ssc_parallel_catchup_job_ephemeral_retried_count', 'Jobs retried with an escalated ephemeral-storage limit')
+metric_oom_retries = Counter(
+    'ssc_parallel_catchup_job_oom_retried_count',
+    'Retry attempts dispatched after an OOM verdict, with an escalated memory limit')
+metric_eph_retries = Counter(
+    'ssc_parallel_catchup_job_ephemeral_retried_count',
+    'Retry attempts dispatched after an ephemeral-storage verdict, with an escalated limit')
+metric_retry_reasons = Counter(
+    'ssc_parallel_catchup_job_retried_reason_count',
+    'Retry attempts dispatched, by the effective verdict of the predecessor attempt',
+    ['reason'])
+
+
+def _worker_targets(pods):
+    """Current Running-with-IP pods, keyed by pod identity.
+
+    A UID change is a replacement even when the Job name or IP is reused. Tests
+    and unusually incomplete API objects may lack a UID, where the pod name is
+    still unique for its lifetime.
+    """
+    out = {}
+    for pod in pods:
+        pod_status = getattr(pod, 'status', None)
+        metadata = getattr(pod, 'metadata', None)
+        ip = getattr(pod_status, 'pod_ip', None)
+        if getattr(pod_status, 'phase', None) != 'Running' or not ip or metadata is None:
+            continue
+        name = getattr(metadata, 'name', None)
+        identity = getattr(metadata, 'uid', None) or name
+        if identity and name:
+            out[str(identity)] = (str(name), str(ip))
+    return out
+
+
+class WorkerLivenessSampler:
+    """Bounded, round-robin stellar-core `/info` sampler.
+
+    Candidate membership comes from the authoritative Kubernetes snapshot, but
+    all network I/O happens on this sampler's fixed worker pool. At most
+    `max_concurrency` requests run and the same number wait in the bounded queue;
+    there is no future, task, session, or thread per pod.
+
+    State is deliberately conservative:
+      * new or replaced pod: unknown
+      * any HTTP response from /info: up
+      * fewer than `failure_threshold` consecutive exceptions/timeouts: unknown
+      * `failure_threshold` consecutive failures: down
+      * any later response: up immediately
+
+    HTTP error statuses still prove the admin endpoint responded. A busy core
+    returning 5xx is responsive; only failure to receive an HTTP response counts
+    toward down.
+    """
+
+    def __init__(self, interval=LIVENESS_PROBE_INTERVAL_SECONDS,
+                 timeout=LIVENESS_PROBE_TIMEOUT_SECONDS,
+                 failure_threshold=LIVENESS_FAILURE_THRESHOLD,
+                 max_concurrency=LIVENESS_MAX_CONCURRENCY, probe=None):
+        if interval <= 0 or timeout <= 0 or failure_threshold <= 0 or max_concurrency <= 0:
+            raise ValueError("liveness sampler values must all be greater than zero")
+        self.interval = float(interval)
+        self.timeout = float(timeout)
+        self.failure_threshold = int(failure_threshold)
+        self.max_concurrency = int(max_concurrency)
+        self._probe = probe
+        self._records = {}
+        self._generation = 0
+        self._tasks = queue.Queue(maxsize=self.max_concurrency)
+        self._stop = threading.Event()
+        self._condition = threading.Condition()
+        self._scheduler = None
+        self._workers = []
+        self._started = False
+        self._failed = None
+        self._active = 0
+        self._failure_count = 0
+        self._last_failure_log = 0.0
+
+    def start(self):
+        with self._condition:
+            if self._started:
+                return
+            self._started = True
+            self._workers = [
+                threading.Thread(target=self._worker_main,
+                                 name=f"worker-liveness-{i}", daemon=True)
+                for i in range(self.max_concurrency)
+            ]
+            self._scheduler = threading.Thread(
+                target=self._scheduler_main, name="worker-liveness-scheduler",
+                daemon=True)
+            for worker in self._workers:
+                worker.start()
+            self._scheduler.start()
+
+    def close(self):
+        self._stop.set()
+        with self._condition:
+            self._condition.notify_all()
+        threads = ([self._scheduler] if self._scheduler is not None else []) + self._workers
+        deadline = time.monotonic() + self.timeout + 1.0
+        for thread in threads:
+            remaining = max(0.0, deadline - time.monotonic())
+            if thread is not None and thread is not threading.current_thread():
+                thread.join(remaining)
+
+    def replace_candidates(self, targets, now=None):
+        """Atomically replace membership without waiting for any probe."""
+        now = time.monotonic() if now is None else float(now)
+        targets = dict(targets)
+        with self._condition:
+            old = self._records
+            records = {}
+            new_identities = [
+                identity for identity in sorted(targets)
+                if identity not in old or old[identity]['target'] != targets[identity]
+            ]
+            offsets = {
+                identity: self.interval * index / max(1, len(new_identities))
+                for index, identity in enumerate(new_identities)
+            }
+            for identity, target in targets.items():
+                previous = old.get(identity)
+                if previous is not None and previous['target'] == target:
+                    records[identity] = previous
+                    continue
+                self._generation += 1
+                records[identity] = {
+                    'target': target,
+                    'generation': self._generation,
+                    'status': 'unknown',
+                    'failures': 0,
+                    'queued': False,
+                    'next_due': now + offsets[identity],
+                }
+            self._records = records
+            self._condition.notify_all()
+
+    def counts(self, expected_count=None):
+        with self._condition:
+            count = len(self._records) if expected_count is None else int(expected_count)
+            healthy = self._started and self._failed is None
+            if healthy:
+                healthy = (self._scheduler is not None and self._scheduler.is_alive()
+                           and all(worker.is_alive() for worker in self._workers))
+            if not healthy or count != len(self._records):
+                return {'up': 0, 'down': 0, 'unknown': count}
+            result = {'up': 0, 'down': 0, 'unknown': 0}
+            for record in self._records.values():
+                result[record['status']] += 1
+            return result
+
+    def stats(self):
+        """Small observability hook used by the scale contract test."""
+        with self._condition:
+            live_threads = sum(
+                1 for thread in ([self._scheduler] + self._workers)
+                if thread is not None and thread.is_alive())
+            return {
+                'records': len(self._records),
+                'active': self._active,
+                'queued': self._tasks.qsize(),
+                'outstanding': self._active + self._tasks.qsize(),
+                'threads': live_threads,
+                'failed': self._failed,
+            }
+
+    def _scheduler_main(self):
+        try:
+            self._schedule()
+        except Exception as e:
+            self._mark_failed("scheduler", e)
+
+    def _schedule(self):
+        while not self._stop.is_set():
+            with self._condition:
+                now = time.monotonic()
+                capacity = self.max_concurrency - self._tasks.qsize()
+                due = sorted(
+                    ((record['next_due'], identity, record)
+                     for identity, record in self._records.items()
+                     if not record['queued'] and record['next_due'] <= now),
+                    key=lambda item: (item[0], item[1]))
+                for _, identity, record in due[:max(0, capacity)]:
+                    task = (identity, record['generation'], record['target'])
+                    try:
+                        self._tasks.put_nowait(task)
+                    except queue.Full:
+                        break
+                    record['queued'] = True
+
+                waiting = [
+                    record['next_due'] for record in self._records.values()
+                    if not record['queued']
+                ]
+                delay = max(0.01, min(1.0, min(waiting) - now)) if waiting else 1.0
+                self._condition.wait(timeout=delay)
+
+    def _worker_main(self):
+        session = None
+        try:
+            if self._probe is None:
+                session = requests.Session()
+                adapter = requests.adapters.HTTPAdapter(
+                    pool_connections=4, pool_maxsize=1, max_retries=0)
+                session.mount('http://', adapter)
+            while not self._stop.is_set():
+                try:
+                    task = self._tasks.get(timeout=0.2)
+                except queue.Empty:
+                    continue
+                with self._condition:
+                    self._active += 1
+                identity, generation, target = task
+                success = False
+                error = None
+                try:
+                    _, ip = target
+                    if self._probe is None:
+                        host = f"[{ip}]" if ':' in ip else ip
+                        with session.get(f"http://{host}:11626/info",
+                                         timeout=self.timeout):
+                            pass
+                    else:
+                        self._probe(ip, self.timeout)
+                    success = True
+                except Exception as e:
+                    error = e
+                finally:
+                    self._record_result(identity, generation, target, success, error)
+                    self._tasks.task_done()
+                    with self._condition:
+                        self._active -= 1
+                        self._condition.notify_all()
+        except Exception as e:
+            self._mark_failed("probe worker", e)
+        finally:
+            if session is not None:
+                session.close()
+
+    def _record_result(self, identity, generation, target, success, error=None,
+                       now=None):
+        now = time.monotonic() if now is None else float(now)
+        log_failure = None
+        with self._condition:
+            record = self._records.get(identity)
+            if (record is None or record['generation'] != generation
+                    or record['target'] != target):
+                return
+            record['queued'] = False
+            record['next_due'] = now + self.interval
+            if success:
+                record['failures'] = 0
+                record['status'] = 'up'
+            else:
+                record['failures'] += 1
+                record['status'] = (
+                    'down' if record['failures'] >= self.failure_threshold
+                    else 'unknown')
+                self._failure_count += 1
+                if now - self._last_failure_log >= 60.0:
+                    log_failure = self._failure_count
+                    self._failure_count = 0
+                    self._last_failure_log = now
+            self._condition.notify_all()
+        if log_failure is not None:
+            logger.warning(
+                "stellar-core /info liveness probes are failing; %d failure(s) "
+                "across the fleet since the previous warning (latest: %s: %s)",
+                log_failure, target[0], error)
+
+    def _mark_failed(self, component, error):
+        with self._condition:
+            if self._failed is not None:
+                return
+            self._failed = f"{component}: {error}"
+            self._condition.notify_all()
+        logger.exception(
+            "worker liveness %s failed; all current workers will be reported "
+            "unknown and reconcile will continue", component)
+
+
+worker_liveness_sampler = WorkerLivenessSampler()
+
+
+def publish_worker_liveness(targets, sampler=None):
+    """Hand a pod snapshot to the sampler and return its current three counts.
+
+    This path copies O(current workers) state under a short lock but never makes
+    a request or waits for an in-flight request. Keeping it separate makes the
+    non-blocking boundary directly testable.
+    """
+    sampler = sampler or worker_liveness_sampler
+    sampler.replace_candidates(targets)
+    return sampler.counts(len(targets))
 
 
 def _worker_targets(pods):
@@ -904,32 +1224,10 @@ def _rehydrate_from_metrics(progress):
     completed = progress.get('completed') or {}
     if not completed:
         return progress
-    recovered = 0
-    for end, rec in completed.items():
-        attempt = int(rec.get('attempts') or 1)
-        try:
-            peaks = peaks_for_range(int(end), attempt)
-            if peaks:
-                for k, v in peaks.items():
-                    rec.setdefault(k, v)
-            if rec.get('txApply') is None:
-                # Not named `tx`: a source-text test in the suite matches the
-                # first `tx = tx_apply_for_range(` in this file and means the
-                # one in reconcile().
-                recovered_tx = tx_apply_for_range(int(end), attempt)
-                if recovered_tx is not None:
-                    rec['txApply'] = recovered_tx
-            if rec.get('seconds') is None:
-                secs = seconds_for_range(int(end), attempt)
-                if secs is not None:
-                    rec['seconds'] = secs
-        except (OSError, ValueError):
-            continue
-        if _has_peaks(rec):
-            recovered += 1
+    recovered = repair_completed_profiles(progress)
     logger.warning("progress.json was unreadable; recovered state from the ConfigMap "
-                   "mirror and re-read measurements for %d of %d completed ranges "
-                   "from .metrics on the volume", recovered, len(completed))
+                   "mirror and reconstructed measurements for %d of %d completed ranges "
+                   "from attempt artifacts on the volume", recovered, len(completed))
     return progress
 
 
@@ -1253,7 +1551,7 @@ def _oom_count(end, attempt):
     OOM. That inflation is fleet-wide and it is what exhausts the vCPU quota.
     """
     return sum(1 for n in range(1, int(attempt) + 1)
-               if (read_outcome(end, n) or {}).get('outcome') == 'oom')
+               if _verdict_of(end, n) == 'oom')
 
 
 def verdict_path(end, attempt):
@@ -1280,11 +1578,13 @@ def save_verdict(end, attempt, outcome):
 def _verdict_of(end, attempt):
     try:
         with open(verdict_path(end, attempt)) as fh:
-            return fh.read().strip() or None
+            verdict = fh.read().strip()
     except OSError:
         # Pre-fix runs, or an attempt whose verdict write lost the volume:
         # the pod-derived classification is the next best thing.
-        return (read_outcome(end, attempt) or {}).get('outcome')
+        outcome = (read_outcome(end, attempt) or {}).get('outcome')
+        return outcome if outcome in ATTEMPT_OUTCOMES else None
+    return verdict if verdict in ATTEMPT_OUTCOMES else None
 
 
 def _cause_count(end, attempt, causes):
@@ -1454,19 +1754,42 @@ def _resumed_chain(end, attempt):
 def _attempt_resumed(end, attempt):
     """Did this attempt pick up at LCL+1 rather than run new-db?
 
-    Recorded by the collector from the worker's own "RESUME: ..." line, which is
-    the only place that knows -- it depends on what was left on /data, not on
-    storage mode or attempt number.
+    Prefer the collector's marker, then recover it from the durable archive for
+    legacy files and pollers recreated after the early RESUME line.
     """
     try:
         with open(metrics_path(end, attempt)) as fh:
-            return bool(json.load(fh).get('resumed'))
-    except (OSError, ValueError):
+            if json.load(fh).get('resumed') is True:
+                return True
+    except FileNotFoundError:
+        pass
+    except ValueError as e:
+        logger.warning("could not parse resume metrics for range %s attempt %s: %s",
+                       end, attempt, e)
+    except OSError as e:
+        logger.warning("could not read resume metrics for range %s attempt %s: %s",
+                       end, attempt, e)
+    return _archive_resumed(end, attempt)
+
+
+def _archive_resumed(end, attempt):
+    """Read the exact worker resume decision from concatenated gzip members."""
+    path = log_path(end, attempt)
+    try:
+        with gzip.open(path, 'rt', errors='replace') as fh:
+            return any('RESUME: ' in line for line in fh)
+    except FileNotFoundError:
+        return False
+    except (EOFError, gzip.BadGzipFile, zlib.error) as e:
+        logger.warning("could not read resume decision from %s: %s", path, e)
+        return False
+    except OSError as e:
+        logger.warning("could not open resume archive %s: %s", path, e)
         return False
 
 
 def tx_apply_for_range(end, attempt=1, pod_name=None):
-    """Total 'ledger.transaction.apply' seconds for the whole range.
+    """Exact known 'ledger.transaction.apply' seconds for the whole range.
 
     Summed across the resumed chain, not read from the winning attempt alone.
     medida's total is per-process, so a pod that resumes at LCL+1 reports only
@@ -1484,8 +1807,12 @@ def tx_apply_for_range(end, attempt=1, pod_name=None):
         # fallbacks are offered to that one alone; earlier legs come from the
         # .metrics the collector already wrote.
         leg = _tx_apply_for_attempt(end, n, pod_name if n == int(attempt) else None)
-        if leg is not None:
-            total = leg if total is None else total + leg
+        if leg is None:
+            # A disrupted process often never prints its final medida block.
+            # Publishing the sum of surviving legs as a total silently
+            # under-reports; absence accurately says the chain is incomplete.
+            return None
+        total = leg if total is None else total + leg
     return total
 
 
@@ -1496,28 +1823,107 @@ def seconds_for_range(end, attempt=1, final=None):
     from the pod. Earlier legs come from their .outcome, written when the
     monitor classified the failure and still had the pod.
 
-    This is compute, not elapsed: the gaps between attempts -- scheduling, image
-    pull, a node coming up -- are not in it. wallSeconds covers those.
+    This is compute, not elapsed: scheduling, image pull, node startup and gaps
+    between attempts are not in it. wallSeconds is a separate winner-Job-only
+    diagnostic; whole-chain elapsed time was never persisted.
     """
     total = None
     for n in _resumed_chain(end, attempt):
-        if n == int(attempt):
+        if n == int(attempt) and final is not None:
             leg = final
         else:
-            # .outcome is authoritative -- the pod's own terminated timestamps.
-            # It is absent whenever the pod was reaped before the monitor could
-            # classify it, which is every spot eviction, so fall back to the
-            # collector's stream-lifetime figure rather than losing the leg.
-            leg = (read_outcome(end, n) or {}).get('attemptSeconds')
-            if leg is None:
-                try:
-                    with open(metrics_path(end, n)) as fh:
-                        leg = json.load(fh).get('attemptSeconds')
-                except (OSError, ValueError):
-                    leg = None
-        if leg is not None:
-            total = leg if total is None else total + leg
+            leg = _attempt_seconds(end, n)
+        if leg is None:
+            return None
+        total = leg if total is None else total + leg
     return total
+
+
+def _attempt_seconds(end, attempt):
+    """Best durable duration for one attempt, or None when it was never saved."""
+    # .outcome is authoritative -- the pod's own terminated timestamps. It is
+    # absent whenever the pod was reaped before the monitor could classify it,
+    # which is every spot eviction, so fall back to the collector's estimate.
+    leg = (read_outcome(end, attempt) or {}).get('attemptSeconds')
+    if leg is not None:
+        return leg
+    try:
+        with open(metrics_path(end, attempt)) as fh:
+            data = json.load(fh)
+        # A poller clock starts when that collector process attaches, so after a
+        # restart it is only a lower bound. Legacy files have no provenance and
+        # remain usable for best-effort reconstruction; new known estimates do
+        # not masquerade as complete chain compute.
+        if data.get('attemptSecondsExact') is False:
+            return None
+        return data.get('attemptSeconds')
+    except (OSError, ValueError):
+        return None
+
+
+def reconstruct_completed_profile(end, attempt):
+    """Recompute recoverable profile fields from immutable attempt artifacts.
+
+    Durations and tx-apply totals follow only the continuous resumed chain, so a
+    fresh retry never double-counts discarded work. Peaks use that chain plus
+    every attempt that hit a resource ceiling. Missing duration or tx-apply legs
+    make that aggregate absent rather than publishing a lower bound as a total.
+    Complete tx-apply legs retain the existing <=64-ledger overlap.
+
+    Reconstructable: persisted sampled peaks, complete attemptSeconds chains in
+    .outcome/.metrics, and complete txApplySeconds chains in .metrics/.log.gz.
+    Not reconstructable: whole-chain wall time, samples never persisted, or a
+    duration/tx-apply leg whose process and archive are both gone.
+    """
+    rebuilt = peaks_for_range(end, attempt)
+    seconds = seconds_for_range(end, attempt)
+    if seconds is not None:
+        rebuilt['seconds'] = seconds
+    tx_apply = tx_apply_for_range(end, attempt)
+    if tx_apply is not None:
+        rebuilt['txApply'] = tx_apply
+    return rebuilt
+
+
+def _apply_profile_reconstruction(record, rebuilt):
+    """Merge reconstruction without lowering stronger persisted evidence."""
+    updates = {}
+    for key, value in rebuilt.items():
+        current = record.get(key)
+        if current is None or value > current:
+            updates[key] = value
+    record.update(updates)
+    return updates
+
+
+def _repair_completed_profile(end, attempt, record):
+    """Merge exact reconstruction and remove unverifiable chain aggregates."""
+    rebuilt = reconstruct_completed_profile(end, attempt)
+    updates = _apply_profile_reconstruction(record, rebuilt)
+    if len(list(_resumed_chain(end, attempt))) > 1:
+        for key in ('seconds', 'txApply'):
+            if key not in rebuilt and record.get(key) is not None:
+                # Older code published the sum of whatever legs survived. Once
+                # resume proves this is a chain, that number is a lower bound,
+                # not a total; omission is the only honest repair.
+                record.pop(key)
+                updates[key] = None
+    return updates
+
+
+def repair_completed_profiles(progress):
+    """Apply artifact reconstruction to old completed records idempotently."""
+    repaired = 0
+    for end, record in (progress.get('completed') or {}).items():
+        try:
+            attempt = int(record.get('attempts') or 1)
+            updates = _repair_completed_profile(end, attempt, record)
+        except (TypeError, ValueError):
+            logger.warning("cannot reconstruct malformed completed record for range %s", end)
+            continue
+        if updates:
+            repaired += 1
+    return repaired
 
 
 def _tx_apply_for_attempt(end, attempt=1, pod_name=None):
@@ -2061,6 +2467,47 @@ def build_job(end, count, attempt, owner, mem=None, eph=None):
         data_vol = client.V1Volume(name='data', empty_dir=client.V1EmptyDirVolumeSource())
 
     env = [client.V1EnvVar(name='ASAN_OPTIONS', value=ASAN_OPTIONS)] if ASAN_OPTIONS else []
+    command = ['/bin/sh', '-c', script]
+    image_pull_policy = None
+    volumes = [data_vol, client.V1Volume(
+        name='config', config_map=client.V1ConfigMapVolumeSource(
+            name=f"{RUN_NAME}-stellar-core-config"))]
+    volume_mounts = [
+        client.V1VolumeMount(name='data', mount_path='/data'),
+        client.V1VolumeMount(name='config', mount_path='/config')]
+    if SYNTHETIC_WORKER_CONFIG_MAP:
+        command = ['python3', '/synthetic/worker.py']
+        image_pull_policy = SYNTHETIC_WORKER_IMAGE_PULL_POLICY
+        env = [
+            client.V1EnvVar(name='SYNTHETIC_ATTEMPT', value=str(attempt)),
+            client.V1EnvVar(name='SYNTHETIC_TARGET', value=str(end)),
+            client.V1EnvVar(name='SYNTHETIC_COUNT', value=str(count)),
+            client.V1EnvVar(name='SYNTHETIC_KEY', value=key),
+            client.V1EnvVar(name='SYNTHETIC_PREDECESSOR_SECONDS',
+                            value=SYNTHETIC_PREDECESSOR_SECONDS),
+            client.V1EnvVar(name='SYNTHETIC_SUCCESSOR_MINIMUM_SECONDS',
+                            value=SYNTHETIC_SUCCESSOR_MINIMUM_SECONDS),
+            client.V1EnvVar(name='SYNTHETIC_MAXIMUM_WAIT_SECONDS',
+                            value=SYNTHETIC_MAXIMUM_WAIT_SECONDS),
+            client.V1EnvVar(name='SYNTHETIC_PREDECESSOR_ANON_MIB',
+                            value=SYNTHETIC_PREDECESSOR_ANON_MIB),
+            client.V1EnvVar(name='SYNTHETIC_PREDECESSOR_WORKING_SET_MIB',
+                            value=SYNTHETIC_PREDECESSOR_WORKING_SET_MIB),
+            client.V1EnvVar(name='SYNTHETIC_SUCCESSOR_ANON_MIB',
+                            value=SYNTHETIC_SUCCESSOR_ANON_MIB),
+            client.V1EnvVar(name='SYNTHETIC_SUCCESSOR_WORKING_SET_MIB',
+                            value=SYNTHETIC_SUCCESSOR_WORKING_SET_MIB),
+            client.V1EnvVar(name='SYNTHETIC_PREDECESSOR_TX_APPLY_MS',
+                            value=SYNTHETIC_PREDECESSOR_TX_APPLY_MS),
+            client.V1EnvVar(name='SYNTHETIC_SUCCESSOR_TX_APPLY_MS',
+                            value=SYNTHETIC_SUCCESSOR_TX_APPLY_MS),
+        ]
+        volumes.append(client.V1Volume(
+            name='synthetic-worker',
+            config_map=client.V1ConfigMapVolumeSource(
+                name=SYNTHETIC_WORKER_CONFIG_MAP)))
+        volume_mounts.append(client.V1VolumeMount(
+            name='synthetic-worker', mount_path='/synthetic', read_only=True))
 
     # Require and avoid go in ONE matchExpressions list: expressions within a
     # term are ANDed, whereas separate terms are ORed and an avoid-only pod would
@@ -2090,10 +2537,10 @@ def build_job(end, count, attempt, owner, mem=None, eph=None):
 
     container = client.V1Container(
         name='stellar-core', image=CORE_IMAGE,
-        command=['/bin/sh', '-c', script], env=env, resources=_resources(mem, eph, end),
+        image_pull_policy=image_pull_policy,
+        command=command, env=env, resources=_resources(mem, eph, end),
         ports=[client.V1ContainerPort(container_port=11626, name='http')],
-        volume_mounts=[client.V1VolumeMount(name='data', mount_path='/data'),
-                       client.V1VolumeMount(name='config', mount_path='/config')])
+        volume_mounts=volume_mounts)
 
     return client.V1Job(
         metadata=client.V1ObjectMeta(
@@ -2148,51 +2595,157 @@ def build_job(end, count, attempt, owner, mem=None, eph=None):
                     termination_grace_period_seconds=WORKER_GRACE_SECONDS,
                     affinity=affinity, tolerations=tolerations,
                     containers=[container],
-                    volumes=[data_vol, client.V1Volume(
-                        name='config', config_map=client.V1ConfigMapVolumeSource(
-                            name=f"{RUN_NAME}-stellar-core-config"))]))))
+                    volumes=volumes))))
 
 
 # --- reconcile --------------------------------------------------------------
 
-def sync_counters(progress, counted):
+_ATTEMPT_FILE = re.compile(
+    r'^range-(?P<end>\d+)-a(?P<attempt>[1-9]\d*)\.'
+    r'(?:verdict|outcome|state|metrics|done|log\.gz)$')
+
+
+def _retry_counter_totals(progress, current_attempts=()):
+    """Reconstruct retry metrics from durable records and observed attempts.
+
+    A verdict says why an attempt ended; it does not say a retry was dispatched.
+    Attempt N therefore contributes to retry totals only when attempt N+1 is
+    evidenced by progress, a persisted per-attempt file, or the current Job
+    snapshot. The latter makes a newly-created successor visible before its range
+    completes, while the durable sources rebuild the same truth after restart.
+    """
+    try:
+        names = os.listdir(LOG_DIR)
+    except OSError:
+        names = []
+
+    max_attempt = {}
+    terminal = set()
+
+    def remember(end, attempt):
+        try:
+            attempt = int(attempt)
+        except (TypeError, ValueError):
+            return
+        if attempt < 1:
+            return
+        end = str(end)
+        max_attempt[end] = max(max_attempt.get(end, 0), attempt)
+
+    if isinstance(progress, dict):
+        for bucket in ('completed', 'failed'):
+            records = progress.get(bucket)
+            if not isinstance(records, dict):
+                continue
+            for end, record in records.items():
+                if not isinstance(record, dict):
+                    continue
+                try:
+                    attempt = int(record.get('attempts', 1))
+                except (TypeError, ValueError):
+                    continue
+                if attempt < 1:
+                    continue
+                remember(end, attempt)
+                terminal.add((str(end), attempt))
+
+    for item in current_attempts:
+        try:
+            end, attempt = item
+        except (TypeError, ValueError):
+            continue
+        remember(end, attempt)
+
+    verdict_files = set()
+    outcome_files = set()
+    for name in names:
+        match = _ATTEMPT_FILE.match(name)
+        if not match:
+            continue
+        key = (match.group('end'), int(match.group('attempt')))
+        remember(*key)
+        if name.endswith('.verdict'):
+            verdict_files.add(key)
+        elif name.endswith('.outcome'):
+            outcome_files.add(key)
+
+    effective = {}
+    for end, attempt in verdict_files:
+        try:
+            with open(verdict_path(end, attempt)) as fh:
+                verdict = fh.read().strip()
+        except OSError:
+            continue
+        if verdict in ATTEMPT_OUTCOMES:
+            effective[(end, attempt)] = verdict
+
+    # .outcome predates .verdict. It is safe only for a completed attempt chain:
+    # a current collector outcome can still be superseded by reconcile's
+    # effective verdict (notably failed -> timeout). Presence of any verdict file,
+    # even a malformed one, means this is not a legacy attempt and must never
+    # fall back to the less-authoritative classification.
+    for end, attempt in outcome_files - verdict_files:
+        if attempt >= max_attempt.get(end, 0) and (end, attempt) not in terminal:
+            continue
+        try:
+            with open(outcome_path(end, attempt)) as fh:
+                record = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        outcome = record.get('outcome') if isinstance(record, dict) else None
+        if outcome in ATTEMPT_OUTCOMES:
+            effective[(end, attempt)] = outcome
+
+    retries = sum(max(0, attempt - 1) for attempt in max_attempt.values())
+    reasons = {reason: 0 for reason in ATTEMPT_OUTCOMES}
+    for (end, attempt), reason in effective.items():
+        if attempt < max_attempt.get(end, 0):
+            reasons[reason] += 1
+    disruption_retried_ranges = {
+        end for (end, attempt), reason in effective.items()
+        if reason == 'disrupted' and attempt < max_attempt.get(end, 0)
+    }
+
+    return {
+        'retries': retries,
+        'evicted': sum(1 for verdict in effective.values() if verdict == 'disrupted'),
+        'spot_disruption_retried': len(disruption_retried_ranges),
+        'oom': reasons['oom'],
+        'ephemeral': reasons['ephemeral'],
+        'reasons': reasons,
+    }
+
+
+def sync_counters(progress, counted, current_attempts=()):
     """Drive the counters from persisted state instead of from events.
 
     Two reasons not to .inc() as things happen:
 
     * a terminally-failed range stays the newest Job for its range, so an
       event-driven inc fires again on every reconcile until teardown
-    * the process resets to zero on restart, while the underlying record
-      (attempts in the progress ConfigMap, .outcome files on the PVC) survives
+    * the process resets to zero on restart, while verdicts and attempt state on
+      the PVC survive
 
     Computing the true total and incrementing by the delta is monotonic,
     idempotent, and self-heals after a restart: the counter starts at 0 and the
     first sync walks it up to the recorded total.
     """
-    retries = 0
-    for rec in list(progress.get('completed', {}).values()) + list(progress.get('failed', {}).values()):
-        retries += max(0, int(rec.get('attempts', 1)) - 1)
-
-    oom = evicted = 0
-    try:
-        for name in os.listdir(LOG_DIR):
-            if not name.endswith('.outcome'):
-                continue
-            try:
-                with open(os.path.join(LOG_DIR, name)) as fh:
-                    o = json.load(fh).get('outcome')
-            except (OSError, ValueError):
-                continue
-            if o == 'oom':
-                oom += 1
-            elif o == 'disrupted':
-                evicted += 1
-    except OSError:
-        pass
-
-    for key, total, metric in (('retries', retries, metric_retries),
-                               ('oom', oom, metric_oom_retries),
-                               ('evicted', evicted, metric_evictions)):
+    totals = _retry_counter_totals(progress, current_attempts)
+    for key, total, metric in (('retries', totals['retries'], metric_retries),
+                               ('oom', totals['oom'], metric_oom_retries),
+                               ('ephemeral', totals['ephemeral'], metric_eph_retries),
+                               ('evicted', totals['evicted'], metric_evictions),
+                               ('spot_disruption_retried',
+                                totals['spot_disruption_retried'],
+                                metric_spot_disruption_retried)):
+        delta = total - counted.get(key, 0)
+        if delta > 0:
+            metric.inc(delta)
+            counted[key] = total
+    for reason in ATTEMPT_OUTCOMES:
+        metric = metric_retry_reasons.labels(reason=reason)
+        key = ('reason', reason)
+        total = totals['reasons'][reason]
         delta = total - counted.get(key, 0)
         if delta > 0:
             metric.inc(delta)
@@ -2249,20 +2802,33 @@ def reconcile(state):
     progress = load_progress()
     completed = progress.setdefault('completed', {})
     failed = progress.setdefault('failed', {})
+    # One pass per monitor process repairs records completed by an older build,
+    # including Jobs that were already reaped and therefore never enter the live
+    # completion branch below. Attempt artifacts are immutable after .done, and
+    # current completions still use the same helpers directly.
+    if not state.get('completed_profiles_reconstructed'):
+        repaired = repair_completed_profiles(progress)
+        state['completed_profiles_reconstructed'] = True
+        if repaired:
+            save_progress(progress)
+            logger.info("reconstructed profile fields for %d completed ranges", repaired)
 
     jobs = batch_v1.list_namespaced_job(
         NAMESPACE, label_selector=f"{LABEL_RUN}={RUN_NAME}").items
     job_pods = pods_by_job()
 
     live = {}           # range-end -> (attempt, job)
+    current_attempts = set()
     for j in jobs:
         end = (j.metadata.labels or {}).get(LABEL_RANGE)
         attempt = int((j.metadata.labels or {}).get(LABEL_ATTEMPT, 1))
+        current_attempts.add((str(end), attempt))
         prev = live.get(end)
         if prev is None or attempt >= prev[0]:
             live[end] = (attempt, j)
 
     in_progress = []
+    finalizing = []
     # The same set of ranges as `in_progress`, keyed by end. `remaining` is a
     # COUNT over this run's range list, never `total - completed - ...`: the
     # progress record is read off a shared volume and can carry ends from a run
@@ -2294,11 +2860,20 @@ def reconcile(state):
                 if st.start_time and st.completion_time:
                     wall = (st.completion_time - st.start_time).total_seconds()
                 # Chain total, not this leg alone: a range that resumed spent
-                # real time in the attempts before the winner. Falls back to the
-                # single leg, then to wall, when nothing durable survived.
-                seconds = seconds_for_range(end, attempt, seconds) or seconds
-                if seconds is None:
-                    seconds = wall   # pod already gone; wall is the only figure left
+                # real time in the attempts before the winner. Only a fresh
+                # single-attempt range may fall back to its winner or Job wall;
+                # a resumed chain with a missing leg stays absent.
+                chain = list(_resumed_chain(end, attempt))
+                chain_seconds = seconds_for_range(end, attempt, seconds)
+                # For a fresh single attempt, the winner or Job wall is still a
+                # useful fallback. For a resumed chain, either every compute leg
+                # is known or the aggregate is absent -- never winner-only.
+                if chain_seconds is not None:
+                    seconds = chain_seconds
+                elif len(chain) == 1:
+                    seconds = seconds if seconds is not None else wall
+                else:
+                    seconds = None
                 # Not gated on `pod`: the collector's .metrics/.log.gz are
                 # written from the live stream and outlive the pod, so a reaped
                 # node must not cost us the metric.
@@ -2320,30 +2895,15 @@ def reconcile(state):
                 # Durably recorded first: the record is what makes the volume
                 # and the Job disposable, so it must land before either goes.
                 save_progress(progress)
-            elif (not _has_peaks(completed[end])
-                  or completed[end].get('txApply') is None
-                  or not _attempt_finalized(end, attempt)):
+            else:
                 # Backfill. The record is written the moment the Job flips to
                 # succeeded, which is usually before the collector has finalized
-                # -- and peaks_for_range has no fallback, unlike tx_apply, which
-                # reads the archive. Measured on ssc-test: 356 of 356 completed
-                # ranges carried txApply and 0 carried peakAnonBytes, while 1936
-                # .metrics files on the same volume held it. Retry while the Job
-                # is still here; delete_job below is what ends the chances.
-                late = peaks_for_range(end, attempt)
-                if completed[end].get('txApply') is None:
-                    # Same one-shot race as the peaks, and the same fix. The
-                    # collector writes txApplySeconds into .metrics when it
-                    # finalizes, which can land after reconcile recorded the
-                    # range. Measured in the sandbox edge suite 2026-07-30:
-                    # progress.json carried txApply=null while the durable
-                    # .metrics file held txApplySeconds=0.000486848.
-                    late_tx = tx_apply_for_range(end, attempt)
-                    if late_tx is not None:
-                        late = dict(late or {})
-                        late['txApply'] = late_tx
+                # -- and the final write can add peaks, txApplySeconds,
+                # attemptSeconds, and the resume marker together. Reconstruct the
+                # same profile used on first completion, not a field-by-field
+                # subset that can leave a pre-marker record permanently short.
+                late = _repair_completed_profile(end, attempt, completed[end])
                 if late:
-                    completed[end].update(late)
                     save_progress(progress)
                     logger.info("range %s: measurements arrived late, backfilled %s",
                                 end, sorted(late))
@@ -2361,6 +2921,12 @@ def reconcile(state):
             # (and its pod, the last place the metric can be read) regardless.
             release_pvc(end)
             _reap_if_complete(end, attempt, completed[end])
+            if not _attempt_finalized(end, attempt):
+                # The mission driver writes the final profile as soon as
+                # jobs_in_progress becomes empty. Keep normal completion open
+                # until the collector's last atomic metrics write has landed;
+                # this does not consume dispatch capacity below.
+                finalizing.append(job_key(int(end), by_end.get(end, 0)))
         elif st.failed:
             # Completion is terminal for the range, so a Failed Job for a range
             # that is already recorded is garbage -- never an input to the retry
@@ -2524,7 +3090,6 @@ def reconcile(state):
                         "memory limit %s -- RAISE THE CONFIGURED MEMORY LIMIT, this run is only "
                         "surviving by escalating at runtime", end, attempt, MAX_ATTEMPTS_PER_RANGE, retry_mem)
                 elif verdict['outcome'] == 'ephemeral':
-                    metric_eph_retries.inc()
                     logger.error(
                         "!!! DISK RETRY !!! range %s %s on attempt %d/%d; retrying with "
                         "ephemeral-storage %s -- RAISE THE CONFIGURED EPHEMERAL STORAGE, this "
@@ -2539,6 +3104,7 @@ def reconcile(state):
                 except ApiException as e:
                     if e.status != 409:
                         raise
+                current_attempts.add((str(end), attempt + 1))
                 # After the successor exists, never before. If the create above
                 # had failed with the predecessor already gone, the range would
                 # have no live Job at all and the next pass would redispatch it
@@ -2614,6 +3180,7 @@ def reconcile(state):
         try:
             batch_v1.create_namespaced_job(NAMESPACE, build_job(
                 end, count, 1, state['owner']))
+            current_attempts.add((str(end), 1))
             created += 1
             capacity -= 1
             in_progress.append(job_key(end, count))
@@ -2621,6 +3188,7 @@ def reconcile(state):
         except ApiException as e:
             if e.status != 409:   # AlreadyExists: name uniqueness is the mutex
                 raise
+            current_attempts.add((str(end), 1))
             # Losing the mutex means the Job EXISTS and is in flight, so it
             # occupies a slot exactly like one we created. Falling through
             # without spending capacity dispatched PARALLELISM+1 workers --
@@ -2631,13 +3199,14 @@ def reconcile(state):
             in_flight.add(str(end))
 
     observe_recorded(progress, state['replayed'])
-    sync_counters(progress, state['counted'])
+    sync_counters(progress, state['counted'], current_attempts)
     return {
         'total': len(ranges),
         'completed': len(completed),
         'failed_ranges': [f"{job_key(int(k), by_end.get(k, 0))}|{v.get('pod', '')}"
                           for k, v in failed.items()],
         'in_progress': in_progress,
+        'finalizing': finalizing,
         'created': created,
         'remaining': sum(1 for end, _ in ranges
                          if str(end) not in completed
@@ -2704,21 +3273,23 @@ def update_status_and_metrics():
 
             mission_duration = time.time() - mission_start_time
             with status_lock:
+                visible_in_progress = r['in_progress'] + r['finalizing']
                 status = {
                     'num_remain': r['remaining'],
                     'queue_remain_count': r['remaining'],
                     'queue_succeeded_count': r['completed'],
                     'queue_failed_count': len(r['failed_ranges']),
-                    'queue_in_progress_count': len(r['in_progress']),
+                    'queue_in_progress_count': len(visible_in_progress),
                     'jobs_failed': r['failed_ranges'],
-                    'jobs_in_progress': r['in_progress'],
+                    'jobs_in_progress': visible_in_progress,
                     'workers_refresh_duration': workers_refresh_duration,
                     'mission_duration': mission_duration,
                 }
             metric_catchup_queues.labels(queue="remain").set(r['remaining'])
             metric_catchup_queues.labels(queue="succeeded").set(r['completed'])
             metric_catchup_queues.labels(queue="failed").set(len(r['failed_ranges']))
-            metric_catchup_queues.labels(queue="in_progress").set(len(r['in_progress']))
+            metric_catchup_queues.labels(queue="in_progress").set(
+                len(visible_in_progress))
             metric_workers.labels(status="up").set(worker_counts['up'])
             metric_workers.labels(status="down").set(worker_counts['down'])
             metric_workers.labels(status="unknown").set(worker_counts['unknown'])
@@ -2727,7 +3298,8 @@ def update_status_and_metrics():
             logger.info("Status: %s", json.dumps(status))
             # Publish on change only -- a 10h run would otherwise issue ~3600
             # no-op ConfigMap writes.
-            counts = (r['remaining'], r['completed'], len(r['failed_ranges']), len(r['in_progress']))
+            counts = (r['remaining'], r['completed'], len(r['failed_ranges']),
+                      len(visible_in_progress))
             if counts != state.get('last_counts'):
                 state['last_counts'] = counts
                 with status_lock:

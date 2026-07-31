@@ -14,6 +14,7 @@ matched the wrong block twice and had to be re-anchored by hand.
 """
 
 import asyncio
+import os
 
 import pytest
 
@@ -249,6 +250,8 @@ def test_a_stream_that_will_not_finish_is_cancelled_after_the_grace(loop_env):
     alive = asyncio.run(_drive(loop, extra=3, want_survivors=True))
 
     assert alive == [], "a wedged stream outlived its grace and held its slot"
+    assert os.path.exists(lc.done_path('300', '1')), \
+        "forced cancellation skipped finalization and never licensed cleanup"
 
 
 def test_the_grace_is_more_than_one_cycle():

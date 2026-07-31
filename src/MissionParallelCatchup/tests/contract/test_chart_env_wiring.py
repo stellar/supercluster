@@ -33,6 +33,7 @@ DEBUG_ONLY = {'LOGGING_LEVEL', 'WATCH_STALE_SECONDS', 'CONNECTION_POOL',
 # by no template at all -- absent from here, that stays invisible.
 FULL = (
     'monitor.profileConfigMap=p',
+    'integration.syntheticWorker.enabled=true',
     'worker.requireNodeLabels[0].key=purpose',
     'worker.requireNodeLabels[0].operator=In',
     'worker.requireNodeLabels[0].values[0]=catchup8-spot',
@@ -58,6 +59,19 @@ def test_every_env_the_monitor_reads_is_set_on_the_monitor_container():
 def test_every_env_the_collector_reads_is_set_on_the_collector_container():
     missing = _missing(art.COLLECTOR_CONTAINER, lc)
     assert not missing, f"the collector reads {missing} but the chart never sets them"
+
+
+def test_liveness_sampler_settings_reach_only_the_monitor():
+    monitor = art.env_of(art.containers()[art.MONITOR_CONTAINER])
+    collector = art.env_of(art.containers()[art.COLLECTOR_CONTAINER])
+    expected = {
+        'LIVENESS_PROBE_INTERVAL_SECONDS': '30',
+        'LIVENESS_PROBE_TIMEOUT_SECONDS': '5',
+        'LIVENESS_FAILURE_THRESHOLD': '3',
+        'LIVENESS_MAX_CONCURRENCY': '32',
+    }
+    assert {name: monitor.get(name) for name in expected} == expected
+    assert not set(expected) & set(collector)
 
 
 def test_the_node_targeting_the_mission_sends_reaches_the_monitor():

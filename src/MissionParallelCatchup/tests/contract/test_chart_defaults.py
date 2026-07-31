@@ -133,6 +133,11 @@ def test_the_chart_value_is_the_code_default():
         + "\n  ".join(drift))
 
 
+def test_the_chart_enables_a_twelve_hour_attempt_backstop():
+    env = art.env_of(art.containers()[art.MONITOR_CONTAINER])
+    assert env['ATTEMPT_DEADLINE_SECONDS'] == '43200'
+
+
 def test_each_deliberate_divergence_is_still_a_real_env_var():
     """Keeps the allowlist above honest.
 
@@ -191,6 +196,7 @@ def test_the_sizing_headroom_is_a_real_allowance_in_both_places():
     headroom = jm._quantity_bytes(code['PROFILE_CACHE_HEADROOM'])
     assert headroom >= 256 * 1024 ** 2, (
         f"{code['PROFILE_CACHE_HEADROOM']} of fixed headroom is what OOMed 90 small ranges")
+    assert code['PROFILE_RUNTIME_MEMORY_INSURANCE'] == '3Gi'
     # ...and the ceiling has to sit above the configured request, or a range
     # measured above it can never ask for what it actually uses and will pack as
     # though it were small.
