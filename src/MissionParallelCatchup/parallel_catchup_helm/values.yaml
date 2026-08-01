@@ -7,6 +7,12 @@ redis:
   progress_queue: "in_progress"
   metrics: "metrics"
   job_owners: "job_owners"
+  # Reverse of job_owners: which range each pod is currently holding. A worker
+  # that restarts reads its own entry to discover the range it abandoned.
+  worker_current: "worker_current"
+  # Per-range recovery tally, so a range that reliably kills its worker is
+  # failed rather than retried forever (stellar/supercluster#334).
+  attempts: "attempts"
   resources:
     requests:
       cpu: "100m"
@@ -34,6 +40,11 @@ worker:
     "curl -sf http://history.stellar.org/prd/core-live/core_live_002/{0} -o {1}"
   historyGetCommandCore003:
     "curl -sf http://history.stellar.org/prd/core-live/core_live_003/{0} -o {1}"
+
+recovery:
+  # How many times a range may be orphaned by a dying worker and handed back to
+  # the queue before it is failed instead.
+  max_attempts: 3
 
 monitor:
   gateway_name: "traefik-gateway-private"
