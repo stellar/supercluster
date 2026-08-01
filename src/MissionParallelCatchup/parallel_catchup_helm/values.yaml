@@ -108,10 +108,15 @@ monitor:
   # against ~1.13 of unthrottled demand -- and the top band sets the makespan,
   # so throttling it is the one place the ladder costs wall-clock.
   #
-  # Nodes are memory-bound at ~7 workers each, so cpu sat 54% idle; this spends
-  # that headroom rather than adding nodes. Modelled first-wave average moves
-  # 0.62 -> 0.92 cores, still under the ~1.13 where cpu would start to bind.
-  profileCpuTiers: "50:0.5,85:0.75,95:1.0,98:1.25,99:1.5,99.5:1.75,100:2.0"
+  # Widened again 2026-08-01 after the 2048-worker run measured a clean
+  # monotonic dose-response across all seven bands -- actual/profiled runtime
+  # 1.23x at 0.5 cores, 1.00x at 0.75, 0.81x at 1.0, 0.72x at 1.25, 0.71x at
+  # 1.5, 0.67x at 1.75, 0.63x at 2.0 over 3984 completed ranges. Every step up
+  # bought speed, and the run finished in 4.15h against r5's 7.5h because the
+  # long ranges are the ones that got faster. The top bands are not idle cpu:
+  # a 2.0 request lands ~3 co-tenants per node instead of 8-14, and ranges on
+  # uncrowded nodes measured 1.80 vs 1.34 ledgers/s.
+  profileCpuTiers: "50:0.5,80:0.75,92:1.0,97:1.25,98.5:1.5,99.25:2.0,99.7:2.5,100:3.0"
   profileMargin: 1.15
   # No margin on cpu: it is compressible, so under-requesting costs contention
   # Ceiling for profile-derived memory. Above the configured worker limit on
