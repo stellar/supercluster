@@ -2,10 +2,12 @@
 // under the Apache License, Version 2.0. See the COPYING file at the root
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
-// This mission tests the EXPERIMENTAL_TRIGGER_TIMER feature with a mix of
-// nodes that have it enabled vs disabled, under configurable clock drift
-// distributions. It uses generated pubnet topologies (--pubnet-data) and
-// overlays trigger timer and clock offset settings onto the CoreSets.
+// This mission tests the protocol-28 consensus-close-time trigger timer with a
+// mix of nodes running it vs nodes forced back onto the older prepare-start
+// timer via FORCE_OLD_STYLE_PREPARE_START_TRIGGER_TIMER, under configurable
+// clock drift distributions. It uses generated pubnet topologies
+// (--pubnet-data) and overlays trigger timer and clock offset settings onto the
+// CoreSets.
 //
 // Load is always generated in the same MIXED_PREGEN_* (classic + synthetic
 // Soroban) mode as MissionMinBlockTimeMixed, with the same node resources,
@@ -14,7 +16,7 @@
 // load pass at a fixed block time and check consensus stays healthy.
 //
 // CLI parameters:
-//   --trigger-timer-flag-pct N        percentage of nodes with the flag (0-100, default 100)
+//   --force-old-style-trigger-timer-pct N  percentage of nodes forced onto the old timer (0-100, default 0)
 //   --drift-pct N                     percentage of nodes that drift (0-100, default 0)
 //   --uniform-drift=lower,upper       uniform random drift in [lower,upper] signed ms (e.g. -2000,+2000)
 //   --bimodal-drift=m1,M1,m2,M2      first half in [m1,M1], second half in [m2,M2] signed ms
@@ -59,15 +61,15 @@ let private driftSuffix (ms: int) =
 // than 63 chars (it appends an 11-char nonce of its own; see StellarCoreSet.fs).
 // With a 16-char run nonce plus the "-sts-"/"-N" scaffolding, the CoreSet name
 // itself only has ~29 chars of headroom. Real pubnet home-domain names (e.g.
-// "blockdaemon-non-tier1") plus our "-expr"/drift annotations overflow that, so
+// "blockdaemon-non-tier1") plus our "-old"/drift annotations overflow that, so
 // we cap the name length here.
 let private maxCoreSetNameLen = 26
 
 // Build an annotated CoreSet name: "<home-domain>-<idx><flag><drift>". The
 // globally-unique idx guarantees the name stays distinct even after the
 // descriptive home-domain prefix is truncated to fit the pod-name budget.
-let private annotateName (baseName: string) (idx: int) (flagEnabled: bool) (offsetMs: int) =
-    let flagPart = if flagEnabled then "-expr" else ""
+let private annotateName (baseName: string) (idx: int) (forceOldTimer: bool) (offsetMs: int) =
+    let flagPart = if forceOldTimer then "-old" else ""
     let suffix = sprintf "-%d%s%s" idx flagPart (driftSuffix offsetMs)
     let budget = maxCoreSetNameLen - suffix.Length
 
@@ -113,16 +115,16 @@ let private parseDrift (context: MissionContext) : ClockDriftDistribution =
 let triggerTimerMixConsensus (baseContext: MissionContext) =
     // This mission assigns the trigger timer per node; a blanket setting for
     // all nodes would defeat its purpose.
-    if baseContext.enableTriggerTimer.IsSome then
+    if baseContext.forceOldStyleTriggerTimer.IsSome then
         failwith
-            "--enable-trigger-timer is not supported by TriggerTimerMixConsensus; use --trigger-timer-flag-pct instead"
+            "--force-old-style-trigger-timer is not supported by TriggerTimerMixConsensus; use --force-old-style-trigger-timer-pct instead"
 
     let drift = parseDrift baseContext
-    let flagPct = baseContext.triggerTimerFlagPct
+    let forceOldPct = baseContext.forceOldStyleTriggerTimerPct
     let driftPct = baseContext.driftPct
 
-    if flagPct < 0 || flagPct > 100 then
-        failwith (sprintf "trigger-timer-flag-pct must be 0-100, got %d" flagPct)
+    if forceOldPct < 0 || forceOldPct > 100 then
+        failwith (sprintf "force-old-style-trigger-timer-pct must be 0-100, got %d" forceOldPct)
 
     if driftPct < 0 || driftPct > 100 then
         failwith (sprintf "drift-pct must be 0-100, got %d" driftPct)
@@ -204,21 +206,22 @@ let triggerTimerMixConsensus (baseContext: MissionContext) =
     let totalNodes = List.sumBy (fun (cs: CoreSet) -> cs.options.nodeCount) baseCoreSets
 
     LogInfo
-        "TriggerTimerMixConsensus: %d total nodes, flag-pct=%d%%, drift-pct=%d%%, mode=%s, classic-tps=%d, soroban-tps=%d, block-time=%dms"
+        "TriggerTimerMixConsensus: %d total nodes, force-old-timer-pct=%d%%, drift-pct=%d%%, mode=%s, classic-tps=%d, soroban-tps=%d, block-time=%dms"
         totalNodes
-        flagPct
+        forceOldPct
         driftPct
         (mode.ToString())
         classicTxRate
         sorobanTxRate
         targetMs
 
-    // Each node independently has a flagPct% chance of having the trigger
-    // timer flag enabled, and a driftPct% chance of drifting. When drifting,
-    // bimodal nodes have a 50/50 chance of being in the first or second group.
+    // Each node independently has a forceOldPct% chance of being forced onto
+    // the old prepare-start trigger timer, and a driftPct% chance of drifting.
+    // When drifting, bimodal nodes have a 50/50 chance of being in the first or
+    // second group.
     let rng = System.Random(context.randomSeed)
 
-    let sampleFlag () = rng.Next(100) < flagPct
+    let sampleForceOldTimer () = rng.Next(100) < forceOldPct
 
     let sampleOffset () =
         match drift with
@@ -240,14 +243,18 @@ let triggerTimerMixConsensus (baseContext: MissionContext) =
                 let nc = cs.options.nodeCount
 
                 [ for j in 0 .. nc - 1 do
-                      let flagEnabled = sampleFlag ()
+                      let forceOldTimer = sampleForceOldTimer ()
                       let offset = sampleOffset ()
                       let idx = nodeIdx
                       nodeIdx <- nodeIdx + 1
 
-                      let annotatedName = annotateName cs.name.StringName idx flagEnabled offset
+                      let annotatedName = annotateName cs.name.StringName idx forceOldTimer offset
 
-                      LogInfo "  Node %s: trigger_timer=%b, offset=%d" annotatedName.StringName flagEnabled offset
+                      LogInfo
+                          "  Node %s: force_old_trigger_timer=%b, offset=%d"
+                          annotatedName.StringName
+                          forceOldTimer
+                          offset
 
                       { cs with
                             name = annotatedName
@@ -256,7 +263,7 @@ let triggerTimerMixConsensus (baseContext: MissionContext) =
                                 { cs.options with
                                       nodeCount = 1
                                       nodeLocs = cs.options.nodeLocs |> Option.map (fun locs -> [ locs.[j] ])
-                                      experimentalTriggerTimer = if flagEnabled then Some true else None
+                                      forceOldStyleTriggerTimer = if forceOldTimer then Some true else None
                                       clockOffsets = if offset <> 0 then Some [ offset ] else None } } ])
 
     let tier1 = List.filter (fun (cs: CoreSet) -> cs.options.tier1 = Some true) modifiedCoreSets

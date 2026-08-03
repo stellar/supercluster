@@ -220,7 +220,7 @@ type CoreSetOptions =
       maxBatchWriteCount: int
       emitMeta: bool
       addArtificialDelayUsec: int option
-      experimentalTriggerTimer: bool option
+      forceOldStyleTriggerTimer: bool option
       clockOffsets: int list option
       surveyPhaseDuration: int option
       updateSorobanCosts: bool option
@@ -263,7 +263,7 @@ type CoreSetOptions =
           maxBatchWriteCount = 1024
           emitMeta = false
           addArtificialDelayUsec = None
-          experimentalTriggerTimer = None
+          forceOldStyleTriggerTimer = None
           clockOffsets = None
           surveyPhaseDuration = None
           updateSorobanCosts = None
