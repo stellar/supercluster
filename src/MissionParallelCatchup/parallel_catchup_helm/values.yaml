@@ -14,7 +14,9 @@ worker:
   # volume lifecycles for no measurable cost and no CSI throttling. Reuse only
   # bought bookkeeping, plus pinning every later range to the AZ the slot's
   # first volume happened to land in.
-  storageSize: "40Gi"
+  # 60Gi to match the tier nodes' ephemeral allowance: peakEphemeralBytes tops
+  # out at 37.8Gi across the whole profile, so this covers 100% with headroom.
+  storageSize: "60Gi"
   # Cap on PVC-mounting workers per node, enforced with a topologySpread
   # minDomains floor. A Nitro node allows ~26 EBS attachments and Karpenter does
   # not size nodes for attachment capacity. Inert at realistic density (1800m
@@ -72,16 +74,20 @@ range:
 monitor:
   # Reuses the existing hand-built job-monitor image slot -- no new image and no
   # new push path (nothing in .github/workflows builds these).
-  image: "stellar/ssc-job-monitor:latest"
+  #
+  # TEMPORARY dev pin, 2026-08-07: stellar/ssc-job-monitor:latest predates the
+  # apps/+lib/ split, ATTEMPT_BUDGETS and per-cause budget counting, so running
+  # this chart against it ships env vars the image cannot read. Built from this
+  # branch and pinned by tag rather than :latest so a run is always traceable to
+  # one image. Revert to the stellar/ repo once there is a push path for it.
+  image: "stellajuna/ssc-jm:2026-08-07b"
   # Dev loop: run the monitor and collector from a ConfigMap holding
   # job_monitor.py and log_collector.py instead of a built image. Set it to the
   # ConfigMap name and point monitor.image at a plain python base; the deps the
   # Dockerfile bakes get pip-installed at start. Empty = use the image as built.
   sourceConfigMap: ""
   # Source-mode development normally installs dependencies at container start.
-  # Disable only when the selected image already contains them, for example in
-  # the opt-in synthetic integration harness where external package access is
-  # intentionally avoided.
+  # Disable only when the selected image already contains them.
   sourceInstallDependencies: true
   # Range profile from an earlier run, as a ConfigMap holding profile.json.
   # The mission driver resolves --pubnet-parallel-catchup-profile (a local
@@ -116,13 +122,237 @@ monitor:
   # long ranges are the ones that got faster. The top bands are not idle cpu:
   # a 2.0 request lands ~3 co-tenants per node instead of 8-14, and ranges on
   # uncrowded nodes measured 1.80 vs 1.34 ledgers/s.
-  profileCpuTiers: "50:0.5,80:0.75,92:1.0,97:1.25,98.5:1.5,99.25:2.0,99.7:2.5,100:3.0"
+  #
+  # Reshaped 2026-08-01 after watching the first wave of the 1224-worker run.
+  # Uniformly raising every band was the wrong move: it reserved cpu without
+  # changing what a long range is actually delivered. With cpu limits removed a
+  # saturated node splits its spare cpu by weight, so when a node holds nothing
+  # but long ranges -- which is exactly what longest-first produces -- they all
+  # get roughly allocatable/co-tenants regardless of what they asked for.
+  # Measured live: nodes 94% cpu-reserved, longest-100 ranges with 4.0
+  # co-tenants each, so ~1.81 vCPU delivered against much larger requests.
+  #
+  # Replaced 2026-08-01 with a continuous ramp rather than a few wide steps, so
+  # a range's request tracks its runtime instead of jumping at a band edge.
+  # Three segments, keyed on the range's runtime percentile:
+  #
+  #   p75..p100  1.5 -> 3.5   the longest quarter, sampled every 2-3 points
+  #   p50..p75   1.0 -> 1.5
+  #   p0..p50    0.5 -> 1.0
+  #
+  # 22 bands, none spanning more than 0.24 vCPU, so the granularity is in the
+  # ladder rather than in how the wave happens to land on it.
+  #
+  # Parallelism is coupled to this and cannot be chosen separately. With
+  # longest-first the wave is the top of the ramp, so the mean request is ~3.0
+  # rather than the ~1.3 a flat ladder gives, and the fleet grows in proportion:
+  # 448 workers is what fits the 2304 vCPU spot quota at 87%. See
+  # scratchpad/granular-ladder.py for the sweep.
+    # Rebuilt 2026-08-01 around ledgers/sec rather than percentile shape, after
+  # the 448-worker run showed the ramp was right but the parallelism was not:
+  # it finished the longest quarter at 0.47x profiled, then spent hours draining
+  # 3536 short ranges through too few slots (projected 6.55h, work-bound).
+  #
+  # With cpu limits removed a pod is delivered request * (allocatable / sum of
+  # requests on its node), so density feeds straight back into ledgers/sec. A
+  # flat coarse ladder at 1.30-1.80 packs 4-5 per node and drops the dense
+  # ranges to 1.8 LPS -- 22% of the first wave under 3. So the top stays tall
+  # for the ranges whose ledgers are transaction-dense (they cap out near 3 LPS
+  # however much cpu they get) and only the middle is coarsened.
+  #
+  # Five bands over the top quarter instead of twelve. Wave floor 1.30 keeps at
+  # most 5 pods on a node (6 x 1.30 > 7.56 allocatable). At 768 workers: ~269
+  # nodes, 2152 vCPU (93% of the spot quota), first-wave LPS min 2.89 and p10
+  # 3.35. Parallelism and this ladder move together -- the p74 boundary is where
+  # the 768-range wave starts.
+    # Derived rather than hand-shaped, 2026-08-01, from the response curve the
+  # 768-worker run measured on 664 live workers: m(c) = 0.856 * c^-0.531, which
+  # reproduced all four of its bands to within 0.01 (1.50->0.69, 2.60->0.51,
+  # 3.40->0.47, 4.00->0.41).
+  #
+  # While a run is work-bound its makespan IS its total work, so the objective
+  # is to minimise sum(seconds_i * m(cpu_i)) under a cpu budget, not to equalise
+  # finish times. Equalising was measured as actively worse: it pushes short
+  # ranges to 0.5 cpu where m = 1.24 -- 24% SLOWER than profiled -- inflating
+  # total work ~25% and costing ~40 minutes.
+  #
+  # Setting the marginal return equal across ranges gives a closed form:
+  #     cpu proportional to seconds^(1/(1+b)) = seconds^0.653
+  # scaled by 0.0060 and clamped to [0.5, 4.5]. At 1280 workers on the
+  # on-demand pool that is ~358 r8a.2xlarge, 2864 vCPU, at most 5 pods/node,
+  # and it lands exactly on the crossover: work-bound 1.87h against a 1.88h
+  # critical path. Below 1280 the tail idles; above it the longest range walls.
+    # Rebuilt 2026-08-02 from four full-fleet probes (A/B/C/D), 735 paired ranges
+  # each, mean cpu 1.17 -> 3.54, requests only and no cpu limit anywhere:
+  #
+  #     ratio(c) = 0.671 * c^0.348      residuals <= 0.005
+  #
+  # No knee in that span. The retired ladder assumed saturation below 2.25 from
+  # arms run at hard cpu LIMITS -- a cfs quota clips the bursts replay uses, so
+  # those arms measured the quota, not the process. See cpu-ladders-history.md.
+  #
+  # The critical path is NOT a fixed range. Probes A/B/C/D each reported a
+  # different slowest range, and the profile's longest (10340s) finished 99th of
+  # 735 in probe C. Per-range slowness reproduces across probes at only r=0.26-0.59
+  # (r^2 0.07-0.35), so most of it is run noise, not a property of the range.
+  # Tuning cpu at whichever range came last just moves the straggler.
+  #
+  # What IS reproducible: headroom compresses the noise. Residual (observed time /
+  # predicted) by the cpu the range actually had --
+  #
+  #     cpu    1.15   1.30   1.90   2.50   3.30   3.70
+  #     p90    1.51   1.40   1.27   1.27   1.21   1.22
+  #     max    2.39   2.08   2.06   1.76   1.49   1.63
+  #
+  # Targets a CRITICAL-PATH BOUND run on the ON-DEMAND pool: simulated 2.20h with
+  # the longest range also finishing at 2.20h, so nothing trails it.
+  #
+  # Chosen by discrete-event SIMULATION of the actual dispatch, not by the
+  # max(work/fleet, longest-job) bound. That bound is what an earlier ladder was
+  # solved against and it is only a LOWER bound -- it sizes each band as if the
+  # range starts at t=0, but longest-first dispatches the cheap ranges LAST. The
+  # ladder it produced put p66 at 0.9 cpu: 1.40h of runtime starting at 1.40h,
+  # finishing at 2.79h, half an hour after the longest range was already done.
+  # Starving the bulk does not make a run crit-path bound, it just moves the tail.
+  #
+  # The real constraint is concurrency, not per-range speed. Jobs long enough to
+  # matter must all be running at t=0 or they serialise: under that earlier ladder
+  # the jobs over 1.25h needed 2518 vCPU against a 2304 spot fleet, so some had to
+  # queue and any two that did cost double. Hence a flat 1.3 across the bottom 95%
+  # -- cheap enough that they all fit at once, rich enough to stay out of the band
+  # where the noise tail blows up (residual p90 is 1.51 at 1.15 cpu against 1.15 at
+  # 7.0, so cheap bulk is bought at the price of stragglers).
+  #
+  # 1.3 rather than 0.9 for the flat band because 0.9 ties the noiseless sim (both
+  # 2.20h) and loses badly once measured noise is applied (5.06h against 4.15h).
+  # This is the choice that does not depend on which model is right.
+  #
+  # Sized for the on-demand pool: 1600 replicas, first wave 2912 vCPU against the
+  # catchup-od nodepool limit (raised 3072 -> 4096 so the packing model's habitual
+  # 7-16% optimism cannot push it over). Spot cannot host this -- its AWS quota is
+  # 2304 vCPU where this needs ~2900, and the cheapest ladder that fits spot
+  # without queueing runs 3.86h.
+  #
+  # Requires range.order=longest-first; under tip-first the top-band ranges scatter
+  # through the run instead of starting first (tip-first is only a 58% proxy).
+  #
+  # Sizing: replicas is a QUEUE DEPTH, not a fleet size, and it should exceed what
+  # the quota can run at once. With range.order=longest-first the first wave is
+  # entirely top-band, so peak demand per pod is far above the ladder mean --
+  # measured 2.63 cpu over the 700 longest ranges against a 1.53 ladder mean. No
+  # replica count both fits the expensive wave AND saturates the cheap tail: even
+  # 700 workers is 94% of quota in wave 1, while the tail would happily run 2000+.
+  #
+  # So oversubscribe and let the scheduler absorb it. At 1200 the run sat at ~2350
+  # vCPU with ~240 Pending, and the queue drained on its own as top-band jobs
+  # finished (239 -> 206 in 5 min, running 962 -> 970). Pending pods hold no
+  # resources; they are how the fleet stays saturated across a 4x swing in cost per
+  # range without anyone retuning mid-run.
+  #
+  # Do NOT size as quota/mean-cpu (ignores memory bin-packing waste) and do not
+  # trust a bin-pack of a RANDOM sample (right method, wrong population -- the run
+  # never dispatches a random sample first; that rule predicted 88% of quota where
+  # reality was 102%).
+  #
+  # Memory sizing is deliberately UNCHANGED. A limit sweep from 16Gi to 40Gi on
+  # one range moved major faults 1768 -> 0 and ledgers/sec not at all
+  # (1.464-1.499), so peakAnonBytes remains the right basis and the working-set
+  # figure stays unused -- it measures what was available, not what is needed.
+  # --- nodepool tiers -------------------------------------------------------
+  #
+  # A range picks a NODEPOOL by its measured memory and gets that node to
+  # itself. Empty prefix disables all of it and every worker keeps the single
+  # global node label, which is exactly the pre-tier behaviour.
+  #
+  # Cuts are node_usable/1.60, covering the p99 of run-to-run growth in the same
+  # range's peakAnonBytes (18,073 observations across five profiles: p50 0.97,
+  # p90 1.28, p99 1.60, max 2.83). Learned the hard way -- range 63080767
+  # measured 13.75Gi went onto nodes with 14.1/14.3Gi allocatable, a 1.03x
+  # margin, and OOMKilled on BOTH during bucket-apply before closing a ledger.
+  poolPrefix: ""
+  poolTiers: "0:subdwarf,0.79:dwarf,1.61:subgiant,3.87:giant,8.85:supergiant,18.38:hypergiant,:supernova"
+  # cpu is a claim token, not a demand estimate -- replay draws ~1.05 cores
+  # whatever it is given and is flat in core count from 2 upward (+2.8% at 2->4,
+  # +1.5% at 4->8). Kept at or below the SMALLEST node in each tier so the
+  # low-weight fallback rungs stay schedulable.
+  # Exactly 50% of each tier node's nameplate capacity. Two pods would need the
+  # whole node, which always exceeds allocatable, so a second can never fit --
+  # isolation without depending on how the kubelet reserves.
+  # hypergiant and supernova are NOT half their node: they are sized to the
+  # smallest shape in the pool. x8i.large is r8a.xlarge with half the cores and
+  # the same 32 GiB, and x8i.xlarge is r8a.2xlarge with half the cores and the
+  # same 64 GiB, so preferring the x8i shapes buys the same RAM for half the
+  # spot quota -- 2128 -> 1800 vCPU on a 900-worker wave, 15% back.
+  #
+  # A "half the node" claim of 2.00/4.00 exceeds what an x8i node can offer once
+  # daemonsets are counted (215m: alloy 10 + aws-node 75 + ebs-csi-node 30 +
+  # kube-proxy 100), so those pools never won a single node in either run on
+  # 2026-08-03 despite being weighted in. 1.70 and 3.60 sit under the 1715m and
+  # 3705m that are actually schedulable.
+  #
+  # Dropping cpu below half stops cpu from isolating the pod on the larger
+  # fallback shapes -- two 1.70 claims do fit a 4-vCPU r8a.xlarge. Memory is
+  # what isolates here instead, and it holds on every type in both pools because
+  # they all carry the same RAM: 2 x 16384Mi > 28713Mi usable, 2 x 32768Mi >
+  # 59515Mi usable.
+  # vCPU of the smallest node in each tier's pool -- what decides whether a
+  # promotion is free. Cannot be inferred from poolCpu, which is a claim rather
+  # than a node size.
+  #
+  # Reading the SMALLEST shape was quietly wrong while the x8i pools existed:
+  # hypergiant listed x8i.xlarge (4 vCPU) at w80 beneath two 8-vCPU rungs, so this
+  # said 4 and supergiant->hypergiant priced as free, while Karpenter tried w100
+  # first and the promotion really cost 4->8. The finished 1200-worker run put 12
+  # hypergiant nodes on 2xlarge shapes against 1 on x8i.xlarge. x8i was removed
+  # from spot on 2026-08-04, so these are now both the smallest and the
+  # top-weighted shape and the top rungs cross a class honestly.
+  # Rungs allowed to cross a vCPU class anyway. hypergiant->supernova costs
+  # +2 vCPU and gains only 1.23x, worth 0 minutes on its own -- but the long
+  # jobs alternate between the two tiers, so paired with supergiant->hypergiant
+  # it takes the floor from 2.90h to 2.44h where either alone gets 8 min or none.
+  # supergiant->hypergiant is listed but is a no-op at today's sizes: the doubled
+  # spot pools put both tiers on 4-vCPU nodes, so the rung is already free and
+  # passes the guard without a whitelist entry. It is here so the rung survives
+  # the pools diverging again -- if hypergiant ever bottoms out above supergiant,
+  # the guard would silently shut a rung that is deliberately open.
+  poolCrossRungs: "supergiant->hypergiant"
+  # Rungs that never run regardless of the vCPU comparison. Empty: with the spot
+  # pools doubled a promotion lands the range on a bigger SHARED node, and that
+  # sharing is what it buys. Measured 2026-08-04, two pods per node on one range:
+  # a co-tenant cost 1.02x per pod on an 8-vCPU node (r8id.2xlarge, 3.78/3.91 lps)
+  # against 1.58x on a 4-vCPU node. Note the bump fires on working set, which does
+  # NOT predict throughput -- same box, memory.max 28GiB ran 1.83 lps vs 56GiB at
+  # 1.70 -- so it reaches the right nodes by the wrong signal.
+  poolBlockRungs: "hypergiant->supernova"
+  poolVcpu: "subdwarf:2,dwarf:2,subgiant:4,giant:4,supergiant:4,hypergiant:8,supernova:16,protostar:8,nebula:8"
+  poolCpu: "subdwarf:0.85,dwarf:0.85,subgiant:1.85,giant:1.85,supergiant:1.85,hypergiant:1.85,supernova:3.80,protostar:1.85,nebula:3.80"
+  poolMem: "subdwarf:1280Mi,dwarf:1280Mi,subgiant:2816Mi,giant:6656Mi,supergiant:14336Mi,hypergiant:29696Mi,supernova:60416Mi,protostar:29696Mi,nebula:14336Mi"
+  # Profiled run, range past the profile's top: newest ledgers, and the newest
+  # are the densest, so a rich pool rather than an average one.
+  poolUnprofiled: "protostar"
+  # No profile at all: nothing is known, so the biggest nodes and the configured
+  # defaults.
+  poolNoProfile: "nebula"
+  # ANDed with the tier label: "spot" or "on-demand". Both capacity variants of
+  # a tier share one label value, so this is what separates them. Empty means no
+  # capacity constraint.
+  capacityType: ""
   profileMargin: 1.15
   # No margin on cpu: it is compressible, so under-requesting costs contention
   # Ceiling for profile-derived memory. Above the configured worker limit on
   # purpose: a range needing more than that must be able to ask for it
   # rather than be pinned under its own measured peak.
   profileMaxMemory: "32Gi"
+  # Disk allowances, mirroring the memory ones. The 2026-08-01 ephemeral run
+  # peaked at 37.76Gi against a flat 40Gi limit -- 6% of margin, on a detection
+  # and escalation path that has never executed on real data. These give a
+  # measured range its own sizing instead: flat headroom for image/logs/WAL,
+  # plus a runtime-weighted share because disk tracks runtime at pearson 0.920.
+  profileEphemeralHeadroom: "2Gi"
+  profileRuntimeEphemeralInsurance: "8Gi"
+  # Above the flat LIM_EPHEMERAL on purpose: that limit is what an UNMEASURED
+  # range gets, and capping a measured one at it would discard the measurement.
+  profileMaxEphemeral: "64Gi"
   # Fixed allowance added to a range's measured rss, on top of profileMargin.
   # Not zero: memory.max bounds anon PLUS page cache, and a multiplicative
   # margin is meaningless at small rss. Measured with headroom 0, ranges
@@ -146,26 +376,54 @@ monitor:
   # about once per interval; three consecutive failures preserve the old
   # approximately 90-second down threshold without coupling network I/O to the
   # 10-second reconcile loop. Unprobed/intermediate workers report unknown.
-  livenessProbeIntervalSeconds: 30
   livenessProbeTimeoutSeconds: 5
-  livenessFailureThreshold: 3
-  # At 2096 workers and a 30s interval this is ~70 requests/s. Thirty-two slots
-  # cover normal sub-second local responses while bounding slow requests,
-  # queued work, sessions and threads independently of fleet size.
+  # One sweep per reconcile pass, and the reconcile loop waits for it -- so this
+  # is the most a fleet of unreachable workers can delay dispatch.
+  livenessSweepSeconds: 15
+  # Concurrent probes per sweep. At 2096 workers this is the throughput that has
+  # to fit inside livenessSweepSeconds: 32 slots x sub-second local responses
+  # clears the fleet, and a fleet that does not answer is bounded by the sweep.
   livenessMaxConcurrency: 32
-  maxAttempts: 5
-  # Evictions, admission rejections and monitor restarts are not the range's
-  # fault, so they do not share the failure budget above. Measured on ssc-test:
-  # ten evictions across 25 workers put four healthy ranges on attempt 3 of 5.
-  maxDisruptionAttempts: 20
+  # Attempts each failure cause gets before the range is condemned. Every budget
+  # is spent by its own cause, and a cause that is not here is condemned the
+  # first time it happens -- a timeout, a real catchup failure, an exit 3 with
+  # nothing in its archive, and anything the monitor could not classify.
+  attemptBudgets:
+    # The cluster took the pod away mid-run, which proves the range was fine.
+    # Effectively unlimited: on spot a healthy range is evicted dozens of times.
+    disrupted: 100
+    # Refused by the kubelet before any container ran (attachment limits,
+    # admission churn). The range never started, so a retry masks nothing.
+    rejected: 100
+    # An exit 3 whose archive named a fetch fault: an unreachable history
+    # mirror is the cluster's problem, not the range's.
+    fetchFault: 20
+    # Each retry escalates the memory request one rung.
+    oom: 5
+    # Each retry escalates the disk limit one rung. Smallest, because an
+    # eviction repeats identically until the range gets more disk.
+    ephemeral: 4
   memBumpFactor: 1.5
-  # An ephemeral-storage eviction repeats until the range gets more disk, so
-  # it gets its own small budget rather than the environmental one.
-  maxEphemeralAttempts: 4
   ephBumpFactor: 1.5
   maxEphemeral: "200Gi"
   maxMem: "48Gi"
   graceSeconds: 100
+  # preStop stall before SIGTERM, in seconds. 0 is off.
+  #
+  # Buys the collector time to NOTICE the disruption before the kill; it is not
+  # what captures the metric. The hook cannot widen the ~4ms between the medida
+  # block and the process exiting -- measured, a 60s hook with 10s polling and
+  # no detection still lost txApply, while 1s polling with no hook captured it.
+  # What it prevents is SIGTERM landing while the poller is still on its lazy
+  # cadence because the pod-list cycle has not come round yet.
+  #
+  # Sized against the collector CYCLE (sleep + pod list + kubelet sweep), not
+  # against collectorPollSeconds. Overshooting is NOT free on spot: the hook is
+  # dead time inside the ~120s AWS reclaim budget. Undershooting the cycle is
+  # survivable because the pod lives out graceSeconds after SIGTERM and its log
+  # stays readable, so a sweep that notices late still finds the medida block.
+  # Must stay well under graceSeconds or the kubelet kills the hook.
+  prestopSleepSeconds: 5
   # Must exceed any plausible monitor outage: completion is recorded to the
   # progress ConfigMap by the monitor, and a Job reclaimed before that happens
   # reads as "never ran" and gets redone.
@@ -192,6 +450,25 @@ monitor:
   # concurrency is independent of worker.replicas. At 4096 pods and a 10s
   # interval this is ~90 in-flight polls.
   logPollSeconds: 10
+  # Spot gives ~120s of notice; past roughly double that the drain was
+  # cancelled and the stream should go back to interval polling.
+  doomedFollowSeconds: 300
+  # Follow streams get their own budget so a mass reclaim cannot consume every
+  # poll slot and blackout the rest of the run. Condemned pods beyond this fall
+  # back to polling, which is the pre-existing behaviour.
+  maxDoomedFollows: 256
+  # Poll interval for a pod the cluster has condemned. The cheap half of the
+  # disruption fix: preStop delays SIGTERM but leaves ~9s between the medida
+  # block and the pod object vanishing, which a 10s poll straddles.
+  doomedPollSeconds: 1
+  # Lifetime of each pod watch before the apiserver closes it and the collector
+  # reconnects from its last resourceVersion. The watch is what makes a
+  # condemnation visible immediately rather than on the next collectorPollSeconds
+  # sweep: measured at prestopSleepSeconds=5, the sweep alone caught that window
+  # about half the time and lost 32 of 52 mid-replay legs. 0 disables the watch
+  # and leaves detection to the sweep.
+  watchTimeoutSeconds: 600
+  watchRetrySeconds: 1
   maxConcurrentPolls: 96
   maxPollChars: 8388608
   # Failed polls tolerated after a pod goes terminal before the collector stops
@@ -210,24 +487,6 @@ monitor:
   resources:
     requests: { cpu: "200m", memory: "512Mi" }
     limits:   { cpu: "2",    memory: "2Gi" }
-
-# Fixed, chart-owned worker used only by the bounded Kubernetes integration
-# harness. It never invokes stellar-core or history services. Keeping the script
-# in the chart instead of accepting a command value avoids turning this into a
-# general arbitrary-command surface.
-integration:
-  syntheticWorker:
-    enabled: false
-    imagePullPolicy: IfNotPresent
-    predecessorSeconds: 12
-    successorMinimumSeconds: 12
-    maximumWaitSeconds: 180
-    predecessorAnonMiB: 48
-    predecessorWorkingSetMiB: 56
-    successorAnonMiB: 24
-    successorWorkingSetMiB: 32
-    predecessorTxApplyMilliseconds: 1250
-    successorTxApplyMilliseconds: 2500
 
 service_account:
   annotations: []

@@ -10,6 +10,7 @@ the Job never has.
 import pytest
 from kubernetes import client
 
+import config
 import job_monitor as jm
 import log_collector as lc
 
@@ -108,15 +109,19 @@ def test_a_bare_exit_code_is_read_when_no_rule_index_is_offered():
 
 
 def test_an_unclassifiable_job_failure_stays_unclassified():
-    # BackoffLimitExceeded carries no rule index and no exit code, so classify
-    # honestly returns nothing rather than guessing. A monitor restart while a
-    # node was reaped produces exactly this, and condemning on it would fail a
-    # 10-hour job on no evidence -- reconcile gives it the environmental budget.
+    """classify returns nothing rather than guessing, and reconcile condemns.
+
+    BackoffLimitExceeded carries no rule index and no exit code. An
+    unclassifiable failure is not evidence that the range is fine, so the run
+    stops rather than retrying blind -- only a node disruption, which proves the
+    cluster took the pod away, keeps its unlimited budget.
+    """
     assert jm.classify_from_job(failed_job(
         "Job has reached the specified backoff limit",
         reason='BackoffLimitExceeded')) is None
-    assert 'unknown' in jm.ENVIRONMENTAL_OUTCOMES
-    assert {'disrupted', 'rejected'} <= set(jm.ENVIRONMENTAL_OUTCOMES)
+    assert set(config.ATTEMPT_BUDGETS) == {'disrupted', 'rejected', 'fetch-fault',
+                                          'oom', 'ephemeral'}, \
+        "an unclassifiable failure must have no budget at all"
 
 
 def test_a_deadline_exceeded_job_is_a_timeout_not_a_catchup_failure():
@@ -137,6 +142,31 @@ def test_a_disruption_target_condition_outranks_everything_on_the_pod():
         conditions=[client.V1PodCondition(type='DisruptionTarget', status='True')],
         terminated={'exit_code': 3, 'reason': 'Error'}))
     assert got['outcome'] == 'disrupted'
+
+
+def test_the_disruption_reason_separates_a_warning_from_a_postmortem():
+    # The bare condition cannot tell these apart, and the difference decides
+    # whether a missing txApply is a capture bug worth chasing. An eviction is a
+    # drain that still owes the container a SIGTERM, so a medida block is coming.
+    # A TaintManager stamp lands ~40s after the node went NotReady, on a process
+    # that already died unsignalled -- nothing was ever written to miss.
+    def reason_for(r):
+        return lc._is_condemned(as_dict(
+            conditions=[{'type': 'DisruptionTarget', 'status': 'True', 'reason': r}]))
+
+    assert reason_for('EvictionByEvictionAPI') == 'EvictionByEvictionAPI'
+    assert reason_for('DeletionByTaintManager') == 'DeletionByTaintManager'
+    # Truthiness is the contract every caller relies on, not the string itself.
+    assert lc._is_condemned(as_dict()) is None
+    assert not lc._is_condemned(as_dict(
+        conditions=[{'type': 'DisruptionTarget', 'status': 'False'}]))
+
+
+def test_a_condition_without_a_reason_still_reads_as_condemned():
+    # Kubernetes does not promise the field. Falling back to None here would
+    # silently un-condemn the pod and drop it back to the lazy poll cadence.
+    assert lc._is_condemned(as_dict(
+        conditions=[{'type': 'DisruptionTarget', 'status': 'True'}])) == 'Unknown'
 
 
 def test_an_ephemeral_eviction_is_not_read_as_an_oom_or_a_disruption():
@@ -204,11 +234,14 @@ def test_a_non_zero_exit_is_a_catchup_failure_and_keeps_its_code():
         assert (got['outcome'], got['exitCode']) == ('failed', 3)
 
 
-def test_exit_three_is_the_ambiguous_one_and_never_inherits_a_bigger_budget():
-    # stellar-core drains to 3 on SIGTERM and a corrupt bucket also exits 3, so
-    # reconcile retries it on the ordinary range budget -- but a genuinely
-    # corrupt range must still be able to exhaust rather than retry 20 times.
-    assert jm.CATCHUP_INCOMPLETE_EXIT == 3
-    assert 'failed' not in jm.ENVIRONMENTAL_OUTCOMES
-    assert 'ephemeral' not in jm.ENVIRONMENTAL_OUTCOMES, \
+def test_exit_three_is_the_ambiguous_one_and_is_decided_by_the_archive():
+    """A corrupt range is protected by the exit-3 rule, not by its budget.
+
+    stellar-core drains to 3 on SIGTERM and a corrupt bucket also exits 3, so
+    the exit code decides nothing. An exit 3 is condemned outright unless its
+    archive names a fetch fault -- so a genuinely corrupt range never reaches a
+    budget at all, and the fetch-fault retry that does is infrastructure.
+    """
+    assert config.CATCHUP_INCOMPLETE_EXIT == 3
+    assert config.ATTEMPT_BUDGETS['ephemeral'] < config.ATTEMPT_BUDGETS['disrupted'], \
         "a deterministic failure must not get the disruption budget"

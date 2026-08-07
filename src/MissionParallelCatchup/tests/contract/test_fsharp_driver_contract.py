@@ -22,6 +22,11 @@ import re
 
 import pytest
 
+import config
+import units
+import profiles
+import records
+import sizing
 import job_monitor as jm
 import log_collector as lc
 
@@ -70,14 +75,20 @@ def test_every_helm_command_uses_the_mission_namespace():
     kubeconfig default, poll sandbox through the client, and wait forever for a
     monitor that exists in another namespace.
     """
-    blocks = re.findall(r'RunShellCommand\s+\[\|\s*"helm"(.*?)\|\]', FS, re.S)
-    assert len(blocks) == 4, (
-        f"expected install, get-values and two cleanup commands; found {len(blocks)}")
+    # Split on the call itself rather than matching one array literal: the install
+    # builds its argv with Array.concat so it can add a second --values for
+    # on-demand, and a `[| "helm" ... |]` pattern silently stopped seeing it.
+    calls = [seg for seg in re.split(r'\bRunShellCommand\b', FS)[1:]
+             if re.match(r'[\s(]*(?:Array\.concat\s*\[\s*)?\[\|\s*"helm"', seg)]
+    assert len(calls) == 4, (
+        f"expected install, get-values and two cleanup commands; found {len(calls)}")
+    blocks = calls
     for block in blocks:
         verb = re.search(r'"(install|get|upgrade|uninstall)"', block)
         assert verb, f"could not identify Helm command in {block!r}"
+        # F# array elements separate with a newline or a semicolon; both appear
         assert re.search(
-            r'"--namespace"\s+context\.namespaceProperty', block), (
+            r'"--namespace"\s*;?\s*context\.namespaceProperty', block), (
             f"helm {verb.group(1)} does not target the mission namespace: {block!r}")
 
 
@@ -252,7 +263,7 @@ def test_the_driver_reads_the_configmap_the_monitor_writes():
     # the latter imported with the RUN_NAME the chart gives it for that release.
     wanted = release + suffix
     run_name = art.env_of(art.containers(release=release)[art.MONITOR_CONTAINER])['RUN_NAME']
-    written = art.defaults('job_monitor', (('RUN_NAME', run_name),))['PROGRESS_CM']
+    written = art.defaults('config', (('RUN_NAME', run_name),))['PROGRESS_CM']
     assert wanted == written, f"driver reads {wanted!r}, monitor writes {written!r}"
 
 
@@ -269,14 +280,14 @@ def test_the_driver_reads_the_keys_the_monitor_publishes(cluster):
     cluster.advance(300, 'succeeded')
     cluster.reconcile()                       # records a completion -> progress.json
     jm.save_status(jm.status)                 # what the reconcile loop publishes
-    published = set(cluster.k8s.config_map_data(jm.PROGRESS_CM, cluster.namespace) or {})
+    published = set(cluster.k8s.config_map_data(config.PROGRESS_CM, cluster.namespace) or {})
     missing = sorted(wanted - published)
     assert not missing, (
         f"the driver reads {missing}; the monitor published {sorted(published)}")
 
 
 def test_every_status_field_the_driver_reads_is_one_the_monitor_sets():
-    """The driver's loop terminates on num_remain and jobs_in_progress.
+    """The driver's loop terminates on num_remain and queue_in_progress_count.
 
     A field it reads that the monitor never sets throws inside the polling loop,
     which the driver treats as fatal: cleanup, uninstall, mission failed -- with
@@ -322,14 +333,14 @@ def test_the_driver_execs_into_a_container_that_exists():
 def test_the_driver_reads_the_progress_file_where_the_monitor_writes_it():
     """`cat /logs/progress.json`, hard-coded on the driver side."""
     path = fs_extract(r'command = \[\| "cat"; "([^"]+)" \|\]').group(1)
-    assert path == jm.PROGRESS_FILE, (
-        f"the driver cats {path}; the monitor writes {jm.PROGRESS_FILE}")
+    assert path == config.PROGRESS_FILE, (
+        f"the driver cats {path}; the monitor writes {config.PROGRESS_FILE}")
 
 
 def test_the_driver_tars_the_directory_the_collector_writes_into():
     """One exec replaces the ~1024 the StatefulSet design needed."""
     cd = fs_extract(r'"cd (/\w+) && tar').group(1)
-    assert cd == jm.LOG_DIR == lc.LOG_DIR
+    assert cd == config.LOG_DIR == config.LOG_DIR
 
 
 def test_the_tar_excludes_only_the_collectors_resume_bookkeeping():
@@ -342,9 +353,9 @@ def test_the_tar_excludes_only_the_collectors_resume_bookkeeping():
     def suffix_of(path_fn):
         return os.path.basename(path_fn('E', 1)).partition('-a1')[2]
 
-    bookkeeping = {suffix_of(jm.state_path)}
-    deliverables = {suffix_of(f) for f in (jm.log_path, jm.metrics_path,
-                                           jm.outcome_path, jm.done_path)}
+    bookkeeping = {suffix_of(records.state_path)}
+    deliverables = {suffix_of(f) for f in (records.log_path, records.metrics_path,
+                                           records.outcome_path, records.done_path)}
     assert bookkeeping.isdisjoint(deliverables)
 
     excludes = set(re.findall(r"--exclude='([^']+)'", FS))
@@ -386,26 +397,44 @@ def fs_document_keys():
     return set(re.findall(r'doc\.\["(\w+)"\]\s*<-', FS))
 
 
-def test_the_artifact_carries_exactly_the_fields_the_mirror_strips():
-    """Two lists that must be one list.
+# Recorded but deliberately not carried into the artifact: they are Prometheus
+# metrics, and nothing in the next run sizes or orders from them -- wallSeconds
+# alone was 349 KB of a 963 KB artifact. Listed rather than inferred so that
+# dropping a field the artifact DOES need still fails the test below.
+NOT_PROFILED = {'wallSeconds', 'txApply'}
 
-    The monitor strips _PROFILE_ONLY_FIELDS out of the ConfigMap mirror to stay
-    under its 1 MiB cap, so those fields exist only in the volume copy -- which
-    is precisely the copy the driver projects into the artifact. A field in one
-    list and not the other is either lost from the artifact or bloating the
-    mirror. peakAnonBytes was missing from the projection: measured 2026-07-30,
-    the artifact carried it for 0% of ranges while the volume copy had it for
-    99%.
+
+def test_the_artifact_carries_every_measurement_the_record_holds(cluster):
+    """Two lists that must agree, in one direction each.
+
+    Anchored on a record the real monitor wrote, so neither side can drift by
+    editing a constant. A field the driver projects but the record never holds
+    lands in the artifact as null; a field the record holds and the driver drops
+    is lost from the artifact -- peakAnonBytes was exactly that, carried for 0%
+    of ranges while the volume copy had it for 99%. The only permitted asymmetry
+    is NOT_PROFILED, enumerated above.
     """
-    assert fs_profile_fields() == set(jm._PROFILE_ONLY_FIELDS), (
-        "driver projects "
-        f"{sorted(fs_profile_fields() - set(jm._PROFILE_ONLY_FIELDS))} extra, "
-        f"drops {sorted(set(jm._PROFILE_ONLY_FIELDS) - fs_profile_fields())}")
+    cluster.reconcile()
+    cluster.advance(300, 'succeeded')
+    cluster.finalize(300, 1, tx_apply=1.5,
+                     peaks={'peakAnonBytes': 7, 'peakWorkingSetBytes': 9,
+                            'peakEphemeralBytes': 11})
+    cluster.reconcile()
+
+    measured = set(cluster.completed()['300']) - {'attempts', 'count'}
+    assert measured, "the monitor recorded no measurements at all"
+    assert not fs_profile_fields() - measured, (
+        f"the driver projects {sorted(fs_profile_fields() - measured)}, which no "
+        "completion record carries")
+    assert measured - fs_profile_fields() == NOT_PROFILED, (
+        "the artifact drops "
+        f"{sorted(measured - fs_profile_fields() - NOT_PROFILED)} "
+        "without that being a deliberate choice recorded in NOT_PROFILED")
 
 
 def test_every_field_the_sizing_consumer_reads_is_in_the_artifact():
     """Derived from _profile_overrides, so a new sizing input fails here first."""
-    consumed = set(re.findall(r"prof\.get\('(\w+)'\)", art.module_source(jm)))
+    consumed = set(re.findall(r"prof\.get\('(\w+)'\)", art.module_source(sizing)))
     assert consumed, "the sizing consumer no longer reads named fields"
     missing = sorted(consumed - fs_profile_fields())
     assert not missing, f"the profile is sized from {missing}, which the artifact drops"
@@ -413,7 +442,7 @@ def test_every_field_the_sizing_consumer_reads_is_in_the_artifact():
 
 def test_every_document_key_the_monitor_reads_is_one_the_driver_writes():
     """storageMode decides whether the disk axis is usable; ranges is the data."""
-    read = set(re.findall(r"doc\.get\('(\w+)'\)", art.module_source(jm)))
+    read = set(re.findall(r"doc\.get\('(\w+)'\)", art.module_source(profiles)))
     assert read, "load_profile no longer reads named document keys"
     missing = sorted(read - fs_document_keys())
     assert not missing, f"load_profile reads {missing}, which the driver never writes"
@@ -439,16 +468,16 @@ def test_an_artifact_from_a_previous_run_loads_and_sizes_the_next_one(tmp_path, 
     path = tmp_path / 'profile.json'
     path.write_text(json.dumps(_artifact(ranges={
         '16752063': {'peakAnonBytes': 2 * 1024 ** 3, 'peakWorkingSetBytes': 13 * 1024 ** 3,
-                     'txApply': 900.0, 'seconds': 1200.0, 'count': 16320}})))
+                     'seconds': 1200.0, 'count': 16320}})))
 
-    monkeypatch.setattr(jm, 'PROFILE_PATH', str(path))
-    monkeypatch.setattr(jm, 'STORAGE_MODE', 'pvc')
-    monkeypatch.setattr(jm, 'PROFILE', jm.load_profile())
-    assert jm.PROFILE, "the driver's artifact did not load at all"
+    monkeypatch.setattr(config, 'PROFILE_PATH', str(path))
+    monkeypatch.setattr(config, 'STORAGE_MODE', 'pvc')
+    monkeypatch.setattr(config, 'PROFILE', profiles.load_profile())
+    assert config.PROFILE, "the driver's artifact did not load at all"
 
-    sized = jm._profile_overrides(16752063, escalated=False)
+    sized = sizing._profile_overrides(16752063, escalated=False)
     assert 'memory' in sized, "a measured range was not sized from the artifact"
-    assert (jm._quantity_bytes(sized['memory']) > 2 * 1024 ** 3), \
+    assert (units.quantity_bytes(sized['memory']) > 2 * 1024 ** 3), \
         "the request came out below the measured peak"
 
 
@@ -464,12 +493,12 @@ def test_a_cross_mode_artifact_keeps_memory_and_drops_the_disk_axis(tmp_path, mo
         '16752063': {'peakAnonBytes': 2 * 1024 ** 3,
                      'peakEphemeralBytes': 30 * 1024 ** 3, 'count': 16320}})))
 
-    monkeypatch.setattr(jm, 'PROFILE_PATH', str(path))
-    monkeypatch.setattr(jm, 'STORAGE_MODE', 'pvc')
-    monkeypatch.setattr(jm, 'LIM_EPHEMERAL', '40Gi')
-    monkeypatch.setattr(jm, 'PROFILE', jm.load_profile())
+    monkeypatch.setattr(config, 'PROFILE_PATH', str(path))
+    monkeypatch.setattr(config, 'STORAGE_MODE', 'pvc')
+    monkeypatch.setattr(config, 'LIM_EPHEMERAL', '40Gi')
+    monkeypatch.setattr(config, 'PROFILE', profiles.load_profile())
 
-    sized = jm._profile_overrides(16752063, escalated=False)
+    sized = sizing._profile_overrides(16752063, escalated=False)
     assert 'memory' in sized, "a cross-mode profile was rejected outright"
     assert 'ephemeral-storage' not in sized, "a pvc run was sized from ephemeral-mode disk"
 
@@ -488,15 +517,15 @@ def test_an_empty_artifact_is_never_written_and_never_fatal(tmp_path, monkeypatc
 
     path = tmp_path / 'profile.json'
     path.write_text(json.dumps(_artifact(ranges={})))
-    monkeypatch.setattr(jm, 'PROFILE_PATH', str(path))
-    monkeypatch.setattr(jm, 'STORAGE_MODE', 'pvc')
-    monkeypatch.setattr(jm, 'PROFILE', jm.load_profile())
-    assert jm.PROFILE == [], "an empty profile loaded as if it held something"
-    assert jm._profile_overrides(16752063, escalated=False) == {}
+    monkeypatch.setattr(config, 'PROFILE_PATH', str(path))
+    monkeypatch.setattr(config, 'STORAGE_MODE', 'pvc')
+    monkeypatch.setattr(config, 'PROFILE', profiles.load_profile())
+    assert config.PROFILE == [], "an empty profile loaded as if it held something"
+    assert sizing._profile_overrides(16752063, escalated=False) == {}
 
     # ...and an artifact that never arrived at all is the same, not an error.
-    monkeypatch.setattr(jm, 'PROFILE_PATH', str(tmp_path / 'absent.json'))
-    assert jm.load_profile() == []
+    monkeypatch.setattr(config, 'PROFILE_PATH', str(tmp_path / 'absent.json'))
+    assert profiles.load_profile() == []
 
 
 def test_every_helm_and_kubectl_call_is_namespaced():

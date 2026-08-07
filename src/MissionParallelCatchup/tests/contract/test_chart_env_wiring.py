@@ -12,6 +12,9 @@ matching values, so "the chart sets it" has to be checked with those values
 present.
 """
 
+from pathlib import Path
+
+import config
 import job_monitor as jm
 import log_collector as lc
 
@@ -24,8 +27,7 @@ KUBELET_INJECTED = {'KUBERNETES_SERVICE_HOST', 'KUBERNETES_SERVICE_PORT'}
 # Operator-facing switches with no chart key on purpose: they are set by hand on
 # a running Deployment when something needs debugging, and a chart key would
 # freeze them at install time.
-DEBUG_ONLY = {'LOGGING_LEVEL', 'WATCH_STALE_SECONDS', 'CONNECTION_POOL',
-              'WORKER_CONTAINER'}
+DEBUG_ONLY = {'LOGGING_LEVEL', 'CONNECTION_POOL', 'WORKER_CONTAINER'}
 
 # Rendered with everything the mission can send, so the conditional blocks are
 # present: a profile ConfigMap, a required node label, an avoided node label
@@ -33,7 +35,6 @@ DEBUG_ONLY = {'LOGGING_LEVEL', 'WATCH_STALE_SECONDS', 'CONNECTION_POOL',
 # by no template at all -- absent from here, that stays invisible.
 FULL = (
     'monitor.profileConfigMap=p',
-    'integration.syntheticWorker.enabled=true',
     'worker.requireNodeLabels[0].key=purpose',
     'worker.requireNodeLabels[0].operator=In',
     'worker.requireNodeLabels[0].values[0]=catchup8-spot',
@@ -61,13 +62,12 @@ def test_every_env_the_collector_reads_is_set_on_the_collector_container():
     assert not missing, f"the collector reads {missing} but the chart never sets them"
 
 
-def test_liveness_sampler_settings_reach_only_the_monitor():
+def test_liveness_sweep_settings_reach_only_the_monitor():
     monitor = art.env_of(art.containers()[art.MONITOR_CONTAINER])
     collector = art.env_of(art.containers()[art.COLLECTOR_CONTAINER])
     expected = {
-        'LIVENESS_PROBE_INTERVAL_SECONDS': '30',
         'LIVENESS_PROBE_TIMEOUT_SECONDS': '5',
-        'LIVENESS_FAILURE_THRESHOLD': '3',
+        'LIVENESS_SWEEP_SECONDS': '15',
         'LIVENESS_MAX_CONCURRENCY': '32',
     }
     assert {name: monitor.get(name) for name in expected} == expected
@@ -99,7 +99,7 @@ def test_node_targeting_is_absent_rather_than_empty_when_unset():
     env = art.env_of(art.containers()[art.MONITOR_CONTAINER])
     for name in ('NODE_LABEL_KEY', 'NODE_LABEL_VALUE', 'TOLERATE_TAINT'):
         assert env.get(name, '') == '', f"{name} rendered without a value to carry"
-    assert art.defaults('job_monitor')['NODE_LABEL_KEY'] == '', \
+    assert art.defaults('config')['NODE_LABEL_KEY'] == '', \
         "the code fallback must be the falsy 'no targeting' value"
 
 
@@ -155,7 +155,7 @@ def test_the_run_name_the_monitor_labels_with_is_the_helm_release():
     collector = art.env_of(art.containers(release='pc-abc')[art.COLLECTOR_CONTAINER])
     assert collector['RUN_NAME'] == 'pc-abc', \
         "the collector would watch a different run's pods"
-    assert jm.LABEL_RUN == lc.LABEL_RUN, \
+    assert config.LABEL_RUN == config.LABEL_RUN, \
         "the two processes select on different label keys"
 
 
@@ -200,26 +200,42 @@ def test_no_container_declares_the_same_env_var_twice():
                 "the API server rejects the Deployment outright")
 
 
-def test_the_chart_ships_cpu_tiering_switched_on():
-    """An empty PROFILE_CPU_TIERS is a silent 2x cost regression, not a no-op.
+def test_the_chart_ships_a_coherent_pool_ladder():
+    """The ladder must be defined even though pooling ships OFF.
 
-    Nothing in MissionHistoryPubnetParallelCatchupV2.fs sets this value, so the
-    chart default IS the configuration. Left empty, every worker falls back to
-    the flat REQ_CPU: measured 2026-07-31, that issued 1250m to all 2048 pods --
-    2560 vCPU of requests against a 2304 spot quota -- and packed 6 workers per
-    node where tiering gets 14.
+    poolPrefix empty is deliberate -- pool routing is opt-in, and an unset
+    prefix is exactly the pre-tier behaviour. But the ladder itself has to be
+    present and well-formed, because the mission turns pooling on by setting
+    only the prefix: a malformed or out-of-order poolTiers would then route
+    ranges to tiers whose nodes cannot hold them, which is an OOM per range
+    rather than a slow run.
+
+    Cuts must ascend. A descending pair would make an earlier tier shadow a
+    later one and every range past the inversion would land one tier too low --
+    measured consequence: a 13.75Gi range on a 14.1Gi node OOMKilled during
+    bucket-apply, before closing a single ledger.
     """
-    # Rendered with FULL: the tier env lives inside the profileConfigMap block,
-    # which is correct -- tiering is keyed on measured runtimes, so it only
-    # applies when a profile is actually mounted.
-    tiers = art.env_of(art.containers(FULL)[art.MONITOR_CONTAINER]).get('PROFILE_CPU_TIERS')
-    assert tiers, "the chart ships cpu tiering disabled; every worker will request REQ_CPU"
-    pairs = [t.split(':') for t in tiers.split(',')]
-    pcts = [float(p) for p, _ in pairs]
-    cpus = [float(c) for _, c in pairs]
-    assert pcts == sorted(pcts), f"tier percentiles out of order: {tiers}"
-    assert cpus == sorted(cpus), f"tier cpu values out of order: {tiers}"
-    assert pcts[-1] == 100, f"tiers must cover the top percentile: {tiers}"
+    env = art.env_of(art.containers(FULL)[art.MONITOR_CONTAINER])
+    tiers = env.get('POOL_TIERS')
+    assert tiers, "the chart ships no pool ladder; enabling poolPrefix would route nowhere"
+    parsed = []
+    for item in tiers.split(','):
+        cut, _, name = item.rpartition(':')
+        assert name, f"tier entry with no name: {item!r}"
+        parsed.append((float(cut) if cut else float('inf'), name))
+    cuts = [c for c, _ in parsed]
+    assert cuts == sorted(cuts), f"pool cuts out of order: {tiers}"
+    assert cuts[-1] == float('inf'), (
+        "the last tier must be unbounded, or a range above the final cut has "
+        f"nowhere to go: {tiers}")
+    # Every tier that can be routed to needs a cpu claim, or the pod keeps the
+    # flat REQ_CPU and two of them can share a node -- which defeats the whole
+    # design: isolating a pod from its neighbours raised throughput 29-92%.
+    claims = dict(item.split(':') for item in env['POOL_CPU'].split(','))
+    for _, name in parsed:
+        assert name in claims, f"tier {name} has no cpu claim in POOL_CPU"
+    for extra in (env['POOL_UNPROFILED'], env['POOL_NO_PROFILE']):
+        assert extra in claims, f"off-ladder pool {extra} has no cpu claim"
 
 
 def test_neither_module_defines_the_same_symbol_twice():
@@ -234,13 +250,50 @@ def test_neither_module_defines_the_same_symbol_twice():
     reason it was benign is that the copies happened to be identical; had the
     merge taken one edited copy and one stale one, the stale one would silently
     have won or lost depending on file order.
+
+    Assignments count too, and only because this test missed one: the same merge
+    left two `worker_liveness_sampler = WorkerLivenessSampler()` lines with a
+    function between them. The first instance was constructed and thrown away --
+    inert only because __init__ starts no thread.
     """
-    import ast, collections, pathlib
-    here = pathlib.Path(__file__).resolve().parents[2]
-    for name in ('job_monitor.py', 'log_collector.py'):
-        tree = ast.parse((here / name).read_text())
-        seen = collections.Counter(
-            node.name for node in tree.body
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)))
-        dupes = sorted(n for n, k in seen.items() if k > 1)
-        assert not dupes, f"{name} defines {dupes} more than once; the later one silently wins"
+    import ast, collections
+    for f in sorted(list(Path(art.APPS_DIR).glob('*.py'))
+                    + list(Path(art.LIB_DIR).glob('*.py'))):
+        tree = ast.parse(f.read_text())
+        seen = collections.defaultdict(list)
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                seen[node.name].append(False)   # a def is never a coercion
+            elif isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                    and isinstance(node.targets[0], ast.Name):
+                name = node.targets[0].id
+                # `X = int(X)` is a coercion of the value above it, not a second
+                # definition -- config.py does this to every liveness knob.
+                coercion = any(isinstance(x, ast.Name) and x.id == name
+                               for x in ast.walk(node.value))
+                seen[name].append(coercion)
+        dupes = sorted(n for n, hits in seen.items()
+                       if len(hits) > 1 and not all(hits[1:]))
+        assert not dupes, \
+            f"{f.name} defines {dupes} more than once; the later one silently wins"
+
+
+def test_the_chart_never_pins_an_absolute_interpreter_path():
+    """A container command must resolve python on PATH, not at /usr/bin.
+
+    Dockerfile.jobmonitor builds on python:3.12-slim, which ships the
+    interpreter at /usr/local/bin/python3. `/usr/bin/python3` shipped in the
+    collector's command and failed as StartError -- and the failure is
+    asymmetric, so it hides: the monitor container inherits the image CMD and
+    comes up healthy while only the sidecar crashloops, which reads as a sidecar
+    bug rather than a chart/base-image mismatch. Observed on ssc-test
+    2026-08-07, 3 restarts before it was caught.
+    """
+    chart = Path(__file__).resolve().parents[2] / 'parallel_catchup_helm'
+    for path in chart.rglob('*.yaml'):
+        for n, line in enumerate(path.read_text().splitlines(), 1):
+            if 'command:' not in line or line.lstrip().startswith('#'):
+                continue
+            assert '/usr/bin/python' not in line and '/usr/local/bin/python' not in line, (
+                f"{path.name}:{n} pins an absolute interpreter path, which ties "
+                f"the chart to one base image: {line.strip()}")

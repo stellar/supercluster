@@ -11,6 +11,7 @@ import importlib
 
 import pytest
 
+import config
 import job_monitor as jm
 
 
@@ -22,7 +23,7 @@ def _match_expressions(monkeypatch, **env):
     """
     for k in ('NODE_LABEL_KEY', 'NODE_LABEL_VALUE',
               'AVOID_NODE_LABEL_KEY', 'AVOID_NODE_LABEL_VALUE'):
-        monkeypatch.setattr(jm, k, env.get(k, ''))
+        monkeypatch.setattr(config, k, env.get(k, ''))
     job = jm.build_job(300, 420, 1, None)
     aff = job.spec.template.spec.affinity
     if aff is None:

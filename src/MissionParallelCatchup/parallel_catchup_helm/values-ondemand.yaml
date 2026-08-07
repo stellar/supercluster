@@ -1,0 +1,79 @@
+# On-demand overlay: one pod per node, AMD-preferred pools.
+#
+#   helm ... -f values.yaml -f values-ondemand.yaml
+#
+# The default values.yaml is tuned for spot, where the pools were doubled on
+# 2026-08-04 and every claim is half a node so two pods share it. On-demand pools
+# were deliberately left at their original sizes, so those same claims are the
+# NAMEPLATE of an on-demand node -- and nameplate is not allocatable. Every
+# on-demand tier was unschedulable as a result: a 14336Mi claim against a
+# 16384Mi node has only ~13313Mi to land in once the EKS reserve (255Mi plus the
+# 25/20/10/6% tiers) and 154Mi of daemonsets are taken out.
+#
+# Claims below are sized from that measured allocatable, not from the nameplate,
+# and sit above half of it -- so exactly one pod fits and a second never can.
+# Verified against a real node the same day: a 16 GiB box reported 13312Mi usable,
+# which is the figure these are cut from.
+#
+# cpu is bounded by the SMALLEST shape in each tier's pool, since a claim that
+# only fits the large fallback wins no nodes at all. protostar is the case that
+# bites: it still reaches x8i.large at 2 vCPU, so its cpu claim stays at 1.60
+# even though its top rung (r8a.xlarge) has 4.
+worker:
+  # on-demand pairs with ephemeral, always: /data on the node disk is denser and
+  # there is no eviction to resume from. pvc is what makes spot survivable, and
+  # the two are never mixed.
+  storageMode: "ephemeral"
+
+monitor:
+  capacityType: "on-demand"
+
+  # Claims are cut from allocatable MINUS the daemonsets, which the previous
+  # table did not do -- it sized straight to allocatable, so on 2026-08-07 every
+  # on-demand tier failed to schedule on BOTH dimensions and Karpenter provisioned
+  # nothing: "no instance type has enough resources ... resources={cpu 1820m,
+  # memory 3054Mi}" against c8a.large's 2663Mi/1715m. Ten workers sat Pending
+  # indefinitely, which reads as slow provisioning rather than as a sizing bug.
+  #
+  # Daemonset overhead is 494Mi / 245m, measured on this cluster: alloy 10m/50Mi,
+  # aws-node 75m, ebs-csi-node 30m/104Mi, kube-proxy 100m, and ebs-csi-node-windows
+  # at 30m/340Mi. That last one CANNOT run here -- it carries
+  # nodeSelector kubernetes.io/os=windows -- but the nodepools constrain arch and
+  # not os, so Karpenter cannot prove it away and reserves for it on every node.
+  # Adding `kubernetes.io/os In [linux]` to the catchup nodepools would return
+  # 340Mi per node at every tier; the nodepool definitions live outside this repo,
+  # so these claims are cut against the 494Mi Karpenter actually enforces and stay
+  # correct (just conservative) if that constraint lands later.
+  #
+  # Each claim leaves a 3% margin and still exceeds half of (allocatable - ds), so
+  # one pod fits and two provably cannot. See the contract test for both halves.
+  #
+  # tier            shape            vCPU   allocatable        claim
+  # subdwarf/dwarf  c8a.medium         1     1127Mi /  725m    576Mi / 0.45
+  # subgiant        c8a.large          2     2663Mi / 1715m   2048Mi / 1.40
+  # giant           m8a.large          2     5940Mi / 1715m   5248Mi / 1.40
+  # supergiant      r8a.large          2    13313Mi / 1715m  12416Mi / 1.40
+  # nebula          m8a.2xlarge        4    13313Mi / 3705m  12416Mi / 3.35
+  # hypergiant      r8a.xlarge         4    28714Mi / 3705m  27328Mi / 3.35
+  # protostar       x8i.large          2    28714Mi / 1715m  27328Mi / 1.40
+  # supernova       r8a.2xlarge        8    59515Mi / 7695m  57216Mi / 7.20
+  poolCpu: "subdwarf:0.45,dwarf:0.45,subgiant:1.40,giant:1.40,supergiant:1.40,hypergiant:3.35,supernova:7.20,protostar:1.40,nebula:3.35"
+  poolMem: "subdwarf:576Mi,dwarf:576Mi,subgiant:2048Mi,giant:5248Mi,supergiant:12416Mi,hypergiant:27328Mi,supernova:57216Mi,protostar:27328Mi,nebula:12416Mi"
+  # vCPU of the smallest node each tier can land on. Differs from the spot map
+  # because on-demand pools were never doubled -- supergiant bottoms out at
+  # r8a.large (2), not at a 4-vCPU shape.
+  poolVcpu: "subdwarf:1,dwarf:1,subgiant:2,giant:2,supergiant:2,hypergiant:4,supernova:8,protostar:2,nebula:4"
+  # Both top rungs open, as on spot -- but they get here by the other route. On
+  # this map supergiant bottoms out at 2 vCPU and hypergiant at 4, so BOTH rungs
+  # cross a vCPU class (2->4 and 4->8) and the whitelist is what carries them;
+  # an empty denylist alone would leave them shut. On spot only the supernova
+  # rung needs listing, because the doubled pools put supergiant and hypergiant
+  # on equally-sized nodes.
+  #
+  # The cost is higher here than on spot: one pod per node means a promotion buys
+  # a bigger node outright, with no co-tenant to amortise it, so each promoted
+  # range doubles its vCPU draw. And the bump fires on working set, which does not
+  # predict throughput -- same box, memory.max 28GiB ran 1.83 lps against 56GiB at
+  # 1.70 -- so some of what it promotes will gain nothing.
+  poolCrossRungs: "supergiant->hypergiant"
+  poolBlockRungs: "hypergiant->supernova"

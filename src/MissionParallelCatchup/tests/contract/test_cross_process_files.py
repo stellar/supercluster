@@ -16,6 +16,9 @@ import os
 
 import pytest
 
+import config
+import records
+import attempts
 import job_monitor as jm
 import log_collector as lc
 
@@ -27,8 +30,7 @@ END, ATTEMPT = '31005951', 2
 @pytest.fixture
 def shared(tmp_path, monkeypatch):
     """Both modules pointed at one directory, as the pod's volume gives them."""
-    monkeypatch.setattr(jm, 'LOG_DIR', str(tmp_path))
-    monkeypatch.setattr(lc, 'LOG_DIR', str(tmp_path))
+    monkeypatch.setattr(config, 'LOG_DIR', str(tmp_path))
     return tmp_path
 
 
@@ -36,7 +38,7 @@ def shared(tmp_path, monkeypatch):
 
 def test_both_processes_name_the_same_metrics_file(shared):
     """The collector writes it; the monitor reads peaks and txApply out of it."""
-    assert jm.metrics_path(END, ATTEMPT) == lc.base(END, ATTEMPT) + '.metrics'
+    assert records.metrics_path(END, ATTEMPT) == lc.base(END, ATTEMPT) + '.metrics'
 
 
 def test_both_processes_name_the_same_done_marker(shared):
@@ -46,15 +48,15 @@ def test_both_processes_name_the_same_done_marker(shared):
     which is the last place peaks can still be read from. A mismatch means the
     monitor never reaps and every Job waits out its TTL instead.
     """
-    assert jm.done_path(END, ATTEMPT) == lc.done_path(END, ATTEMPT)
+    assert records.done_path(END, ATTEMPT) == lc.done_path(END, ATTEMPT)
 
 
 def test_both_processes_name_the_same_archive_and_verdict(shared):
     """The monitor falls back to the archive for txApply and reads .outcome for
     the authoritative verdict; the collector writes both."""
-    assert jm.log_path(END, ATTEMPT) == lc.base(END, ATTEMPT) + '.log.gz'
-    assert jm.outcome_path(END, ATTEMPT) == lc.base(END, ATTEMPT) + '.outcome'
-    assert jm.state_path(END, ATTEMPT) == lc.base(END, ATTEMPT) + '.state'
+    assert records.log_path(END, ATTEMPT) == lc.base(END, ATTEMPT) + '.log.gz'
+    assert records.outcome_path(END, ATTEMPT) == lc.base(END, ATTEMPT) + '.outcome'
+    assert records.state_path(END, ATTEMPT) == lc.base(END, ATTEMPT) + '.state'
 
 
 def test_the_filenames_carry_the_attempt_as_well_as_the_range(shared):
@@ -64,7 +66,7 @@ def test_the_filenames_carry_the_attempt_as_well_as_the_range(shared):
     being compared against it -- which destroys exactly the OOM evidence the
     chain exists to keep.
     """
-    for path in (jm.metrics_path, jm.log_path, jm.outcome_path, jm.done_path):
+    for path in (records.metrics_path, records.log_path, records.outcome_path, records.done_path):
         assert path(END, 1) != path(END, 2)
         assert path('1', 1) != path('2', 1)
 
@@ -81,24 +83,25 @@ def test_discarding_a_successful_archive_keeps_what_is_still_read(shared):
             fh.write('x')
     lc.discard(END, ATTEMPT)
 
-    assert os.path.exists(jm.metrics_path(END, ATTEMPT)), "discard dropped the measurements"
-    assert os.path.exists(jm.done_path(END, ATTEMPT)), "discard dropped the reap marker"
-    assert not os.path.exists(jm.log_path(END, ATTEMPT)), "discard kept the archive"
+    assert os.path.exists(records.metrics_path(END, ATTEMPT)), "discard dropped the measurements"
+    assert os.path.exists(records.done_path(END, ATTEMPT)), "discard dropped the reap marker"
+    assert not os.path.exists(records.log_path(END, ATTEMPT)), "discard kept the archive"
 
 
 def test_the_monitor_can_read_an_archive_the_collector_wrote(shared):
     """gzip, appended member by member, read whole.
 
-    The monitor reads it with gzip.open() for the txApply fallback. A writer
-    that produced anything other than a concatenation of complete members would
-    give it a truncated read -- which it treats as "this range has no metric".
+    The monitor reads it with gzip.open() to decide whether an exit 3 was a
+    fetch fault. A writer that produced anything other than a concatenation of
+    complete members would give it a truncated read -- which it treats as no
+    evidence, and no evidence condemns the range.
     """
     path = lc.base(END, ATTEMPT) + '.log.gz'
-    for chunk in ("first line\n", "metric 'ledger.transaction.apply'\n",
-                  "              sum = 8.34285ms\n"):
+    for chunk in ("first line\n", "second line\n", "last line\n"):
         with gzip.open(path, 'ab') as fh:
             fh.write(chunk.encode())
-    assert jm._tx_apply_for_attempt(END, ATTEMPT) == pytest.approx(0.00834285)
+    assert [l.strip() for l in attempts._archive_tail(END, ATTEMPT)] == [
+        'first line', 'second line', 'last line']
 
 
 def test_a_carriage_return_meter_does_not_become_one_giant_line(shared, monkeypatch):
@@ -156,8 +159,9 @@ def test_both_containers_mount_one_volume_at_the_directory_they_both_use():
     at a different path in each container would give each process its own
     private copy of every measurement.
     """
-    log_dir = art.defaults('job_monitor')['LOG_DIR']
-    assert log_dir == art.defaults('log_collector')['LOG_DIR']
+    # One constant read through config by both processes now: they cannot
+    # disagree about the directory, only about mounting it.
+    log_dir = art.defaults('config')['LOG_DIR']
 
     mounts = {}
     for name, container in art.containers().items():
@@ -176,7 +180,7 @@ def test_both_containers_mount_one_volume_at_the_directory_they_both_use():
 
 def test_the_chart_tells_both_containers_where_that_directory_is():
     """LOG_DIR is env, not a constant, so the mount and the env must agree."""
-    log_dir = art.defaults('job_monitor')['LOG_DIR']
+    log_dir = art.defaults('config')['LOG_DIR']
     for name, container in art.containers().items():
         assert art.env_of(container)['LOG_DIR'] == log_dir, name
 
@@ -189,7 +193,7 @@ def test_the_progress_record_lives_on_that_volume_too():
     would not survive a monitor restart and the mission would build its range
     profile from the ConfigMap mirror -- which has every measurement stripped.
     """
-    assert os.path.dirname(jm.PROGRESS_FILE) == jm.LOG_DIR
+    assert os.path.dirname(config.PROGRESS_FILE) == config.LOG_DIR
 
 
 def test_the_shared_directory_is_a_single_writer_pvc():

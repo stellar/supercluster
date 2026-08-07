@@ -16,6 +16,8 @@ with their reason, so a new one has to be argued for rather than merely added.
 import os
 import re
 
+import config as cfg
+import units
 import job_monitor as jm
 import log_collector as lc
 
@@ -25,10 +27,34 @@ import _artifacts as art
 # the block the chart/code split actually bit on.
 SETS = ('monitor.profileConfigMap=p',)
 
-MODULES = {
-    art.MONITOR_CONTAINER: ('job_monitor', jm),
-    art.COLLECTOR_CONTAINER: ('log_collector', lc),
+# Every module whose code runs in the container, in the order a name is looked
+# for. Both containers read config.py -- the collector's own knobs are its own,
+# but NAMESPACE, RUN_NAME, LOG_DIR, STORAGE_MODE and SAVE_SUCCESS_LOGS are
+# shared, and were declared in both files until they were not.
+CONTAINERS = {
+    art.MONITOR_CONTAINER: (('config', cfg), ('job_monitor', jm)),
+    art.COLLECTOR_CONTAINER: (('log_collector', lc), ('config', cfg)),
 }
+
+READERS = {c: tuple(m for _, m in mods) for c, mods in CONTAINERS.items()}
+
+
+def _bindings(cname):
+    """env var -> (module_name, constant), across every module in the container."""
+    out = {}
+    for module_name, module in CONTAINERS[cname]:
+        for env, constant in art.env_bindings(art.module_source(module)).items():
+            out.setdefault(env, (module_name, constant))
+    return out
+
+
+def _code_defaults(cname):
+    """The built-in defaults of every module in the container, merged."""
+    out = {}
+    for module_name, _ in CONTAINERS[cname]:
+        for name, value in art.defaults(module_name).items():
+            out.setdefault((module_name, name), value)
+    return out
 
 # Env vars whose chart value is deliberately NOT the code default. Each one is
 # either per-release, per-mission, or a run parameter the mission overrides; in
@@ -46,10 +72,11 @@ DELIBERATE = {
     'ATTEMPT_DEADLINE_SECONDS': 'a backstop the chart turns on and the code leaves off',
     # StellarKubeSpecs.fs owns worker sizing, so the chart ships these empty on
     # purpose and the mission fills them in on every install.
-    # The code default is 'off' so a bare import stays inert, but nothing in the
-    # F# ever sets this -- the chart value IS the configuration, and shipping it
-    # empty silently drops every worker to the flat REQ_CPU.
-    'PROFILE_CPU_TIERS': 'code defaults to off; the chart is the only thing that enables tiering',
+    # Pool routing is opt-in: an empty prefix is exactly the pre-tier behaviour,
+    # and the mission turns the whole thing on by setting only this. The ladder
+    # itself ships defined -- see test_the_chart_ships_a_coherent_pool_ladder.
+    'POOL_PREFIX': 'empty ships pooling off; the mission sets it to opt in',
+    'CAPACITY_TYPE': 'empty means no capacity constraint; the mission derives it from storage mode',
     'REQ_CPU': 'left empty in the chart; StellarKubeSpecs.fs supplies it',
     'REQ_MEM': 'left empty in the chart; StellarKubeSpecs.fs supplies it',
 }
@@ -76,15 +103,15 @@ def _pairs():
     """(container, env, chart_value, constant, code_default) for each env set."""
     out = []
     for cname, container in art.containers(SETS).items():
-        module_name, module = MODULES[cname]
-        bindings = art.env_bindings(art.module_source(module))
-        code = art.defaults(module_name)
+        bindings = _bindings(cname)
+        code = _code_defaults(cname)
         for env, chart_value in art.env_of(container).items():
             if chart_value is None:
                 continue                      # valueFrom: the chart picks nothing
-            constant = bindings.get(env)
+            found = bindings.get(env)
+            constant = found[1] if found else None
             out.append((cname, env, chart_value, constant,
-                        code.get(constant) if constant else None))
+                        code.get(found) if found else None))
     return out
 
 
@@ -110,13 +137,16 @@ def test_no_pinned_default_is_a_constant_nothing_reads():
     """
     dead = []
     for cname, container in art.containers(SETS).items():
-        module_name, module = MODULES[cname]
-        source = art.module_source(module)
-        bindings = art.env_bindings(source)
+        bindings = _bindings(cname)
+        # Uses are counted across every module in the container, not just the one
+        # holding the assignment: config.py defines these and job_monitor reads
+        # them, and several are named differently from their env var.
+        source = '\n'.join(art.module_source(m) for m in READERS[cname])
         for env in art.env_of(container):
-            constant = bindings.get(env)
-            if constant is None:
+            found = bindings.get(env)
+            if found is None:
                 continue
+            module_name, constant = found
             uses = len(re.findall(rf"\b{constant}\b", source))
             if uses < 2:
                 dead.append(f"{module_name}.{constant} (from {env})")
@@ -195,16 +225,16 @@ def test_the_sizing_headroom_is_a_real_allowance_in_both_places():
     says what they must remain true of, so retuning them stays possible and
     zeroing them does not.
     """
-    code = art.defaults('job_monitor')
+    code = art.defaults('config')
     assert code['PROFILE_MARGIN'] >= 1.0, "a margin below 1.0 sizes under the measured peak"
-    headroom = jm._quantity_bytes(code['PROFILE_CACHE_HEADROOM'])
+    headroom = units.quantity_bytes(code['PROFILE_CACHE_HEADROOM'])
     assert headroom >= 256 * 1024 ** 2, (
         f"{code['PROFILE_CACHE_HEADROOM']} of fixed headroom is what OOMed 90 small ranges")
     assert code['PROFILE_RUNTIME_MEMORY_INSURANCE'] == '3Gi'
     # ...and the ceiling has to sit above the configured request, or a range
     # measured above it can never ask for what it actually uses and will pack as
     # though it were small.
-    assert (jm._quantity_bytes(code['PROFILE_MAX_MEM'])
-            > jm._quantity_bytes(code['REQ_MEM'])), (
+    assert (units.quantity_bytes(code['PROFILE_MAX_MEM'])
+            > units.quantity_bytes(code['REQ_MEM'])), (
         "the profile ceiling is at or below the configured request, so a hungry "
         "range can never ask for what it measured")

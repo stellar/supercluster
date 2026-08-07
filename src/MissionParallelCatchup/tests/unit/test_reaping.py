@@ -15,6 +15,9 @@ import pytest
 from kubernetes import client
 
 import fake_k8s
+import config
+import kube
+import records
 import job_monitor as jm
 
 
@@ -26,16 +29,16 @@ RUN = 'pc'
 def k8s(logdir, monkeypatch):
     """A fake cluster wired into the monitor, with no reconcile in the way."""
     fake = fake_k8s.FakeCluster(namespace=NAMESPACE)
-    monkeypatch.setattr(jm, 'core_v1', fake.core_v1)
-    monkeypatch.setattr(jm, 'batch_v1', fake.batch_v1)
-    monkeypatch.setattr(jm, 'NAMESPACE', NAMESPACE)
-    monkeypatch.setattr(jm, 'RUN_NAME', RUN)
-    monkeypatch.setattr(jm, 'STORAGE_MODE', 'pvc')
+    monkeypatch.setattr(kube, 'core_v1', fake.core_v1)
+    monkeypatch.setattr(kube, 'batch_v1', fake.batch_v1)
+    monkeypatch.setattr(config, 'NAMESPACE', NAMESPACE)
+    monkeypatch.setattr(config, 'RUN_NAME', RUN)
+    monkeypatch.setattr(config, 'STORAGE_MODE', 'pvc')
 
     def add_job(end, attempt):
         name = jm.job_name(end, attempt)
-        labels = {jm.LABEL_RUN: RUN, jm.LABEL_RANGE: str(end),
-                  jm.LABEL_ATTEMPT: str(attempt)}
+        labels = {config.LABEL_RUN: RUN, config.LABEL_RANGE: str(end),
+                  config.LABEL_ATTEMPT: str(attempt)}
         fake.batch_v1.create_namespaced_job(NAMESPACE, client.V1Job(
             metadata=client.V1ObjectMeta(name=name, labels=labels),
             spec=client.V1JobSpec(
@@ -81,7 +84,7 @@ def test_delete_job_is_best_effort(monkeypatch, k8s, status):
     # status must be swallowed too: losing a Job to a leaked object is a
     # disk/etcd cost, but raising here would abort the whole reconcile pass.
     boom = Boom(status)
-    monkeypatch.setattr(jm, 'batch_v1', boom)
+    monkeypatch.setattr(kube, 'batch_v1', boom)
     jm.delete_job(1, 1)          # must not raise
     assert boom.calls == 1
 
@@ -103,7 +106,7 @@ def test_a_completed_range_reaps_every_attempt_not_just_the_winner(k8s):
 
 
 def test_a_list_failure_leaves_the_jobs_to_the_ttl_rather_than_raising(monkeypatch, k8s):
-    monkeypatch.setattr(jm, 'batch_v1', Boom(500))
+    monkeypatch.setattr(kube, 'batch_v1', Boom(500))
     jm.reap_range_jobs(300)      # must not raise
 
 
@@ -115,27 +118,20 @@ def test_the_reap_waits_for_the_collectors_done_marker(k8s):
     # with no peaks at all. Only the collector knows it is done, and deleting
     # the Job reaps the pod -- the last place peaks could still be read from.
     k8s.add_job(300, 1)
-    full = {'txApply': 5.0, 'peakAnonBytes': 99}
-    jm._reap_if_complete(300, 1, full)
-    assert k8s.job_names() == [jm.job_name(300, 1)], \
-        "reaped before the collector marked it done"
-    open(jm.done_path(300, 1), 'w').close()
-    jm._reap_if_complete(300, 1, full)
+    assert jm._attempt_finalized(300, 1) is False, \
+        "no marker yet, so reconcile must not reap"
+    open(records.done_path(300, 1), 'w').close()
+    assert jm._attempt_finalized(300, 1) is True
+    jm.reap_range_jobs(300)
     assert k8s.job_names() == []
 
 
 def test_the_done_marker_is_the_only_thing_that_counts_as_finalized(logdir):
     assert jm._attempt_finalized(300, 1) is False
-    open(jm.metrics_path(300, 1), 'w').close()
+    open(records.metrics_path(300, 1), 'w').close()
     assert jm._attempt_finalized(300, 1) is False, "metrics are not a promise"
-    open(jm.done_path(300, 1), 'w').close()
+    open(records.done_path(300, 1), 'w').close()
     assert jm._attempt_finalized(300, 1) is True
-
-
-def test_a_record_has_peaks_only_if_some_axis_actually_measured_something():
-    assert jm._has_peaks({'peakAnonBytes': 1}) is True
-    assert jm._has_peaks({'peakAnonBytes': None, 'txApply': 5.0}) is False
-    assert jm._has_peaks({}) is False
 
 
 # --- releasing the volume ----------------------------------------------------
@@ -153,7 +149,7 @@ def test_a_completed_range_releases_its_volume(k8s):
 
 def test_ephemeral_mode_has_no_volume_to_release(monkeypatch, k8s):
     jm.ensure_pvc(300, owner=None)
-    monkeypatch.setattr(jm, 'STORAGE_MODE', 'ephemeral')
+    monkeypatch.setattr(config, 'STORAGE_MODE', 'ephemeral')
     jm.release_pvc(300)
     assert k8s.pvc_names() != [], "ephemeral mode deleted a volume it does not own"
 

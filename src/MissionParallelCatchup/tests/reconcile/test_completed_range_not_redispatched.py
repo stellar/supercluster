@@ -22,6 +22,7 @@ the API was asked to create, what landed in progress.json, and what reconcile()
 itself reported. No source text is inspected.
 """
 
+import config
 import job_monitor as jm
 
 
@@ -53,7 +54,7 @@ def stale_predecessor(cluster):
 def win_on_attempt_two(cluster):
     """Pass 3: a2 succeeds and is recorded. Returns reconcile()'s summary."""
     cluster.advance(300, 'succeeded')          # newest attempt == a2
-    cluster.finalize(300, 2, tx_apply=0.25, peaks={'peakRssBytes': 4096})
+    cluster.finalize(300, 2, tx_apply=0.25, peaks={'peakAnonBytes': 4096})
     return cluster.reconcile()
 
 
@@ -156,7 +157,7 @@ def test_a_phantom_rerun_does_not_breach_parallelism(cluster):
 
     assert '300/420' not in result['in_progress']
     assert sorted(result['in_progress']) == ['100/420', '200/420']
-    assert len(result['in_progress']) <= jm.PARALLELISM
+    assert len(result['in_progress']) <= config.PARALLELISM
 
 
 def test_the_range_scoped_reap_still_waits_for_the_done_marker(cluster):
@@ -179,7 +180,7 @@ def test_the_range_scoped_reap_still_waits_for_the_done_marker(cluster):
     assert waiting['finalizing'] == ['300/420'], \
         "the mission could publish its final profile before metrics landed"
 
-    cluster.finalize(300, 1, tx_apply=0.1, peaks={'peakRssBytes': 1})
+    cluster.finalize(300, 1, tx_apply=0.1, peaks={'peakAnonBytes': 1})
     finished = cluster.reconcile()
     assert jobs_for(cluster, 300) == []
     assert cluster.deleted.names(verb='delete', kind='job') == ['pc-r300-a1']
@@ -196,7 +197,7 @@ def test_remaining_never_goes_negative_and_the_run_reports_done(cluster,
     is also in completed, so it is subtracted twice -- remaining reads -1, and
     in_progress is never empty, so the driver's completion test never fires.
     """
-    monkeypatch.setattr(jm, 'PARALLELISM', 3)   # all three ranges at once
+    monkeypatch.setattr(config, 'PARALLELISM', 3)   # all three ranges at once
 
     cluster.reconcile()
     cluster.advance(300, 'disrupted')
@@ -204,7 +205,7 @@ def test_remaining_never_goes_negative_and_the_run_reports_done(cluster,
 
     for end, attempt in ((300, 2), (200, 1), (100, 1)):
         cluster.advance(end, 'succeeded', attempt=attempt)
-        cluster.finalize(end, attempt, tx_apply=0.1, peaks={'peakRssBytes': 1})
+        cluster.finalize(end, attempt, tx_apply=0.1, peaks={'peakAnonBytes': 1})
     done = cluster.reconcile()
 
     assert done['completed'] == 3

@@ -18,14 +18,16 @@ import os
 
 import pytest
 
+import config
+import attempts
 import job_monitor as jm
 import log_collector as lc
 
 
 @pytest.fixture
 def volume(tmp_path, monkeypatch):
-    monkeypatch.setattr(lc, 'LOG_DIR', str(tmp_path))
-    monkeypatch.setattr(jm, 'LOG_DIR', str(tmp_path))
+    monkeypatch.setattr(config, 'LOG_DIR', str(tmp_path))
+    monkeypatch.setattr(config, 'LOG_DIR', str(tmp_path))
     monkeypatch.setattr(lc, 'token', lambda: 'tok')
     monkeypatch.setattr(lc, 'LOG_POLL_SECONDS', 0.02)
     monkeypatch.setattr(lc, 'TERMINAL_POLL_ATTEMPTS', 2)
@@ -108,7 +110,7 @@ def test_a_404_finalizes_what_was_already_streamed(volume):
     drive(Apiserver(_Resp(200, body), _Resp(404)), lambda: False)
 
     assert jm._attempt_finalized('300', 1), "a vanished pod never finalized"
-    assert jm.tx_apply_for_range('300', 1) == pytest.approx(1.5)
+    assert attempts.tx_apply_for_range('300', 1) == pytest.approx(1.5)
     assert 'sum = 1500.0ms' in archive()
 
 
@@ -153,7 +155,7 @@ def test_terminal_is_sampled_before_the_poll_not_after(volume):
     assert 'catchup ledger 42000000' in archive()
     assert 'sum = 1500.0ms' in archive(), \
         "the read after the pod went terminal never happened"
-    assert jm.tx_apply_for_range('300', 1) == pytest.approx(1.5)
+    assert attempts.tx_apply_for_range('300', 1) == pytest.approx(1.5)
 
 
 # --- resuming a read ----------------------------------------------------------

@@ -9,6 +9,7 @@ processes actually run under.
 
 import pytest
 
+import config
 import job_monitor as jm
 import log_collector as lc
 
@@ -18,6 +19,6 @@ def logdir(tmp_path, monkeypatch):
     """The shared volume, as both processes see it."""
     d = tmp_path / 'logs'
     d.mkdir()
-    monkeypatch.setattr(jm, 'LOG_DIR', str(d))
-    monkeypatch.setattr(lc, 'LOG_DIR', str(d))
+    monkeypatch.setattr(config, 'LOG_DIR', str(d))
+    monkeypatch.setattr(config, 'LOG_DIR', str(d))
     return d

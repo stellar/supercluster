@@ -16,6 +16,8 @@ import asyncio
 
 import pytest
 
+import config
+import attempts
 import job_monitor as jm
 import log_collector as lc
 
@@ -25,10 +27,9 @@ MIB = 1024 ** 2
 @pytest.fixture
 def sampler(tmp_path, monkeypatch):
     """A collector with no memory, writing to a disposable volume."""
-    monkeypatch.setattr(lc, 'LOG_DIR', str(tmp_path))
-    monkeypatch.setattr(jm, 'LOG_DIR', str(tmp_path))
+    monkeypatch.setattr(config, 'LOG_DIR', str(tmp_path))
     monkeypatch.setattr(lc, 'token', lambda: 'tok')
-    monkeypatch.setattr(lc, 'STORAGE_MODE', 'ephemeral')
+    monkeypatch.setattr(config, 'STORAGE_MODE', 'ephemeral')
     for name in ('_eph_peak', '_anon_peak', '_ws_peak', '_peak_flushed',
                  '_streaming', '_pod_secs', '_wake'):
         monkeypatch.setattr(lc, name, {})
@@ -82,23 +83,16 @@ def sample(doc):
 
 # --- a peak is a high-water mark, not the latest reading ---------------------
 
-def test_a_later_lower_sample_never_lowers_the_peak(sampler):
+@pytest.mark.parametrize('first, second', [(900, 400), (400, 900)])
+def test_the_peak_is_a_high_water_mark_in_either_order(sampler, first, second):
     """Catching the spike is the whole point, and download-phase anon
-    oscillates: the sampler is what turns a series of readings into one
-    number, so last-wins here defeats every consumer downstream."""
-    sample(payload('w-1', [container(rss=900 * MIB)], eph=5))
-    sample(payload('w-1', [container(rss=400 * MIB)], eph=2))
+    oscillates: the sampler turns a series of readings into one number, so
+    last-wins defeats every consumer downstream."""
+    sample(payload('w-1', [container(rss=first * MIB)], eph=first))
+    sample(payload('w-1', [container(rss=second * MIB)], eph=second))
 
     assert lc._anon_peak == {'w-1': 900 * MIB}
-    assert lc._eph_peak == {'w-1': 5}
-
-
-def test_a_higher_sample_still_raises_it(sampler):
-    sample(payload('w-1', [container(rss=400 * MIB)], eph=2))
-    sample(payload('w-1', [container(rss=900 * MIB)], eph=5))
-
-    assert lc._anon_peak == {'w-1': 900 * MIB}
-    assert lc._eph_peak == {'w-1': 5}
+    assert lc._eph_peak == {'w-1': 900}
 
 
 # --- what must not be recorded -----------------------------------------------
@@ -186,18 +180,18 @@ def test_an_in_flight_peak_reaches_the_volume_before_the_stream_ends(sampler):
     lc._streaming['w-1'] = ('300', '1')
     sample(payload('w-1', [container(rss=900 * MIB)]))
 
-    assert jm.peaks_for_range('300', 1) == {'peakAnonBytes': 900 * MIB}
+    assert attempts.peaks_for_range('300', 1) == {'peakAnonBytes': 900 * MIB}
 
 
 def test_a_peak_sampled_before_stream_registration_is_flushed_on_open(sampler):
     """main samples first, then opens new pollers; a restart between those steps
     must not make that first high-water process-memory-only."""
     sample(payload('w-1', [container(rss=900 * MIB, ws=1200 * MIB)]))
-    assert jm.peaks_for_range('300', 1) == {}
+    assert attempts.peaks_for_range('300', 1) == {}
 
     lc._register_stream('w-1', '300', '1')
 
-    assert jm.peaks_for_range('300', 1) == {
+    assert attempts.peaks_for_range('300', 1) == {
         'peakAnonBytes': 900 * MIB,
         'peakWorkingSetBytes': 1200 * MIB,
     }
@@ -206,7 +200,7 @@ def test_a_peak_sampled_before_stream_registration_is_flushed_on_open(sampler):
 def test_the_disk_axis_stays_mode_gated(sampler, monkeypatch):
     """ephemeral-storage is meaningless in pvc mode: /data is on the volume,
     not on the node."""
-    monkeypatch.setattr(lc, 'STORAGE_MODE', 'pvc')
+    monkeypatch.setattr(config, 'STORAGE_MODE', 'pvc')
     lc._streaming['w-1'] = ('300', '1')
 
     sample(payload('w-1', [container(rss=900 * MIB)], eph=34 * 1024 ** 3))
@@ -236,7 +230,7 @@ def test_finalize_records_the_working_set_peak(sampler):
     asyncio.run(lc.finalize(None, 'w-1', '300', 1, lc.TxApplyScanner(),
                             lambda p: True))
 
-    stored = jm.peaks_for_range('300', 1)
+    stored = attempts.peaks_for_range('300', 1)
     assert stored['peakWorkingSetBytes'] == 4096 * MIB
     assert stored['peakAnonBytes'] == 900 * MIB
 
@@ -250,11 +244,45 @@ def test_finalize_records_that_an_attempt_resumed(sampler):
     tx.feed("RESUME: 300/16320 reached ledger 299, replay had started")
     asyncio.run(lc.finalize(None, 'w-1', '300', 1, tx, lambda p: True))
 
-    assert jm._attempt_resumed('300', 1) is True
+    assert attempts._attempt_resumed('300', 1) is True
 
 
 def test_a_fresh_attempt_is_never_marked_resumed(sampler):
     asyncio.run(lc.finalize(None, 'w-1', '300', 1, lc.TxApplyScanner(),
                             lambda p: True))
 
-    assert jm._attempt_resumed('300', 1) is False
+    assert attempts._attempt_resumed('300', 1) is False
+
+
+# --- which endpoint, and why it matters --------------------------------------
+
+def test_the_sampler_goes_straight_to_the_kubelet_not_the_apiserver_proxy(sampler):
+    """The endpoint choice IS the privilege boundary.
+
+    Reaching kubelet through `/api/v1/nodes/<n>/proxy/...` requires the
+    `nodes/proxy` subresource, which authorizes GET on EVERY kubelet path --
+    /pods and /containerLogs among them, for any namespace scheduled on that
+    node. The kubelet maps /stats/* to its own `nodes/stats` subresource, so
+    talking to it directly is the same payload under a grant that cannot read
+    pod inventory or logs at all.
+
+    Reverting to the proxy would 403 against the deployed RBAC rather than
+    quietly widening it, but the intent should fail loudly here first.
+    """
+    seen = []
+
+    class _Recording(_Session):
+        def get(self, url, **kw):
+            seen.append((url, kw))
+            return _Resp(self.payload)
+
+    asyncio.run(lc.sample_kubelet(_Recording(payload('w-1', [container(rss=1)])),
+                                 ['10.1.2.3']))
+
+    (url, kw), = seen
+    assert url == f"https://10.1.2.3:{lc.KUBELET_PORT}/stats/summary"
+    assert '/proxy/' not in url, "back on the apiserver node proxy"
+    assert 'nodes' not in url, "addressing a Node object rather than the kubelet"
+    # EKS kubelet serving certs are self-signed, not issued by the cluster CA
+    # the session's context trusts.
+    assert kw.get('ssl') is False

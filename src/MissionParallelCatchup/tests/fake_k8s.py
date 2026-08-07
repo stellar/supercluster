@@ -455,6 +455,11 @@ class FakeBatchV1Api(_Api):
         job = copy.deepcopy(body)
         job.metadata.namespace = namespace
         job.metadata.uid = job.metadata.uid or f"uid-{name}"
+        # The apiserver assigns this synchronously on every create, so a Job
+        # without one cannot exist. status.start_time is set by the Job
+        # controller instead, i.e. after the create response -- but the harness
+        # has no controller loop, so it stands in for one here.
+        job.metadata.creation_timestamp = job.metadata.creation_timestamp or _now()
         job.status = client.V1JobStatus(active=0, start_time=_now())
         self._c.jobs[(namespace, name)] = job
         self._c._spawn_pod(namespace, job)

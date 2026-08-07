@@ -18,16 +18,19 @@ import os
 
 import pytest
 
+import config
 import log_collector as lc
 
 
-def pod(name, phase='Running', end='300', attempt='1', node='node-1'):
+def pod(name, phase='Running', end='300', attempt='1', node='node-1', ip=None):
+    # hostIP is what the sampler reads: it talks to the kubelet directly rather
+    # than through the apiserver's node proxy.
     return {'metadata': {'name': name,
-                         'labels': {lc.LABEL_RUN: lc.RUN_NAME,
-                                    lc.LABEL_RANGE: end,
-                                    lc.LABEL_ATTEMPT: attempt}},
+                         'labels': {config.LABEL_RUN: config.RUN_NAME,
+                                    config.LABEL_RANGE: end,
+                                    config.LABEL_ATTEMPT: attempt}},
             'spec': {'nodeName': node},
-            'status': {'phase': phase}}
+            'status': {'phase': phase, 'hostIP': ip or f"10.0.0.{abs(hash(node)) % 200 + 1}"}}
 
 
 class Loop:
@@ -80,7 +83,7 @@ class Loop:
 
 @pytest.fixture
 def loop_env(tmp_path, monkeypatch):
-    monkeypatch.setattr(lc, 'LOG_DIR', str(tmp_path))
+    monkeypatch.setattr(config, 'LOG_DIR', str(tmp_path))
     monkeypatch.setattr(lc, 'token', lambda: 'tok')
     monkeypatch.setattr(lc, 'ssl_ctx', lambda: None)
     monkeypatch.setattr(lc, 'POLL_SECONDS', 0.01)
@@ -108,9 +111,13 @@ async def _drive(loop, extra, want_survivors=False):
         await asyncio.sleep(0.005)
         if loop.passes >= want:
             break
+    # Stream tasks only. The condemnation watch is also long-lived by design --
+    # it is supposed to outlive every poller -- so counting it here would read
+    # as a wedged stream that never gave its slot back.
     survivors = [t for t in asyncio.all_tasks()
                  if t is not asyncio.current_task() and t is not task
-                 and not t.done()]
+                 and not t.done()
+                 and 'watch_condemnations' not in repr(t.get_coro())]
     task.cancel()
     try:
         await task
@@ -121,19 +128,29 @@ async def _drive(loop, extra, want_survivors=False):
 
 # --- the sampler ---------------------------------------------------------------
 
-def test_the_sampler_runs_before_the_per_pod_branches(loop_env):
-    """The per-pod branches all end in `continue` for a pod already streaming,
-    so a sampler placed after them fires only on the cycle a stream opens --
-    when the range has written almost nothing and its peak is meaningless."""
+def test_the_sampler_never_delays_opening_a_stream(loop_env):
+    """The sampler is a serial sweep of every node's kubelet, and on spot a dead
+    one costs the whole connect timeout. Measured at 900 workers it stretched a
+    cycle to 925s, and ahead of the per-pod branches that delay applied to every
+    stream: five -a2 legs died with no reader, one after 184.7s. Opening a stream
+    is time-critical, so it goes first and the sampler takes the wait."""
     loop = run_loop(loop_env, [[pod('w-1')], [pod('w-1')], [pod('w-1')]])
 
-    assert loop.order[:3] == ['list', 'sample', 'open:w-1']
-    # One listing per cycle and one sample per listing: the sampler reuses the
-    # pod list rather than fetching its own.
+    assert loop.order[:3] == ['list', 'open:w-1', 'sample']
+    # Still once per cycle, and still off the same listing rather than its own.
     assert loop.order.count('sample') == loop.order.count('list')
-    for i, event in enumerate(loop.order):
-        if event == 'sample':
-            assert loop.order[i - 1] == 'list'
+
+
+def test_the_sampler_stays_outside_the_per_pod_loop(loop_env):
+    """It has to run every cycle, not once per stream. Those branches end in
+    `continue` for a pod already streaming, so a sampler placed among them fires
+    only on the cycle a stream opens -- when the range has written almost nothing
+    and its peak is meaningless."""
+    loop = run_loop(loop_env, [[pod('w-1')]] * 4)
+
+    # One sample per listing even though only the first cycle opens anything.
+    assert loop.order.count('sample') == loop.order.count('list')
+    assert loop.order.count('open:w-1') == 1
 
 
 def test_the_sampler_runs_every_cycle_not_once_per_stream(loop_env):
@@ -146,19 +163,19 @@ def test_the_sampler_runs_every_cycle_not_once_per_stream(loop_env):
 def test_the_sampler_is_not_gated_on_storage_mode(loop_env):
     """It was, back when it only sampled disk. Memory is sized in both modes,
     so gating here left every pvc run with no anon peak at all."""
-    loop_env.setattr(lc, 'STORAGE_MODE', 'pvc')
+    loop_env.setattr(config, 'STORAGE_MODE', 'pvc')
     loop = run_loop(loop_env, [[pod('w-1')], [pod('w-1')]])
 
-    assert loop.sampled and loop.sampled[0] == {'node-1'}
+    assert loop.sampled and loop.sampled[0] == {pod('w-1')['status']['hostIP']}
 
 
 def test_only_running_pods_are_handed_to_the_sampler(loop_env):
     """kubelet has no live stats for a pod that has not started or has exited,
     and every extra node in the set is another /stats/summary GET."""
-    loop = run_loop(loop_env, [[pod('w-1', phase='Pending', node='node-a'),
-                                pod('w-2', phase='Running', node='node-b')]] * 2)
+    loop = run_loop(loop_env, [[pod('w-1', phase='Pending', node='node-a', ip='10.0.0.1'),
+                                pod('w-2', phase='Running', node='node-b', ip='10.0.0.2')]] * 2)
 
-    assert loop.sampled[0] == {'node-b'}
+    assert loop.sampled[0] == {'10.0.0.2'}
 
 
 # --- which pods get a stream ---------------------------------------------------
@@ -174,7 +191,7 @@ def test_a_pending_pod_is_not_polled_until_it_can_answer(loop_env):
     assert loop.opened == [('w-1', '300', '1')]
     # ...and not until the third cycle, the first one it could have answered.
     assert loop.order[:6] == ['list', 'sample', 'list', 'sample',
-                              'list', 'sample']
+                              'list', 'open:w-1']
 
 
 def test_a_terminal_pod_is_still_polled(loop_env):
@@ -187,7 +204,7 @@ def test_a_terminal_pod_is_still_polled(loop_env):
 
 def test_a_pod_with_no_range_label_is_not_ours(loop_env):
     stray = pod('other-1')
-    del stray['metadata']['labels'][lc.LABEL_RANGE]
+    del stray['metadata']['labels'][config.LABEL_RANGE]
     loop = run_loop(loop_env, [[stray]] * 2)
 
     assert loop.opened == []

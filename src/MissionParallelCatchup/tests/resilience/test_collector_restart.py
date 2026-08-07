@@ -26,6 +26,9 @@ import os
 
 import pytest
 
+import config
+import records
+import attempts
 import job_monitor as jm
 import log_collector as lc
 
@@ -81,9 +84,9 @@ def vol(tmp_path, monkeypatch):
     """
     log_dir = tmp_path / 'logs'
     log_dir.mkdir()
-    monkeypatch.setattr(lc, 'LOG_DIR', str(log_dir))
+    monkeypatch.setattr(config, 'LOG_DIR', str(log_dir))
     # The monitor reads the same directory off its own module global.
-    monkeypatch.setattr(jm, 'LOG_DIR', str(log_dir))
+    monkeypatch.setattr(config, 'LOG_DIR', str(log_dir))
     restart(monkeypatch)
     monkeypatch.setattr(lc, '_pod_secs', {})
     monkeypatch.setattr(lc, '_wake', {})
@@ -109,7 +112,7 @@ def restart(monkeypatch):
 def metrics(end, attempt=1):
     """What the monitor would find in .metrics, or None if there is no file."""
     try:
-        with open(jm.metrics_path(str(end), attempt)) as fh:
+        with open(records.metrics_path(str(end), attempt)) as fh:
             return json.load(fh)
     except OSError:
         return None
@@ -179,24 +182,16 @@ def finalize(pod, end, attempt=1, succeeded=False, started=None, tx=None):
 # -- a peak may never go backwards -------------------------------------------
 
 @pytest.mark.parametrize('key', lc.PEAK_KEYS)
-def test_a_later_lower_write_cannot_lower_a_recorded_peak(vol, key):
-    """Every field in PEAK_KEYS, not just the one that was reported.
+@pytest.mark.parametrize('first, second', [(8, 1), (1, 8)])
+def test_a_recorded_peak_only_ever_rises(vol, key, first, second):
+    """Every field in PEAK_KEYS, in both orders.
 
-    This is the restarted-poller case reduced to its file operation: the second
-    write is a fresh process's first flush, and it is smaller because that
-    process started counting at zero.
+    The restarted-poller case reduced to its file operation: a smaller second
+    write is a fresh process's first flush, counting from zero. The guard must
+    still not be a write-once latch -- growth is the normal case.
     """
-    lc.write_metrics('300', 1, {key: 8 * GIB})
-    lc.write_metrics('300', 1, {key: 1 * GIB})
-
-    assert metrics(300)[key] == 8 * GIB
-
-
-@pytest.mark.parametrize('key', lc.PEAK_KEYS)
-def test_a_later_higher_write_still_raises_the_peak(vol, key):
-    """The guard must not be a write-once latch: growth is the normal case."""
-    lc.write_metrics('300', 1, {key: 1 * GIB})
-    lc.write_metrics('300', 1, {key: 8 * GIB})
+    lc.write_metrics('300', 1, {key: first * GIB})
+    lc.write_metrics('300', 1, {key: second * GIB})
 
     assert metrics(300)[key] == 8 * GIB
 
@@ -233,7 +228,7 @@ def test_finalize_recovers_resume_after_the_scanner_is_recreated(vol):
 
 def test_finalize_recovers_txapply_after_the_scanner_is_recreated(vol, monkeypatch):
     """The first poll saw the final medida block, then its scanner vanished."""
-    monkeypatch.setattr(lc, 'SAVE_SUCCESS_LOGS', False)
+    monkeypatch.setattr(config, 'SAVE_SUCCESS_LOGS', False)
     path = lc.base('300', 2) + '.log.gz'
     with gzip.open(path, 'wt') as fh:
         fh.write('RESUME: local state reached ledger 250; skipping new-db\n')
@@ -250,34 +245,29 @@ def test_finalize_recovers_txapply_after_the_scanner_is_recreated(vol, monkeypat
         "the test must prove recovery happened before success-log discard"
 
 
-def test_synthetic_peaks_survive_the_same_scanner_recreation(vol, monkeypatch):
-    monkeypatch.setattr(lc, 'SYNTHETIC_WORKER', True)
-    path = lc.base('300', 2) + '.log.gz'
+def test_finalize_recovers_txapply_for_a_scanner_that_was_never_recreated(vol,
+                                                                          monkeypatch):
+    """The gap the monitor used to cover, now closed at the source.
+
+    stellar-core prints the medida block once, at exit, so a poller that ran the
+    pod's whole life can still end a beat early and hold no total -- with nothing
+    to recreate. The rescue used to require `recreated`, so it never looked, and
+    the monitor re-parsed the same archive behind it. Measured on the 2026-08-04
+    run: 15 attempts of 4805 landed here, and replaying the archive through this
+    same scanner recovers every one.
+    """
+    monkeypatch.setattr(config, 'SAVE_SUCCESS_LOGS', False)
+    path = lc.base('300', 1) + '.log.gz'
     with gzip.open(path, 'wt') as fh:
-        fh.write('RESUME: local state reached ledger 250; skipping new-db\n')
-        fh.write('SYNTHETIC PEAK: anonBytes=50331648 workingSetBytes=58720256\n')
         fh.write("metric 'ledger.transaction.apply'\n")
-        fh.write('sum = 2500ms\n')
+        fh.write('  count = 123\n')
+        fh.write('  sum = 4200.0ms\n')
 
-    finalize('w-300-a2', 300, attempt=2, tx=lc.TxApplyScanner(recreated=True))
+    # recreated=False: this poller ran start to finish and simply has no total.
+    finalize('w-300-a1', 300, attempt=1, succeeded=True, tx=lc.TxApplyScanner())
 
-    assert metrics(300, 2) == {
-        'peakAnonBytes': 50331648,
-        'peakWorkingSetBytes': 58720256,
-        'resumed': True,
-        'txApplySeconds': 2.5,
-    }
-
-
-def test_synthetic_mode_never_overwrites_fixed_peaks_from_kubelet(vol, monkeypatch):
-    monkeypatch.setattr(lc, 'SYNTHETIC_WORKER', True)
-    session = FakeSession(summary(
-        'w-300-a1', rss=80 * GIB, ws=90 * GIB))
-
-    run(lc.sample_kubelet(session, ['node-1']))
-
-    assert session.urls == []
-    assert metrics(300) is None
+    assert metrics(300, 1)['txApplySeconds'] == 4.2, \
+        "the collector did not re-read its own archive, so the value is lost"
 
 
 def test_finalize_does_not_promote_resume_declined(vol):
@@ -321,7 +311,7 @@ def test_a_midflight_anon_flush_survives_a_collector_restart(vol, monkeypatch):
 
     assert metrics(300)['peakAnonBytes'] == 6 * GIB
     # And the consumer agrees: this is the figure that sizes the next run.
-    assert jm.peaks_for_range('300', 1)['peakAnonBytes'] == 6 * GIB
+    assert attempts.peaks_for_range('300', 1)['peakAnonBytes'] == 6 * GIB
 
 
 def test_a_midflight_ephemeral_flush_survives_a_collector_restart(vol, monkeypatch):
@@ -332,25 +322,25 @@ def test_a_midflight_ephemeral_flush_survives_a_collector_restart(vol, monkeypat
     buckets are applied -- so a replacement sidecar re-measuring the same pod
     does not recover the earlier high-water. It has to already be on the volume.
     """
-    monkeypatch.setattr(lc, 'STORAGE_MODE', 'ephemeral')
+    monkeypatch.setattr(config, 'STORAGE_MODE', 'ephemeral')
     lc._streaming['w-300'] = ('300', '1')
     sample('w-300', rss=1 * GIB, eph=34 * GIB)
 
     restart(monkeypatch)
-    monkeypatch.setattr(lc, 'STORAGE_MODE', 'ephemeral')
+    monkeypatch.setattr(config, 'STORAGE_MODE', 'ephemeral')
     lc._streaming['w-300'] = ('300', '1')
     sample('w-300', rss=1 * GIB, eph=4 * GIB)
     finalize('w-300', 300)
 
     assert metrics(300)['peakEphemeralBytes'] == 34 * GIB
-    assert jm.peaks_for_range('300', 1)['peakEphemeralBytes'] == 34 * GIB
+    assert attempts.peaks_for_range('300', 1)['peakEphemeralBytes'] == 34 * GIB
 
 
 def test_pvc_mode_records_no_ephemeral_peak_at_all(vol, monkeypatch):
     """In pvc mode the range's data sits on the volume, not on node disk, so
     there is no ephemeral-storage request to size and the figure would be
     noise. Sampling it is gated on the mode; flushing it must be too."""
-    monkeypatch.setattr(lc, 'STORAGE_MODE', 'pvc')
+    monkeypatch.setattr(config, 'STORAGE_MODE', 'pvc')
     lc._streaming['w-300'] = ('300', '1')
     sample('w-300', rss=1 * GIB, eph=34 * GIB)
     finalize('w-300', 300)
@@ -361,7 +351,7 @@ def test_pvc_mode_records_no_ephemeral_peak_at_all(vol, monkeypatch):
 def test_a_flush_with_no_stream_registered_writes_nothing(vol, monkeypatch):
     """_streaming is repopulated when a poller opens. A sample that lands on a
     pod with no poller yet has nowhere to write and must not guess a file."""
-    monkeypatch.setattr(lc, 'STORAGE_MODE', 'ephemeral')
+    monkeypatch.setattr(config, 'STORAGE_MODE', 'ephemeral')
     sample('w-300', rss=6 * GIB, eph=34 * GIB)
 
     assert os.listdir(vol) == []
@@ -415,7 +405,7 @@ def test_done_never_appears_beside_a_half_written_metrics_file(vol, monkeypatch)
     record permanent."""
     lc.write_metrics('300', 1, {'peakAnonBytes': 6 * GIB, 'txApplySeconds': 30.0})
 
-    seen = _arm_half_write(monkeypatch, lc, '.metrics.tmp')
+    seen = _arm_half_write(monkeypatch, records, '.metrics.tmp')
     lc._anon_peak['w-300'] = 9 * GIB
     finalize('w-300', 300)
 
@@ -424,9 +414,9 @@ def test_done_never_appears_beside_a_half_written_metrics_file(vol, monkeypatch)
     assert metrics(300) == {'peakAnonBytes': 6 * GIB, 'txApplySeconds': 30.0}
     # .done still lands: the collector really will write nothing more for this
     # attempt, and withholding it only strands the Job until its TTL.
-    assert os.path.exists(jm.done_path('300', 1))
+    assert os.path.exists(records.done_path('300', 1))
     # What the monitor actually reads is a complete record, not a torn one.
-    assert jm.peaks_for_range('300', 1) == {'peakAnonBytes': 6 * GIB}
+    assert attempts.peaks_for_range('300', 1) == {'peakAnonBytes': 6 * GIB}
 
 
 def test_done_lands_after_the_metrics_it_promises(vol):
@@ -434,21 +424,21 @@ def test_done_lands_after_the_metrics_it_promises(vol):
     lc._anon_peak['w-300'] = 6 * GIB
     finalize('w-300', 300)
 
-    assert (os.stat(jm.done_path('300', 1)).st_mtime_ns
-            >= os.stat(jm.metrics_path('300', 1)).st_mtime_ns)
+    assert (os.stat(records.done_path('300', 1)).st_mtime_ns
+            >= os.stat(records.metrics_path('300', 1)).st_mtime_ns)
     assert metrics(300)['peakAnonBytes'] == 6 * GIB
 
 
 def test_a_truncated_metrics_file_does_not_poison_the_next_write(vol):
     """Whatever tore the previous record, the next flush must still produce a
     file the monitor can read -- and must not raise inside the sampler."""
-    with open(jm.metrics_path('300', 1), 'w') as fh:
+    with open(records.metrics_path('300', 1), 'w') as fh:
         fh.write('{"peakAnonBytes": 644245')
 
     lc.write_metrics('300', 1, {'peakAnonBytes': 5 * GIB})
 
     assert metrics(300) == {'peakAnonBytes': 5 * GIB}
-    assert jm.peaks_for_range('300', 1) == {'peakAnonBytes': 5 * GIB}
+    assert attempts.peaks_for_range('300', 1) == {'peakAnonBytes': 5 * GIB}
 
 
 def test_an_attempt_with_nothing_to_report_still_finalizes(vol):
@@ -465,7 +455,7 @@ def test_marking_done_twice_is_harmless(vol):
     lc._mark_done('300', 1)
     lc._mark_done('300', 1)
 
-    assert os.path.exists(jm.done_path('300', 1))
+    assert os.path.exists(records.done_path('300', 1))
     assert jm._attempt_finalized('300', 1)
 
 
@@ -537,7 +527,7 @@ def test_a_cold_poller_on_an_already_terminal_pod_reports_no_duration(vol):
     assert 'attemptSeconds' not in stored
     assert stored['peakAnonBytes'] == 6 * GIB
     # ...and the monitor is left free to supply the real one.
-    assert jm.seconds_for_range('300', 1, final=3600.4) == 3600.4
+    assert attempts.seconds_for_range('300', 1, final=3600.4) == 3600.4
 
 
 def test_a_poller_that_watched_the_whole_attempt_still_reports_its_duration(vol):
@@ -548,7 +538,7 @@ def test_a_poller_that_watched_the_whole_attempt_still_reports_its_duration(vol)
     stored = metrics(300)
     assert stored['attemptSeconds'] == pytest.approx(42.0, abs=1.0)
     assert stored['attemptSecondsExact'] is False
-    assert jm.seconds_for_range('300', 1) is None
+    assert attempts.seconds_for_range('300', 1) is None
 
 
 def test_the_duration_the_collector_records_is_the_pods_not_the_pollers(vol):
@@ -583,11 +573,11 @@ def test_an_existing_outcome_is_not_overwritten_by_a_later_pod(vol):
     the one taken while the evidence was fresh; a later, different pod must not
     silently rewrite it."""
     lc.record_outcome(_pod('w-300-first', disrupted=True), '300', 1)
-    first = jm.read_outcome('300', 1)
+    first = records.read_outcome('300', 1)
 
     lc.record_outcome(_pod('w-300-second', exit_code=1), '300', 1)
 
-    assert jm.read_outcome('300', 1) == first
+    assert records.read_outcome('300', 1) == first
     assert first['outcome'] == 'disrupted'
     assert first['pod'] == 'w-300-first'
 
@@ -596,25 +586,25 @@ def test_an_outcome_written_by_the_monitor_is_not_re_classified(vol, monkeypatch
     """Both processes write this file and both read it. The collector must
     treat the monitor's verdict as final, including the fields only the monitor
     records -- attemptSeconds for a failed leg lives nowhere else."""
-    with open(jm.outcome_path('300', 1), 'w') as fh:
+    with open(records.outcome_path('300', 1), 'w') as fh:
         json.dump({'outcome': 'ephemeral', 'exitCode': None, 'pod': 'w-300',
                    'attemptSeconds': 1800.0}, fh)
 
     lc.record_outcome(_pod('w-300', exit_code=3), '300', 1)
 
-    assert jm.read_outcome('300', 1)['outcome'] == 'ephemeral'
-    assert jm.read_outcome('300', 1)['attemptSeconds'] == 1800.0
+    assert records.read_outcome('300', 1)['outcome'] == 'ephemeral'
+    assert records.read_outcome('300', 1)['attemptSeconds'] == 1800.0
 
 
 def test_a_recorded_outcome_is_a_complete_file_or_no_file(vol, monkeypatch):
     """Same rename discipline as .metrics: the monitor branches its whole retry
     policy on this file, so a torn read would have to be a crash or a wrong
     verdict."""
-    _arm_half_write(monkeypatch, lc, '.outcome.tmp')
+    _arm_half_write(monkeypatch, records, '.outcome.tmp')
     lc.record_outcome(_pod('w-300', exit_code=1), '300', 1)
 
-    assert jm.read_outcome('300', 1) is None
-    assert not os.path.exists(jm.outcome_path('300', 1))
+    assert records.read_outcome('300', 1) is None
+    assert not os.path.exists(records.outcome_path('300', 1))
 
 
 def test_an_ephemeral_eviction_is_classified_from_the_pod_message(vol):
@@ -627,7 +617,7 @@ def test_an_ephemeral_eviction_is_classified_from_the_pod_message(vol):
                      'of containers 40Gi'),
         '300', 1)
 
-    assert jm.read_outcome('300', 1)['outcome'] == 'ephemeral'
+    assert records.read_outcome('300', 1)['outcome'] == 'ephemeral'
 
 
 # -- the resume state file ----------------------------------------------------
@@ -667,7 +657,7 @@ def test_discarding_a_successful_range_keeps_its_measurements(vol):
 
 
 def test_a_successful_range_discards_its_archive_inside_finalize(vol, monkeypatch):
-    monkeypatch.setattr(lc, 'SAVE_SUCCESS_LOGS', False)
+    monkeypatch.setattr(config, 'SAVE_SUCCESS_LOGS', False)
     with open(lc.base('300', 1) + '.log.gz', 'wb') as fh:
         fh.write(b'\x1f\x8b')
     lc._anon_peak['w-300'] = 6 * GIB
@@ -676,4 +666,4 @@ def test_a_successful_range_discards_its_archive_inside_finalize(vol, monkeypatc
 
     assert not os.path.exists(lc.base('300', 1) + '.log.gz')
     assert metrics(300)['peakAnonBytes'] == 6 * GIB
-    assert os.path.exists(jm.done_path('300', 1))
+    assert os.path.exists(records.done_path('300', 1))

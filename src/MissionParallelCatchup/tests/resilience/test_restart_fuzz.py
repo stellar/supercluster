@@ -19,6 +19,11 @@ import random
 
 import pytest
 
+import config
+import units
+import ranges
+import records
+import attempts
 import job_monitor as jm
 
 # The states the fuzz drives Jobs through. A real run is dominated by success,
@@ -49,7 +54,7 @@ def restart(cluster):
     cluster.state = {'owner': None, 'replayed': set(), 'max_completed': 0,
                      'halted': False, 'counted': {}}
     jm._progress_owner.clear()
-    jm.PROFILE = None
+    config.PROFILE = None
 
 
 # --- cluster inspection -----------------------------------------------------
@@ -65,8 +70,8 @@ def _jobs_by_range(cluster):
     for name in cluster.jobs():
         job = cluster.k8s.job(name)
         labels = job.metadata.labels or {}
-        end = labels.get(jm.LABEL_RANGE)
-        attempt = int(labels.get(jm.LABEL_ATTEMPT, 1))
+        end = labels.get(config.LABEL_RANGE)
+        attempt = int(labels.get(config.LABEL_ATTEMPT, 1))
         out.setdefault(end, []).append((attempt, job))
     return out
 
@@ -135,8 +140,8 @@ def check(cluster, result, led, where):
 
     # ...and the run never runs wider than it was told to. A restart that
     # forgot what was in flight would show up here first.
-    assert len(result['in_progress']) <= jm.PARALLELISM, \
-        f"{where}: {len(result['in_progress'])} in flight over PARALLELISM {jm.PARALLELISM}"
+    assert len(result['in_progress']) <= config.PARALLELISM, \
+        f"{where}: {len(result['in_progress'])} in flight over PARALLELISM {config.PARALLELISM}"
 
     # A completed range has nothing left to resume, so its volume is gone --
     # 79 TiB of orphaned gp3 is what this costs when it regresses.
@@ -167,7 +172,7 @@ def check(cluster, result, led, where):
     # -- I5: recorded peaks are a high-water mark ----------------------------
     for end, record in (progress.get('completed') or {}).items():
         seen = led.peaks.setdefault(end, {})
-        for field in jm.PEAK_FIELDS:
+        for field in attempts.PEAK_FIELDS:
             value = record.get(field)
             if value is None:
                 continue
@@ -180,10 +185,10 @@ def check(cluster, result, led, where):
     # -- I6: one pod per (range, attempt) ------------------------------------
     for (_, name), pod in cluster.k8s.pods.items():
         labels = pod.metadata.labels or {}
-        end = labels.get(jm.LABEL_RANGE)
+        end = labels.get(config.LABEL_RANGE)
         if end is None:
             continue
-        key = (end, labels.get(jm.LABEL_ATTEMPT))
+        key = (end, labels.get(config.LABEL_ATTEMPT))
         previous = led.pods.setdefault(key, name)
         assert previous == name, (
             f"{where}: range {key[0]} attempt {key[1]} has two distinct pods "
@@ -201,7 +206,7 @@ def collector_catches_up(cluster, rng):
     """
     for end, entries in _jobs_by_range(cluster).items():
         for attempt, job in entries:
-            if not _terminal(job) or os.path.exists(jm.done_path(end, attempt)):
+            if not _terminal(job) or os.path.exists(records.done_path(end, attempt)):
                 continue
             if rng.random() < 0.35:
                 continue
@@ -209,7 +214,7 @@ def collector_catches_up(cluster, rng):
                 end, attempt,
                 tx_apply=round(rng.uniform(0.0, 5.0), 4),
                 peaks={'peakAnonBytes': rng.randrange(1, 20) * 10 ** 8,
-                       'peakRssBytes': rng.randrange(1, 20) * 10 ** 8},
+                       'peakAnonBytes': rng.randrange(1, 20) * 10 ** 8},
                 resumed=(attempt > 1 and rng.random() < 0.5),
                 attempt_seconds=round(rng.uniform(10.0, 300.0), 2))
 
@@ -228,8 +233,8 @@ def cluster_moves(cluster, rng):
 def big_run(cluster, monkeypatch):
     """Twelve ranges, four at a time -- enough queueing that a dropped range
     would be silently re-dispatched rather than obviously stuck."""
-    monkeypatch.setattr(jm, 'LATEST_LEDGER_NUM', 1200)
-    monkeypatch.setattr(jm, 'PARALLELISM', 4)
+    monkeypatch.setattr(config, 'LATEST_LEDGER_NUM', 1200)
+    monkeypatch.setattr(config, 'PARALLELISM', 4)
     return cluster
 
 
@@ -244,7 +249,7 @@ def _observable(cluster):
 def test_restart_is_invisible_under_fuzz(big_run, seed):
     cluster = big_run
     rng = random.Random(seed)
-    ends = [str(end) for end, _ in jm.generate_ranges()]
+    ends = [str(end) for end, _ in ranges.generate_ranges()]
     assert len(ends) == 12
     led = Ledger(ends)
 
@@ -293,7 +298,7 @@ def test_restart_is_invisible_under_fuzz(big_run, seed):
     assert progress.get('completed'), f"seed={seed}: no range ever completed"
     # Retries have to have actually happened, or the fuzz only exercised the
     # happy path.
-    assert any(name.endswith('.verdict') for name in os.listdir(jm.LOG_DIR)), \
+    assert any(name.endswith('.verdict') for name in os.listdir(config.LOG_DIR)), \
         f"seed={seed}: no attempt ever failed"
 
 
@@ -304,7 +309,7 @@ def test_restart_does_not_redispatch_a_recorded_range(big_run):
     cluster.reconcile()
     for end in ('1200', '1100', '1000', '900'):
         cluster.advance(int(end), 'succeeded')
-        cluster.finalize(end, 1, tx_apply=1.0, peaks={'peakRssBytes': 5})
+        cluster.finalize(end, 1, tx_apply=1.0, peaks={'peakAnonBytes': 5})
     cluster.reconcile()
     recorded = set(cluster.completed())
     assert recorded == {'1200', '1100', '1000', '900'}
@@ -338,7 +343,7 @@ def test_restart_mid_retry_keeps_the_attempt_number(big_run):
     assert cluster.attempt_of(1200) == 3
     escalated = (cluster.k8s.job('pc-r1200-a3')
                  .spec.template.spec.containers[0].resources.requests['memory'])
-    assert jm._quantity_bytes(escalated) > jm._quantity_bytes(limit)
+    assert units.quantity_bytes(escalated) > units.quantity_bytes(limit)
     assert cluster.failed() == {}
 
 
@@ -394,35 +399,31 @@ def test_restart_does_not_halt_on_its_own_progress(big_run):
 # high-water mark in memory, so a restart disarmed it for exactly the event it
 # existed to survive, and re-running a range is idempotent anyway.
 
-def test_a_measurement_survives_the_configmap_fallback(big_run):
-    """I5, in its purest form: a recorded peak that must not go away.
+def test_losing_progress_json_costs_a_replay_not_the_measurement(big_run):
+    """I5 holds because the measurements live in .metrics, not in the record.
 
-    The two stores have different jobs. The ConfigMap is the control plane the
-    mission driver reads, capped at 1 MiB, so _state_only strips every
-    measurement from it. The volume is the data plane. Falling back to the
-    mirror therefore returns a record that is complete as state and empty as
-    data, and the next save wrote that back over the volume.
-
-    The measurements were never really gone: only progress.json was damaged,
-    and .metrics is written per attempt and never rewritten. load_progress
-    re-reads them from there rather than persisting the hole.
+    Losing progress.json used to be papered over by the ConfigMap mirror, which
+    returned state without data and then persisted that hole over the volume.
+    Now the record is simply absent and the range becomes eligible again --
+    which I5 permits, since it forbids a peak going BACKWARDS, not a record
+    going away. .metrics is written per attempt and never rewritten, so
+    re-completing the range restores the same peak rather than a lower one.
     """
     cluster = big_run
     cluster.reconcile()
     cluster.advance(1200, 'succeeded')
-    cluster.finalize('1200', 1, tx_apply=2.5, peaks={'peakRssBytes': 12345})
+    cluster.finalize('1200', 1, tx_apply=2.5, peaks={'peakAnonBytes': 12345})
     cluster.reconcile()
-    assert cluster.completed()['1200']['peakRssBytes'] == 12345
+    assert cluster.completed()['1200']['peakAnonBytes'] == 12345
 
-    os.remove(jm.PROGRESS_FILE)
+    os.remove(config.PROGRESS_FILE)
     restart(cluster)
-    # Any later completion rewrites the file from the fallback record.
-    cluster.advance(1100, 'succeeded')
-    cluster.finalize('1100', 1, tx_apply=1.0, peaks={'peakRssBytes': 999})
     cluster.reconcile()
-
-    assert cluster.completed()['1200'].get('peakRssBytes') == 12345
-    assert cluster.completed()['1200'].get('txApply') == 2.5
+    # Not recovered from it: the range is eligible again rather than carrying a
+    # state-only entry that the next save would persist over the volume.
+    assert '1200' not in cluster.completed()
+    # And the artifacts outlived the record, so a replay can still measure it.
+    assert attempts.peaks_for_range('1200', 1).get('peakAnonBytes') == 12345
 
 
 # --- the checker has teeth --------------------------------------------------
@@ -443,7 +444,7 @@ def test_checker_catches_progress_held_in_memory(big_run, monkeypatch):
     monkeypatch.setattr(jm, 'save_progress', lambda progress: cache.update(progress))
     monkeypatch.setattr(cluster, 'progress', lambda: cache)
 
-    led = Ledger([str(e) for e, _ in jm.generate_ranges()])
+    led = Ledger([str(e) for e, _ in ranges.generate_ranges()])
     rng = random.Random(1)
     with pytest.raises(AssertionError, match='accounted for nowhere|re-dispatched'):
         for i in range(12):
@@ -458,7 +459,7 @@ def test_checker_catches_progress_held_in_memory(big_run, monkeypatch):
 
 def test_checker_catches_two_live_jobs_for_one_range(big_run):
     cluster = big_run
-    led = Ledger([str(e) for e, _ in jm.generate_ranges()])
+    led = Ledger([str(e) for e, _ in ranges.generate_ranges()])
     result = cluster.reconcile()
     check(cluster, result, led, 'mutant pre')
 
@@ -471,16 +472,16 @@ def test_checker_catches_two_live_jobs_for_one_range(big_run):
 
 def test_checker_catches_a_peak_going_backwards(big_run):
     cluster = big_run
-    led = Ledger([str(e) for e, _ in jm.generate_ranges()])
+    led = Ledger([str(e) for e, _ in ranges.generate_ranges()])
     cluster.reconcile()
     cluster.advance(1200, 'succeeded')
-    cluster.finalize('1200', 1, peaks={'peakRssBytes': 900})
+    cluster.finalize('1200', 1, peaks={'peakAnonBytes': 900})
     result = cluster.reconcile()
     check(cluster, result, led, 'mutant pre')
 
     record = cluster.progress()
-    record['completed']['1200']['peakRssBytes'] = 5
-    cluster.write(jm.PROGRESS_FILE, json.dumps(record))
+    record['completed']['1200']['peakAnonBytes'] = 5
+    cluster.write(config.PROGRESS_FILE, json.dumps(record))
 
     with pytest.raises(AssertionError, match='went backwards'):
         check(cluster, result, led, 'mutant post')
@@ -488,7 +489,7 @@ def test_checker_catches_a_peak_going_backwards(big_run):
 
 def test_checker_catches_a_replayed_attempt(big_run):
     cluster = big_run
-    led = Ledger([str(e) for e, _ in jm.generate_ranges()])
+    led = Ledger([str(e) for e, _ in ranges.generate_ranges()])
     result = cluster.reconcile()
     check(cluster, result, led, 'mutant pre')
     # The range's only Job is destroyed with no record of the range, so the

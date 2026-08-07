@@ -3,10 +3,10 @@
 The mission driver (MissionHistoryPubnetParallelCatchupV2.fs) no longer aborts
 on the first failure -- it drains first, and only reports once
 
-    num_remain == 0 && jobs_in_progress.Count == 0
+    num_remain == 0 && queue_in_progress_count == 0
 
 which are `reconcile()`'s own `remaining` and `in_progress` verbatim
-(job_monitor.update_status_and_metrics maps them straight into the status JSON).
+(job_monitor.reconcile_loop maps them straight into the status JSON).
 
 If dispatch is gated on `not failed`, the first condemned range stops the
 monitor sending any further work. `in_progress` still drains to empty as the
@@ -21,6 +21,7 @@ on what it returns and on what ends up in progress.json. No source text.
 
 import pytest
 
+import config
 import job_monitor as jm
 
 
@@ -61,7 +62,7 @@ def drive_like_the_mission(cluster, condemn=(), max_passes=40):
             else:
                 cluster.advance(end, 'succeeded', attempt=attempt)
                 cluster.finalize(end, attempt, tx_apply=1.0,
-                                 peaks={'peakRssBytes': 1})
+                                 peaks={'peakAnonBytes': 1})
     return None
 
 
@@ -87,7 +88,7 @@ def test_a_condemned_range_does_not_pin_remaining_above_zero(cluster):
 
     cluster.advance(300, 'condemned')          # exit 1: never retried
     cluster.advance(200, 'succeeded')
-    cluster.finalize(200, 1, tx_apply=1.0, peaks={'peakRssBytes': 1})
+    cluster.finalize(200, 1, tx_apply=1.0, peaks={'peakAnonBytes': 1})
 
     second = cluster.reconcile()
 
@@ -104,7 +105,7 @@ def test_a_condemned_range_does_not_pin_remaining_above_zero(cluster):
 
     # And it really does finish.
     cluster.advance(100, 'succeeded')
-    cluster.finalize(100, 1, tx_apply=1.0, peaks={'peakRssBytes': 1})
+    cluster.finalize(100, 1, tx_apply=1.0, peaks={'peakAnonBytes': 1})
     third = cluster.reconcile()
     assert _drained(third)
     assert sorted(cluster.completed()) == ['100', '200']
@@ -139,7 +140,7 @@ def test_a_condemned_tip_does_not_discard_every_range_behind_it(cluster,
     This is the 2026-07-30 incident at small scale -- a condemned range at the
     tip stranded everything queued behind it. Freezing dispatch loses all nine.
     """
-    monkeypatch.setattr(jm, 'LATEST_LEDGER_NUM', 1000)   # ends 100..1000
+    monkeypatch.setattr(config, 'LATEST_LEDGER_NUM', 1000)   # ends 100..1000
 
     polls = drive_like_the_mission(cluster, condemn=[1000])
 
@@ -181,7 +182,7 @@ def test_two_condemned_ranges_still_leave_the_run_drainable(cluster,
     `remaining` subtracts completed, failed and in-flight; a second condemn has
     to land in `failed` exactly once or the arithmetic stops reaching zero.
     """
-    monkeypatch.setattr(jm, 'LATEST_LEDGER_NUM', 500)    # ends 100..500
+    monkeypatch.setattr(config, 'LATEST_LEDGER_NUM', 500)    # ends 100..500
 
     polls = drive_like_the_mission(cluster, condemn=[500, 400])
 
@@ -208,10 +209,10 @@ def test_nothing_gates_dispatch_at_all(cluster):
     """
     cluster.reconcile()
     cluster.advance(300, 'succeeded')
-    cluster.finalize(300, 1, tx_apply=1.0, peaks={'peakRssBytes': 1})
+    cluster.finalize(300, 1, tx_apply=1.0, peaks={'peakAnonBytes': 1})
     cluster.reconcile()
 
-    cluster.write(jm.PROGRESS_FILE, '{}')    # the record is wiped underneath us
+    cluster.write(config.PROGRESS_FILE, '{}')    # the record is wiped underneath us
 
     poll = cluster.reconcile()
 
@@ -224,5 +225,5 @@ def test_nothing_gates_dispatch_at_all(cluster):
 
     # Free a slot and it really is dispatched again: the run is not wedged.
     cluster.advance(200, 'succeeded')
-    cluster.finalize(200, 1, tx_apply=1.0, peaks={'peakRssBytes': 1})
+    cluster.finalize(200, 1, tx_apply=1.0, peaks={'peakAnonBytes': 1})
     assert cluster.reconcile()['created'] >= 1

@@ -17,6 +17,7 @@ from types import SimpleNamespace as NS
 
 import pytest
 
+import config
 import job_monitor as jm
 import log_collector as lc
 
@@ -265,23 +266,29 @@ def test_every_outcome_the_classifiers_can_produce_has_a_budget():
     produced = set()
     for source in (art.module_source(jm), art.module_source(lc)):
         produced |= set(re.findall(r"'outcome':\s*'(\w+)'", source))
-    budgeted = set(jm.ENVIRONMENTAL_OUTCOMES) | {'oom', 'ephemeral', 'timeout', 'failed'}
-    assert produced <= budgeted, f"unrouted outcomes: {sorted(produced - budgeted)}"
+    assert produced <= set(config.ATTEMPT_OUTCOMES), (
+        f"outcomes no budget or verdict file knows about: "
+        f"{sorted(produced - set(config.ATTEMPT_OUTCOMES))}")
     assert 'disrupted' in produced and 'rejected' in produced
 
 
 def test_the_deterministic_failures_do_not_get_the_environmental_budget():
-    """Environmental means "the cluster did this to us" and gets ~20 attempts.
+    """Only a node disruption gets the effectively unbounded budget.
 
-    An OOM, a disk eviction, a hang and a genuinely corrupt range are all
-    statements about the range; giving them 20 attempts would park a node on a
-    broken range for hours. 'unknown' IS environmental on purpose -- an
-    unclassifiable failure is usually a monitor restart racing a reaped node.
+    It is the one outcome that proves the range itself was fine: the cluster took
+    the pod away mid-run. Everything else is either a statement about the range
+    (OOM, disk, hang) or an absence of evidence, and neither earns unlimited
+    retries -- a run that cannot explain a failure stops instead.
     """
-    environmental = set(jm.ENVIRONMENTAL_OUTCOMES)
-    assert not (environmental & {'oom', 'ephemeral', 'timeout', 'failed'}), \
-        f"a deterministic failure inherited the disruption budget: {sorted(environmental)}"
-    assert {'disrupted', 'rejected', 'unknown'} <= environmental
+    b = config.ATTEMPT_BUDGETS
+    # A ladder, from "this range is broken" to "the cluster did this to us".
+    assert b['ephemeral'] <= b['oom'] < b['fetch-fault'] <= b['rejected'] <= b['disrupted'], \
+        f"the budget ladder is out of order: {b}"
+    assert b['disrupted'] == max(b.values()), \
+        f"something other than a disruption got the largest budget: {b}"
+    assert not ({'timeout', 'unknown', 'failed'} & set(b)), \
+        "a hang, an unclassifiable failure and a real catchup failure must have "\
+        "no budget at all"
 
 
 # --- the log endpoint, which does not always return log lines ----------------
@@ -306,7 +313,7 @@ def test_a_poisoned_state_file_is_repaired_rather_than_replayed(tmp_path, monkey
     volumes, and nothing rewrites it until a poll succeeds -- which it cannot,
     because the poisoned value is what makes the poll 400.
     """
-    monkeypatch.setattr(lc, 'LOG_DIR', str(tmp_path))
+    monkeypatch.setattr(config, 'LOG_DIR', str(tmp_path))
     with open(lc.base('300', 1) + '.state', 'w') as fh:
         fh.write('unable')
     assert lc.read_state('300', 1) is None

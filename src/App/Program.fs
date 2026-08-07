@@ -118,6 +118,7 @@ type MissionOptions
         pubnetParallelCatchupStorageMode: string,
         pubnetParallelCatchupProfile: string,
         pubnetParallelCatchupRangeOrder: string,
+        pubnetParallelCatchupPoolPrefix: string,
         pubnetParallelCatchupCpuRequest: string,
         tag: string option,
         numPregeneratedTxs: int option,
@@ -543,6 +544,12 @@ type MissionOptions
              Default = "tip-first")>]
     member self.PubnetParallelCatchupRangeOrder : string = pubnetParallelCatchupRangeOrder
 
+    [<Option("pubnet-parallel-catchup-pool-prefix",
+             HelpText = "route each range to a nodepool sized for its measured memory, e.g. 'catchup' selects catchup-dwarf, catchup-giant and so on. Each range gets its node to itself. Empty = one pool for every worker, the pre-tier behaviour (only supported for V2)",
+             Required = false,
+             Default = "")>]
+    member self.PubnetParallelCatchupPoolPrefix : string = pubnetParallelCatchupPoolPrefix
+
     [<Option("pubnet-parallel-catchup-cpu-request",
              HelpText = "override the worker cpu request, e.g. 1000m or 500m. Also the ceiling a profile-derived cpu request is clamped to, so it applies to profiled and unprofiled ranges alike. Empty = use StellarKubeSpecs (only supported for V2)",
              Required = false,
@@ -929,6 +936,7 @@ let main argv =
                                pubnetParallelCatchupStorageMode = mission.PubnetParallelCatchupStorageMode
                                pubnetParallelCatchupProfile = mission.PubnetParallelCatchupProfile
                                pubnetParallelCatchupRangeOrder = mission.PubnetParallelCatchupRangeOrder
+                               pubnetParallelCatchupPoolPrefix = mission.PubnetParallelCatchupPoolPrefix
                                pubnetParallelCatchupCpuRequest = mission.PubnetParallelCatchupCpuRequest
                                tag = mission.Tag
                                numPregeneratedTxs = mission.NumPregeneratedTxs

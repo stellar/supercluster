@@ -15,12 +15,16 @@ making import side-effect free (log dir fallback, in-cluster config guarded on
 KUBERNETES_SERVICE_HOST). Every decision under test is the shipped code path.
 """
 
+import gzip
 import json
 import os
 
 import pytest
 
 import fake_k8s
+import config
+import kube
+import records
 import job_monitor as jm
 
 # Config the fixture pins. Small on purpose: three ranges and PARALLELISM 2 so
@@ -42,20 +46,43 @@ DEFAULT_CONFIG = {
     'SAVE_SUCCESS_LOGS': True,
     'PROFILE_PATH': '',
     'ATTEMPT_DEADLINE_SECONDS': 0,
-    'MAX_ATTEMPTS_PER_RANGE': 5,
-    'MAX_DISRUPTION_ATTEMPTS': 20,
-    'MAX_EPHEMERAL_ATTEMPTS': 4,
+    # The whole retry policy. Patch this map, not the MAX_* constants: those are
+    # only the env seam and the map is built from them once, at import.
+    'ATTEMPT_BUDGETS': {'disrupted': 100, 'rejected': 100, 'fetch-fault': 20,
+                        'oom': 5, 'ephemeral': 4},
     'LIM_EPHEMERAL': '',
     'REQ_EPHEMERAL': '',
 }
 
 # What advance() does to the fake cluster for each name. The verdict the monitor
 # then reaches is its own business -- that is the thing under test.
+# The cascade GetHistoryArchiveStateWork prints when a HAS fetch fails, ending in
+# the give-up line. exit3_retry_cause() reads this to decide whether an exit-3
+# attempt is retryable, so a fixture exit-3 has to carry it to be retried.
+FETCH_FAULT_ARCHIVE = (
+    'fatal error: Could not connect to the endpoint URL: '
+    '"https://sts.us-east-1.amazonaws.com/"\n'
+    '2026-01-01T00:00:00.000 GAJSL [Process WARNING] process 1 exited 1: '
+    'aws s3 cp --no-progress s3://bucket/history-00000000.json /data/tmp\n'
+    '2026-01-01T00:00:00.000 GAJSL [History WARNING] Could not download file: '
+    'archive core_live_003 maybe missing file history/00/00/00/history-0.json\n'
+    '2026-01-01T00:00:00.000 GAJSL [History ERROR] Missing HAS for ledger 1: '
+    'maybe stale archive core_live_003\n'
+    '2026-01-01T00:00:00.000 GAJSL [History WARNING] Catchup failed\n')
+
+# Same give-up, no fetch cascade in front of it: what a SIGTERM drain leaves.
+BARE_FAILURE_ARCHIVE = (
+    '2026-01-01T00:00:00.000 GAJSL [Ledger INFO] Ledger close complete: 42\n'
+    '2026-01-01T00:00:00.000 GAJSL [History WARNING] Catchup failed\n')
+
+_ARCHIVES = {'fetch_fault': FETCH_FAULT_ARCHIVE, 'bare': BARE_FAILURE_ARCHIVE}
+
 STATES = (
     'pending',      # dispatched, nothing scheduled yet
     'running',      # pod Running, job active
     'succeeded',    # exit 0
-    'incomplete',   # exit 3: did-not-complete, retryable on the range budget
+    'incomplete',   # exit 3 with a fetch fault in the archive: retryable
+    'unexplained',  # exit 3 with nothing in the archive to explain it: condemned
     'condemned',    # exit 1: genuine catchup failure, no retry
     'oom',          # exit 137 / OOMKilled
     'disrupted',    # DisruptionTarget condition -- spot eviction
@@ -70,15 +97,15 @@ STATES = (
 class Driver:
     """Runs reconcile passes against the fake cluster and inspects the results."""
 
-    def __init__(self, k8s, tmp_path, config):
+    def __init__(self, k8s, tmp_path, env):
         self.k8s = k8s
         self.jm = jm
         self.tmp_path = tmp_path
-        self.config = config
-        self.namespace = config['NAMESPACE']
-        self.run_name = config['RUN_NAME']
-        self.log_dir = jm.LOG_DIR
-        # Same dict update_status_and_metrics() carries across iterations of the
+        self.config = env
+        self.namespace = env['NAMESPACE']
+        self.run_name = env['RUN_NAME']
+        self.log_dir = config.LOG_DIR
+        # Same dict reconcile_loop() carries across iterations of the
         # loop, so multi-pass tests see the real cross-pass behaviour (halt on
         # regression, histogram replay guard, counter deltas).
         self.state = {'owner': None, 'replayed': set(), 'max_completed': 0,
@@ -121,7 +148,7 @@ class Driver:
 
         # Everything below is a failure; the Job condition and the pod detail
         # are set independently because in a real run either can be missing.
-        if state == 'incomplete':
+        if state in ('incomplete', 'unexplained'):
             if pod_name:
                 self.k8s.set_pod_terminated(pod_name, exit_code=3)
             self.k8s.set_job_failed(name, message=self._policy_msg(pod_name, 3, 2))
@@ -194,7 +221,7 @@ class Driver:
     # -- the collector's side of the contract --------------------------------
 
     def finalize(self, end, attempt=1, tx_apply=None, peaks=None, resumed=False,
-                 attempt_seconds=None):
+                 attempt_seconds=None, archive=None):
         """Write what the log-collector sidecar writes for a finished attempt.
 
         The monitor will not reap a Job until the .done marker exists, and reads
@@ -208,8 +235,25 @@ class Driver:
             data['attemptSeconds'] = attempt_seconds
         if resumed:
             data['resumed'] = True
-        self.write(jm.metrics_path(str(end), attempt), json.dumps(data))
-        self.write(jm.done_path(str(end), attempt), '')
+        if archive in _ARCHIVES:
+            archive = _ARCHIVES[archive]
+        if archive is not None:
+            # exit 3 is classified from the archive, so a test driving that path
+            # has to stand in for what the worker wrote as well.
+            self.archive(end, attempt, archive)
+        self.write(records.metrics_path(str(end), attempt), json.dumps(data))
+        self.write(records.done_path(str(end), attempt), '')
+
+    def archive(self, end, attempt, text):
+        """Lay down an attempt's gzipped worker archive, with no .done marker.
+
+        `text` may be one of the shorthands finalize() takes ('fetch_fault',
+        'bare'). Writing the archive alone is what the collector's mid-append
+        state looks like.
+        """
+        text = _ARCHIVES.get(text, text)
+        with gzip.open(records.log_path(str(end), attempt), 'wb') as fh:
+            fh.write(text.encode())
 
     def write(self, path, text):
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -240,15 +284,10 @@ class Driver:
     def progress(self):
         """The authoritative progress record, straight off disk."""
         try:
-            with open(jm.PROGRESS_FILE) as fh:
+            with open(config.PROGRESS_FILE) as fh:
                 return json.load(fh)
         except (OSError, ValueError):
             return {}
-
-    def progress_configmap(self):
-        """The best-effort ConfigMap mirror the mission driver reads."""
-        data = self.k8s.config_map_data(jm.PROGRESS_CM, self.namespace) or {}
-        return json.loads(data.get('progress.json', '{}'))
 
     def completed(self):
         return self.progress().get('completed', {})
@@ -267,27 +306,27 @@ class Driver:
 
 @pytest.fixture
 def cluster(tmp_path, monkeypatch):
-    config = dict(DEFAULT_CONFIG)
+    env = dict(DEFAULT_CONFIG)
     log_dir = tmp_path / 'logs'
     log_dir.mkdir()
 
-    k8s = fake_k8s.FakeCluster(namespace=config['NAMESPACE'])
-    monkeypatch.setattr(jm, 'core_v1', k8s.core_v1)
-    monkeypatch.setattr(jm, 'batch_v1', k8s.batch_v1)
+    k8s = fake_k8s.FakeCluster(namespace=env['NAMESPACE'])
+    monkeypatch.setattr(kube, 'core_v1', k8s.core_v1)
+    monkeypatch.setattr(kube, 'batch_v1', k8s.batch_v1)
 
-    for key, value in config.items():
-        monkeypatch.setattr(jm, key, value)
+    for key, value in env.items():
+        monkeypatch.setattr(config, key, value)
     # Derived at import from RUN_NAME / LOG_DIR, so they have to follow.
-    monkeypatch.setattr(jm, 'LOG_DIR', str(log_dir))
-    monkeypatch.setattr(jm, 'PROGRESS_FILE', str(log_dir / 'progress.json'))
-    monkeypatch.setattr(jm, 'PROGRESS_CM', f"{config['RUN_NAME']}-catchup-progress")
+    monkeypatch.setattr(config, 'LOG_DIR', str(log_dir))
+    monkeypatch.setattr(config, 'PROGRESS_FILE', str(log_dir / 'progress.json'))
+    monkeypatch.setattr(config, 'PROGRESS_CM', f"{env['RUN_NAME']}-catchup-progress")
     # Module-level mutable state that would otherwise leak between tests.
-    monkeypatch.setattr(jm, 'PROFILE', None)
+    monkeypatch.setattr(config, 'PROFILE', None)
     monkeypatch.setattr(jm, '_progress_owner', {})
 
     # The chart's ConfigMap: owner_ref() reads it, and every Job, PVC and the
     # progress ConfigMap hang off it.
-    k8s.add_config_map(f"{config['RUN_NAME']}-stellar-core-config",
+    k8s.add_config_map(f"{env['RUN_NAME']}-stellar-core-config",
                        {'stellar-core.cfg': '# test'})
 
-    return Driver(k8s, tmp_path, config)
+    return Driver(k8s, tmp_path, env)

@@ -18,6 +18,9 @@ import json
 import pytest
 
 import fake_k8s
+import config
+import records
+import attempts
 import job_monitor as jm
 
 
@@ -28,7 +31,7 @@ FOREIGN = {'attempts': 1, 'count': 111, 'seconds': 12.0, 'wallSeconds': 12.0,
 
 
 def seed_progress(cluster, completed=None, failed=None):
-    cluster.write(jm.PROGRESS_FILE, json.dumps(
+    cluster.write(config.PROGRESS_FILE, json.dumps(
         {'completed': dict(completed or {}), 'failed': dict(failed or {})}))
 
 
@@ -62,7 +65,7 @@ def test_foreign_completed_keys_do_not_shrink_remaining(cluster):
 def test_foreign_completed_keys_do_not_drive_remaining_negative(cluster):
     """The mirror image, and the one that hangs a real run.
 
-    The mission finishes on `num_remain == 0 && jobs_in_progress == []`
+    The mission finishes on `num_remain == 0 && queue_in_progress_count == 0`
     (MissionHistoryPubnetParallelCatchupV2.fs). With three foreign keys in the
     record, subtraction lands on -3 once every real range has actually
     completed -- never 0 -- so the driver waits forever on a run that is done.
@@ -124,46 +127,12 @@ def test_a_range_end_shared_with_the_foreign_slicing_is_still_skipped(cluster):
 # --- corruption --------------------------------------------------------------
 
 
-def test_truncated_progress_json_does_not_crash_or_lose_completions(cluster):
-    """A half-written progress.json must not read as an empty record.
+def test_an_unreadable_progress_json_replays_rather_than_halting(cluster):
+    """An unreadable record reads as "nothing has been done".
 
-    The file is written through a .tmp + os.replace, so a torn write should be
-    impossible -- but the volume is shared, and the ConfigMap mirror is exactly
-    the second copy that exists for this. Truncate the file and the run must
-    carry on from the mirror.
-    """
-    cluster.reconcile()
-    cluster.advance(300, 'succeeded')
-    cluster.finalize(300, 1)
-    cluster.reconcile()
-    assert '300' in cluster.completed()
-    assert '300' in cluster.progress_configmap()['completed']
-
-    # Truncated mid-object: json.load raises ValueError.
-    cluster.write(jm.PROGRESS_FILE, '{"completed": {"300": {"att')
-    with pytest.raises(ValueError):
-        json.loads(open(jm.PROGRESS_FILE).read())
-
-    before = set(cluster.jobs())
-    result = cluster.reconcile()
-
-    # No crash, no halt, and the completion survived via the mirror.
-    assert cluster.state['halted'] is False
-    assert '300' in jm.load_progress()['completed']
-    # The critical consequence: a range that is done is not dispatched again.
-    assert 'pc-r300-a1' not in cluster.jobs()
-    assert 'pc-r300-a2' not in cluster.jobs()
-    assert result['completed'] == 1
-    assert set(cluster.jobs()) >= before - {'pc-r300-a1'}
-
-
-def test_unreadable_progress_with_no_mirror_halts_rather_than_replaying(cluster):
-    """Losing both copies replays the run rather than stopping it.
-
-    Indistinguishable from "nothing has been done", and that is now the reading
-    the monitor takes: there is no monotonic-progress guard, because its
-    high-water mark lived in memory and a restart erased it. Replay is safe --
-    the PVCs survive, so each range resumes at its last closed ledger.
+    There is no monotonic-progress guard -- its high-water mark lived in memory
+    and a restart erased it. Replay is safe: the PVCs survive, so each range
+    resumes at its last closed ledger.
     """
     cluster.reconcile()
     cluster.advance(300, 'succeeded')
@@ -171,15 +140,13 @@ def test_unreadable_progress_with_no_mirror_halts_rather_than_replaying(cluster)
     cluster.reconcile()
     assert '300' in cluster.completed()
 
-    # Both copies gone: garbage on the volume, mirror deleted underneath us.
-    cluster.write(jm.PROGRESS_FILE, 'not json at all')
-    cluster.k8s.core_v1.delete_namespaced_config_map(jm.PROGRESS_CM,
-                                                     cluster.namespace)
+    cluster.write(config.PROGRESS_FILE, 'not json at all')
 
     result = cluster.reconcile()
 
     # The record is empty, so the range is eligible again -- and the pass does
     # not crash, which is the property that actually matters here.
+    assert cluster.state['halted'] is False
     assert cluster.completed() == {}
     assert result['remaining'] + len(result['in_progress']) == 3
 
@@ -203,7 +170,7 @@ def test_progress_rolled_back_to_an_older_version_makes_it_eligible_again(cluste
     assert set(cluster.completed()) == {'200', '300'}
 
     # The stale copy lands back on the volume.
-    cluster.write(jm.PROGRESS_FILE, older)
+    cluster.write(config.PROGRESS_FILE, older)
     before = set(cluster.jobs())
     created_before = cluster.calls.names(verb='create', kind='job')
 
@@ -226,8 +193,8 @@ def test_metrics_without_done_must_not_reap(cluster):
     cluster.reconcile()
     cluster.advance(300, 'succeeded')
     # .metrics only -- exactly the window between the collector's two writes.
-    cluster.write(jm.metrics_path('300', 1),
-                  json.dumps({'txApplySeconds': 2.5, 'peakRssBytes': 999}))
+    cluster.write(records.metrics_path('300', 1),
+                  json.dumps({'txApplySeconds': 2.5, 'peakAnonBytes': 999}))
 
     cluster.reconcile()
 
@@ -236,12 +203,12 @@ def test_metrics_without_done_must_not_reap(cluster):
     # The range is recorded and its measurements were read -- the reap is the
     # only thing being withheld.
     assert cluster.completed()['300']['txApply'] == 2.5
-    assert cluster.completed()['300']['peakRssBytes'] == 999
+    assert cluster.completed()['300']['peakAnonBytes'] == 999
 
     # Withheld, not leaked: the Job carries a TTL, so declining to reap costs a
     # late reclaim rather than an object that lives until `helm uninstall`.
     assert (cluster.k8s.job('pc-r300-a1').spec.ttl_seconds_after_finished
-            == jm.JOB_TTL_SECONDS)
+            == config.JOB_TTL_SECONDS)
 
     # And the withheld reap does not turn into a re-dispatch on later passes.
     cluster.reconcile()
@@ -261,12 +228,12 @@ def test_the_reap_lands_once_the_done_marker_arrives(cluster):
     assert cluster.deleted.names(verb='delete', kind='job') == []
 
     # The collector finally finishes this attempt.
-    cluster.finalize(300, 1, tx_apply=2.5, peaks={'peakRssBytes': 999})
+    cluster.finalize(300, 1, tx_apply=2.5, peaks={'peakAnonBytes': 999})
     cluster.reconcile()
 
     # Backfilled from the durable files, then reaped.
     assert cluster.completed()['300']['txApply'] == 2.5
-    assert cluster.completed()['300']['peakRssBytes'] == 999
+    assert cluster.completed()['300']['peakAnonBytes'] == 999
     assert cluster.deleted.names(verb='delete', kind='job') == ['pc-r300-a1']
 
 
@@ -279,7 +246,7 @@ def test_done_without_metrics_reaps_but_does_not_invent_measurements(cluster):
     """
     cluster.reconcile()
     cluster.advance(300, 'succeeded')
-    cluster.write(jm.done_path('300', 1), '')
+    cluster.write(records.done_path('300', 1), '')
 
     cluster.reconcile()
 
@@ -289,7 +256,7 @@ def test_done_without_metrics_reaps_but_does_not_invent_measurements(cluster):
     # No .metrics and no history archive to fall back on: the gap is reported
     # as a gap, not as zero.
     assert record['txApply'] is None
-    assert not any(record.get(k) is not None for k in jm.PEAK_FIELDS)
+    assert not any(record.get(k) is not None for k in attempts.PEAK_FIELDS)
     # Timing comes from the pod, which is real.
     assert record['seconds'] == pytest.approx(60.0)
 
@@ -304,14 +271,14 @@ def test_an_empty_metrics_file_is_not_read_as_zero(cluster):
     """A zero-length .metrics is a torn write, not a measurement of nothing."""
     cluster.reconcile()
     cluster.advance(300, 'succeeded')
-    cluster.write(jm.metrics_path('300', 1), '')
-    cluster.write(jm.done_path('300', 1), '')
+    cluster.write(records.metrics_path('300', 1), '')
+    cluster.write(records.done_path('300', 1), '')
 
     cluster.reconcile()
 
     record = cluster.completed()['300']
     assert record['txApply'] is None
-    assert not any(record.get(k) is not None for k in jm.PEAK_FIELDS)
+    assert not any(record.get(k) is not None for k in attempts.PEAK_FIELDS)
 
 
 # --- two monitors ------------------------------------------------------------
@@ -327,7 +294,7 @@ def test_two_monitors_racing_the_same_volume_never_double_dispatch(cluster):
     real cluster.
     """
     stale_jobs = cluster.k8s.batch_v1.list_namespaced_job(
-        cluster.namespace, label_selector=f"{jm.LABEL_RUN}={jm.RUN_NAME}")
+        cluster.namespace, label_selector=f"{config.LABEL_RUN}={config.RUN_NAME}")
     assert stale_jobs.items == []
 
     a = cluster.reconcile()
@@ -415,7 +382,7 @@ def test_a_foreign_run_s_jobs_in_the_namespace_are_ignored(cluster):
         jm.build_job(300, 420, 1, None))
     other.metadata.name = 'other-r300-a1'
     other.metadata.labels = dict(other.metadata.labels or {})
-    other.metadata.labels[jm.LABEL_RUN] = 'other-run'
+    other.metadata.labels[config.LABEL_RUN] = 'other-run'
     cluster.k8s.jobs[(cluster.namespace, 'other-r300-a1')] = other
     del cluster.k8s.jobs[(cluster.namespace, 'pc-r300-a1')]
 
@@ -429,52 +396,15 @@ def test_a_foreign_run_s_jobs_in_the_namespace_are_ignored(cluster):
     assert result['total'] == 3
 
 
-@pytest.mark.parametrize('document', [
-    {'completed': {'333': 'garbage'}, 'failed': {}},        # entry not a record
-    {'completed': {'333': None}, 'failed': {}},
-    {'completed': ['333'], 'failed': {}},                   # bucket not a map
-    {'completed': {}, 'failed': 'wat'},
-    ['333'],                                                # not even an object
-])
-def test_a_structurally_wrong_progress_document_does_not_crash_the_pass(
-        cluster, document):
-    """Truncation is not the only corruption.
-
-    A file that parses but has the wrong SHAPE gets past the ValueError guard,
-    and the walk over `completed` then raises -- after dispatch, inside a loop
-    that swallows exceptions. The run keeps its Jobs but stops publishing
-    status, so `num_remain` freezes and the mission waits on a number that will
-    never move again.
-    """
-    cluster.write(jm.PROGRESS_FILE, json.dumps(document))
-
-    try:
-        result = cluster.reconcile()
-    except Exception as e:            # noqa: BLE001 -- the point of the test
-        pytest.fail(f"a malformed progress record took the reconcile down: {e!r}")
-
-    # Dispatch is unaffected, and -- the important half -- the garbage is not
-    # read as work already done.
-    assert result['completed'] == 0
-    assert sorted(result['in_progress']) == ['200/420', '300/420']
-    assert result['remaining'] == 1
-
-    # A real completion still lands on top of it, and the record heals.
-    cluster.advance(300, 'succeeded')
-    cluster.finalize(300, 1)
-    cluster.reconcile()
-    assert set(cluster.completed()) == {'300'}
-    assert cluster.state['halted'] is False
-
-
-def test_the_progress_configmap_being_deleted_mid_run_is_survivable(cluster):
-    """The mirror is best-effort. Losing it must not lose the run."""
+def test_the_status_configmap_being_deleted_mid_run_is_survivable(cluster):
+    """The ConfigMap is the driver's view. Losing it must not lose the run."""
     cluster.reconcile()
     cluster.advance(300, 'succeeded')
     cluster.finalize(300, 1)
     cluster.reconcile()
+    jm.save_status(jm.status)                 # what the reconcile loop publishes
 
-    cluster.k8s.core_v1.delete_namespaced_config_map(jm.PROGRESS_CM,
+    cluster.k8s.core_v1.delete_namespaced_config_map(config.PROGRESS_CM,
                                                      cluster.namespace)
     cluster.advance(200, 'succeeded')
     cluster.finalize(200, 1)
@@ -483,21 +413,11 @@ def test_the_progress_configmap_being_deleted_mid_run_is_survivable(cluster):
     assert set(cluster.completed()) == {'200', '300'}
     assert cluster.state['halted'] is False
     assert result['completed'] == 2
-    # Recreated on the next write, with both entries.
-    assert set(cluster.progress_configmap()['completed']) == {'200', '300'}
+
+    # Recreated by the next publish, so the driver is not blind for the rest of
+    # the run.
+    jm.save_status(jm.status)
+    assert 'status.json' in cluster.k8s.config_map_data(config.PROGRESS_CM,
+                                                        cluster.namespace)
 
 
-def test_a_mirror_write_failure_does_not_stall_recording(cluster):
-    """A 413 from the ConfigMap patch used to throw inside reconcile, and the
-    loop swallows exceptions -- so no completion would ever be recorded again."""
-    cluster.reconcile()
-    cluster.advance(300, 'succeeded')
-    cluster.finalize(300, 1)
-    cluster.k8s.fail_next['patch configmap'] = fake_k8s.api_exception(
-        413, 'RequestEntityTooLarge')
-
-    result = cluster.reconcile()
-
-    assert '300' in cluster.completed()
-    assert result['completed'] == 1
-    assert cluster.state['halted'] is False

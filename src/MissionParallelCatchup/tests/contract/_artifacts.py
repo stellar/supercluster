@@ -25,6 +25,8 @@ import yaml
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODULE_DIR = os.path.dirname(os.path.dirname(HERE))          # src/MissionParallelCatchup
+APPS_DIR = os.path.join(MODULE_DIR, 'apps')                  # the two entrypoints
+LIB_DIR = os.path.join(MODULE_DIR, 'lib')                    # what they import
 SRC_ROOT = os.path.dirname(MODULE_DIR)                       # src
 CHART = os.path.join(MODULE_DIR, 'parallel_catchup_helm')
 FSHARP_PATH = os.path.join(SRC_ROOT, 'FSLibrary',
@@ -130,7 +132,7 @@ def granted(sets=(), release='t'):
 
 _PROBE = """
 import json, sys
-sys.path.insert(0, {module_dir!r})
+sys.path[:0] = [{apps_dir!r}, {lib_dir!r}]
 import {module} as m
 out = {{}}
 for k, v in vars(m).items():
@@ -153,11 +155,11 @@ def defaults(module_name, env_pairs=()):
     derived from an env var at import -- PROGRESS_CM off RUN_NAME, say -- where
     the derivation is what a test needs to see.
     """
-    src = _PROBE.format(module_dir=MODULE_DIR, module=module_name)
+    src = _PROBE.format(apps_dir=APPS_DIR, lib_dir=LIB_DIR, module=module_name)
     env = {'PATH': os.environ.get('PATH', ''), 'HOME': os.environ.get('HOME', '')}
     env.update(dict(env_pairs))
     r = subprocess.run([sys.executable, '-c', src], capture_output=True,
-                       text=True, env=env, cwd=MODULE_DIR)
+                       text=True, env=env, cwd=APPS_DIR)
     assert r.returncode == 0, f"could not import {module_name} cleanly:\n{r.stderr}"
     body = r.stdout[r.stdout.index('<<<') + 3:r.stdout.rindex('>>>')]
     return json.loads(body)

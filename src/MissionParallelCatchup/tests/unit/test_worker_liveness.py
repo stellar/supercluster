@@ -1,143 +1,182 @@
-"""Worker responsiveness metrics stay truthful without entering reconcile."""
+"""Worker responsiveness: one concurrent sweep per reconcile pass.
 
+Driven against real sockets rather than a faked session -- the whole behaviour is
+"what did stellar-core's admin port actually answer", so a fake that returns
+whatever the test wants proves very little.
+"""
+
+import asyncio
+import contextlib
 import os
+import socket
 import subprocess
 import sys
 import threading
 import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
-import job_monitor as jm
+import pytest
 from kubernetes import client
 
-
-def _task(sampler, identity):
-    record = sampler._records[identity]
-    return identity, record['generation'], record['target']
-
-
-def _result(sampler, identity, success, now):
-    sampler._record_result(*_task(sampler, identity), success,
-                           None if success else TimeoutError("busy"), now=now)
+import config
+import worker_liveness
+import job_monitor as jm
 
 
-def test_hysteresis_unknown_down_and_immediate_recovery():
-    sampler = jm.WorkerLivenessSampler(
-        interval=30, timeout=5, failure_threshold=3, max_concurrency=1)
-    sampler.replace_candidates({'uid-1': ('pod-1', '10.0.0.1')}, now=0)
+def _server(status=200, delay=0.0, counter=None):
+    """A local HTTP endpoint standing in for stellar-core's admin port."""
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if counter is not None:
+                counter.enter()
+            if delay:
+                time.sleep(delay)
+            self.send_response(status)
+            self.end_headers()
+            self.wfile.write(b'{}')
+            if counter is not None:
+                counter.leave()
 
-    assert sampler._records['uid-1']['status'] == 'unknown'
-    _result(sampler, 'uid-1', True, 1)
-    assert sampler._records['uid-1']['status'] == 'up'
-
-    _result(sampler, 'uid-1', False, 31)
-    assert sampler._records['uid-1']['status'] == 'unknown'
-    _result(sampler, 'uid-1', False, 61)
-    assert sampler._records['uid-1']['status'] == 'unknown'
-    _result(sampler, 'uid-1', False, 91)
-    assert sampler._records['uid-1']['status'] == 'down'
-
-    _result(sampler, 'uid-1', True, 121)
-    assert sampler._records['uid-1']['status'] == 'up'
-    assert sampler._records['uid-1']['failures'] == 0
-
-
-def test_disappearance_and_replacement_discard_stale_probe_results():
-    sampler = jm.WorkerLivenessSampler(max_concurrency=1)
-    sampler.replace_candidates({'old-uid': ('pod-1', '10.0.0.1')}, now=0)
-    old_task = _task(sampler, 'old-uid')
-    _result(sampler, 'old-uid', True, 1)
-
-    # A new UID is a new attempt/pod even if Kubernetes reuses the IP.
-    sampler.replace_candidates({'new-uid': ('pod-2', '10.0.0.1')}, now=2)
-    assert set(sampler._records) == {'new-uid'}
-    assert sampler._records['new-uid']['status'] == 'unknown'
-
-    # The old request may finish after the replacement snapshot. It cannot
-    # resurrect the vanished pod or update the replacement.
-    sampler._record_result(*old_task, True, now=3)
-    assert set(sampler._records) == {'new-uid'}
-    assert sampler._records['new-uid']['status'] == 'unknown'
-
-    sampler.replace_candidates({}, now=4)
-    assert sampler.counts() == {'up': 0, 'down': 0, 'unknown': 0}
-
-
-def test_ip_change_on_same_identity_resets_to_unknown():
-    sampler = jm.WorkerLivenessSampler(max_concurrency=1)
-    sampler.replace_candidates({'uid': ('pod', '10.0.0.1')}, now=0)
-    old_task = _task(sampler, 'uid')
-    _result(sampler, 'uid', True, 1)
-
-    sampler.replace_candidates({'uid': ('pod', '10.0.0.2')}, now=2)
-    assert sampler._records['uid']['status'] == 'unknown'
-    assert sampler._records['uid']['failures'] == 0
-
-    sampler._record_result(*old_task, False, TimeoutError(), now=3)
-    assert sampler._records['uid']['status'] == 'unknown'
-    assert sampler._records['uid']['failures'] == 0
-
-
-def test_sampler_failure_reports_every_current_candidate_unknown():
-    release = threading.Event()
-
-    def blocked_probe(_ip, _timeout):
-        release.wait(2)
-
-    sampler = jm.WorkerLivenessSampler(
-        interval=30, timeout=1, failure_threshold=3,
-        max_concurrency=1, probe=blocked_probe)
-    sampler.start()
-    try:
-        sampler.replace_candidates({
-            'a': ('pod-a', '10.0.0.1'),
-            'b': ('pod-b', '10.0.0.2'),
-        })
-        with sampler._condition:
-            sampler._failed = 'synthetic scheduler failure'
-        assert sampler.counts() == {'up': 0, 'down': 0, 'unknown': 2}
-    finally:
-        release.set()
-        sampler.close()
-
-
-def test_probe_uses_stellar_core_info_and_any_http_response_is_up(monkeypatch):
-    called = []
-
-    class Response:
-        status_code = 503
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-    class Session:
-        def mount(self, *_args):
+        def log_message(self, *_a):
             pass
 
-        def get(self, url, timeout):
-            called.append((url, timeout))
-            return Response()
+    srv = HTTPServer(('127.0.0.1', 0), Handler)
+    srv.daemon_threads = True
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
 
-        def close(self):
-            pass
 
-    monkeypatch.setattr(jm.requests, 'Session', Session)
-    sampler = jm.WorkerLivenessSampler(
-        interval=30, timeout=5, failure_threshold=3, max_concurrency=1)
-    sampler.start()
+class _Concurrency:
+    """Server-side count of overlapping requests, and its high-water mark."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.now = 0
+        self.peak = 0
+
+    def enter(self):
+        with self.lock:
+            self.now += 1
+            self.peak = max(self.peak, self.now)
+
+    def leave(self):
+        with self.lock:
+            self.now -= 1
+
+
+def _targets(port, count=1):
+    return {f"uid-{i}": (f"pod-{i}", '127.0.0.1') for i in range(count)}
+
+
+@contextlib.contextmanager
+def _serving(monkeypatch, **kw):
+    """Point the module's admin port at a local endpoint for the duration."""
+    srv = _server(**kw)
+    monkeypatch.setattr(worker_liveness, '_ADMIN_PORT', srv.server_address[1])
     try:
-        sampler.replace_candidates({'uid': ('pod', '10.2.3.4')})
-        deadline = time.monotonic() + 1
-        while time.monotonic() < deadline and sampler._records['uid']['status'] != 'up':
-            time.sleep(0.01)
-        assert called == [('http://10.2.3.4:11626/info', 5.0)]
-        assert sampler._records['uid']['status'] == 'up', (
-            "an HTTP 503 is a busy but responsive admin endpoint")
+        yield srv
     finally:
-        sampler.close()
+        srv.shutdown()
 
+
+def _closed_port():
+    s = socket.socket()
+    s.bind(('127.0.0.1', 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def _sweep(targets, port, **kw):
+    """Run a sweep against a chosen port by pointing the module's URL at it."""
+    kw.setdefault('timeout', 2)
+    kw.setdefault('deadline', 5)
+    kw.setdefault('concurrency', 8)
+    return asyncio.run(worker_liveness.sweep(targets, **kw))
+
+
+# --- what counts as up --------------------------------------------------------
+
+@pytest.mark.parametrize('status, verdict', [
+    (200, 'up'),
+    # A busy core used to count as up. "Answered, badly" is not answering, and
+    # nothing downstream smooths it.
+    (503, 'down'),
+    # Not just 5xx: `status < 500` passes the 503 case while counting a wrong
+    # path or a proxy in the way as a healthy core.
+    (404, 'down'),
+])
+def test_only_a_200_is_up(monkeypatch, status, verdict):
+    with _serving(monkeypatch, status=status):
+        counts = _sweep(_targets(0, 2), None)
+    assert counts[verdict] == 2 and sum(counts.values()) == 2
+
+
+def test_a_refused_connection_is_down(monkeypatch):
+    monkeypatch.setattr(worker_liveness, '_ADMIN_PORT', _closed_port())
+    assert _sweep(_targets(0, 2), None) == {'up': 0, 'down': 2, 'unknown': 0}
+
+
+def test_a_probe_slower_than_its_timeout_is_down(monkeypatch):
+    with _serving(monkeypatch, status=200, delay=1.0):
+        assert _sweep(_targets(0, 1), None, timeout=0.2) == \
+            {'up': 0, 'down': 1, 'unknown': 0}
+
+
+def test_no_targets_is_not_a_sweep():
+    assert worker_liveness.publish({}) == {'up': 0, 'down': 0, 'unknown': 0}
+
+
+# --- the bounds the reconcile loop depends on --------------------------------
+
+def test_the_sweep_stops_at_its_deadline_and_reports_the_rest_unknown(monkeypatch):
+    """The reconcile loop waits for this, so it must be bounded by wall clock.
+
+    Ten pods that each hang for a second, two at a time, is five seconds of work.
+    With a half-second deadline the sweep keeps what finished and calls the rest
+    unknown rather than making dispatch wait.
+    """
+    with _serving(monkeypatch, status=200, delay=1.0):
+        started = time.monotonic()
+        counts = _sweep(_targets(0, 10), None, concurrency=2, timeout=5, deadline=0.5)
+        elapsed = time.monotonic() - started
+    assert elapsed < 2.0, f"the sweep ran {elapsed:.2f}s past a 0.5s deadline"
+    assert counts['unknown'] >= 6, counts
+    assert sum(counts.values()) == 10, "every target must be accounted for"
+
+
+def test_concurrency_is_bounded_at_the_server(monkeypatch):
+    counter = _Concurrency()
+    with _serving(monkeypatch, status=200, delay=0.05, counter=counter):
+        counts = _sweep(_targets(0, 60), None, concurrency=4, timeout=5, deadline=10)
+    assert counts == {'up': 60, 'down': 0, 'unknown': 0}
+    assert counter.peak <= 4, f"{counter.peak} overlapping requests, limit 4"
+
+
+def test_one_unreachable_pod_does_not_discard_the_others(monkeypatch):
+    """Why this is asyncio.wait and not a TaskGroup.
+
+    A TaskGroup cancels its siblings when a task raises. Every other answer has
+    to survive one pod being unreachable, so four pods point at a live endpoint
+    and one at a loopback address with nothing bound.
+    """
+    with _serving(monkeypatch, status=200):
+        targets = {f"uid-{i}": (f"pod-{i}", '127.0.0.1') for i in range(4)}
+        targets['uid-dead'] = ('pod-dead', '127.0.0.2')
+        counts = _sweep(targets, None, timeout=1)
+    assert counts == {'up': 4, 'down': 1, 'unknown': 0}
+
+
+def test_publish_reports_every_target_unknown_when_the_sweep_itself_fails(monkeypatch):
+    """The production call path: job_monitor calls publish(targets) and nothing else."""
+    async def boom(*_a, **_kw):
+        raise RuntimeError("no event loop for you")
+    monkeypatch.setattr(worker_liveness, 'sweep', boom)
+    assert worker_liveness.publish(_targets(0, 7)) == \
+        {'up': 0, 'down': 0, 'unknown': 7}
+
+
+# --- candidate selection ------------------------------------------------------
 
 def test_only_running_pods_with_ips_are_candidates_and_uid_is_identity():
     def pod(name, uid, phase, ip):
@@ -145,7 +184,7 @@ def test_only_running_pods_with_ips_are_candidates_and_uid_is_identity():
             metadata=client.V1ObjectMeta(name=name, uid=uid),
             status=client.V1PodStatus(phase=phase, pod_ip=ip))
 
-    targets = jm._worker_targets([
+    targets = worker_liveness.targets([
         pod('ready', 'uid-ready', 'Running', '10.0.0.1'),
         pod('pending', 'uid-pending', 'Pending', '10.0.0.2'),
         pod('no-ip', 'uid-no-ip', 'Running', None),
@@ -157,7 +196,9 @@ def test_malformed_liveness_configuration_fails_with_an_explicit_message():
     env = {
         'PATH': os.environ.get('PATH', ''),
         'HOME': os.environ.get('HOME', ''),
-        'PYTHONPATH': os.path.dirname(jm.__file__),
+        # apps/ and lib/ both, the way the container's flat /app has them.
+        'PYTHONPATH': os.pathsep.join((os.path.dirname(jm.__file__),
+                                       os.path.dirname(config.__file__))),
         'LIVENESS_MAX_CONCURRENCY': 'many',
     }
     result = subprocess.run(
@@ -165,67 +206,25 @@ def test_malformed_liveness_configuration_fails_with_an_explicit_message():
         text=True, capture_output=True, env=env,
         cwd=os.path.dirname(jm.__file__))
     assert result.returncode != 0
-    assert 'LIVENESS_MAX_CONCURRENCY must be integers' in result.stderr
+    assert 'LIVENESS_MAX_CONCURRENCY must be an integer' in result.stderr
 
 
-def test_2096_slow_workers_have_bounded_work_and_do_not_delay_reconcile(
-        cluster):
-    release = threading.Event()
-    active_lock = threading.Lock()
-    active = 0
-    peak_active = 0
+def test_a_blocked_sweep_does_not_delay_dispatch(cluster, monkeypatch):
+    """Dispatch must not wait on the fleet answering.
 
-    def blocked_probe(_ip, _timeout):
-        nonlocal active, peak_active
-        with active_lock:
-            active += 1
-            peak_active = max(peak_active, active)
-        try:
-            release.wait(3)
-        finally:
-            with active_lock:
-                active -= 1
-
-    concurrency = 8
-    sampler = jm.WorkerLivenessSampler(
-        interval=0.2, timeout=1, failure_threshold=3,
-        max_concurrency=concurrency, probe=blocked_probe)
-    targets = {
-        f"uid-{i}": (f"pod-{i}", f"10.{i // 65536}.{(i // 256) % 256}.{i % 256}")
-        for i in range(2096)
-    }
-    sampler.start()
-    sampler.replace_candidates(targets)
-    try:
-        deadline = time.monotonic() + 2
-        while time.monotonic() < deadline and sampler.stats()['active'] < concurrency:
-            time.sleep(0.01)
-
-        stats = sampler.stats()
-        assert stats['records'] == 2096
-        assert stats['active'] <= concurrency
-        assert stats['queued'] <= concurrency
-        assert stats['outstanding'] <= 2 * concurrency
-        assert stats['threads'] == concurrency + 1
-        assert peak_active <= concurrency
-
-        # Exercise the exact handoff used by update_status_and_metrics while all
-        # request slots are blocked. It copies the candidate snapshot and reads
-        # counts, but never waits for a request.
+    The sweep is bounded by its deadline, and reconcile pays that at most once
+    per pass -- so this pins the cost rather than the independence the old
+    background sampler gave.
+    """
+    monkeypatch.setattr(config, 'LIVENESS_SWEEP_SECONDS', 0.3)
+    with _serving(monkeypatch, status=200, delay=5.0):
         started = time.monotonic()
-        counts = jm.publish_worker_liveness(targets, sampler=sampler)
-        publish_elapsed = time.monotonic() - started
-        assert publish_elapsed < 0.5, (
-            f"blocked probes delayed liveness publication by {publish_elapsed:.3f}s")
-        assert counts == {'up': 0, 'down': 0, 'unknown': 2096}
-        assert sum(counts.values()) == len(targets)
-
-        # Dispatch itself remains equally independent.
-        started = time.monotonic()
-        result = cluster.reconcile()
+        counts = worker_liveness.publish(_targets(0, 50))
         elapsed = time.monotonic() - started
-        assert result['created'] == 2
-        assert elapsed < 0.5, f"blocked liveness probes delayed reconcile by {elapsed:.3f}s"
-    finally:
-        release.set()
-        sampler.close()
+        assert elapsed < 1.5, f"publish took {elapsed:.2f}s against a 0.3s deadline"
+        assert counts['unknown'] > 0
+        assert sum(counts.values()) == 50
+
+        started = time.monotonic()
+        cluster.reconcile()
+        assert time.monotonic() - started < 1.0

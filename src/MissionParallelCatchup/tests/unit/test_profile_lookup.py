@@ -8,14 +8,16 @@ import json
 
 import pytest
 
+import config
+import profiles
 import job_monitor as jm
 
 
 PROFILE_RANGES = [
-    (1000, {'peakRssBytes': 1_000_000_000, 'peakWorkingSetBytes': 9_000_000_000,
-            'peakEphemeralBytes': 2_000_000_000, 'peakCpuCores': 0.5}),
-    (2000, {'peakRssBytes': 3_000_000_000, 'peakWorkingSetBytes': 13_000_000_000,
-            'peakEphemeralBytes': 4_000_000_000, 'peakCpuCores': 1.2}),
+    (1000, {'peakAnonBytes': 1_000_000_000, 'peakWorkingSetBytes': 9_000_000_000,
+            'peakEphemeralBytes': 2_000_000_000}),
+    (2000, {'peakAnonBytes': 3_000_000_000, 'peakWorkingSetBytes': 13_000_000_000,
+            'peakEphemeralBytes': 4_000_000_000}),
 ]
 
 
@@ -23,7 +25,7 @@ PROFILE_RANGES = [
 def profile(monkeypatch):
     """Install a loaded profile, as load_profile() would have left it."""
     def install(ranges=PROFILE_RANGES):
-        monkeypatch.setattr(jm, 'PROFILE', sorted(ranges))
+        monkeypatch.setattr(config, 'PROFILE', sorted(ranges))
     return install
 
 
@@ -33,9 +35,9 @@ def written(tmp_path, monkeypatch):
     def load(doc, mode='ephemeral', text=None):
         path = tmp_path / 'profile.json'
         path.write_text(text if text is not None else json.dumps(doc))
-        monkeypatch.setattr(jm, 'PROFILE_PATH', str(path))
-        monkeypatch.setattr(jm, 'STORAGE_MODE', mode)
-        return jm.load_profile()
+        monkeypatch.setattr(config, 'PROFILE_PATH', str(path))
+        monkeypatch.setattr(config, 'STORAGE_MODE', mode)
+        return profiles.load_profile()
     return load
 
 
@@ -43,7 +45,7 @@ def written(tmp_path, monkeypatch):
 
 def test_profile_prefers_an_exact_end(profile):
     profile()
-    assert jm.profile_for(2000)['peakRssBytes'] == 3_000_000_000
+    assert profiles.profile_for(2000)['peakAnonBytes'] == 3_000_000_000
 
 
 def test_profile_rounds_up_to_the_next_measured_end_never_down(profile):
@@ -51,7 +53,7 @@ def test_profile_rounds_up_to_the_next_measured_end_never_down(profile):
     # neighbour under-reports, and under-provisioning costs an eviction while
     # over-provisioning only costs packing density.
     profile()
-    assert jm.profile_for(1500)['peakRssBytes'] == 3_000_000_000, \
+    assert profiles.profile_for(1500)['peakAnonBytes'] == 3_000_000_000, \
         "1500 must size from 2000, not from 1000"
 
 
@@ -59,28 +61,28 @@ def test_profile_falls_back_to_defaults_past_its_high_water_mark(profile):
     # An older profile has nothing above its own top, which is exactly where a
     # newer run's fresh ranges live. Extrapolating there would under-provision.
     profile()
-    assert jm.profile_for(9999) is None
+    assert profiles.profile_for(9999) is None
 
 
 def test_no_profile_at_all_is_not_an_error(monkeypatch):
-    monkeypatch.setattr(jm, 'PROFILE', None)
-    assert jm.profile_for(1000) is None
-    monkeypatch.setattr(jm, 'PROFILE', [])
-    assert jm.profile_for(1000) is None
+    monkeypatch.setattr(config, 'PROFILE', None)
+    assert profiles.profile_for(1000) is None
+    monkeypatch.setattr(config, 'PROFILE', [])
+    assert profiles.profile_for(1000) is None
 
 
 # --- reading the document ----------------------------------------------------
 
 def test_no_configured_path_means_no_profile(monkeypatch):
-    monkeypatch.setattr(jm, 'PROFILE_PATH', '')
-    assert jm.load_profile() == []
+    monkeypatch.setattr(config, 'PROFILE_PATH', '')
+    assert profiles.load_profile() == []
 
 
 def test_an_unreadable_profile_is_not_fatal(written, tmp_path, monkeypatch):
     # It is an optimisation, never a prerequisite.
     assert written(None, text='{not json') == []
-    monkeypatch.setattr(jm, 'PROFILE_PATH', str(tmp_path / 'nope.json'))
-    assert jm.load_profile() == []
+    monkeypatch.setattr(config, 'PROFILE_PATH', str(tmp_path / 'nope.json'))
+    assert profiles.load_profile() == []
 
 
 def test_a_matching_profile_keeps_every_axis(written):
@@ -99,7 +101,7 @@ def test_entries_come_back_sorted_by_range_end(written):
 
 def test_a_non_numeric_range_key_is_skipped_not_fatal(written):
     got = written({'storageMode': 'ephemeral',
-                   'ranges': {'2000': {'peakRssBytes': 1}, 'tip': {'peakRssBytes': 2}}})
+                   'ranges': {'2000': {'peakAnonBytes': 1}, 'tip': {'peakAnonBytes': 2}}})
     assert [end for end, _ in got] == [2000]
 
 
@@ -113,8 +115,7 @@ def test_a_cross_mode_profile_keeps_memory_but_drops_disk(written):
     assert len(got) == 1
     rec = got[0][1]
     assert 'peakEphemeralBytes' not in rec
-    assert rec['peakRssBytes'] == 3_000_000_000
-    assert rec['peakCpuCores'] == 1.2
+    assert rec['peakAnonBytes'] == 3_000_000_000
 
 
 def test_a_profile_with_no_declared_mode_is_taken_at_face_value(written):

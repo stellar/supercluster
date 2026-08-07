@@ -135,8 +135,8 @@ spec:
           args:
             - >-
               {{- if .Values.monitor.sourceInstallDependencies }}
-              pip install --no-cache-dir -q 'kubernetes~=35.0' 'aiohttp~=3.9'
-              'requests~=2.31' 'prometheus-client~=0.19' &&
+              pip install --no-cache-dir -q 'kubernetes~=36.0' 'aiohttp~=3.9'
+              'prometheus-client~=0.19' &&
               {{- end }}
               exec python3 /app/job_monitor.py
           {{- end }}
@@ -159,12 +159,10 @@ spec:
               value: {{ .Values.monitor.emitMissionLabel | quote }}
             - name: LOGGING_INTERVAL_SECONDS
               value: {{ .Values.monitor.loggingIntervalSeconds | quote }}
-            - name: LIVENESS_PROBE_INTERVAL_SECONDS
-              value: {{ .Values.monitor.livenessProbeIntervalSeconds | quote }}
             - name: LIVENESS_PROBE_TIMEOUT_SECONDS
               value: {{ .Values.monitor.livenessProbeTimeoutSeconds | quote }}
-            - name: LIVENESS_FAILURE_THRESHOLD
-              value: {{ .Values.monitor.livenessFailureThreshold | quote }}
+            - name: LIVENESS_SWEEP_SECONDS
+              value: {{ .Values.monitor.livenessSweepSeconds | quote }}
             - name: LIVENESS_MAX_CONCURRENCY
               value: {{ .Values.monitor.livenessMaxConcurrency | quote }}
             - name: RANGE_GENERATOR
@@ -203,14 +201,18 @@ spec:
               value: {{ .Values.worker.resources.requests.ephemeral_storage | quote }}
             - name: LIM_EPHEMERAL
               value: {{ .Values.worker.resources.limits.ephemeral_storage | quote }}
-            - name: MAX_ATTEMPTS
-              value: {{ .Values.monitor.maxAttempts | quote }}
             - name: MAX_DISRUPTION_ATTEMPTS
-              value: {{ .Values.monitor.maxDisruptionAttempts | quote }}
+              value: {{ .Values.monitor.attemptBudgets.disrupted | quote }}
+            - name: MAX_REJECTED_ATTEMPTS
+              value: {{ .Values.monitor.attemptBudgets.rejected | quote }}
+            - name: MAX_FETCH_FAULT_ATTEMPTS
+              value: {{ .Values.monitor.attemptBudgets.fetchFault | quote }}
+            - name: MAX_OOM_ATTEMPTS
+              value: {{ .Values.monitor.attemptBudgets.oom | quote }}
+            - name: MAX_EPHEMERAL_ATTEMPTS
+              value: {{ .Values.monitor.attemptBudgets.ephemeral | quote }}
             - name: MEM_BUMP_FACTOR
               value: {{ .Values.monitor.memBumpFactor | quote }}
-            - name: MAX_EPHEMERAL_ATTEMPTS
-              value: {{ .Values.monitor.maxEphemeralAttempts | quote }}
             - name: EPH_BUMP_FACTOR
               value: {{ .Values.monitor.ephBumpFactor | quote }}
             - name: EPH_ESCALATION_CAP
@@ -221,43 +223,44 @@ spec:
               value: {{ .Values.monitor.maxMem | quote }}
             - name: GRACE_SECONDS
               value: {{ .Values.monitor.graceSeconds | quote }}
+            # Delays SIGTERM so the collector has more room to be holding a
+            # stream when stellar-core prints its final medida block.
+            - name: PRESTOP_SLEEP_SECONDS
+              value: {{ .Values.monitor.prestopSleepSeconds | quote }}
             # A range stuck retrying the history archive never exits on its
             # own; without this it holds a slot for the life of the run.
             - name: ATTEMPT_DEADLINE_SECONDS
               value: {{ .Values.monitor.attemptDeadlineSeconds | quote }}
             - name: JOB_TTL_SECONDS
               value: {{ .Values.monitor.jobTtlSeconds | quote }}
-            {{- if .Values.integration.syntheticWorker.enabled }}
-            - name: SYNTHETIC_WORKER_CONFIG_MAP
-              value: {{ .Release.Name }}-synthetic-worker
-            - name: SYNTHETIC_WORKER_IMAGE_PULL_POLICY
-              value: {{ .Values.integration.syntheticWorker.imagePullPolicy | quote }}
-            - name: SYNTHETIC_PREDECESSOR_SECONDS
-              value: {{ .Values.integration.syntheticWorker.predecessorSeconds | quote }}
-            - name: SYNTHETIC_SUCCESSOR_MINIMUM_SECONDS
-              value: {{ .Values.integration.syntheticWorker.successorMinimumSeconds | quote }}
-            - name: SYNTHETIC_MAXIMUM_WAIT_SECONDS
-              value: {{ .Values.integration.syntheticWorker.maximumWaitSeconds | quote }}
-            - name: SYNTHETIC_PREDECESSOR_ANON_MIB
-              value: {{ .Values.integration.syntheticWorker.predecessorAnonMiB | quote }}
-            - name: SYNTHETIC_PREDECESSOR_WORKING_SET_MIB
-              value: {{ .Values.integration.syntheticWorker.predecessorWorkingSetMiB | quote }}
-            - name: SYNTHETIC_SUCCESSOR_ANON_MIB
-              value: {{ .Values.integration.syntheticWorker.successorAnonMiB | quote }}
-            - name: SYNTHETIC_SUCCESSOR_WORKING_SET_MIB
-              value: {{ .Values.integration.syntheticWorker.successorWorkingSetMiB | quote }}
-            - name: SYNTHETIC_PREDECESSOR_TX_APPLY_MS
-              value: {{ .Values.integration.syntheticWorker.predecessorTxApplyMilliseconds | quote }}
-            - name: SYNTHETIC_SUCCESSOR_TX_APPLY_MS
-              value: {{ .Values.integration.syntheticWorker.successorTxApplyMilliseconds | quote }}
-            {{- end }}
             - name: LOG_DIR
               value: /logs
+            - name: POOL_PREFIX
+              value: {{ .Values.monitor.poolPrefix | quote }}
+            - name: POOL_TIERS
+              value: {{ .Values.monitor.poolTiers | quote }}
+            - name: POOL_BLOCK_RUNGS
+              value: {{ .Values.monitor.poolBlockRungs | quote }}
+            - name: POOL_CROSS_RUNGS
+              value: {{ .Values.monitor.poolCrossRungs | quote }}
+            - name: POOL_VCPU
+              value: {{ .Values.monitor.poolVcpu | quote }}
+            - name: POOL_CPU
+              value: {{ .Values.monitor.poolCpu | quote }}
+            - name: POOL_UNPROFILED
+              value: {{ .Values.monitor.poolUnprofiled | quote }}
+            - name: POOL_NO_PROFILE
+              value: {{ .Values.monitor.poolNoProfile | quote }}
+            - name: POOL_MEM
+              value: {{ .Values.monitor.poolMem | quote }}
+            # Pods AND this with the tier label. Both capacity variants of a
+            # tier share one label value, and a pod cannot otherwise express a
+            # NodePool property; Karpenter labels every node with it itself.
+            - name: CAPACITY_TYPE
+              value: {{ .Values.monitor.capacityType | quote }}
             {{- if .Values.monitor.profileConfigMap }}
             - name: PROFILE_PATH
               value: /profile/profile.json
-            - name: PROFILE_CPU_TIERS
-              value: {{ .Values.monitor.profileCpuTiers | quote }}
             - name: PROFILE_MARGIN
               value: {{ .Values.monitor.profileMargin | quote }}
             - name: PROFILE_MAX_MEM
@@ -266,6 +269,13 @@ spec:
               value: {{ .Values.monitor.profileCacheHeadroom | quote }}
             # Handed out in proportion to a range's own runtime, so the ranges
             # that sit exposed to drift the longest get the largest share.
+            # Disk gets the same flat + runtime-weighted allowances as memory.
+            - name: PROFILE_EPHEMERAL_HEADROOM
+              value: {{ .Values.monitor.profileEphemeralHeadroom | quote }}
+            - name: PROFILE_RUNTIME_EPHEMERAL_INSURANCE
+              value: {{ .Values.monitor.profileRuntimeEphemeralInsurance | quote }}
+            - name: PROFILE_MAX_EPHEMERAL
+              value: {{ .Values.monitor.profileMaxEphemeral | quote }}
             - name: PROFILE_RUNTIME_MEMORY_INSURANCE
               value: {{ .Values.monitor.profileRuntimeMemoryInsurance | quote }}
             {{- end }}
@@ -327,12 +337,10 @@ spec:
             - name: monitor-src
               mountPath: /app
             {{- end }}
-          readinessProbe:
-            httpGet:
-              path: /status
-              port: 8080
-            initialDelaySeconds: 2
-            periodSeconds: 10
+          # No readinessProbe: nothing consumes Ready. There is no Service, and
+          # the prometheus kubernetes-pods job keeps targets on the scrape
+          # annotation alone, with no pod-ready filter.
+          #
           # A dead pod watch stops all failure classification, which degrades
           # silently: later failures record outcome=unknown and get retried
           # blindly. Restart the container rather than run half-blind.
@@ -356,12 +364,17 @@ spec:
           args:
             - >-
               {{- if .Values.monitor.sourceInstallDependencies }}
-              pip install --no-cache-dir -q 'kubernetes~=35.0' 'aiohttp~=3.9'
-              'requests~=2.31' 'prometheus-client~=0.19' &&
+              pip install --no-cache-dir -q 'kubernetes~=36.0' 'aiohttp~=3.9'
+              'prometheus-client~=0.19' &&
               {{- end }}
               exec python3 /app/log_collector.py
           {{- else }}
-          command: ["/usr/bin/python3", "log_collector.py"]
+          # Resolved on PATH, not /usr/bin/python3: Dockerfile.jobmonitor builds
+          # on python:3.12-slim, which ships the interpreter at
+          # /usr/local/bin/python3. An absolute path here pins the chart to one
+          # base image and fails as StartError -- the monitor container comes up
+          # (it inherits the image CMD) and only the sidecar crashloops.
+          command: ["python3", "log_collector.py"]
           {{- end }}
           env:
             - name: NAMESPACE
@@ -378,6 +391,18 @@ spec:
               value: {{ .Values.monitor.terminalPollAttempts | quote }}
             - name: LOG_POLL_SECONDS
               value: {{ .Values.monitor.logPollSeconds | quote }}
+            # Ceiling on how long a follow stream is held for a condemned pod,
+            # so a withdrawn drain notice cannot pin one open for a whole range.
+            - name: DOOMED_POLL_SECONDS
+              value: {{ .Values.monitor.doomedPollSeconds | quote }}
+            - name: WATCH_TIMEOUT_SECONDS
+              value: {{ .Values.monitor.watchTimeoutSeconds | quote }}
+            - name: WATCH_RETRY_SECONDS
+              value: {{ .Values.monitor.watchRetrySeconds | quote }}
+            - name: MAX_DOOMED_FOLLOWS
+              value: {{ .Values.monitor.maxDoomedFollows | quote }}
+            - name: DOOMED_FOLLOW_SECONDS
+              value: {{ .Values.monitor.doomedFollowSeconds | quote }}
             - name: MAX_CONCURRENT_POLLS
               value: {{ .Values.monitor.maxConcurrentPolls | quote }}
             - name: MAX_POLL_CHARS
@@ -393,10 +418,6 @@ spec:
             # this the collector defaults to pvc and silently records nothing.
             - name: STORAGE_MODE
               value: {{ .Values.worker.storageMode | quote }}
-            {{- if .Values.integration.syntheticWorker.enabled }}
-            - name: SYNTHETIC_WORKER
-              value: "true"
-            {{- end }}
           resources:
             {{- toYaml .Values.monitor.collectorResources | nindent 12 }}
           volumeMounts:

@@ -8,6 +8,8 @@ behaviour changed, not a regex.
 import pytest
 
 import fake_k8s
+import config
+import records
 import job_monitor as jm
 
 
@@ -40,7 +42,7 @@ def test_a_succeeded_job_is_recorded_into_completed(cluster):
     # The collector's half of the contract: peaks and tx_apply are only ever
     # readable from the files it writes, and the .done marker is what allows a
     # reap at all.
-    cluster.finalize(300, 1, tx_apply=1.5, peaks={'peakRssBytes': 123})
+    cluster.finalize(300, 1, tx_apply=1.5, peaks={'peakAnonBytes': 123})
 
     cluster.reconcile()
 
@@ -48,14 +50,9 @@ def test_a_succeeded_job_is_recorded_into_completed(cluster):
     assert record['attempts'] == 1
     assert record['count'] == 420
     assert record['txApply'] == 1.5
-    assert record['peakRssBytes'] == 123
+    assert record['peakAnonBytes'] == 123
     assert record['seconds'] == pytest.approx(60.0)
     assert record['wallSeconds'] == pytest.approx(60.0)
-
-    # Durable file first, ConfigMap mirror second -- and the mirror is stripped
-    # of the profiling fields that would push it at the 1 MiB cap.
-    assert '300' in cluster.progress_configmap()['completed']
-    assert 'peakRssBytes' not in cluster.progress_configmap()['completed']['300']
 
     # A completed range gives its volume back and its Job is reaped.
     assert 'pc-data-r300' not in cluster.pvcs()
@@ -68,9 +65,10 @@ def test_a_succeeded_job_is_recorded_into_completed(cluster):
 
 def test_a_failed_job_is_retried(cluster):
     cluster.reconcile()
-    # exit 3 is stellar-core's "did not complete": a corrupt archive and an
-    # interruption are indistinguishable, so it must be retried, not condemned.
+    # exit 3 is stellar-core's "did not complete" and is retried only when the
+    # archive shows a fetch fault killed it -- so the decision waits for .done.
     cluster.advance(300, 'incomplete')
+    cluster.finalize(300, 1, archive='fetch_fault')
 
     cluster.reconcile()
 
@@ -81,12 +79,9 @@ def test_a_failed_job_is_retried(cluster):
 
     # The retry rides the same volume -- that is what makes resume-at-LCL work.
     assert cluster.calls.names(verb='create', kind='pvc').count('pc-data-r300') == 1
-    # The predecessor is NOT deleted: the collector has not finalized it, and
-    # reaping the Job would reap the pod its metrics still live on.
-    assert 'pc-r300-a1' in cluster.jobs()
     # ...and the new pod carries the attempt label the collector keys files on.
     pod = cluster.k8s.pod_for_job('pc-r300-a2')
-    assert pod.metadata.labels[jm.LABEL_ATTEMPT] == '2'
+    assert pod.metadata.labels[config.LABEL_ATTEMPT] == '2'
 
 
 def test_a_condemned_range_is_recorded_and_not_retried(cluster):
@@ -127,12 +122,12 @@ def test_a_disruption_does_not_spend_the_range_budget(cluster):
     cluster.reconcile()
 
     assert 'pc-r300-a2' in cluster.jobs()
-    outcome = jm.read_outcome('300', 1)
+    outcome = records.read_outcome('300', 1)
     assert outcome['outcome'] == 'disrupted'
     # Memory is untouched: an eviction says nothing about how much the range wants.
     resources = (cluster.k8s.job('pc-r300-a2')
                  .spec.template.spec.containers[0].resources)
-    assert resources.requests['memory'] == jm.REQ_MEM
+    assert resources.requests['memory'] == config.REQ_MEM
 
 
 def test_progress_going_backwards_redispatches_rather_than_halting(cluster):
@@ -147,7 +142,7 @@ def test_progress_going_backwards_redispatches_rather_than_halting(cluster):
     assert '300' in cluster.completed()
 
     # Someone deletes the record underneath the run.
-    cluster.write(jm.PROGRESS_FILE, '{}')
+    cluster.write(config.PROGRESS_FILE, '{}')
     result = cluster.reconcile()
 
     # Back in the pool, and the run keeps going instead of halting.
@@ -173,3 +168,18 @@ def test_the_fake_raises_the_status_codes_the_monitor_branches_on(cluster):
         cluster.k8s.core_v1.read_namespaced_persistent_volume_claim(
             'pc-data-r999', cluster.namespace)
     assert gone.value.status == 404
+
+
+def test_an_unfinalized_predecessor_is_not_deleted(cluster):
+    """Reaping the Job reaps the pod its measurements still live on.
+
+    Driven through a disruption rather than exit 3: exit 3 now defers until the
+    collector has finalized, so it can never be observed mid-retry unfinalized.
+    """
+    cluster.reconcile()
+    cluster.advance(300, 'disrupted')
+
+    cluster.reconcile()
+
+    assert 'pc-r300-a2' in cluster.jobs(), "the successor must exist"
+    assert 'pc-r300-a1' in cluster.jobs(), "the collector has not finalized a1"

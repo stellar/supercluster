@@ -19,6 +19,7 @@ from types import SimpleNamespace as NS
 
 import pytest
 
+import config
 import job_monitor as jm
 import log_collector as lc
 
@@ -28,10 +29,10 @@ import _artifacts as art
 @pytest.fixture
 def job(monkeypatch):
     """One rendered worker Job, in the mode that needs no cluster."""
-    monkeypatch.setattr(jm, 'STORAGE_MODE', 'ephemeral')
-    monkeypatch.setattr(jm, 'RUN_NAME', 'pc')
-    monkeypatch.setattr(jm, 'CORE_IMAGE', 'stellar/stellar-core:test')
-    monkeypatch.setattr(jm, 'PROFILE', None)
+    monkeypatch.setattr(config, 'STORAGE_MODE', 'ephemeral')
+    monkeypatch.setattr(config, 'RUN_NAME', 'pc')
+    monkeypatch.setattr(config, 'CORE_IMAGE', 'stellar/stellar-core:test')
+    monkeypatch.setattr(config, 'PROFILE', None)
     return jm.build_job(31005951, 16320, 2, None)
 
 
@@ -57,8 +58,8 @@ def test_a_finished_job_still_has_a_ttl_backstop(job):
     Job listed on every later pass. The TTL is what bounds that, and it must be
     the value the chart configured -- not a second, independent default.
     """
-    assert job.spec.ttl_seconds_after_finished == jm.JOB_TTL_SECONDS
-    assert jm.JOB_TTL_SECONDS > 0, "a TTL of 0 deletes a Job before it can be classified"
+    assert job.spec.ttl_seconds_after_finished == config.JOB_TTL_SECONDS
+    assert config.JOB_TTL_SECONDS > 0, "a TTL of 0 deletes a Job before it can be classified"
 
 
 def test_a_worker_pod_is_never_restarted_in_place(job):
@@ -84,7 +85,7 @@ def test_the_deadline_is_on_the_job_so_it_can_be_patched_live(job, monkeypatch):
     of the allowance, against a pod-level field that could not be corrected at
     all on 850 already-running pods.
     """
-    monkeypatch.setattr(jm, 'ATTEMPT_DEADLINE_SECONDS', 43200)
+    monkeypatch.setattr(config, 'ATTEMPT_DEADLINE_SECONDS', 43200)
     j = jm.build_job(300, 420, 1, None)
     assert j.spec.active_deadline_seconds == 43200, \
         "the deadline must be patchable, so it belongs on the JobSpec"
@@ -93,7 +94,7 @@ def test_the_deadline_is_on_the_job_so_it_can_be_patched_live(job, monkeypatch):
 
 def test_no_deadline_means_no_field_at_all(job, monkeypatch):
     """0 is "off". Rendering it literally would kill every pod instantly."""
-    monkeypatch.setattr(jm, 'ATTEMPT_DEADLINE_SECONDS', 0)
+    monkeypatch.setattr(config, 'ATTEMPT_DEADLINE_SECONDS', 0)
     j = jm.build_job(300, 420, 1, None)
     assert j.spec.template.spec.active_deadline_seconds is None
 
@@ -107,7 +108,7 @@ def test_the_grace_period_outlasts_a_stellar_core_drain(job):
     range that never needed any.
     """
     grace = job.spec.template.spec.termination_grace_period_seconds
-    assert grace == jm.WORKER_GRACE_SECONDS
+    assert grace == config.WORKER_GRACE_SECONDS
     assert grace > 7, f"{grace}s does not cover the measured ~7s drain"
 
 
@@ -213,15 +214,9 @@ def test_the_pod_carries_its_own_attempt_number(job):
     OOM evidence the resumed chain exists to keep.
     """
     labels = job.spec.template.metadata.labels
-    assert labels[jm.LABEL_ATTEMPT] == '2'
-    assert labels[jm.LABEL_RANGE] == '31005951'
-    assert labels[jm.LABEL_RUN] == 'pc'
-
-
-def test_both_processes_agree_on_the_label_keys():
-    """Two readers, one key. A mismatch reproduces the same silent collision."""
-    assert jm.LABEL_ATTEMPT == lc.LABEL_ATTEMPT
-    assert jm.LABEL_RUN == lc.LABEL_RUN
+    assert labels[config.LABEL_ATTEMPT] == '2'
+    assert labels[config.LABEL_RANGE] == '31005951'
+    assert labels[config.LABEL_RUN] == 'pc'
 
 
 def test_the_job_is_findable_by_the_same_labels_as_its_pod(job):
@@ -230,7 +225,7 @@ def test_the_job_is_findable_by_the_same_labels_as_its_pod(job):
     The pod list and the Job list have to describe the same universe, or a Job
     is reaped while its pod is still streaming.
     """
-    for key in (jm.LABEL_RUN, jm.LABEL_RANGE, jm.LABEL_ATTEMPT):
+    for key in (config.LABEL_RUN, config.LABEL_RANGE, config.LABEL_ATTEMPT):
         assert job.metadata.labels[key] == job.spec.template.metadata.labels[key]
 
 
@@ -263,32 +258,6 @@ def test_the_worker_runs_the_resume_script_for_its_own_range(job):
     assert f'catchup "$KEY"' in script
 
 
-def test_synthetic_worker_is_absent_from_the_default_job(job):
-    container = job.spec.template.spec.containers[0]
-    assert container.image_pull_policy is None
-    assert 'synthetic-worker' not in {v.name for v in job.spec.template.spec.volumes}
-    assert not any(e.name.startswith('SYNTHETIC_') for e in container.env)
-
-
-def test_opt_in_synthetic_worker_uses_only_the_fixed_chart_script(job, monkeypatch):
-    monkeypatch.setattr(jm, 'SYNTHETIC_WORKER_CONFIG_MAP', 'pc-synthetic-worker')
-    monkeypatch.setattr(jm, 'SYNTHETIC_WORKER_IMAGE_PULL_POLICY', 'IfNotPresent')
-
-    synthetic = jm.build_job(31005951, 16320, 2, None)
-    container = synthetic.spec.template.spec.containers[0]
-    env = {e.name: e.value for e in container.env}
-    volumes = {v.name: v for v in synthetic.spec.template.spec.volumes}
-    mounts = {m.name: m.mount_path for m in container.volume_mounts}
-
-    assert container.command == ['python3', '/synthetic/worker.py']
-    assert container.image == 'stellar/stellar-core:test'
-    assert container.image_pull_policy == 'IfNotPresent'
-    assert env['SYNTHETIC_ATTEMPT'] == '2'
-    assert env['SYNTHETIC_TARGET'] == '31005951'
-    assert env['SYNTHETIC_COUNT'] == '16320'
-    assert env['SYNTHETIC_KEY'] == jm.job_key(31005951, 16320)
-    assert volumes['synthetic-worker'].config_map.name == 'pc-synthetic-worker'
-    assert mounts['synthetic-worker'] == '/synthetic'
 
 
 def test_the_worker_mounts_the_config_the_chart_renders(job):
@@ -298,7 +267,7 @@ def test_the_worker_mounts_the_config_the_chart_renders(job):
     owner-referenced to, so the name has to be the one owner_ref() reads.
     """
     volumes = {v.name: v for v in job.spec.template.spec.volumes}
-    assert volumes['config'].config_map.name == f"{jm.RUN_NAME}-stellar-core-config"
+    assert volumes['config'].config_map.name == f"{config.RUN_NAME}-stellar-core-config"
     mounts = {m.name: m.mount_path for m in job.spec.template.spec.containers[0].volume_mounts}
     assert mounts['config'] == '/config'
     assert '/config/stellar-core.cfg' in job.spec.template.spec.containers[0].command[2]

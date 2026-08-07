@@ -18,6 +18,10 @@ import re
 
 import pytest
 
+import config
+import kube
+import records
+import medida
 import job_monitor as jm
 import log_collector as lc
 
@@ -89,21 +93,14 @@ def test_the_sum_still_sits_inside_the_scan_window():
 
 @pytest.mark.parametrize('gap', [1, 10, lc.TxApplyScanner.WINDOW,
                                  lc.TxApplyScanner.WINDOW + 5])
-def test_both_readers_reach_exactly_as_far_past_the_header(gap, tmp_path, monkeypatch):
-    """The collector scans the stream; the monitor scans the archive.
+def test_the_scanner_reaches_exactly_as_far_past_the_header_as_it_claims(gap):
+    """One reader now: the collector, live and again over its own archive.
 
-    Two separate implementations of "find the sum under this header". A reach
-    that differed between them would make the metric depend on which reader got
-    to it -- and the monitor's read is the one that happens when the collector
-    was down for the pod's lifetime.
-
-    Asserted by measuring both, at the boundary and past it, rather than by
-    comparing two constants: the monitor is free to stop slicing a window and
-    reuse the scanner outright, which is a better implementation of the same
-    contract.
+    The window is the whole contract. Measured on ssc-test 2026-08-04, a /info
+    response landed between the header and its sum 91 lines apart, and a span
+    that charged every line gave up 76 lines short of a value that was right
+    there -- which is why the budget counts medida statistics only.
     """
-    monkeypatch.setattr(jm, 'LOG_DIR', str(tmp_path))
-    monkeypatch.setattr(lc, 'LOG_DIR', str(tmp_path))
     block = ["metric 'ledger.transaction.apply':"]
     block += [f"           filler {i} = 0ms" for i in range(gap - 1)]
     block += ["              sum = 1500.0ms"]
@@ -112,15 +109,12 @@ def test_both_readers_reach_exactly_as_far_past_the_header(gap, tmp_path, monkey
     for line in block:
         scanner.feed(line)
 
-    with gzip.open(jm.log_path('300', 1), 'wt') as fh:
-        fh.write("\n".join(block) + "\n")
-    from_archive = jm._tx_apply_for_attempt('300', 1)
+    within = gap <= lc.TxApplyScanner.WINDOW
+    assert (scanner.seconds is not None) is within, (
+        f"a sum {gap} statistics past the header was "
+        f"{'missed' if within else 'read'} against a window of "
+        f"{lc.TxApplyScanner.WINDOW}")
 
-    assert (scanner.seconds is None) == (from_archive is None), (
-        f"at {gap} lines past the header the collector says {scanner.seconds} "
-        f"and the monitor says {from_archive}")
-    if from_archive is not None:
-        assert from_archive == pytest.approx(scanner.seconds)
 
 
 # --- the number itself --------------------------------------------------------
@@ -137,7 +131,7 @@ def test_both_processes_read_the_same_total_out_of_one_block(block, seconds):
     first, so a disagreement is a per-range coin flip.
     """
     assert scan(block).seconds == pytest.approx(seconds)
-    m = jm._SUM_RE.search(block)
+    m = medida.SUM_RE.search(block)
     assert m, "the monitor's regex does not match this block at all"
     assert float(m.group(1)) / 1000.0 == pytest.approx(seconds)
 
@@ -155,7 +149,7 @@ def test_no_other_line_in_the_block_looks_like_the_sum():
     latency as a whole-range total -- plausible, wrong, and unnoticeable.
     """
     for block in (MEDIDA_BLOCK, MEDIDA_BIG):
-        matched = [l for l in block.splitlines() if jm._SUM_RE.search(l)]
+        matched = [l for l in block.splitlines() if medida.SUM_RE.search(l)]
         assert len(matched) == 1, f"matched {len(matched)} lines: {matched}"
         assert 'sum =' in matched[0]
 

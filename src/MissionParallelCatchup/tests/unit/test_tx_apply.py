@@ -12,6 +12,10 @@ import os
 
 import pytest
 
+import kube
+import records
+import medida
+import attempts
 import job_monitor as jm
 import log_collector as lc
 
@@ -91,25 +95,66 @@ def test_scanner_ignores_sum_from_another_metric():
     assert s.seconds is None
 
 
-def test_scanner_gives_up_past_its_window():
+def test_scanner_gives_up_past_its_window_of_STATISTICS():
+    # The window bounds how many medida statistics may sit between the header
+    # and the sum, so a release that adds percentiles is caught here rather than
+    # silently dropping tx_apply.
     s = lc.TxApplyScanner()
     s.feed("metric 'ledger.transaction.apply':")
-    for _ in range(20):
-        s.feed("[default INFO] unrelated chatter")
+    for i in range(lc.TxApplyScanner.WINDOW + 5):
+        s.feed(f"              {i}% = 1.5ms")
     s.feed("              sum = 12.5555ms")
     assert s.seconds is None
+
+
+def test_interleaved_output_does_not_spend_the_window():
+    # Measured on ssc-test 2026-08-04: a /info liveness response landed inside
+    # the block and pushed `sum` 91 lines below the header. Charging those lines
+    # made the scanner give up 76 lines short while the value sat in the archive
+    # -- one leg in 233, and job_monitor's re-read used the same span so its
+    # recovery path missed it too.
+    s = lc.TxApplyScanner()
+    s.feed("metric 'ledger.transaction.apply':")
+    s.feed("            count = 7641690")
+    for line in ('{', '   "info" : {', '      "build" : "stellar-core 27.1.1",',
+                 '      "ledger" : {', '         "age" : 109870542,',
+                 '         "baseFee" : 100,', '         "bucketlist" : [',
+                 '            {', '               "curr" : "2a2cfe82",',
+                 '               "snap" : "c12100ab"', '            },') * 8:
+        s.feed(line)
+    s.feed("              sum = 1.9501e+06ms")
+    assert s.seconds == pytest.approx(1950.1)
+
+
+def test_a_block_whose_sum_never_arrives_cannot_claim_a_later_one():
+    # Without a hard bound, skipping non-statistic lines would leave the scanner
+    # armed forever and let it read some other timer's sum as tx_apply.
+    s = lc.TxApplyScanner()
+    s.feed("metric 'ledger.transaction.apply':")
+    for _ in range(lc.TxApplyScanner.HARD_WINDOW + 10):
+        s.feed('   "noise" : 1,')
+    s.feed("              sum = 12.5555ms")
+    assert s.seconds is None
+
+
+def test_a_different_metric_block_ends_the_search():
+    s = lc.TxApplyScanner()
+    s.feed("metric 'ledger.transaction.apply':")
+    s.feed("metric 'ledger.close':")
+    s.feed("              sum = 12.5555ms")
+    assert s.seconds is None, "that sum belongs to ledger.close"
 
 
 def test_rate_and_mean_lines_are_not_read_as_sum():
     for line in MEDIDA_BLOCK.splitlines():
         if 'rate =' in line or 'mean =' in line:
-            assert lc._SUM_RE.search(line) is None
+            assert medida.SUM_RE.search(line) is None
 
 
 def test_sum_stays_inside_the_scan_window():
     lines = MEDIDA_BLOCK.splitlines()
     header = next(i for i, l in enumerate(lines) if 'ledger.transaction.apply' in l)
-    offset = next(i for i, l in enumerate(lines) if lc._SUM_RE.search(l)) - header
+    offset = next(i for i, l in enumerate(lines) if medida.SUM_RE.search(l)) - header
     assert offset == 10, f"medida layout moved: sum is now {offset} lines below the header"
     assert offset <= lc.TxApplyScanner.WINDOW
 
@@ -127,51 +172,43 @@ def test_resumed_is_read_from_the_workers_own_line():
 def test_resumed_is_bookkeeping_and_never_becomes_a_measurement():
     # peaks_for_range needs it to tell a resumed tail from a complete pass; the
     # profile must not see it as an axis.
-    assert 'resumed' not in jm.PEAK_FIELDS
+    assert 'resumed' not in attempts.PEAK_FIELDS
 
 
 # --- the monitor's own reader -------------------------------------------------
 
-def test_the_monitor_reads_the_same_block_the_collector_scanned(logdir):
-    # Two independent parsers over one format: they must agree, or a range
-    # measured live and a range recovered from the archive report differently.
-    with gzip.open(jm.log_path(4000, 1), 'wt') as fh:
-        fh.write(MEDIDA_BLOCK)
-    assert jm._tx_apply_for_attempt(4000, 1) == pytest.approx(scan(MEDIDA_BLOCK).seconds)
 
+def test_tx_apply_comes_from_the_collectors_record_and_nowhere_else(logdir, monkeypatch):
+    """The monitor no longer parses stellar-core output for this at all.
 
-def test_tx_apply_prefers_durable_sources_over_the_pod_api(logdir, monkeypatch):
-    # .metrics survives pod reaping and saveSuccessLogs=false; the archive
-    # survives reaping alone; the pod log is racing Karpenter, so it is a
-    # fallback and never the plan. Each source carries a different value here
-    # so the winner is unambiguous.
-    class FakePodLog:
-        def read_namespaced_pod_log(self, name, namespace, **_):
-            return MEDIDA_BLOCK
-    monkeypatch.setattr(jm, 'core_v1', FakePodLog())
+    An archive sitting beside the record is not a second source: the collector
+    re-reads it with its own scanner at finalization, so a reader here would
+    repeat that work over the same bytes and could not disagree.
+    """
+    class ExplodingPodLog:
+        def read_namespaced_pod_log(self, *_a, **_kw):
+            raise AssertionError("the monitor must not read pod logs for txApply")
+    monkeypatch.setattr(kube, 'core_v1', ExplodingPodLog())
 
-    with open(jm.metrics_path(4000, 1), 'w') as fh:
-        json.dump({'txApplySeconds': 99.0}, fh)
-    with gzip.open(jm.log_path(4000, 1), 'wt') as fh:
+    _metrics(4000, 1, {'txApplySeconds': 99.0})
+    assert attempts._tx_apply_for_attempt(4000, 1) == 99.0
+
+    os.remove(records.metrics_path(4000, 1))
+    with gzip.open(records.log_path(4000, 1), 'wt') as fh:
         fh.write(MEDIDA_BIG)
-
-    assert jm._tx_apply_for_attempt(4000, 1, pod_name='p') == 99.0
-    os.remove(jm.metrics_path(4000, 1))
-    assert jm._tx_apply_for_attempt(4000, 1, pod_name='p') == pytest.approx(BIG_SECONDS)
-    os.remove(jm.log_path(4000, 1))
-    assert jm._tx_apply_for_attempt(4000, 1, pod_name='p') == pytest.approx(TX_APPLY_SECONDS)
+    assert attempts._tx_apply_for_attempt(4000, 1) is None, \
+        "an archive is the collector's to parse, not the monitor's"
 
 
 def test_tx_apply_survives_a_reaped_pod(logdir):
-    # The pod is the only source that can vanish, so nothing may depend on it.
-    with open(jm.metrics_path(4000, 1), 'w') as fh:
-        json.dump({'txApplySeconds': 12.5}, fh)
-    assert jm.tx_apply_for_range(4000, 1, pod_name=None) == 12.5
+    # The record outlives the pod, and is now the only thing the monitor reads.
+    _metrics(4000, 1, {'txApplySeconds': 12.5})
+    assert attempts.tx_apply_for_range(4000, 1) == 12.5
 
 
 def test_a_range_with_no_measurement_anywhere_reports_nothing(logdir):
-    assert jm._tx_apply_for_attempt(4000, 1) is None
-    assert jm.tx_apply_for_range(4000, 1) is None
+    assert attempts._tx_apply_for_attempt(4000, 1) is None
+    assert attempts.tx_apply_for_range(4000, 1) is None
 
 
 def test_a_corrupt_archive_costs_this_range_its_metric_never_the_pass(logdir):
@@ -179,42 +216,38 @@ def test_a_corrupt_archive_costs_this_range_its_metric_never_the_pass(logdir):
     # escape the per-range work and abort the whole reconcile: no recording, no
     # reap, no dispatch for any of ~4000 ranges, for as long as the torn bytes
     # sat there.
-    with open(jm.log_path(4000, 1), 'wb') as fh:
+    with open(records.log_path(4000, 1), 'wb') as fh:
         fh.write(gzip.compress(MEDIDA_BLOCK.encode())[:40])
-    assert jm._tx_apply_for_attempt(4000, 1) is None
+    assert attempts._tx_apply_for_attempt(4000, 1) is None
 
 
 # --- summing a resumed chain --------------------------------------------------
 
+def _metrics(end, attempt, values):
+    """Write one attempt's .metrics, the way the collector leaves it."""
+    with open(records.metrics_path(end, attempt), 'w') as fh:
+        json.dump(values, fh)
+
+
 def test_tx_apply_sums_the_whole_resumed_chain(logdir):
     # medida's total is per-process, so a pod that resumes at LCL+1 reports only
     # the transactions it replayed -- the tail, not the range.
-    with open(jm.metrics_path(4000, 1), 'w') as fh:
-        json.dump({'txApplySeconds': 10.0}, fh)
-    with open(jm.metrics_path(4000, 2), 'w') as fh:
-        json.dump({'txApplySeconds': 5.0, 'resumed': True}, fh)
-    assert jm.tx_apply_for_range(4000, 2) == 15.0
+    _metrics(4000, 1, {'txApplySeconds': 10.0})
+    _metrics(4000, 2, {'txApplySeconds': 5.0, 'resumed': True})
+    assert attempts.tx_apply_for_range(4000, 2) == 15.0
 
 
 def test_a_fresh_start_drops_the_earlier_legs_from_the_total(logdir):
     # No RESUME line means new-db ran and this attempt redid the whole range;
     # adding the interrupted attempt's figure would double-count the same work.
-    with open(jm.metrics_path(4000, 1), 'w') as fh:
-        json.dump({'txApplySeconds': 10.0}, fh)
-    with open(jm.metrics_path(4000, 2), 'w') as fh:
-        json.dump({'txApplySeconds': 5.0}, fh)
-    assert jm.tx_apply_for_range(4000, 2) == 5.0
+    _metrics(4000, 1, {'txApplySeconds': 10.0})
+    _metrics(4000, 2, {'txApplySeconds': 5.0})
+    assert attempts.tx_apply_for_range(4000, 2) == 5.0
 
 
-def test_the_winner_pod_fallback_cannot_fill_a_missing_predecessor(logdir, monkeypatch):
-    # pod_name names the winning attempt's pod; handing it to an earlier leg
-    # would read the wrong pod's log and attribute it to the wrong attempt.
-    class FakePodLog:
-        def read_namespaced_pod_log(self, name, namespace, **_):
-            return MEDIDA_BIG
-    monkeypatch.setattr(jm, 'core_v1', FakePodLog())
-    # a1 has no durable record at all; a2 resumed from it and has none either.
-    with open(jm.metrics_path(4000, 2), 'w') as fh:
-        json.dump({'resumed': True}, fh)
-    assert jm.tx_apply_for_range(4000, 2, pod_name='p') is None, \
-        "winner-only txApply is a lower bound, not the resumed chain total"
+def test_a_missing_predecessor_leg_makes_the_chain_total_absent(logdir):
+    # a1 has no record at all; a2 resumed from it and has none either. The sum
+    # of what survived is a lower bound, not the range's total.
+    _metrics(4000, 2, {'resumed': True, 'txApplySeconds': 3.0})
+    assert attempts.tx_apply_for_range(4000, 2) is None, \
+        "a chain missing a leg must report nothing, not the legs it has"

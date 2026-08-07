@@ -23,6 +23,7 @@ terminal, so it fails the whole mission. A genuine wedge holds ONE slot of
 Asserted against the Jobs reconcile actually creates, not against a helper.
 """
 
+import config
 import job_monitor as jm
 
 DEADLINE = 43200
@@ -43,8 +44,8 @@ def test_the_cheapest_and_costliest_ranges_get_the_same_deadline(cluster, monkey
     Tightening the cheap one is exactly what killed 134 ranges in the backtest:
     its `seconds` came from a neighbour, and the neighbour was wrong.
     """
-    monkeypatch.setattr(jm, 'PROFILE', PROFILE)
-    monkeypatch.setattr(jm, 'ATTEMPT_DEADLINE_SECONDS', DEADLINE)
+    monkeypatch.setattr(config, 'PROFILE', PROFILE)
+    monkeypatch.setattr(config, 'ATTEMPT_DEADLINE_SECONDS', DEADLINE)
     cluster.reconcile()
 
     assert _deadline_of(cluster, 200) == DEADLINE
@@ -53,8 +54,8 @@ def test_the_cheapest_and_costliest_ranges_get_the_same_deadline(cluster, monkey
 
 def test_an_unprofiled_range_gets_the_same_deadline_too(cluster, monkeypatch):
     """No profile at all changes nothing -- there is nothing to scale by."""
-    monkeypatch.setattr(jm, 'PROFILE', [])
-    monkeypatch.setattr(jm, 'ATTEMPT_DEADLINE_SECONDS', DEADLINE)
+    monkeypatch.setattr(config, 'PROFILE', [])
+    monkeypatch.setattr(config, 'ATTEMPT_DEADLINE_SECONDS', DEADLINE)
     cluster.reconcile()
 
     assert _deadline_of(cluster, 300) == DEADLINE
@@ -63,8 +64,8 @@ def test_an_unprofiled_range_gets_the_same_deadline_too(cluster, monkeypatch):
 def test_zero_disables_the_deadline_entirely(cluster, monkeypatch):
     """0 must mean absent, not 0 -- a zero-second deadline kills every attempt
     the moment it is created."""
-    monkeypatch.setattr(jm, 'PROFILE', PROFILE)
-    monkeypatch.setattr(jm, 'ATTEMPT_DEADLINE_SECONDS', 0)
+    monkeypatch.setattr(config, 'PROFILE', PROFILE)
+    monkeypatch.setattr(config, 'ATTEMPT_DEADLINE_SECONDS', 0)
     cluster.reconcile()
 
     assert _deadline_of(cluster, 300) is None

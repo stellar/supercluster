@@ -83,7 +83,7 @@ def test_the_role_grants_what_the_collector_reads():
     """
     source = art.module_source(lc)
     have = art.granted()
-    assert re.search(r"/api/v1/namespaces/\{NAMESPACE\}/pods\"", source), \
+    assert re.search(r"/api/v1/namespaces/\{config\.NAMESPACE\}/pods\"", source), \
         "the collector no longer lists pods -- update this test"
     assert 'list' in have[('', 'pods')]
     assert re.search(r"/pods/\{pod\}/log\"", source), \

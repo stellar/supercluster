@@ -124,6 +124,7 @@ let ctx : MissionContext =
       pubnetParallelCatchupStorageMode = "pvc"
       pubnetParallelCatchupProfile = ""
       pubnetParallelCatchupRangeOrder = "tip-first"
+      pubnetParallelCatchupPoolPrefix = ""
       pubnetParallelCatchupCpuRequest = ""
       tag = None
       numPregeneratedTxs = None
@@ -558,37 +559,44 @@ let ``range profile keeps only the measurements that exist`` () =
     // finished, so most records will not carry it.
     let record = JObject()
     record.["peakWorkingSetBytes"] <- JValue(1234L)
-    record.["peakCpuCores"] <- JValue(0.5)
     record.["seconds"] <- JValue(42)
 
     let entry = projectRangeEntry record
 
-    Assert.Equal(3, entry.Count)
+    Assert.Equal(2, entry.Count)
     Assert.Equal(1234L, entry.["peakWorkingSetBytes"].Value<int64>())
     Assert.Null(entry.["peakEphemeralBytes"])
 
     record.["peakEphemeralBytes"] <- JValue(9999L)
     let withEph = projectRangeEntry record
-    Assert.Equal(4, withEph.Count)
+    Assert.Equal(3, withEph.Count)
     Assert.Equal(9999L, withEph.["peakEphemeralBytes"].Value<int64>())
 
 
 [<Fact>]
 let ``range profile carries the fields the sizing consumer prefers`` () =
-    // peakAnonBytes is what _profile_overrides reads FIRST (kubelet-sampled
-    // anon); peakRssBytes is only its fallback. Omitting it from the
-    // projection silently stripped it from the mission artifact while the
-    // monitor's progress.json carried it for 99% of ranges -- measured
-    // 2026-07-30, artifact 0% vs volume 99%. wallSeconds likewise.
+    // peakAnonBytes is the memory figure _profile_overrides reads. Omitting it
+    // from the projection silently stripped it from the mission artifact while
+    // the monitor's progress.json carried it for 99% of ranges -- measured
+    // 2026-07-30, artifact 0% vs volume 99%.
+    //
+    // `seconds` is the only timing carried: it is the percentile basis, the
+    // dispatch order and the runtime insurance threshold. wallSeconds and
+    // txApply are recorded per range as metrics but nothing sizes from either,
+    // and wallSeconds alone was 349 KB of a 963 KB artifact.
     Assert.Contains("peakAnonBytes", rangeProfileFields)
-    Assert.Contains("wallSeconds", rangeProfileFields)
+    Assert.Contains("seconds", rangeProfileFields)
+    Assert.DoesNotContain("wallSeconds", rangeProfileFields)
+    Assert.DoesNotContain("txApply", rangeProfileFields)
 
     let record = JObject()
     record.["peakAnonBytes"] <- JValue(111L)
-    record.["wallSeconds"] <- JValue(50.0)
+    record.["seconds"] <- JValue(50.0)
+    record.["wallSeconds"] <- JValue(999.0)
     let entry = projectRangeEntry record
     Assert.Equal(111L, entry.["peakAnonBytes"].Value<int64>())
-    Assert.Equal(50.0, entry.["wallSeconds"].Value<float>())
+    Assert.Equal(50.0, entry.["seconds"].Value<float>())
+    Assert.Null(entry.["wallSeconds"])
 
 
 [<Fact>]
@@ -628,14 +636,171 @@ let ``pvc mode does not reserve node disk it never uses`` () =
 
 
 [<Fact>]
-let ``progress record is read from the volume before the configmap`` () =
-    // The ConfigMap is a 1 MiB-capped mirror (~6100 ranges); /logs/progress.json
-    // is authoritative and unbounded. Reading the mirror would silently
-    // truncate the artifact on a finer slicing.
+let ``progress record is read from the volume and never from the configmap`` () =
+    // /logs/progress.json is the monitor's own state: authoritative, unbounded,
+    // and the only copy carrying measurements. The ConfigMap is the driver's
+    // view of the run -- status only -- so a record sourced from it would build
+    // an artifact that looks complete and measures nothing.
     let src =
         System.IO.File.ReadAllText(
             "../../../../FSLibrary/MissionHistoryPubnetParallelCatchupV2.fs")
-    let vol = src.IndexOf("/logs/progress.json")
-    let cm = src.IndexOf("queryJobMonitor (context, jobMonitorProgressKey)")
-    Assert.True(vol > 0, "must read the volume copy")
-    Assert.True(vol < cm, "volume read must precede the ConfigMap fallback")
+    Assert.Contains("/logs/progress.json", src)
+    Assert.DoesNotContain("jobMonitorProgressKey", src)
+
+
+[<Fact>]
+let ``on-demand runs layer the one-pod-per-node overlay`` () =
+    // The chart defaults are the spot claims: the spot pools were doubled on
+    // 2026-08-04 so each claim is half a node and two pods share it. On-demand
+    // pools kept their original sizes, where those same claims are the node's
+    // NAMEPLATE -- and nameplate is not allocatable, so every on-demand tier
+    // becomes unschedulable. Measured on ssc-test: a 16 GiB node reports
+    // 13312Mi usable, against a 14336Mi supergiant claim.
+    let src =
+        System.IO.File.ReadAllText(
+            "../../../../FSLibrary/MissionHistoryPubnetParallelCatchupV2.fs")
+    Assert.Contains("values-ondemand.yaml", src)
+    // and it must be layered, never swapped in: the overlay only carries the
+    // pool claims, so dropping the base values would lose the whole chart config
+    Assert.Contains("[| \"--values\"; valuesFilePath; \"--values\"; onDemandValuesFilePath |]", src)
+
+
+[<Fact>]
+let ``the on-demand overlay is not applied to pvc runs`` () =
+    // pvc means spot means shared nodes. Layering the one-pod claims there would
+    // halve pods per node on pools that were doubled precisely to hold two.
+    let src =
+        System.IO.File.ReadAllText(
+            "../../../../FSLibrary/MissionHistoryPubnetParallelCatchupV2.fs")
+    let guard = src.IndexOf("if context.pubnetParallelCatchupStorageMode = \"pvc\" then\n            [| \"--values\"; valuesFilePath |]")
+    Assert.True(guard > 0, "pvc branch must pass the base values file alone")
+
+
+[<Fact>]
+let ``on-demand pool claims fit exactly one pod per node`` () =
+    // Both halves, on BOTH dimensions. The previous version of this test checked
+    // memory only and assumed 154Mi of daemonsets, so it passed while every
+    // on-demand tier was in fact unschedulable -- 2026-08-07, ten workers Pending
+    // forever because Karpenter needed 1820m/3054Mi against c8a.large's
+    // 1715m/2663Mi. A test that encodes a stale measurement is worse than none:
+    // it is why the table looked verified.
+    //
+    // 494Mi/245m measured on ssc-test, and it is what Karpenter enforces --
+    // ebs-csi-node-windows is 340Mi of it and cannot run on these nodes, but the
+    // nodepools constrain arch and not os, so it is reserved anyway.
+    let dsMem, dsCpu = 494.0, 245.0
+
+    let overlay =
+        System.IO.File.ReadAllText(
+            "../../../../MissionParallelCatchup/parallel_catchup_helm/values-ondemand.yaml")
+
+    let claim (map: string) (tier: string) =
+        let entry =
+            overlay.Split('\n')
+            |> Array.find (fun l -> l.TrimStart().StartsWith(map + ":"))
+        entry.Split(',')
+        |> Array.pick (fun kv ->
+            let parts = (kv.Split(':') |> Array.map (fun x -> x.Trim([| '"'; ' ' |])))
+            if parts.[parts.Length - 2] = tier then Some parts.[parts.Length - 1] else None)
+
+    // tier, measured allocatable MiB, measured allocatable millicores
+    let nodes =
+        [ "subdwarf", 1127.0, 725.0
+          "dwarf", 1127.0, 725.0
+          "subgiant", 2663.0, 1715.0
+          "giant", 5940.0, 1715.0
+          "supergiant", 13313.0, 1715.0
+          "nebula", 13313.0, 3705.0
+          "hypergiant", 28714.0, 3705.0
+          "protostar", 28714.0, 1715.0
+          "supernova", 59515.0, 7695.0 ]
+
+    for (tier, allocMem, allocCpu) in nodes do
+        let mem = float ((claim "poolMem" tier).Replace("Mi", ""))
+        let cpu = float (claim "poolCpu" tier) * 1000.0
+
+        // One pod must FIT once the daemonsets are counted -- this is the half
+        // that was missing, and it is why nothing provisioned.
+        Assert.True(
+            mem + dsMem <= allocMem,
+            sprintf "%s: %.0fMi + %.0fMi daemonsets exceeds %.0fMi allocatable" tier mem dsMem allocMem
+        )
+
+        Assert.True(
+            cpu + dsCpu <= allocCpu,
+            sprintf "%s: %.0fm + %.0fm daemonsets exceeds %.0fm allocatable" tier cpu dsCpu allocCpu
+        )
+
+        // And a second must NOT, or the isolation the on-demand ladder exists
+        // for is gone without anything failing.
+        Assert.True(
+            2.0 * mem + dsMem > allocMem,
+            sprintf "%s: two pods fit in %.0fMi; on-demand is one per node" tier allocMem
+        )
+
+        Assert.True(
+            2.0 * cpu + dsCpu > allocCpu,
+            sprintf "%s: two pods fit in %.0fm; on-demand is one per node" tier allocCpu
+        )
+
+
+[<Fact>]
+let ``incremental log fetch tars only what changed since the watermark`` () =
+    // The teardown tar moved the whole volume in one stream and measured ~20
+    // minutes on a full run, entirely after the work had finished. The
+    // watermark is what turns that into a delta.
+    let first = String.concat " " (logTarCommand 0L)
+    Assert.DoesNotContain("--newer-mtime", first)
+    Assert.Contains("tar -cf -", first)
+
+    // A watermark reaches BACK by the overlap, never forward: a file written
+    // while the previous tar walked the tree carries an mtime inside that
+    // window and has to be picked up again rather than skipped forever.
+    let later = String.concat " " (logTarCommand 1000000L)
+    Assert.Contains(sprintf "--newer-mtime=@%d" (1000000L - logFetchOverlapSecs), later)
+
+    // The overlap cannot drive the filter negative on a clock near the epoch.
+    Assert.Contains("--newer-mtime=@0", String.concat " " (logTarCommand 1L))
+
+    // Both passes keep the collector's per-attempt verdicts and drop its resume
+    // bookkeeping, or a post-mortem loses why a range failed.
+    for cmd in [ first; later ] do
+        Assert.Contains("--exclude='*.state'", cmd)
+        Assert.Contains("--exclude='./lost+found'", cmd)
+
+
+[<Fact>]
+let ``log archive parts sort in fetch order`` () =
+    // Parts are extracted in order so a later, complete copy of a file
+    // overwrites an earlier truncated one. Zero-padded because part10 must not
+    // sort before part2.
+    let names = [ 1; 2; 10 ] |> List.map (logArchiveName "run")
+    Assert.Equal<string list>(List.sort names, names)
+    Assert.Equal("run-worker-logs.part01.tar", logArchiveName "run" 1)
+
+
+[<Fact>]
+let ``a truncated log archive is not mistaken for a good one`` () =
+    // The watermark may only advance past an archive that reads back whole.
+    // On ssc-test 2026-08-07 a 64MB mid-run part came back cut mid-member; the
+    // watermark advanced anyway and 12 ranges lost their logs permanently,
+    // because their archives were complete and therefore older than the new
+    // watermark -- so nothing would ever fetch them again.
+    let root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ssc-tar-test")
+    if System.IO.Directory.Exists root then System.IO.Directory.Delete(root, true)
+    let src = System.IO.Path.Combine(root, "logs")
+    System.IO.Directory.CreateDirectory(src) |> ignore
+    System.IO.File.WriteAllBytes(System.IO.Path.Combine(src, "range-1-a1.log.gz"), Array.init 4096 byte)
+
+    // Written outside the directory being archived, or the tar would contain itself.
+    let whole = System.IO.Path.Combine(root, "whole.tar")
+    System.Formats.Tar.TarFile.CreateFromDirectory(src, whole, false)
+    Assert.True(archiveIsIntact whole, "a complete archive must read back whole")
+
+    // Cut the stream mid-member, which is exactly what the pod exec produced.
+    let cut = System.IO.Path.Combine(root, "cut.tar")
+    let bytes = System.IO.File.ReadAllBytes(whole)
+    System.IO.File.WriteAllBytes(cut, bytes.[0 .. bytes.Length / 2])
+    Assert.False(archiveIsIntact cut, "a truncated archive must not pass as intact")
+
+    System.IO.Directory.Delete(root, true)

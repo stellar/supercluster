@@ -25,6 +25,8 @@ import pytest
 from kubernetes.client.rest import ApiException
 
 import fake_k8s
+import config
+import records
 import job_monitor as jm
 
 
@@ -77,7 +79,7 @@ def crash_after(monkeypatch, target, name, times=1, match=None):
 def restart(cluster):
     """Replace the monitor process: fresh in-memory state, same volume+cluster.
 
-    Identical to the dict update_status_and_metrics() builds on entry, so a
+    Identical to the dict reconcile_loop() builds on entry, so a
     restarted monitor starts from exactly what the shipped loop starts from.
     """
     cluster.state = {'owner': None, 'replayed': set(), 'max_completed': 0,
@@ -223,34 +225,6 @@ def test_crash_before_save_progress_records_the_range_exactly_once(cluster,
     assert_converged(cluster)
 
 
-def test_crash_between_the_progress_file_and_its_configmap_mirror(cluster,
-                                                                  monkeypatch):
-    """The file is authoritative; the mirror is best effort and catches up."""
-    cluster.reconcile()
-    cluster.advance(300, 'succeeded')
-    cluster.finalize(300, 1, tx_apply=1.5, peaks={'peakAnonBytes': 7})
-
-    crash_before(monkeypatch, jm, '_patch_cm')
-    with pytest.raises(Crash):
-        cluster.reconcile()
-
-    # os.replace() landed before the mirror was attempted.
-    assert '300' in cluster.progress()['completed']
-
-    restart(cluster)
-    cluster.reconcile()
-
-    # Reloaded from the file, not re-derived from the cluster: same attempt,
-    # and no second Job.
-    assert cluster.completed()['300']['attempts'] == 1
-    assert creates_of(cluster, 'pc-r300-a1') == 1
-
-    run_to_quiescence(cluster)
-    assert_converged(cluster)
-    # The mirror is whole again once any later write re-publishes the document.
-    assert sorted(cluster.progress_configmap()['completed']) == ['100', '200', '300']
-
-
 def test_crash_after_save_progress_before_release_pvc_does_not_leak_the_volume(
         cluster, monkeypatch):
     """The record is durable and the volume is not yet freed.
@@ -387,7 +361,7 @@ def test_crash_after_the_successor_exists_before_the_predecessor_is_deleted(
     leave the loser standing once the range finishes."""
     cluster.reconcile()
     cluster.advance(300, 'incomplete')
-    cluster.finalize(300, 1)                  # finalized, so a-1 is deletable
+    cluster.finalize(300, 1, archive='fetch_fault')
 
     crash_after(monkeypatch, cluster.k8s.batch_v1, 'create_namespaced_job',
                 match=lambda ns, body, **kw: body.metadata.name == 'pc-r300-a2')
@@ -403,7 +377,7 @@ def test_crash_after_the_successor_exists_before_the_predecessor_is_deleted(
     # keys on the highest attempt for the range.
     assert 'pc-r300-a3' not in cluster.jobs()
     assert creates_of(cluster, 'pc-r300-a2') == 1
-    assert jm._cause_count('300', 2, ('oom', 'failed')) == 1, \
+    assert records._cause_count('300', 2, ('fetch-fault',)) == 1, \
         "attempt 1 must be counted once, not once per pass that saw it"
 
     cluster.advance(300, 'succeeded', attempt=2)
@@ -430,7 +404,7 @@ def test_crash_between_the_verdict_and_the_retry_create(cluster, monkeypatch):
     with pytest.raises(Crash):
         cluster.reconcile()
 
-    assert jm._verdict_of('300', 1) == 'oom'
+    assert records._verdict_of('300', 1) == 'oom'
     assert 'pc-r300-a1' in cluster.jobs(), \
         "the predecessor must survive: without it the range restarts at attempt 1"
 
@@ -443,7 +417,7 @@ def test_crash_between_the_verdict_and_the_retry_create(cluster, monkeypatch):
     # One OOM seen, so exactly one rung: 24000Mi * 1.5. Two would mean the
     # replayed attempt was counted twice.
     assert resources.requests['memory'] == '13824Mi'
-    assert jm._cause_count('300', 1, ('oom', 'failed')) == 1
+    assert records._cause_count('300', 1, ('oom', 'failed')) == 1
     assert cluster.failed() == {}
 
 
@@ -495,8 +469,8 @@ def test_409_means_the_slot_is_taken_and_must_not_over_dispatch(cluster,
     result = cluster.reconcile()
 
     assert lost, "precondition: the create actually lost the race"
-    assert len(cluster.jobs()) <= jm.PARALLELISM, (
-        f"dispatched {cluster.jobs()} against PARALLELISM={jm.PARALLELISM}: "
+    assert len(cluster.jobs()) <= config.PARALLELISM, (
+        f"dispatched {cluster.jobs()} against PARALLELISM={config.PARALLELISM}: "
         "a 409 left the slot looking free")
     assert '300/420' in result['in_progress'], \
         "the range whose Job exists is in flight and must be reported as such"
@@ -534,7 +508,7 @@ def test_500_on_the_retry_create_does_not_lose_or_double_spend_the_range(cluster
     """The retry create fails hard. The range keeps its budget and its history."""
     cluster.reconcile()
     cluster.advance(300, 'incomplete')
-    cluster.finalize(300, 1)
+    cluster.finalize(300, 1, archive='fetch_fault')
 
     cluster.k8s.fail_next['create job'] = fake_k8s.api_exception(500, 'boom')
     with pytest.raises(ApiException):
@@ -548,7 +522,7 @@ def test_500_on_the_retry_create_does_not_lose_or_double_spend_the_range(cluster
     cluster.reconcile()
 
     assert 'pc-r300-a2' in cluster.jobs()
-    assert jm._cause_count('300', 2, ('oom', 'failed')) == 1
+    assert records._cause_count('300', 2, ('fetch-fault',)) == 1
     assert cluster.calls.names(verb='create', kind='pvc').count('pc-data-r300') == 1
 
     cluster.advance(300, 'succeeded', attempt=2)
@@ -560,24 +534,31 @@ def test_500_on_the_retry_create_does_not_lose_or_double_spend_the_range(cluster
 def test_a_range_that_exhausts_its_budget_across_crashes_fails_once(cluster,
                                                                     monkeypatch):
     """Budgets are spent by durable verdicts, so restarts must not stretch or
-    shrink them. Five attempts, a crash before each retry create."""
+    shrink them. Five attempts, a crash before each retry create.
+
+    An exit-3 fetch fault is an unreachable archive, so it spends the
+    environmental budget; the cap is lowered here rather than looping to the
+    configured one.
+    """
+    # A fetch fault spends its own budget, so that is the one to lower.
+    monkeypatch.setitem(config.ATTEMPT_BUDGETS, 'fetch-fault', 5)
     cluster.reconcile()
-    for attempt in range(1, jm.MAX_ATTEMPTS_PER_RANGE + 1):
+    for attempt in range(1, config.ATTEMPT_BUDGETS['fetch-fault'] + 1):
         cluster.advance(300, 'incomplete', attempt=attempt)
-        cluster.finalize(300, attempt)
+        cluster.finalize(300, attempt, archive='fetch_fault')
         crash_before(monkeypatch, cluster.k8s.batch_v1, 'create_namespaced_job')
         with pytest.raises(Crash):
             cluster.reconcile()
         restart(cluster)
         cluster.reconcile()
 
-    assert cluster.failed()['300']['attempts'] == jm.MAX_ATTEMPTS_PER_RANGE
-    assert cluster.failed()['300']['outcome'] == 'failed'
-    # Exactly MAX_ATTEMPTS Jobs were ever created for the range, despite five
+    assert cluster.failed()['300']['attempts'] == config.ATTEMPT_BUDGETS['fetch-fault']
+    assert cluster.failed()['300']['outcome'] == 'fetch-fault'
+    # Exactly that many Jobs were ever created for the range, despite five
     # crashed passes replaying the same failed attempts.
     creates = cluster.calls.names(verb='create', kind='job')
     assert sorted(n for n in creates if n.startswith('pc-r300-')) == [
-        f'pc-r300-a{n}' for n in range(1, jm.MAX_ATTEMPTS_PER_RANGE + 1)]
+        f'pc-r300-a{n}' for n in range(1, config.ATTEMPT_BUDGETS['fetch-fault'] + 1)]
 
 
 # --- end to end --------------------------------------------------------------

@@ -122,6 +122,7 @@ type MissionContext =
       pubnetParallelCatchupStorageMode: string
       pubnetParallelCatchupProfile: string
       pubnetParallelCatchupRangeOrder: string
+      pubnetParallelCatchupPoolPrefix: string
       pubnetParallelCatchupCpuRequest: string
       genesisTestAccountCount: int option
 

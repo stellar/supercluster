@@ -27,6 +27,8 @@ one that puts it in the wrong place does not.
 
 import pytest
 
+import config
+import records
 import job_monitor as jm
 
 
@@ -122,7 +124,7 @@ def test_a_range_that_never_ran_still_fails_when_it_hits_the_deadline(cluster, m
     The range ran for a sixth of its allowance. It is only killed because the
     clock was started by the Job's creation instead of by the container's start.
     """
-    monkeypatch.setattr(jm, 'ATTEMPT_DEADLINE_SECONDS', DEADLINE)
+    monkeypatch.setattr(config, 'ATTEMPT_DEADLINE_SECONDS', DEADLINE)
     cluster.reconcile()
 
     outcome = _DeadlineController.run_attempt(
@@ -143,7 +145,7 @@ def test_a_stall_long_enough_to_hit_the_deadline_condemns_the_range(cluster, mon
     A timeout is terminal, so the first stall condemns the range outright -- and
     a condemned range fails the mission.
     """
-    monkeypatch.setattr(jm, 'ATTEMPT_DEADLINE_SECONDS', DEADLINE)
+    monkeypatch.setattr(config, 'ATTEMPT_DEADLINE_SECONDS', DEADLINE)
     cluster.reconcile()
 
     # Keep the stall going until the range settles one way or the other. Four
@@ -167,8 +169,8 @@ def test_a_stall_long_enough_to_hit_the_deadline_condemns_the_range(cluster, mon
 
 def test_a_fleet_wide_stall_that_reaches_the_deadline_is_reported_not_retried(cluster, monkeypatch):
     """The outage hits every range at once, not one of them."""
-    monkeypatch.setattr(jm, 'ATTEMPT_DEADLINE_SECONDS', DEADLINE)
-    monkeypatch.setattr(jm, 'PARALLELISM', 3)
+    monkeypatch.setattr(config, 'ATTEMPT_DEADLINE_SECONDS', DEADLINE)
+    monkeypatch.setattr(config, 'PARALLELISM', 3)
     cluster.reconcile()
     assert sorted(cluster.jobs()) == ['pc-r100-a1', 'pc-r200-a1', 'pc-r300-a1']
 
@@ -191,7 +193,7 @@ def test_an_attempt_that_really_hangs_is_still_killed_by_the_deadline(cluster, m
     Green before and after: a range that genuinely runs past its budget is
     killed, retried once, and then condemned as a timeout with evidence.
     """
-    monkeypatch.setattr(jm, 'ATTEMPT_DEADLINE_SECONDS', DEADLINE)
+    monkeypatch.setattr(config, 'ATTEMPT_DEADLINE_SECONDS', DEADLINE)
     cluster.reconcile()
 
     for attempt in (1, 2):
@@ -216,7 +218,7 @@ def test_an_oom_inside_a_deadline_exceeded_job_escalates_memory(cluster, monkeyp
     Only one of them tells you what to do about it. Filing this as a timeout
     means the retry goes out at the same memory limit that just killed it.
     """
-    monkeypatch.setattr(jm, 'ATTEMPT_DEADLINE_SECONDS', DEADLINE)
+    monkeypatch.setattr(config, 'ATTEMPT_DEADLINE_SECONDS', DEADLINE)
     cluster.reconcile()
     cluster.advance(300, 'oom')
     _job_hit_its_deadline(cluster, 300)
@@ -225,7 +227,7 @@ def test_an_oom_inside_a_deadline_exceeded_job_escalates_memory(cluster, monkeyp
 
     # The pod's own record is unambiguous and durable -- reconcile simply
     # ignored it.
-    assert jm.read_outcome('300', 1)['outcome'] == 'oom'
+    assert records.read_outcome('300', 1)['outcome'] == 'oom'
     assert 'pc-r300-a2' in cluster.jobs()
     resources = _memory(cluster, 'pc-r300-a2')
     assert resources.requests['memory'] == '13824Mi', (
@@ -236,7 +238,7 @@ def test_an_oom_inside_a_deadline_exceeded_job_escalates_memory(cluster, monkeyp
 
 def test_two_ooms_inside_deadline_exceeded_jobs_do_not_condemn_the_range(cluster, monkeypatch):
     """An OOM gets the range budget (5). A timeout gets 2. Misfiling ends the run."""
-    monkeypatch.setattr(jm, 'ATTEMPT_DEADLINE_SECONDS', DEADLINE)
+    monkeypatch.setattr(config, 'ATTEMPT_DEADLINE_SECONDS', DEADLINE)
     cluster.reconcile()
 
     for attempt in (1, 2):
@@ -259,7 +261,7 @@ def test_a_disruption_inside_a_deadline_exceeded_job_keeps_its_own_budget(cluste
     A node drained near the end of a long attempt trips the Job deadline on the
     way out, so the two signals arrive together constantly on spot.
     """
-    monkeypatch.setattr(jm, 'ATTEMPT_DEADLINE_SECONDS', DEADLINE)
+    monkeypatch.setattr(config, 'ATTEMPT_DEADLINE_SECONDS', DEADLINE)
     cluster.reconcile()
 
     for attempt in (1, 2):
@@ -268,26 +270,26 @@ def test_a_disruption_inside_a_deadline_exceeded_job_keeps_its_own_budget(cluste
         cluster.finalize(300, attempt)
         cluster.reconcile()
 
-    assert jm.read_outcome('300', 1)['outcome'] == 'disrupted'
+    assert records.read_outcome('300', 1)['outcome'] == 'disrupted'
     assert cluster.failed() == {}, (
         "two spot evictions condemned the range: the Job's DeadlineExceeded "
         "downgraded them to the 2-attempt timeout budget")
     assert 'pc-r300-a3' in cluster.jobs()
     # An eviction says nothing about how much memory the range wants.
-    assert _memory(cluster, 'pc-r300-a3').requests['memory'] == jm.REQ_MEM
+    assert _memory(cluster, 'pc-r300-a3').requests['memory'] == config.REQ_MEM
 
 
 def test_an_ephemeral_eviction_inside_a_deadline_exceeded_job_still_grows_the_disk(cluster, monkeypatch):
-    monkeypatch.setattr(jm, 'ATTEMPT_DEADLINE_SECONDS', DEADLINE)
-    monkeypatch.setattr(jm, 'LIM_EPHEMERAL', '40Gi')
-    monkeypatch.setattr(jm, 'REQ_EPHEMERAL', '40Gi')
+    monkeypatch.setattr(config, 'ATTEMPT_DEADLINE_SECONDS', DEADLINE)
+    monkeypatch.setattr(config, 'LIM_EPHEMERAL', '40Gi')
+    monkeypatch.setattr(config, 'REQ_EPHEMERAL', '40Gi')
     cluster.reconcile()
     cluster.advance(300, 'ephemeral')
     _job_hit_its_deadline(cluster, 300)
 
     cluster.reconcile()
 
-    assert jm.read_outcome('300', 1)['outcome'] == 'ephemeral'
+    assert records.read_outcome('300', 1)['outcome'] == 'ephemeral'
     assert 'pc-r300-a2' in cluster.jobs()
     grown = _memory(cluster, 'pc-r300-a2').limits['ephemeral-storage']
     assert grown != '40Gi', (
@@ -303,7 +305,7 @@ def test_a_deadline_kill_that_drained_to_exit_three_is_still_a_timeout(cluster, 
     involved. Here the Job genuinely is the better source, so it must still win.
     Green before and after.
     """
-    monkeypatch.setattr(jm, 'ATTEMPT_DEADLINE_SECONDS', DEADLINE)
+    monkeypatch.setattr(config, 'ATTEMPT_DEADLINE_SECONDS', DEADLINE)
     cluster.reconcile()
 
     for attempt in (1, 2):

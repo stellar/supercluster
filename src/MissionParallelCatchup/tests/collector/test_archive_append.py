@@ -24,7 +24,9 @@ import random
 
 import pytest
 
+import records
 import job_monitor as jm
+import config
 import log_collector as lc
 
 
@@ -89,7 +91,7 @@ def test_a_torn_archive_does_not_abort_the_reconcile_pass(cluster):
     cluster.advance(300, 'succeeded')
     # The collector has not flushed .metrics yet, so the archive is the only
     # source for txApply -- and it is exactly the file being written.
-    write_torn_archive(jm.log_path('300', 1))
+    write_torn_archive(records.log_path('300', 1))
 
     result = cluster.reconcile()
 
@@ -113,9 +115,9 @@ def test_a_torn_archive_costs_one_range_not_the_other_ranges_in_the_pass(cluster
     cluster.advance(300, 'succeeded')
     cluster.advance(200, 'succeeded')
     # r300: collector finished cleanly.
-    cluster.finalize(300, 1, tx_apply=12.5, peaks={'peakRssBytes': 111})
+    cluster.finalize(300, 1, tx_apply=12.5, peaks={'peakAnonBytes': 111})
     # r200: collector is mid-poll, archive torn, nothing durable yet.
-    write_torn_archive(jm.log_path('200', 1))
+    write_torn_archive(records.log_path('200', 1))
 
     result = cluster.reconcile()
 
@@ -123,7 +125,7 @@ def test_a_torn_archive_costs_one_range_not_the_other_ranges_in_the_pass(cluster
     assert set(completed) == {'300', '200'}
     # The healthy range is untouched by its neighbour's corrupt file.
     assert completed['300']['txApply'] == 12.5
-    assert completed['300']['peakRssBytes'] == 111
+    assert completed['300']['peakAnonBytes'] == 111
     assert 'pc-r300-a1' not in cluster.jobs(), "finalized range was not reaped"
     # The torn range pays, and only the torn range.
     assert completed['200']['txApply'] is None
@@ -145,7 +147,7 @@ def test_a_never_repaired_torn_archive_does_not_wedge_the_run(cluster):
     cluster.advance(200, 'succeeded')
     cluster.finalize(200, 1, tx_apply=7.0)
     # r300's archive is torn and nobody ever fixes it.
-    torn = write_torn_archive(jm.log_path('300', 1))
+    torn = write_torn_archive(records.log_path('300', 1))
 
     cluster.reconcile()                        # records 300 + 200, dispatches 100
     assert 'pc-r100-a1' in cluster.jobs()
@@ -170,34 +172,19 @@ def test_a_range_recovers_its_metric_once_the_collector_finishes(cluster):
     """
     cluster.reconcile()
     cluster.advance(300, 'succeeded')
-    write_torn_archive(jm.log_path('300', 1))
+    write_torn_archive(records.log_path('300', 1))
 
     cluster.reconcile()
     assert cluster.completed()['300']['txApply'] is None
 
     # The collector's poll completes and it writes what it scanned out of the
     # stream. The archive on disk is still torn.
-    cluster.finalize(300, 1, tx_apply=88.25, peaks={'peakRssBytes': 222})
+    cluster.finalize(300, 1, tx_apply=88.25, peaks={'peakAnonBytes': 222})
     cluster.reconcile()
 
     assert cluster.completed()['300']['txApply'] == 88.25
-    assert cluster.completed()['300']['peakRssBytes'] == 222
+    assert cluster.completed()['300']['peakAnonBytes'] == 222
     assert 'pc-r300-a1' not in cluster.jobs()
-
-
-def test_a_readable_archive_is_still_the_txapply_fallback(cluster):
-    """Guard rail: widening the except must not swallow a good read.
-
-    Without this, 'catch everything and return None' would pass every test
-    above while silently deleting the archive fallback.
-    """
-    cluster.reconcile()
-    cluster.advance(300, 'succeeded')
-    write_whole_archive(jm.log_path('300', 1))   # no .metrics: archive is the source
-
-    cluster.reconcile()
-
-    assert cluster.completed()['300']['txApply'] == pytest.approx(4.2)
 
 
 # --- writer side: the collector's append ------------------------------------
@@ -282,7 +269,7 @@ def test_collector_append_never_exposes_a_partial_member_to_a_reader(tmp_path, m
     every 250 lines. Every one of those reads must succeed and must see exactly
     the last settled content.
     """
-    monkeypatch.setattr(lc, 'LOG_DIR', str(tmp_path))
+    monkeypatch.setattr(config, 'LOG_DIR', str(tmp_path))
     monkeypatch.setattr(lc, 'token', lambda: 'test-token')
     path = lc.base('300', 1) + '.log.gz'
     rng = random.Random(7)

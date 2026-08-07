@@ -21,6 +21,7 @@ import time
 
 import pytest
 
+import config
 import log_collector as lc
 
 # Everything is scaled down from the shipped 10s so the tests run in ~2s. The
@@ -134,7 +135,7 @@ async def _drive(session, terminal_at_start=True, flip_after=None, timeout=10):
 
 @pytest.fixture
 def logs(tmp_path, monkeypatch):
-    monkeypatch.setattr(lc, 'LOG_DIR', str(tmp_path))
+    monkeypatch.setattr(config, 'LOG_DIR', str(tmp_path))
     monkeypatch.setattr(lc, 'token', lambda: 'tok')
     monkeypatch.setattr(lc, 'LOG_POLL_SECONDS', POLL)
     monkeypatch.setattr(lc, 'TERMINAL_POLL_ATTEMPTS', ATTEMPTS)

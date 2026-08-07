@@ -6,15 +6,17 @@ after it is free, and every hour it starts late lands on the end of the run.
 
 import pytest
 
+import config
+import ranges
 import job_monitor as jm
 
 RANGES = [(600, 420), (500, 420), (400, 420), (300, 420)]   # generators emit tip-first
 
 
 def _order(monkeypatch, mode, profile=None):
-    monkeypatch.setattr(jm, 'RANGE_ORDER', mode)
-    monkeypatch.setattr(jm, 'PROFILE', profile)
-    return [e for e, _ in jm._ordered(list(RANGES))]
+    monkeypatch.setattr(config, 'RANGE_ORDER', mode)
+    monkeypatch.setattr(config, 'PROFILE', profile)
+    return [e for e, _ in ranges._ordered(list(RANGES))]
 
 
 def test_tip_first_is_unchanged(monkeypatch):

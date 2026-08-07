@@ -13,6 +13,7 @@ fake logs volume, and the samples the Prometheus client actually exports.
 Nothing reads job_monitor's source.
 """
 
+import metrics
 import job_monitor as jm
 
 
@@ -64,7 +65,7 @@ def test_late_txapply_reaches_the_histogram_not_just_progress_json(cluster):
     # holding the test below is not exercising the race any more.
     assert cluster.completed()['300']['txApply'] is None
 
-    before = _hist(jm.metric_tx_apply_duration)
+    before = _hist(metrics.tx_apply_duration)
 
     # The collector finishes and flushes the attempt's measurements.
     cluster.finalize(300, 1, tx_apply=1.25)
@@ -74,7 +75,7 @@ def test_late_txapply_reaches_the_histogram_not_just_progress_json(cluster):
     assert cluster.progress()['completed']['300']['txApply'] == 1.25
 
     # ...so the histogram must have counted that same value.
-    count, total = _delta(before, _hist(jm.metric_tx_apply_duration))
+    count, total = _delta(before, _hist(metrics.tx_apply_duration))
     assert (count, total) == (1.0, 1.25), (
         "progress.json carries txApply=1.25 for range 300 but the histogram "
         f"observed count+{count} sum+{total}: the backfilled value can never "
@@ -90,14 +91,14 @@ def test_backfilled_txapply_is_counted_once_not_on_every_later_pass(cluster):
     without bound.
     """
     _succeed_without_metrics(cluster, 300)
-    before = _hist(jm.metric_tx_apply_duration)
+    before = _hist(metrics.tx_apply_duration)
 
     cluster.finalize(300, 1, tx_apply=1.25)
     for _ in range(4):
         cluster.reconcile()
 
     assert cluster.progress()['completed']['300']['txApply'] == 1.25
-    count, total = _delta(before, _hist(jm.metric_tx_apply_duration))
+    count, total = _delta(before, _hist(metrics.tx_apply_duration))
     assert (count, total) == (1.0, 1.25), (
         f"range 300's txApply was observed {count} times across four passes; "
         "the histogram must count each recorded range exactly once")
@@ -118,8 +119,8 @@ def test_durations_recorded_up_front_are_not_recounted_while_txapply_is_late(clu
     assert rec['seconds'] is not None and rec['wallSeconds'] is not None
     seconds, wall = rec['seconds'], rec['wallSeconds']
 
-    before_full = _hist(jm.metric_full_duration)
-    before_wall = _hist(jm.metric_wall_duration)
+    before_full = _hist(metrics.full_duration)
+    before_wall = _hist(metrics.wall_duration)
 
     # Three passes with the collector still silent, then it finally lands.
     for _ in range(3):
@@ -130,10 +131,10 @@ def test_durations_recorded_up_front_are_not_recounted_while_txapply_is_late(clu
 
     assert cluster.progress()['completed']['300']['txApply'] == 0.5
 
-    assert _delta(before_full, _hist(jm.metric_full_duration)) == (0.0, 0.0), (
+    assert _delta(before_full, _hist(metrics.full_duration)) == (0.0, 0.0), (
         "the full-duration histogram re-observed range 300's already-counted "
         f"{seconds}s while waiting for its txApply")
-    assert _delta(before_wall, _hist(jm.metric_wall_duration)) == (0.0, 0.0), (
+    assert _delta(before_wall, _hist(metrics.wall_duration)) == (0.0, 0.0), (
         "the wall-duration histogram re-observed range 300's already-counted "
         f"{wall}s while waiting for its txApply")
 
@@ -148,13 +149,13 @@ def test_txapply_present_on_first_sight_is_still_counted_exactly_once(cluster):
     cluster.advance(300, 'succeeded')
     cluster.finalize(300, 1, tx_apply=2.5)
 
-    before = _hist(jm.metric_tx_apply_duration)
+    before = _hist(metrics.tx_apply_duration)
     cluster.reconcile()
     cluster.reconcile()
     cluster.reconcile()
 
     assert cluster.progress()['completed']['300']['txApply'] == 2.5
-    assert _delta(before, _hist(jm.metric_tx_apply_duration)) == (1.0, 2.5)
+    assert _delta(before, _hist(metrics.tx_apply_duration)) == (1.0, 2.5)
 
 
 def test_two_ranges_landing_their_metrics_at_different_times_both_count(cluster):
@@ -170,7 +171,7 @@ def test_two_ranges_landing_their_metrics_at_different_times_both_count(cluster)
     # 300's collector is quick; 200's is not.
     cluster.finalize(300, 1, tx_apply=1.0)
 
-    before = _hist(jm.metric_tx_apply_duration)
+    before = _hist(metrics.tx_apply_duration)
     cluster.reconcile()
 
     assert cluster.completed()['200']['txApply'] is None
@@ -181,7 +182,7 @@ def test_two_ranges_landing_their_metrics_at_different_times_both_count(cluster)
     recorded = {k: v['txApply'] for k, v in cluster.completed().items()}
     assert recorded == {'300': 1.0, '200': 3.0}
 
-    count, total = _delta(before, _hist(jm.metric_tx_apply_duration))
+    count, total = _delta(before, _hist(metrics.tx_apply_duration))
     assert (count, total) == (2.0, 4.0), (
         f"progress.json holds txApply for {sorted(recorded)} but the histogram "
         f"counted {count} of them (sum {total}); only the range whose .metrics "

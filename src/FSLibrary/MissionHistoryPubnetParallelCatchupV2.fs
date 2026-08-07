@@ -16,6 +16,7 @@ open System
 open System.Diagnostics
 open System.Net.Http
 open System.IO
+open System.Formats.Tar
 
 open Newtonsoft.Json.Linq
 open Microsoft.FSharp.Control
@@ -39,14 +40,20 @@ let helmChartPath =
 // $ dotnet run --project src/App/App.fsproj -- mission HistoryPubnetParallelCatchupV2 --image=docker-registry.services.stellar-ops.com/dev/stellar-core:23.0.3-2779.4d1df2b03.jammy-vnext-buildtests  --pubnet-parallel-catchup-num-workers=2 --pubnet-parallel-catchup-starting-ledger=0 --pubnet-parallel-catchup-end-ledger=6400 --pubnet-parallel-catchup-ledgers-per-job 1280  --destination ./logs
 // let helmChartPath = "src/MissionParallelCatchup/parallel_catchup_helm"
 let valuesFilePath = helmChartPath + "/values.yaml"
+// Layered on top of values.yaml for on-demand runs only. The chart defaults are
+// the spot claims: the spot pools were doubled on 2026-08-04 so each claim is
+// half a node and two pods share it. On-demand pools kept their original sizes,
+// where those same claims are the node's NAMEPLATE -- and nameplate is not
+// allocatable, so nothing schedules at all. A 14336Mi claim has ~13313Mi to land
+// in on a 16 GiB node once the EKS reserve and 154Mi of daemonsets come out.
+let onDemandValuesFilePath = helmChartPath + "/values-ondemand.yaml"
 
 // Keys in the <release>-catchup-progress ConfigMap. These were HTTP paths when
 // the driver polled the monitor through a Gateway; it reads the ConfigMap now.
 let jobMonitorStatusKey = "status.json" // live queue counts
 
-let jobMonitorProgressKey = "progress.json" // durable per-range completion record
 let jobMonitorLoggingIntervalSecs = 30 // frequency of the monitor reconcile loop: dispatch, liveness ping, status publish
-let jobMonitorStatusCheckIntervalSecs = 60 // frequency of us querying job monitor's `/status` end point
+let jobMonitorStatusCheckIntervalSecs = 60 // frequency of us reading the monitor's progress ConfigMap
 let jobMonitorStatusCheckTimeOutSecs = 600
 let mutable toPerformCleanup = true
 let failedJobLogFileLineCount = 10000
@@ -169,6 +176,42 @@ let installProject (context: MissionContext) =
     | None -> ()
 
     setOptions.Add(sprintf "range.order=%s" context.pubnetParallelCatchupRangeOrder)
+
+    // Nodepool routing. Empty prefix ships the pre-tier behaviour: one label for
+    // every worker. Set, each range goes to <prefix>-<tier> where the tier comes
+    // from its measured peakAnonBytes, and gets that node to itself.
+    setOptions.Add(sprintf "monitor.poolPrefix=%s" context.pubnetParallelCatchupPoolPrefix)
+
+    // Capacity type is DERIVED, not configured. Both capacity variants of a tier
+    // share one label value, so a pod needs this second expression to pick a
+    // side -- and the storage mode already decides which side it must be. pvc
+    // exists so an evicted range resumes at LCL+1, which is what makes spot
+    // survivable; ephemeral has no resume, so it belongs on nodes that are not
+    // reclaimed underneath it. Letting these disagree would put a run with no
+    // resume path onto interruptible capacity.
+    if context.pubnetParallelCatchupPoolPrefix <> "" then
+        let capacityType =
+            if context.pubnetParallelCatchupStorageMode = "pvc" then "spot" else "on-demand"
+
+        setOptions.Add(sprintf "monitor.capacityType=%s" capacityType)
+
+        // Routing needs the label KEY and the taint toleration, and neither has
+        // a sensible default for an unpooled run -- both ship as []. Derived
+        // here for the same reason capacityType is: a pooled run that sets only
+        // the prefix otherwise fails twice over, and both failures are quiet.
+        // Karpenter labels these nodes purpose=<prefix>-<tier>, which is exactly
+        // the value job_monitor builds per range, and taints them <prefix>:
+        // NoSchedule. Without the key there is no tier affinity at all (the pods
+        // schedule anywhere); without the toleration they schedule nowhere.
+        // Observed on ssc-test 2026-08-07: 10 workers Pending indefinitely,
+        // "did not tolerate taint (taint=catchup:NoSchedule)".
+        setOptions.Add(
+            sprintf "worker.requireNodeLabels[0]=purpose:%s" context.pubnetParallelCatchupPoolPrefix
+        )
+
+        setOptions.Add(
+            sprintf "worker.tolerateNodeTaints[0]=%s" context.pubnetParallelCatchupPoolPrefix
+        )
 
     setOptions.Add(sprintf "range.startingLedger=%d" context.pubnetParallelCatchupStartingLedger)
 
@@ -315,16 +358,23 @@ let installProject (context: MissionContext) =
     // installs its monitor, Jobs and PVCs into a different one. Observed
     // 2026-07-30: a mission run with --namespace sandbox put a monitor and four
     // Jobs into the production namespace alongside a live run.
-    RunShellCommand [| "helm"
-                       "install"
-                       helmReleaseName
-                       helmChartPath
-                       "--namespace"
-                       context.namespaceProperty
-                       "--values"
-                       valuesFilePath
-                       "--set"
-                       String.Join(",", setOptions) |]
+    // The overlay rides as a second --values, not as setOptions, because every
+    // option below is folded into ONE comma-separated --set and the pool maps are
+    // themselves comma-separated -- they would need every internal comma escaped.
+    // Derived from storage mode for the same reason capacityType is: pvc means
+    // spot means shared nodes, ephemeral means on-demand means one pod per node.
+    let valuesArgs =
+        if context.pubnetParallelCatchupStorageMode = "pvc" then
+            [| "--values"; valuesFilePath |]
+        else
+            [| "--values"; valuesFilePath; "--values"; onDemandValuesFilePath |]
+
+    RunShellCommand(
+        Array.concat [ [| "helm"; "install"; helmReleaseName; helmChartPath |]
+                       [| "--namespace"; context.namespaceProperty |]
+                       valuesArgs
+                       [| "--set"; String.Join(",", setOptions) |] ]
+    )
     |> ignore
 
     match RunShellCommand [| "helm"
@@ -341,61 +391,191 @@ let installProject (context: MissionContext) =
 // 1. Automatically determines worker pod names from context.pubnetParallelCatchupNumWorkers
 // 2. For each pod, finds all files matching "stellar-core-*.log" in /data
 // 3. Creates a tar.gz archive and copies it to context.destination directory
-let collectLogsFromPods (context: MissionContext) =
-    // Worker pods are per-range now and are reaped within about a minute of
-    // finishing, so there is nothing left to exec into at teardown. The monitor
-    // pulls each pod's log while it is still alive -- on failure before the
-    // retry, on success before the Job's TTL -- onto its own volume, so one
-    // exec here replaces the ~1024 that the StatefulSet design needed.
-    let monitorPods =
-        context
-            .kube
-            .ListNamespacedPod(
-                context.namespaceProperty,
-                labelSelector = sprintf "app=job-monitor,release=%s" helmReleaseName
-            )
-            .Items
-        |> Seq.map (fun p -> p.Metadata.Name)
-        |> List.ofSeq
+// How often the main loop fetches logs, and how much of the previous window it
+// re-fetches. One pass every 10 minutes flattens the teardown cost without
+// taking meaningful IOPS from the collector: --newer-mtime still stats every
+// file, and at ~4000 attempts that walk is the expensive part, not the bytes.
+let logFetchIntervalSecs = 600
+let logFetchOverlapSecs = 120L
+// Transfers of this archive are retried in-pass before the window is deferred.
+let logFetchAttempts = 3
 
-    match monitorPods with
-    | [] -> LogWarn "No job-monitor pod found for release %s; worker logs cannot be collected" helmReleaseName
-    | podName :: _ ->
+// An empty GNU tar is two zero blocks at the default blocking factor. A pass
+// with nothing new still writes that, so it is deleted rather than left to
+// clutter the destination with 19 identical 10K files.
+let emptyTarBytes = 10240L
+
+/// The archive written by one fetch. Parts are numbered rather than merged:
+/// extracting them in order reconstructs /logs, and a later part overwrites an
+/// earlier truncated copy of a file that was still being appended when it was
+/// first picked up.
+let logArchiveName (release: string) (part: int) : string =
+    sprintf "%s-worker-logs.part%02d.tar" release part
+
+/// tar of everything modified since `sinceEpoch`; 0 takes the whole volume,
+/// which is what teardown does when no incremental pass ever landed.
+///
+/// Entries are already gzipped by the streaming collector, so this bundles
+/// without re-compressing. Named range-<end>-a<attempt>.log.gz, so a failing
+/// range is findable directly rather than by worker ordinal. Keeps the
+/// per-attempt .outcome verdicts and drops .state, the collector's own resume
+/// bookkeeping.
+let logTarCommand (sinceEpoch: int64) : string [] =
+    let since =
+        if sinceEpoch > 0L then
+            sprintf " --newer-mtime=@%d" (max 0L (sinceEpoch - logFetchOverlapSecs))
+        else
+            ""
+
+    [| "sh"
+       "-c"
+       // lost+found is the ext4 root of the logs PVC, not ours.
+       sprintf "cd /logs && tar -cf -%s --exclude='*.state' --exclude='./lost+found' ." since |]
+
+/// Can every entry in this archive be read back?
+///
+/// A pass tars /logs while workers are still appending to it, so tar can hit
+/// "file changed as we read it", exit non-zero, and leave the stream cut
+/// mid-member. Verified on ssc-test 2026-08-07: at 200 workers a 64MB part came
+/// back truncated and 12 ranges lost their logs for good, because the watermark
+/// advanced anyway and their archives -- complete, and older than the new
+/// watermark -- were never re-sent. Checking here turns that into a re-transfer.
+let archiveIsIntact (path: string) : bool =
+    try
+        use stream = File.OpenRead(path)
+        use reader = new TarReader(stream)
+
+        let mutable entry = reader.GetNextEntry()
+
+        while not (isNull entry) do
+            entry <- reader.GetNextEntry()
+
+        true
+    with _ ->
+        false
+
+let private monitorPodName (context: MissionContext) : string option =
+    context
+        .kube
+        .ListNamespacedPod(
+            context.namespaceProperty,
+            labelSelector = sprintf "app=job-monitor,release=%s" helmReleaseName
+        )
+        .Items
+    |> Seq.map (fun p -> p.Metadata.Name)
+    |> Seq.tryHead
+
+/// Fetch everything written since `sinceEpoch` into numbered part `part`.
+///
+/// Worker pods are per-range and are reaped within about a minute of finishing,
+/// so there is nothing left to exec into at teardown. The monitor pulls each
+/// pod's log while it is still alive onto its own volume, so one exec here
+/// replaces the ~1024 the StatefulSet design needed.
+///
+/// Returns the watermark for the next call, or None when nothing was fetched --
+/// the caller then keeps its old watermark and re-fetches that window next time,
+/// so a failed pass costs bandwidth rather than logs.
+let collectLogsSince (context: MissionContext) (sinceEpoch: int64) (part: int) : int64 option =
+    match monitorPodName context with
+    | None ->
+        LogWarn "No job-monitor pod found for release %s; worker logs cannot be collected" helmReleaseName
+        None
+    | Some podName ->
         try
-            LogInfo "Collecting worker logs from job-monitor pod %s to %s" podName context.destination.Path
-
-            let outputFile =
-                Path.Combine(context.destination.Path, sprintf "%s-worker-logs.tar" helmReleaseName)
-
-            // Entries are already gzipped by the streaming collector, so this
-            // bundles without re-compressing. Named range-<end>-a<attempt>.log.gz,
-            // so a failing range is findable directly rather than by worker ordinal.
-            // Already gzipped by the collector, so no -z. Keeps the per-attempt
-            // .outcome verdicts (outcome/exitCode/pod -- useful post-mortem) and
-            // drops .state, which is only the collector's resume bookkeeping.
-            let command =
-                [| "sh"
-                   "-c"
-                   // lost+found is the ext4 root of the logs PVC, not ours.
-                   "cd /logs && tar -cf - --exclude='*.state' --exclude='./lost+found' ." |]
+            // The clock is read from the POD, and BEFORE the tar. This driver
+            // runs outside the cluster, so a few seconds of NTP skew either way
+            // would silently skip a file forever; and a watermark taken after
+            // the tar would exclude anything written while it walked the tree.
+            // Both failure modes lose logs; taking it early only re-sends.
+            let stampFile =
+                Path.Combine(Path.GetTempPath(), sprintf "%s-logstamp" helmReleaseName)
 
             RemoteCommandRunner.RunRemoteCommandAndCaptureOutput(
                 kube = context.kube,
                 ns = context.namespaceProperty,
                 podName = podName,
                 containerName = "job-monitor",
-                command = command,
-                outputFilePath = outputFile
+                command = [| "date"; "+%s" |],
+                outputFilePath = stampFile
             )
 
-            let fileInfo = FileInfo(outputFile)
+            let parsed, podEpoch = Int64.TryParse(File.ReadAllText(stampFile).Trim())
 
-            if fileInfo.Exists && fileInfo.Length > 0L then
-                LogInfo "Collected worker logs to %s (size: %d bytes)" outputFile fileInfo.Length
+            if not parsed then
+                LogWarn "Could not read the clock from %s; skipping this log pass" podName
+                None
             else
-                LogWarn "Worker log archive is empty: %s" outputFile
+                let outputFile =
+                    Path.Combine(context.destination.Path, logArchiveName helmReleaseName part)
 
-        with ex -> LogWarn "Could not collect worker logs from %s: %s" podName ex.Message
+                // The exec stream can end early on a large transfer and report
+                // success anyway -- the pod's tar exits 0, the status channel
+                // says Success, and the bytes simply stop. Measured on ssc-test
+                // 2026-08-07: a 64MB part arrived cut mid-member. So fetch, then
+                // read the archive back, and retry the whole transfer before
+                // giving up on this window.
+                let mutable attemptsLeft = logFetchAttempts
+                let mutable intact = false
+
+                while attemptsLeft > 0 && not intact do
+                    attemptsLeft <- attemptsLeft - 1
+
+                    RemoteCommandRunner.RunRemoteCommandAndCaptureOutput(
+                        kube = context.kube,
+                        ns = context.namespaceProperty,
+                        podName = podName,
+                        containerName = "job-monitor",
+                        command = logTarCommand sinceEpoch,
+                        outputFilePath = outputFile
+                    )
+
+                    let fi = FileInfo(outputFile)
+                    intact <- fi.Exists && (fi.Length <= emptyTarBytes || archiveIsIntact outputFile)
+
+                    if not intact && attemptsLeft > 0 then
+                        LogWarn "Worker log archive came back truncated; refetching (%d attempt(s) left)" attemptsLeft
+
+                let fileInfo = FileInfo(outputFile)
+
+                if not fileInfo.Exists then
+                    LogWarn "Worker log archive was not written: %s" outputFile
+                    None
+                elif fileInfo.Length <= emptyTarBytes then
+                    File.Delete(outputFile)
+                    LogInfo "No new worker logs since the last pass"
+                    Some podEpoch
+                elif not (archiveIsIntact outputFile) then
+                    // Keep the part -- it holds real entries, and a later
+                    // complete pass over the same window supersedes it on
+                    // extract. But hold the watermark, so that window IS
+                    // re-fetched rather than silently skipped.
+                    LogWarn
+                        "Worker log archive %s is truncated (%d bytes); keeping the old watermark so this window is fetched again"
+                        outputFile
+                        fileInfo.Length
+
+                    None
+                else
+                    LogInfo "Collected worker logs to %s (size: %d bytes)" outputFile fileInfo.Length
+                    Some podEpoch
+        with ex ->
+            LogWarn "Failed to collect worker logs: %s" ex.Message
+            None
+
+// Watermark and part counter for the incremental fetch. Module-level because
+// the main loop and the cleanup path both advance them.
+let mutable private logWatermark = 0L
+let mutable private logPartCount = 0
+
+/// One log pass. Advances the watermark only when the bytes are safely local.
+let collectLogsFromPods (context: MissionContext) =
+    let part = logPartCount + 1
+
+    match collectLogsSince context logWatermark part with
+    | Some epoch ->
+        logWatermark <- epoch
+        logPartCount <- part
+    | None -> ()
 
 // Cleanup on exit. `signalTriggered` indicates we're running under a hard
 // deadline (Jenkins' SoftKillWaitSeconds, ~5s by default, before SIGKILL).
@@ -404,9 +584,9 @@ let collectLogsFromPods (context: MissionContext) =
 // collection and leak every worker pod, which is what we saw in practice
 // with a 1024-worker run aborted from Jenkins.
 let queryJobMonitor (context: MissionContext, key: String) =
-    // The monitor publishes the same JSON it serves on /status into
-    // <release>-catchup-progress. Reading it through the kube API removes the
-    // Gateway/HTTPRoute dependency entirely -- the driver already has a client.
+    // The monitor publishes its status JSON into <release>-catchup-progress.
+    // Reading it through the kube API removes the Gateway/HTTPRoute dependency
+    // entirely -- the driver already has a client.
     try
         let cm =
             context.kube.ReadNamespacedConfigMap(helmReleaseName + "-catchup-progress", context.namespaceProperty)
@@ -431,23 +611,22 @@ let queryJobMonitor (context: MissionContext, key: String) =
 // A PVC's size is absent on purpose -- it is not a scheduling dimension, so
 // profiling it buys no packing. peakEphemeralBytes appears only for
 // ephemeral-mode runs, and only for ranges that finished.
+//
+// A subset of what the monitor records: it measures more per range than the next
+// run can size from, and a measurement nothing reads is pure weight in an
+// artifact that was already 963 KB at 4805 ranges.
 let rangeProfileFields =
-    // peakAnonBytes is the field the sizing consumer prefers (kubelet-sampled
-    // anon; peakRssBytes is the coarser Prometheus-era name for the same
-    // quantity). Omitting it here silently stripped it from the mission's
-    // profile artifact while the monitor's own progress.json carried it --
-    // measured 2026-07-30: artifact 0% peakAnonBytes, volume copy 99%.
+    // The memory figure the sizing consumer reads, sampled from kubelet by the
+    // collector. Omitting it strips it from the artifact while progress.json
+    // still carries it, so the next run sizes every range from defaults.
     [ "peakAnonBytes"
-      "peakRssBytes"
       "peakWorkingSetBytes"
-      "peakCpuCores"
       "peakEphemeralBytes"
-      "seconds"
-      // Kubernetes startTime -> completionTime for the winning Job only. The
-      // monitor cannot reconstruct first dispatch -> success after predecessor
-      // Jobs and their inter-attempt gaps are gone.
-      "wallSeconds"
-      "txApply" ]
+      // The only timing the next run sizes from: it sets the percentile basis,
+      // the dispatch order and the runtime insurance thresholds. wallSeconds and
+      // txApply are recorded per range as Prometheus metrics but nothing sizes
+      // or orders from either, so they stay out of the artifact.
+      "seconds" ]
 
 // A missing measurement must stay missing rather than become a null: the
 // consumer falls back to its configured default when the field is absent.
@@ -462,12 +641,13 @@ let projectRangeEntry (record: JObject) : JObject =
     entry
 
 
-// The progress record, preferring the copy on the monitor's volume.
+// The progress record, read only from the monitor's volume.
 //
-// The ConfigMap is only a mirror and is capped at 1 MiB -- about 6100 ranges at
-// ~172 bytes each, reachable simply by halving ledgersPerJob. Past that the
-// mirror stops updating while /logs/progress.json stays correct, so reading the
-// ConfigMap would silently truncate the artifact.
+// Not from the ConfigMap: that is a visibility mirror with every profiling
+// field stripped and a 1 MiB cap (~6100 ranges, reachable by halving
+// ledgersPerJob). A profile built from it would be empty but look complete, and
+// past the cap it stops updating while /logs/progress.json stays correct.
+// No record is the safe outcome -- the consumer falls back to its defaults.
 let readProgressRecord (context: MissionContext) : JObject option =
     let monitorPods =
         context
@@ -504,21 +684,10 @@ let readProgressRecord (context: MissionContext) : JObject option =
                 else
                     None
             with ex ->
-                LogWarn "Could not read /logs/progress.json (%s); falling back to the ConfigMap" ex.Message
+                LogWarn "Could not read /logs/progress.json (%s); no range profile will be written" ex.Message
                 None
 
-    match fromVolume with
-    | Some p -> Some p
-    | None ->
-        // Degraded read, and it must not be silent. The ConfigMap is a state
-        // mirror: the monitor strips every profiling field out of it to stay
-        // under the 1 MiB cap, so a record sourced here carries attempts and
-        // count and nothing else. Any range profile built from it will be
-        // empty, and rangeProfileDocument will decline to write one.
-        LogWarn
-            "Falling back to the progress ConfigMap; it is a state mirror with no measurements, so no range profile can be built from it"
-
-        queryJobMonitor (context, jobMonitorProgressKey)
+    fromVolume
 
 
 // The `ranges` map of a profile artifact, built from a progress record's
@@ -546,10 +715,8 @@ let buildRangeProfile (completed: JObject) : JObject =
         // The guard decides on measurements alone. count is bookkeeping, not a
         // measurement, so it is attached only after the entry has been found to
         // carry something real. Attaching it first made every entry non-empty
-        // and defeated the guard completely: a ConfigMap-sourced record, which
-        // has had all eight profiling fields stripped by the monitor's
-        // _state_only(), still sailed through and produced a range with nothing
-        // in it but a count.
+        // and defeated the guard completely: a record that measured nothing
+        // still sailed through and produced a range holding only a count.
         if entry.Count > 0 then
             match record.["count"] with
             | null -> ()
@@ -653,11 +820,12 @@ let cleanup (signalTriggered: bool) (context: MissionContext) =
     if toPerformCleanup then
         toPerformCleanup <- false
 
-        // Before either branch: `helm uninstall` deletes the progress ConfigMap
-        // the profile is built from, so an aborted run would otherwise lose every
-        // measurement it had already taken. One ConfigMap read and a local file
-        // write -- cheap enough for the abort path's few seconds, and a run
-        // stopped part-way is exactly when the partial profile is most wanted.
+        // Before either branch: `helm uninstall` takes the monitor pod, and with
+        // it the volume the profile is read from, so an aborted run would
+        // otherwise lose every measurement it had already taken. One pod exec
+        // and a local file write -- cheap enough for the abort path's few
+        // seconds, and a run stopped part-way is exactly when the partial
+        // profile is most wanted.
         try
             writeRangeProfile context
         with ex -> LogWarn "Failed to write range profile: %s" ex.Message
@@ -668,7 +836,9 @@ let cleanup (signalTriggered: bool) (context: MissionContext) =
             // Jenkins' ~5s grace before SIGKILL, and it can't beat the per-pod
             // terminationGracePeriodSeconds (default 30s) when scaled to 1024
             // workers. Whatever logs were captured inline by the failure
-            // handler in the main loop are still on disk.
+            // handler in the main loop are still on disk -- and since the main
+            // loop now fetches every logFetchIntervalSecs, an abort keeps every
+            // part up to the last pass rather than losing the run's logs whole.
             LogInfo "Signal-triggered cleanup: uninstalling release %s" helmReleaseName
 
             RunShellCommand [| "helm"
@@ -765,6 +935,7 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
     // fails -- it just finishes the work it can first.
     let failedJobs = ResizeArray<string>()
     let seenFailures = System.Collections.Generic.HashSet<string>()
+    let mutable lastLogFetch = DateTime.UtcNow
 
     while not allJobsFinished do
         Thread.Sleep(jobMonitorStatusCheckIntervalSecs * 1000)
@@ -776,7 +947,7 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
                 timeoutLeft <- jobMonitorStatusCheckTimeOutSecs
                 let remainSize = status.Value<int>("num_remain")
                 let jobsFailed = status.["jobs_failed"] :?> JArray
-                let JobsInProgress = status.["jobs_in_progress"] :?> JArray
+                let jobsInProgress = status.Value<int>("queue_in_progress_count")
 
                 for job in jobsFailed do
                     let text = job.ToString()
@@ -785,9 +956,21 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
                         failedJobs.Add(text)
                         LogError "RANGE FAILED: %s -- run continues, mission will fail once it drains" text
 
-                if remainSize = 0 && JobsInProgress.Count = 0 then
+                if remainSize = 0 && jobsInProgress = 0 then
                     LogInfo "All queues empty. Mission complete."
                     allJobsFinished <- true
+
+                // Pull the logs written since the last pass, so teardown moves a
+                // delta instead of the whole volume. Measured at ~20 minutes for
+                // a full run, all of it after the work had finished. Isolated in
+                // its own try: a failed pass re-fetches the same window next
+                // time and must never take the mission down.
+                if (DateTime.UtcNow - lastLogFetch).TotalSeconds >= float logFetchIntervalSecs then
+                    lastLogFetch <- DateTime.UtcNow
+
+                    try
+                        collectLogsFromPods context
+                    with ex -> LogWarn "Incremental log collection failed: %s" ex.Message
 
             | None ->
                 LogError "no status"
