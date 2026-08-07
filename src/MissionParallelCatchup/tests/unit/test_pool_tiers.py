@@ -570,3 +570,35 @@ def test_every_poolable_tier_fits_the_smallest_node_it_can_land_on(pooled):
         assert cpu * 1000 <= usable(vcpu), (
             f"{tier} claims {cpu * 1000:.0f}m but its smallest node "
             f"({vcpu} vCPU) only offers {usable(vcpu)}m")
+
+
+# --- nebula: the no-profile pool ---------------------------------------------
+
+def test_nebula_packs_two_to_four_on_the_shapes_its_pools_offer():
+    """Ranges with no measurement at all, so density is set deliberately.
+
+    Read off the unpatched defaults, not the fixture: these are the numbers the
+    chart ships and the nodepools are cut from. A claim above what the smallest
+    shape can offer wins no nodes at all rather than packing fewer -- r8a.xlarge
+    offers 3705m once the EKS reserve and 215m of daemonsets come out, so the
+    3800m this used to claim fit zero pods on it.
+    """
+    cpu = float(dict(x.split(':') for x in config.POOL_CPU.split(','))['nebula']) * 1000
+    mem = int(dict(x.split(':') for x in config.POOL_MEM.split(','))['nebula'].rstrip('Mi'))
+    vcpu = int(dict(x.split(':') for x in config.POOL_VCPU.split(','))['nebula'])
+
+    def usable_cpu(cores):
+        reserved = 60 + (10 if cores >= 2 else 0) + (5 if cores >= 3 else 0) \
+            + (5 if cores >= 4 else 0) + max(0, cores - 4) * 2.5
+        return cores * 1000 - reserved - 215
+
+    # measured allocatable, same source as ALLOC above
+    for shape, cores, alloc_mem, want in (('r8a.xlarge', 4, 30259, 2),
+                                          ('m8a.2xlarge', 8, 30259, 3),
+                                          ('r8a.2xlarge', 8, 61604, 4)):
+        fits = min(int(usable_cpu(cores) // cpu), int((alloc_mem - 215) // mem))
+        assert fits == want, f"{shape}: {fits} pods per node, expected {want}"
+
+    # POOL_VCPU must name the SMALLEST shape, or the free-rung guard misprices
+    # a promotion into or out of nebula.
+    assert vcpu == 4

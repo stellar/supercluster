@@ -324,9 +324,9 @@ monitor:
   # NOT predict throughput -- same box, memory.max 28GiB ran 1.83 lps vs 56GiB at
   # 1.70 -- so it reaches the right nodes by the wrong signal.
   poolBlockRungs: "hypergiant->supernova"
-  poolVcpu: "subdwarf:2,dwarf:2,subgiant:4,giant:4,supergiant:4,hypergiant:8,supernova:16,protostar:8,nebula:8"
-  poolCpu: "subdwarf:0.85,dwarf:0.85,subgiant:1.85,giant:1.85,supergiant:1.85,hypergiant:1.85,supernova:3.80,protostar:1.85,nebula:3.80"
-  poolMem: "subdwarf:1280Mi,dwarf:1280Mi,subgiant:2816Mi,giant:6656Mi,supergiant:14336Mi,hypergiant:29696Mi,supernova:60416Mi,protostar:29696Mi,nebula:14336Mi"
+  poolVcpu: "subdwarf:2,dwarf:2,subgiant:4,giant:4,supergiant:4,hypergiant:8,supernova:16,protostar:8,nebula:4"
+  poolCpu: "subdwarf:0.85,dwarf:0.85,subgiant:1.85,giant:1.85,supergiant:1.85,hypergiant:1.85,supernova:3.80,protostar:1.85,nebula:1.80"
+  poolMem: "subdwarf:1280Mi,dwarf:1280Mi,subgiant:2816Mi,giant:6656Mi,supergiant:14336Mi,hypergiant:29696Mi,supernova:60416Mi,protostar:29696Mi,nebula:9216Mi"
   # Profiled run, range past the profile's top: newest ledgers, and the newest
   # are the densest, so a rich pool rather than an average one.
   poolUnprofiled: "protostar"

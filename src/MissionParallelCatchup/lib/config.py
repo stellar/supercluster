@@ -469,7 +469,7 @@ POOL_NO_PROFILE = os.getenv('POOL_NO_PROFILE', 'nebula')
 # the same RAM.
 POOL_CPU = os.getenv(
     'POOL_CPU',
-    'subdwarf:0.85,dwarf:0.85,subgiant:1.85,giant:1.85,supergiant:1.85,hypergiant:1.85,supernova:3.80,protostar:1.85,nebula:3.80')
+    'subdwarf:0.85,dwarf:0.85,subgiant:1.85,giant:1.85,supergiant:1.85,hypergiant:1.85,supernova:3.80,protostar:1.85,nebula:1.80')
 
 # vCPU of the SMALLEST node in each tier's pool. This is what decides whether a
 # promotion is free, and it cannot be inferred from POOL_CPU, which is a claim
@@ -485,7 +485,7 @@ POOL_CPU = os.getenv(
 # rungs cross a class honestly -- which is what POOL_CROSS_RUNGS now carries.
 POOL_VCPU = os.getenv(
     'POOL_VCPU',
-    'subdwarf:2,dwarf:2,subgiant:4,giant:4,supergiant:4,hypergiant:8,supernova:16,protostar:8,nebula:8')
+    'subdwarf:2,dwarf:2,subgiant:4,giant:4,supergiant:4,hypergiant:8,supernova:16,protostar:8,nebula:4')
 
 # Rungs allowed to cross a vCPU class anyway, "from->to", comma separated. The
 # guard exists because a speculative promotion that doubles cores is usually a
@@ -560,7 +560,7 @@ POOL_BLOCK_RUNGS = os.getenv('POOL_BLOCK_RUNGS', 'hypergiant->supernova')
 # this cluster, so subdwarf shares dwarf's node type and is emptied by its cut.
 POOL_MEM = os.getenv(
     'POOL_MEM',
-    'subdwarf:1280Mi,dwarf:1280Mi,subgiant:2816Mi,giant:6656Mi,supergiant:14336Mi,hypergiant:29696Mi,supernova:60416Mi,protostar:29696Mi,nebula:14336Mi')
+    'subdwarf:1280Mi,dwarf:1280Mi,subgiant:2816Mi,giant:6656Mi,supergiant:14336Mi,hypergiant:29696Mi,supernova:60416Mi,protostar:29696Mi,nebula:9216Mi')
 
 _SORTED_SECONDS = None
 
