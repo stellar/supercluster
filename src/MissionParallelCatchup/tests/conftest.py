@@ -319,7 +319,6 @@ def cluster(tmp_path, monkeypatch):
     # Derived at import from RUN_NAME / LOG_DIR, so they have to follow.
     monkeypatch.setattr(config, 'LOG_DIR', str(log_dir))
     monkeypatch.setattr(config, 'PROGRESS_FILE', str(log_dir / 'progress.json'))
-    monkeypatch.setattr(config, 'PROGRESS_CM', f"{env['RUN_NAME']}-catchup-progress")
     # Module-level mutable state that would otherwise leak between tests.
     monkeypatch.setattr(config, 'PROFILE', None)
     monkeypatch.setattr(jm, '_progress_owner', {})

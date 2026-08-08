@@ -396,28 +396,5 @@ def test_a_foreign_run_s_jobs_in_the_namespace_are_ignored(cluster):
     assert result['total'] == 3
 
 
-def test_the_status_configmap_being_deleted_mid_run_is_survivable(cluster):
-    """The ConfigMap is the driver's view. Losing it must not lose the run."""
-    cluster.reconcile()
-    cluster.advance(300, 'succeeded')
-    cluster.finalize(300, 1)
-    cluster.reconcile()
-    jm.save_status(jm.status)                 # what the reconcile loop publishes
-
-    cluster.k8s.core_v1.delete_namespaced_config_map(config.PROGRESS_CM,
-                                                     cluster.namespace)
-    cluster.advance(200, 'succeeded')
-    cluster.finalize(200, 1)
-    result = cluster.reconcile()
-
-    assert set(cluster.completed()) == {'200', '300'}
-    assert cluster.state['halted'] is False
-    assert result['completed'] == 2
-
-    # Recreated by the next publish, so the driver is not blind for the rest of
-    # the run.
-    jm.save_status(jm.status)
-    assert 'status.json' in cluster.k8s.config_map_data(config.PROGRESS_CM,
-                                                        cluster.namespace)
 
 

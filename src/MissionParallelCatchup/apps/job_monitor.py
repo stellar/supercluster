@@ -58,10 +58,19 @@ if not kube.IN_CLUSTER:
 
 
 def main():
-    # Before any dispatch: the first Job built must already be sized from it.
-    config.PROFILE = profiles.load_profile()
-    # After the profile, before the thread: the only place a bad config can
-    # still take the process down instead of being swallowed by the loop.
+    # The driver POSTs the profile to /start. Kept on the volume so a restarted
+    # monitor resumes a run already under way instead of waiting for a /start
+    # that was delivered to its predecessor.
+    config.PROFILE_PATH = os.path.join(config.LOG_DIR, 'profile.json')
+    if os.path.exists(config.PROFILE_PATH):
+        config.PROFILE = profiles.load_profile()
+        http_server.started.set()
+
+    http_server.status_source = lambda: (status, status_lock)
+    http_server.on_start = install_profile
+
+    # Before the thread: the only place a bad config can still take the process
+    # down instead of being swallowed by the loop.
     validate_config()
 
     # This is the reconcile loop --
@@ -70,6 +79,27 @@ def main():
     reconcile_thread.start()
 
     http_server.serve()
+
+
+def install_profile(doc):
+    """Land the driver's profile on the volume and size from it.
+
+    Written before the gate opens, so the first Job dispatched is already sized
+    by it -- an unprofiled first wave would route every range to protostar.
+    """
+    profile = profiles.load_profile_doc(doc)
+    # Checked here, not at startup: the profile arrives with /start, so this is
+    # the first moment it can be judged. Raising rejects the POST with the
+    # reason, which fails the driver fast instead of dispatching a run whose
+    # ordering silently degrades to tip-first.
+    if config.RANGE_ORDER == 'longest-first' and not profile:
+        raise ValueError(
+            "RANGE_ORDER=longest-first requires a profile: it orders ranges by "
+            "their measured seconds, and with no profile every range ties and "
+            "dispatch stays tip-first. POST a profile, or set RANGE_ORDER.")
+    records.write_atomic(config.PROFILE_PATH, json.dumps(doc, separators=(',', ':')))
+    config.PROFILE = profile
+    logger.info("profile installed: %d ranges", len(config.PROFILE))
 
 
 def validate_config():
@@ -83,15 +113,6 @@ def validate_config():
     if config.RANGE_ORDER not in config.VALID_RANGE_ORDERS:
         raise ValueError("RANGE_ORDER must be one of %s, got %r"
                          % (', '.join(config.VALID_RANGE_ORDERS), config.RANGE_ORDER))
-    # longest-first sorts on measured `seconds`; with no profile every key ties
-    # and dispatch silently stays tip-first.
-    if config.RANGE_ORDER == 'longest-first' and not config.PROFILE:
-        raise ValueError(
-            "RANGE_ORDER=longest-first requires a profile: it orders ranges by "
-            "their measured seconds, and with no profile loaded every range ties "
-            "and dispatch stays tip-first. Pass a profile, or set RANGE_ORDER "
-            "explicitly to tip-first or oldest-first.")
-
 
 status = {
     'num_remain': 1,  # non-zero until the first real update, so callers don't see a premature 0
@@ -105,10 +126,16 @@ status = {
 }
 status_lock = threading.Lock()
 
+# Beside progress.json: the volume is the only durable store.
+_MISSION_START = os.path.join(config.LOG_DIR, 'mission_started')
+
 
 # --- the run itself ---------------------------------------------------------
 def reconcile_loop():
     global status
+    # Nothing is dispatched until the driver has POSTed /start: a range sized
+    # before the profile lands is sized wrong, and it cannot be re-sized later.
+    http_server.started.wait()
     # None until reconcile has an owner reference to attach it to; until then
     # process start is correct anyway, because that IS the start of a new run.
     mission_start_time = read_mission_start() or time.time()
@@ -120,7 +147,7 @@ def reconcile_loop():
                 state['owner'] = owner_ref()
                 _progress_owner['ref'] = state['owner']
                 if read_mission_start() is None:
-                    _patch_cm({'started_at': repr(mission_start_time)})
+                    records.write_atomic(_MISSION_START, repr(mission_start_time))
 
             r = reconcile(state)
 
@@ -165,14 +192,6 @@ def reconcile_loop():
             metrics.refresh_duration.set(workers_refresh_duration)
             metrics.mission_duration.set(mission_duration)
             logger.info("Status: %s", json.dumps(status))
-            # Publish on change only -- a 10h run would otherwise issue ~3600
-            # no-op ConfigMap writes.
-            counts = (r['remaining'], r['completed'], len(r['failed_ranges']),
-                      len(visible_in_progress))
-            if counts != state.get('last_counts'):
-                state['last_counts'] = counts
-                with status_lock:
-                    save_status(status)
 
         except Exception as e:
             logger.exception("Error while reconciling: %s", str(e))
@@ -422,16 +441,6 @@ def load_progress():
         return {}
 
 
-def save_status(snapshot):
-    """Publish the run's status into the ConfigMap the driver reads.
-
-    The mission driver runs outside the cluster and already has a kube client,
-    so reading a ConfigMap is simpler and more robust than exposing the monitor
-    through a Gateway/HTTPRoute just to be polled.
-    """
-    _patch_cm({'status.json': json.dumps(snapshot, separators=(',', ':'))})
-
-
 def save_progress(progress):
     # The monitor's own state, and the only copy. The driver's view of the run
     # is status.json in the ConfigMap; this document is not published.
@@ -439,19 +448,6 @@ def save_progress(progress):
     records.write_atomic(config.PROGRESS_FILE, blob)
 
 
-def _patch_cm(data):
-    body = {'data': data}
-    try:
-        kube.core_v1.patch_namespaced_config_map(config.PROGRESS_CM, config.NAMESPACE, body)
-    except ApiException as e:
-        if e.status != 404:
-            raise
-        kube.core_v1.create_namespaced_config_map(config.NAMESPACE, client.V1ConfigMap(
-            # Owned by the chart's stellar-core ConfigMap, like the Jobs and
-            # PVCs, so `helm uninstall` reclaims it.
-            metadata=client.V1ObjectMeta(name=config.PROGRESS_CM, labels={config.LABEL_RUN: config.RUN_NAME},
-                                         owner_references=_progress_owner.get('ref')),
-            data=body['data']))
 
 
 # --- worker log capture -----------------------------------------------------
@@ -1467,15 +1463,14 @@ def pods_by_job():
 def read_mission_start():
     """When this run first started, or None if not recorded yet.
 
-    Its own ConfigMap key: progress.json is keyed by ledger range, and anything
-    else in it would be walked as one. Read-only -- creating the ConfigMap here
-    would race the owner reference, and an ownerless one survives
-    `helm uninstall`.
+    Its own file: progress.json is keyed by ledger range, and anything else in
+    it would be walked as one. On the volume so it survives a monitor restart,
+    which is what makes mission_duration span the run rather than the process.
     """
     try:
-        cm = kube.core_v1.read_namespaced_config_map(config.PROGRESS_CM, config.NAMESPACE)
-        return float((cm.data or {})['started_at'])
-    except (ApiException, KeyError, TypeError, ValueError):
+        with open(_MISSION_START) as fh:
+            return float(fh.read())
+    except (OSError, ValueError):
         return None
 
 

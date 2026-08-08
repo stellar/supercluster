@@ -53,7 +53,6 @@ NAMESPACE = os.getenv('NAMESPACE', 'default')
 
 RUN_NAME = os.getenv('RUN_NAME', 'parallel-catchup')
 
-PROGRESS_CM = f"{RUN_NAME}-catchup-progress"
 
 LABEL_RUN = 'catchup.stellar.org/run'
 

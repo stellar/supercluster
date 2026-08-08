@@ -104,24 +104,55 @@ let resolveRangeProfile (context: MissionContext) : string option =
                 LogWarn "Range profile %s has no ranges; sizing from configured requests" spec
                 None
             else
-                let name = sprintf "%s-range-profile" helmReleaseName
-                let file = Path.Combine(Path.GetTempPath(), sprintf "%s-profile.json" helmReleaseName)
-                File.WriteAllText(file, body)
-
-                RunShellCommand [| "kubectl"
-                                   "create"
-                                   "configmap"
-                                   name
-                                   "--namespace"
-                                   context.namespaceProperty
-                                   sprintf "--from-file=profile.json=%s" file |]
-                |> ignore
-
-                LogInfo "Range profile: %d ranges from %s -> configmap %s" count spec name
-                Some name
+                LogInfo "Range profile: %d ranges from %s" count spec
+                Some body
         with ex ->
             LogWarn "Could not load range profile %s (%s); sizing from configured requests" spec ex.Message
             None
+
+
+// The driver talks to the monitor over its HTTPRoute: profile in via POST
+// /start, status out of /status, logs pulled per file. The previous channels --
+// a status ConfigMap and `kubectl exec tar` -- both went through the API
+// server; the logs alone measured ~0.3 MB per range, so ~1.2 GB of
+// control-plane traffic on a 4000-range run, for bytes with no reason to be
+// there.
+let monitorRouteHost (context: MissionContext) = sprintf "%s.%s" nonce context.routeInternalDomain
+
+// Where the socket actually goes. An external host (an ELB, say) still needs
+// the Host header set to the route hostname, or the gateway cannot match it.
+let monitorEndpoint (context: MissionContext) =
+    match context.routeExternalHost with
+    | Some h -> h
+    | None -> monitorRouteHost context
+
+let private monitorClient (context: MissionContext) =
+    let c = new HttpClient(BaseAddress = Uri(sprintf "http://%s" (monitorEndpoint context)))
+    c.DefaultRequestHeaders.Host <- monitorRouteHost context
+    c.Timeout <- TimeSpan.FromMinutes(10.0)
+    c
+
+/// POST the profile and let reconcile start. Retried: the route and the pod
+/// both need a moment after `helm install`, and until this lands the monitor
+/// deliberately dispatches nothing.
+let startMission (context: MissionContext) (profileJson: string) =
+    use client = monitorClient context
+    let deadline = DateTime.UtcNow.AddMinutes(5.0)
+    let mutable started = false
+
+    while not started && DateTime.UtcNow < deadline do
+        try
+            use content = new StringContent(profileJson, Text.Encoding.UTF8, "application/json")
+            let r = client.PostAsync("/start", content) |> Async.AwaitTask |> Async.RunSynchronously
+            if r.IsSuccessStatusCode then
+                LogInfo "Mission started: profile POSTed to %s/start" (monitorEndpoint context)
+                started <- true
+            else
+                Thread.Sleep(5000)
+        with _ -> Thread.Sleep(5000)
+
+    if not started then
+        failwithf "could not reach the job monitor at %s to start the mission" (monitorEndpoint context)
 
 
 // Helper functions to convert label/taint tuples to Helm-compatible format using indexed notation
@@ -171,9 +202,12 @@ let installProject (context: MissionContext) =
     // ~2Gi for pvc, ~35Gi for ephemeral, or the monitor logs a loud mismatch.
     setOptions.Add(sprintf "worker.storageMode=%s" context.pubnetParallelCatchupStorageMode)
 
-    match resolveRangeProfile context with
-    | Some cm -> setOptions.Add(sprintf "monitor.profileConfigMap=%s" cm)
-    | None -> ()
+    // The route the driver uses for /start, /status and the logs. Templated
+    // only when routeHost is set, so an in-cluster caller still works without a
+    // gateway.
+    setOptions.Add(sprintf "monitor.routeHost=%s" (monitorRouteHost context))
+    setOptions.Add(sprintf "monitor.gatewayName=%s" context.gatewayName)
+    setOptions.Add(sprintf "monitor.gatewayNamespace=%s" context.gatewayNamespace)
 
     setOptions.Add(sprintf "range.order=%s" context.pubnetParallelCatchupRangeOrder)
 
@@ -583,23 +617,17 @@ let collectLogsFromPods (context: MissionContext) =
 // of the much-slower log collection — otherwise we get SIGKILLed mid-
 // collection and leak every worker pod, which is what we saw in practice
 // with a 1024-worker run aborted from Jenkins.
-let queryJobMonitor (context: MissionContext, key: String) =
-    // The monitor publishes its status JSON into <release>-catchup-progress.
-    // Reading it through the kube API removes the Gateway/HTTPRoute dependency
-    // entirely -- the driver already has a client.
-    try
-        let cm =
-            context.kube.ReadNamespacedConfigMap(helmReleaseName + "-catchup-progress", context.namespaceProperty)
 
-        match cm.Data.TryGetValue key with
-        | true, body ->
-            LogInfo "job monitor status from configmap key '%s': %s" key body
-            Some(JObject.Parse(body))
-        | _ ->
-            LogInfo "job monitor configmap has no '%s' yet" key
-            None
+let queryJobMonitor (context: MissionContext, key: String) =
+    // `key` is vestigial: /status returns the one document the ConfigMap used
+    // to hold under that key.
+    try
+        use client = monitorClient context
+        let body = client.GetStringAsync("/status") |> Async.AwaitTask |> Async.RunSynchronously
+        LogInfo "job monitor status: %s" body
+        Some(JObject.Parse(body))
     with ex ->
-        LogError "Error reading job monitor configmap: %s" ex.Message
+        LogError "Error reading job monitor status: %s" ex.Message
         None
 
 
@@ -923,6 +951,11 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
     cleanupContext <- Some context
 
     installProject context
+
+    // The monitor dispatches nothing until this arrives, so a profile that
+    // cannot be delivered fails the run here rather than silently sizing every
+    // range as unprofiled.
+    startMission context (defaultArg (resolveRangeProfile context) "{}")
 
     let mutable allJobsFinished = false
     let mutable timeoutLeft = jobMonitorStatusCheckTimeOutSecs

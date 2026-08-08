@@ -81,6 +81,12 @@ monitor:
   # branch and pinned by tag rather than :latest so a run is always traceable to
   # one image. Revert to the stellar/ repo once there is a push path for it.
   image: "stellajuna/ssc-jm:2026-08-07b"
+  # The driver reaches the monitor through this route: profile in via POST
+  # /start, status and logs out. Empty routeHost disables the HTTPRoute; the
+  # Service still exists, so an in-cluster caller works either way.
+  routeHost: ""
+  gatewayName: ""
+  gatewayNamespace: ""
   # Dev loop: run the monitor and collector from a ConfigMap holding
   # job_monitor.py and log_collector.py instead of a built image. Set it to the
   # ConfigMap name and point monitor.image at a plain python base; the deps the

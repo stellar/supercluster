@@ -149,9 +149,20 @@ def test_preflight_rejects_an_unknown_order(preflight):
         preflight(order='longest')()
 
 
-def test_preflight_rejects_longest_first_without_a_profile(preflight):
-    with pytest.raises(ValueError, match='requires a profile'):
-        preflight(order='longest-first', profile=None)()
+def test_preflight_rejects_longest_first_without_a_profile(monkeypatch, tmp_path):
+    """The check moved to /start: the profile arrives with the POST, so startup
+    is too early to judge it. Rejecting there fails the driver fast instead of
+    dispatching a run whose ordering silently degrades to tip-first."""
+    monkeypatch.setattr(config, 'RANGE_ORDER', 'longest-first')
+    monkeypatch.setattr(config, 'LOG_DIR', str(tmp_path))
+    monkeypatch.setattr(config, 'PROFILE_PATH', str(tmp_path / 'profile.json'))
+
+    with pytest.raises(ValueError, match='longest-first requires a profile'):
+        jm.install_profile({})
+
+    # A profile with ranges is accepted, and nothing is written until it passes.
+    jm.install_profile({'ranges': {'300': {'seconds': 1.0}}})
+    assert config.PROFILE == [(300, {'seconds': 1.0})]
 
 
 def test_preflight_allows_longest_first_with_a_profile(preflight):

@@ -92,14 +92,6 @@ def test_every_helm_command_uses_the_mission_namespace():
             f"helm {verb.group(1)} does not target the mission namespace: {block!r}")
 
 
-def test_profile_configmap_uses_the_mission_namespace():
-    """The profile mount and Helm release must be created in one namespace."""
-    block = fs_extract(
-        r'RunShellCommand\s+\[\|\s*"kubectl"(.*?)\|\]').group(1)
-    assert '"create"' in block and '"configmap"' in block
-    assert re.search(r'"--namespace"\s+context\.namespaceProperty', block), (
-        "the range-profile ConfigMap follows kubeconfig's default namespace "
-        "instead of the mission namespace")
 
 
 def test_every_value_the_driver_sets_is_one_the_chart_knows():
@@ -249,41 +241,8 @@ def test_the_history_get_command_lands_in_the_config_the_worker_mounts():
 
 # --- the ConfigMap the driver polls ------------------------------------------
 
-def test_the_driver_reads_the_configmap_the_monitor_writes():
-    """One name, derived on both sides from the helm release name.
-
-    The driver appends a literal suffix to the release; the monitor appends the
-    same suffix to RUN_NAME, which the chart sets from .Release.Name. A mismatch
-    reads as "the monitor has not published yet", forever -- and the driver's
-    only reaction to that is a 600s timeout and `job monitor not reachable`.
-    """
-    suffix = fs_extract(r'helmReleaseName \+ "(-[a-z-]+)"').group(1)
-    release = 'pc-abc'
-    # What the driver will ask for, and what the monitor will have created --
-    # the latter imported with the RUN_NAME the chart gives it for that release.
-    wanted = release + suffix
-    run_name = art.env_of(art.containers(release=release)[art.MONITOR_CONTAINER])['RUN_NAME']
-    written = art.defaults('config', (('RUN_NAME', run_name),))['PROGRESS_CM']
-    assert wanted == written, f"driver reads {wanted!r}, monitor writes {written!r}"
 
 
-def test_the_driver_reads_the_keys_the_monitor_publishes(cluster):
-    """status.json and progress.json are two keys in that one ConfigMap.
-
-    Checked against a ConfigMap the real monitor actually wrote, so a key that
-    is only mentioned in a comment does not count.
-    """
-    wanted = set(re.findall(r'let jobMonitor\w*Key = "([\w.]+)"', FS))
-    assert wanted, "the driver no longer names the ConfigMap keys"
-
-    cluster.reconcile()
-    cluster.advance(300, 'succeeded')
-    cluster.reconcile()                       # records a completion -> progress.json
-    jm.save_status(jm.status)                 # what the reconcile loop publishes
-    published = set(cluster.k8s.config_map_data(config.PROGRESS_CM, cluster.namespace) or {})
-    missing = sorted(wanted - published)
-    assert not missing, (
-        f"the driver reads {missing}; the monitor published {sorted(published)}")
 
 
 def test_every_status_field_the_driver_reads_is_one_the_monitor_sets():

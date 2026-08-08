@@ -13,6 +13,16 @@ import config
 logger = logging.getLogger()
 
 
+def load_profile_doc(doc):
+    """The sorted (end, record) list a parsed profile document yields.
+
+    An unprofiled run POSTs {} and gets [] -- a profile is an optimisation,
+    never a prerequisite, so "no ranges" is a valid answer rather than an error.
+    """
+    ranges = (doc or {}).get('ranges') or {}
+    return sorted((int(k), v) for k, v in ranges.items())
+
+
 def load_profile():
     """Per-range measurements from an earlier run, keyed by range end.
 
