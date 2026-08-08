@@ -126,11 +126,21 @@ let monitorEndpoint (context: MissionContext) =
     | Some h -> h
     | None -> monitorRouteHost context
 
-let private monitorClient (context: MissionContext) =
+// The per-request timeout has to be shorter than any retry window built on top
+// of it, or one hung request eats the whole window and the retry never happens.
+// Observed 2026-08-08: a /start attempt hung on a route that was still
+// programming, the 10-minute client timeout outlived the 5-minute deadline, and
+// the mission failed after exactly one attempt.
+let private monitorClientWith (context: MissionContext) (timeout: TimeSpan) =
     let c = new HttpClient(BaseAddress = Uri(sprintf "http://%s" (monitorEndpoint context)))
     c.DefaultRequestHeaders.Host <- monitorRouteHost context
-    c.Timeout <- TimeSpan.FromMinutes(10.0)
+    c.Timeout <- timeout
     c
+
+// Log pulls move whole files, so they get room; everything else is a short
+// request that should fail fast and be retried.
+let private monitorClient (context: MissionContext) =
+    monitorClientWith context (TimeSpan.FromMinutes(10.0))
 
 /// The run the monitor is asked to perform. The range travels with the profile
 /// because both are per-run input -- the chart installs a generic monitor, and
@@ -164,7 +174,7 @@ let runDocument (context: MissionContext) (profileJson: string option) : string 
 /// both need a moment after `helm install`, and until this lands the monitor
 /// deliberately dispatches nothing.
 let startMission (context: MissionContext) (runJson: string) =
-    use client = monitorClient context
+    use client = monitorClientWith context (TimeSpan.FromSeconds(15.0))
     let deadline = DateTime.UtcNow.AddMinutes(5.0)
     let mutable started = false
 
@@ -483,8 +493,13 @@ let collectLogs (context: MissionContext) (destination: string) =
         // Already whole. The collector only ever appends, so equal length means
         // equal content -- and this is what stops a pass re-sending what the
         // last one already took (the tar overlap re-sent 58% of files).
-        if have = size then
-            0L
+        //
+        // File.Exists is not redundant: a .done marker is zero bytes, so a
+        // length comparison alone reads "absent locally" as "already have it"
+        // and never fetches it. Measured 2026-08-08: 88 of 110 artifacts
+        // collected, and every .done was among the 22 missing.
+        if File.Exists path && have = size then
+            -1L   // already whole; distinct from a zero-byte file we did fetch
         else
             let req = new HttpRequestMessage(HttpMethod.Get, "/logs/" + name)
             if have > 0L && have < size then
@@ -511,12 +526,15 @@ let collectLogs (context: MissionContext) (destination: string) =
         |> Array.map (fun e -> async { return (try fetchOne e with ex ->
                                                  LogWarn "log fetch failed for %s: %s"
                                                      (e.["name"].ToString()) ex.Message
-                                                 0L) })
+                                                 -1L) })
         |> fun work -> Async.Parallel(work, 8)
         |> Async.RunSynchronously
 
-    let moved = Array.sum fetched
-    let touched = fetched |> Array.filter (fun n -> n > 0L) |> Array.length
+    let moved = fetched |> Array.filter (fun n -> n > 0L) |> Array.sum
+    // >= 0 counts a zero-byte artifact we really did fetch. .done markers are
+    // empty by design, so "bytes > 0" undercounts exactly the files whose
+    // existence IS the signal.
+    let touched = fetched |> Array.filter (fun n -> n >= 0L) |> Array.length
     LogInfo "Collected %d of %d artifacts (%d bytes) from %s"
         touched (Seq.length manifest) moved (monitorEndpoint context)
 

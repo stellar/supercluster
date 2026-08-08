@@ -494,3 +494,30 @@ def test_the_driver_pulls_from_the_directory_the_collector_writes_into():
     # The monitor serves them out of the volume the collector writes to.
     import http_server
     assert 'config.LOG_DIR' in art.module_source(http_server)
+
+
+def test_the_puller_does_not_mistake_an_absent_file_for_a_complete_one():
+    """A zero-byte artifact must still be fetched.
+
+    .done is empty by design -- its existence is the signal. Comparing lengths
+    alone makes "absent locally" indistinguishable from "already have it", so
+    every .done is skipped forever: 88 of 110 artifacts on 2026-08-08, with the
+    22 missing being exactly the markers that say an attempt finished.
+    """
+    fs = open(art.FSHARP_PATH).read()
+    assert 'File.Exists path && have = size' in fs, (
+        "the puller compares lengths without checking the file exists, so "
+        "zero-byte artifacts are never collected")
+
+
+def test_a_retry_window_outlives_the_request_it_retries():
+    """A per-request timeout longer than the retry deadline is one attempt.
+
+    Observed 2026-08-08: /start hung on a route that was still programming, the
+    10-minute client timeout outlived the 5-minute deadline, and the mission
+    failed having tried exactly once -- on a route that answered in 37ms a
+    moment later.
+    """
+    fs = open(art.FSHARP_PATH).read()
+    assert 'monitorClientWith context (TimeSpan.FromSeconds(15.0))' in fs, (
+        "startMission no longer bounds each attempt below its retry deadline")
