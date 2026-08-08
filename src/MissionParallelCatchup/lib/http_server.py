@@ -98,12 +98,20 @@ class RequestHandler(BaseHTTPRequestHandler):
         self._send(200, b'{"started":true}')
 
     def _manifest(self):
-        """Every artifact on the volume, with the size and mtime a puller needs
-        to tell "already have it" from "grew since last time"."""
+        """Every artifact worth pulling, with the size and mtime a puller needs
+        to tell "already have it" from "grew since last time".
+
+        .state is excluded: it is the collector's resume cursor, one timestamp
+        rewritten on every poll of a live range. It is meaningless once the pods
+        are gone, and because it changes constantly a manifest diff would
+        re-fetch one per in-flight range on every pass -- up to 1024 round trips
+        for bytes that are garbage by the time the run ends.
+        """
         out = []
         for name in os.listdir(config.LOG_DIR):
             path = os.path.join(config.LOG_DIR, name)
-            if _SAFE_NAME.match(name) and os.path.isfile(path):
+            if (_SAFE_NAME.match(name) and not name.endswith('.state')
+                    and os.path.isfile(path)):
                 st = os.stat(path)
                 out.append({'name': name, 'size': st.st_size, 'mtime': int(st.st_mtime)})
         return out

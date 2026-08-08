@@ -120,3 +120,20 @@ def test_a_path_outside_the_volume_is_refused(server):
         with pytest.raises(urllib.error.HTTPError) as e:
             _get(base, '/logs/' + bad)
         assert e.value.code == 404
+
+
+def test_the_collectors_resume_cursor_is_not_offered_for_pulling(server):
+    """.state is one timestamp rewritten on every poll of a live range.
+
+    It means nothing once the pods are gone, and it changes constantly -- so a
+    manifest diff would re-fetch one per in-flight range on every pass. The tar
+    it replaced excluded it deliberately; this keeps that.
+    """
+    base, vol = server
+    (vol / 'range-300-a1.log.gz').write_bytes(b'kept')
+    (vol / 'range-300-a1.state').write_text('2026-08-08T21:44:01.867115384Z')
+
+    names = {e['name'] for e in json.loads(_get(base, '/logs')[1])}
+
+    assert 'range-300-a1.log.gz' in names
+    assert 'range-300-a1.state' not in names
