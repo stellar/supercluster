@@ -4,6 +4,8 @@ generate_ranges() must stay a pure function of config: dispatch derives the
 full list on every reconcile, so a restart has to reproduce it exactly.
 """
 
+import os
+
 import pytest
 
 import config
@@ -169,20 +171,19 @@ def test_preflight_allows_longest_first_with_a_profile(preflight):
     preflight(order='longest-first', profile=[(40000000, {'seconds': 900.0})])()
 
 
-def test_the_preflight_runs_before_the_reconcile_thread_starts():
-    """Guards the placement, which is the whole point of the check.
+def test_the_preflight_runs_before_anything_is_dispatched(monkeypatch, tmp_path):
+    """Validation moved to /start, which is the first moment the config is
+    whole. It still has to bind before dispatch: a run that is misconfigured
+    must be refused, not started and then discovered."""
+    monkeypatch.setattr(config, 'LOG_DIR', str(tmp_path))
+    monkeypatch.setattr(config, 'PROFILE_PATH', str(tmp_path / 'profile.json'))
+    monkeypatch.setattr(config, 'RANGE_GENERATOR', 'nonsense')
 
-    If validate_config ever moves inside reconcile (or after the thread start),
-    a bad config becomes a silent hang instead of a crash. Asserted against the
-    source because the ordering, not the call, is what has to hold.
-    """
-    import inspect
-    main = inspect.getsource(jm.main)
-    assert 'validate_config()' in main, "validate_config must be called from main()"
-    assert main.index('validate_config()') < main.index('reconcile_thread.start()'), \
-        "validate_config must run BEFORE the reconcile thread starts"
-    assert main.index('load_profile()') < main.index('validate_config()'), \
-        "validate_config checks the profile, so it must run after load_profile"
+    with pytest.raises(ValueError, match='RANGE_GENERATOR must be one of'):
+        jm.install_profile({})
+
+    # Rejected, so nothing was written and no run can proceed from it.
+    assert not os.path.exists(config.PROFILE_PATH)
 
 
 def jm_source():

@@ -192,21 +192,32 @@ def test_only_running_pods_with_ips_are_candidates_and_uid_is_identity():
     assert targets == {'uid-ready': ('ready', '10.0.0.1')}
 
 
-def test_malformed_liveness_configuration_fails_with_an_explicit_message():
-    env = {
-        'PATH': os.environ.get('PATH', ''),
-        'HOME': os.environ.get('HOME', ''),
-        # apps/ and lib/ both, the way the container's flat /app has them.
-        'PYTHONPATH': os.pathsep.join((os.path.dirname(jm.__file__),
-                                       os.path.dirname(config.__file__))),
-        'LIVENESS_MAX_CONCURRENCY': 'many',
-    }
-    result = subprocess.run(
-        [sys.executable, '-c', 'import job_monitor'],
-        text=True, capture_output=True, env=env,
-        cwd=os.path.dirname(jm.__file__))
-    assert result.returncode != 0
-    assert 'LIVENESS_MAX_CONCURRENCY must be an integer' in result.stderr
+def test_malformed_liveness_configuration_fails_with_an_explicit_message(monkeypatch, tmp_path):
+    """A bad value is rejected at /start, not at import.
+
+    Coercing at import made this a boot crash, and a process that cannot start
+    cannot say why -- the driver polled a pod that never answered and timed out
+    600s later with "not reachable". Now it comes back as a 400 with the reason.
+    """
+    monkeypatch.setattr(config, 'LOG_DIR', str(tmp_path))
+    monkeypatch.setattr(config, 'PROFILE_PATH', str(tmp_path / 'profile.json'))
+    monkeypatch.setattr(config, 'LIVENESS_MAX_CONCURRENCY', 'many')
+
+    with pytest.raises(ValueError, match='LIVENESS_MAX_CONCURRENCY must be an integer'):
+        jm.install_profile({})
+
+
+def test_liveness_numbers_are_coerced_once_validation_passes(monkeypatch, tmp_path):
+    """Callers must never see the string form; validate_config rebinds them."""
+    monkeypatch.setattr(config, 'LOG_DIR', str(tmp_path))
+    monkeypatch.setattr(config, 'PROFILE_PATH', str(tmp_path / 'profile.json'))
+    monkeypatch.setattr(config, 'LIVENESS_MAX_CONCURRENCY', '8')
+    monkeypatch.setattr(config, 'LIVENESS_SWEEP_SECONDS', '2.5')
+
+    jm.install_profile({})
+
+    assert config.LIVENESS_MAX_CONCURRENCY == 8
+    assert config.LIVENESS_SWEEP_SECONDS == 2.5
 
 
 def test_a_blocked_sweep_does_not_delay_dispatch(cluster, monkeypatch):

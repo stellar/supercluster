@@ -64,14 +64,13 @@ def main():
     config.PROFILE_PATH = os.path.join(config.LOG_DIR, 'profile.json')
     if os.path.exists(config.PROFILE_PATH):
         config.PROFILE = profiles.load_profile()
+        # The gate opens without a /start on this path, so this is where the
+        # config gets coerced and checked instead.
+        validate_config()
         http_server.started.set()
 
     http_server.status_source = lambda: (status, status_lock)
     http_server.on_start = install_profile
-
-    # Before the thread: the only place a bad config can still take the process
-    # down instead of being swallowed by the loop.
-    validate_config()
 
     # This is the reconcile loop --
     # dispatch, progress record, metrics, status.
@@ -88,10 +87,10 @@ def install_profile(doc):
     by it -- an unprofiled first wave would route every range to protostar.
     """
     profile = profiles.load_profile_doc(doc)
-    # Checked here, not at startup: the profile arrives with /start, so this is
-    # the first moment it can be judged. Raising rejects the POST with the
-    # reason, which fails the driver fast instead of dispatching a run whose
-    # ordering silently degrades to tip-first.
+    # The whole config, judged at the first moment it is complete. Anything
+    # wrong rejects the POST with the reason rather than dispatching a run that
+    # is already misconfigured.
+    validate_config()
     if config.RANGE_ORDER == 'longest-first' and not profile:
         raise ValueError(
             "RANGE_ORDER=longest-first requires a profile: it orders ranges by "
@@ -102,11 +101,34 @@ def install_profile(doc):
     logger.info("profile installed: %d ranges", len(config.PROFILE))
 
 
-def validate_config():
-    """Fatal config checks. Runs once at startup, BEFORE the reconcile thread starts.
+_LIVENESS_NUMBERS = (('LIVENESS_PROBE_TIMEOUT_SECONDS', float),
+                     ('LIVENESS_SWEEP_SECONDS', float),
+                     ('LIVENESS_MAX_CONCURRENCY', int))
 
-    Called after load_profile() because the last check needs the profile.
+
+def validate_config():
+    """Every fatal config check, against the whole config.
+
+    Runs from /start rather than at import, because that is the first moment the
+    config is complete -- the profile arrives with the POST. One validation
+    point, one failure channel: whatever is wrong comes back as a 400 with the
+    reason instead of a crashlooping pod the driver can only time out on.
+
+    Coerces the numeric env vars and rebinds them, so no caller ever sees the
+    string form.
     """
+    for name, cast in _LIVENESS_NUMBERS:
+        raw = getattr(config, name)
+        try:
+            value = cast(raw)
+        except (TypeError, ValueError):
+            raise ValueError(
+                "LIVENESS_PROBE_TIMEOUT_SECONDS and LIVENESS_SWEEP_SECONDS must be "
+                "numbers; LIVENESS_MAX_CONCURRENCY must be an integer") from None
+        if value <= 0:
+            raise ValueError(f"{name} must be greater than zero, got {raw!r}")
+        setattr(config, name, value)
+
     if config.RANGE_GENERATOR not in config.VALID_RANGE_GENERATORS:
         raise ValueError("RANGE_GENERATOR must be one of %s, got %r"
                          % (', '.join(config.VALID_RANGE_GENERATORS), config.RANGE_GENERATOR))

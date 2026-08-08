@@ -568,20 +568,8 @@ _SORTED_SECONDS = None
 # go out at once at the head of a wave.
 CONNECTION_POOL = int(os.getenv('CONNECTION_POOL', '64'))
 
-# Coerced here rather than at each use site so no importer can ever see the
-# string form, and a bad value fails at import instead of at the first probe.
-try:
-    LIVENESS_PROBE_TIMEOUT_SECONDS = float(LIVENESS_PROBE_TIMEOUT_SECONDS)
-    LIVENESS_SWEEP_SECONDS = float(LIVENESS_SWEEP_SECONDS)
-    LIVENESS_MAX_CONCURRENCY = int(LIVENESS_MAX_CONCURRENCY)
-except ValueError as e:
-    raise ValueError(
-        "LIVENESS_PROBE_TIMEOUT_SECONDS and LIVENESS_SWEEP_SECONDS must be "
-        "numbers; LIVENESS_MAX_CONCURRENCY must be an integer") from e
-
-for _name, _value in (
-        ('LIVENESS_PROBE_TIMEOUT_SECONDS', LIVENESS_PROBE_TIMEOUT_SECONDS),
-        ('LIVENESS_SWEEP_SECONDS', LIVENESS_SWEEP_SECONDS),
-        ('LIVENESS_MAX_CONCURRENCY', LIVENESS_MAX_CONCURRENCY)):
-    if _value <= 0:
-        raise ValueError(f"{_name} must be greater than zero, got {_value!r}")
+# Left as strings on purpose. Coercing at import made a bad value a boot crash,
+# and a process that cannot start cannot report why -- the driver just polled a
+# pod that never answered and timed out 600s later with "not reachable".
+# validate_config coerces and rebinds these when /start delivers the run, so a
+# bad value comes back as a 400 carrying the reason.
