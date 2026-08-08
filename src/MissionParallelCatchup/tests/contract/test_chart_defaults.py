@@ -67,7 +67,6 @@ DELIBERATE = {
     'MISSION': 'the mission name, for the kube-state-metrics label',
     'PROFILE_PATH': 'the mounted path of an optional profile ConfigMap',
     'ASAN_OPTIONS': 'passed through to the worker; empty means "unset", not "default"',
-    'LATEST_LEDGER_NUM': 'a demo value in the chart; the mission always sets the real tip',
     'PARALLELISM': 'worker.replicas -- the whole point of the knob is to differ per run',
     'ATTEMPT_DEADLINE_SECONDS': 'a backstop the chart turns on and the code leaves off',
     # StellarKubeSpecs.fs owns worker sizing, so the chart ships these empty on

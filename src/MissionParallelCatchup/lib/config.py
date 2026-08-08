@@ -23,7 +23,7 @@ ASAN_OPTIONS = os.getenv('ASAN_OPTIONS', '')
 # Which ledger ranges to run. These are pure inputs to the range generator:
 # dispatch recomputes the whole list every reconcile, so a restart must
 # reproduce it exactly.
-RANGE_GENERATOR = os.getenv('RANGE_GENERATOR', 'uniform')      # uniform | logarithmic
+RANGE_GENERATOR = 'uniform'  # from /start: uniform | logarithmic
 
 VALID_RANGE_GENERATORS = ('uniform', 'logarithmic')
 
@@ -31,17 +31,17 @@ VALID_RANGE_GENERATORS = ('uniform', 'logarithmic')
 # the bucket set only grows with ledger position. 'oldest-first' reverses that,
 # so a profiling run measures the cheap early ranges before it can be
 # interrupted, and the expensive tip ranges last.
-RANGE_ORDER = os.getenv('RANGE_ORDER', 'tip-first')  # tip-first | oldest-first | longest-first
+RANGE_ORDER = 'tip-first'  # from /start: tip-first | oldest-first | longest-first
 
 VALID_RANGE_ORDERS = ('tip-first', 'oldest-first', 'longest-first')
 
-STARTING_LEDGER = int(os.getenv('STARTING_LEDGER', 0))
+STARTING_LEDGER = 0  # from /start
 
-LATEST_LEDGER_NUM = int(os.getenv('LATEST_LEDGER_NUM', 0))
+LATEST_LEDGER_NUM = 0  # from /start
 
-LEDGERS_PER_JOB = int(os.getenv('LEDGERS_PER_JOB', 16000))
+LEDGERS_PER_JOB = 16000  # from /start
 
-OVERLAP_LEDGERS = int(os.getenv('OVERLAP_LEDGERS', 320))
+OVERLAP_LEDGERS = 320  # from /start
 
 # logarithmic only: chunk size halves toward the tip and stops shrinking here.
 LOGARITHMIC_FLOOR_LEDGERS = int(os.getenv('LOGARITHMIC_FLOOR_LEDGERS', 64000))
@@ -92,6 +92,8 @@ REQ_MEM = os.getenv('REQ_MEM', '9Gi')
 # workers fit per node. Requests only -- limits stay as configured, so the
 # failure semantics and the OOM/disk escalation ladders are unchanged.
 PROFILE_PATH = os.getenv('PROFILE_PATH', '')
+# The run document /start delivers, kept so a restart resumes the same run.
+RUN_PATH = ''
 
 PROFILE_MARGIN = float(os.getenv('PROFILE_MARGIN', 1.15))
 

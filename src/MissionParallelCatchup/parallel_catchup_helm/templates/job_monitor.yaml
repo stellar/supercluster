@@ -205,18 +205,6 @@ spec:
               value: {{ .Values.monitor.livenessSweepSeconds | quote }}
             - name: LIVENESS_MAX_CONCURRENCY
               value: {{ .Values.monitor.livenessMaxConcurrency | quote }}
-            - name: RANGE_GENERATOR
-              value: {{ .Values.range.generator | quote }}
-            - name: STARTING_LEDGER
-              value: {{ .Values.range.startingLedger | quote }}
-            - name: LATEST_LEDGER_NUM
-              value: {{ .Values.range.latestLedgerNum | quote }}
-            - name: LEDGERS_PER_JOB
-              value: {{ .Values.range.ledgersPerJob | quote }}
-            - name: OVERLAP_LEDGERS
-              value: {{ .Values.range.overlapLedgers | quote }}
-            - name: RANGE_ORDER
-              value: {{ .Values.range.order | quote }}
             - name: LOGARITHMIC_FLOOR_LEDGERS
               value: {{ .Values.range.logarithmicFloorLedgers | quote }}
             - name: PARALLELISM

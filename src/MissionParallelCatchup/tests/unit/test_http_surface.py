@@ -22,9 +22,9 @@ import job_monitor as jm
 def server(tmp_path, monkeypatch):
     """A live monitor HTTP surface on a throwaway port and volume."""
     monkeypatch.setattr(config, 'LOG_DIR', str(tmp_path))
-    monkeypatch.setattr(config, 'PROFILE_PATH', str(tmp_path / 'profile.json'))
+    monkeypatch.setattr(config, 'RUN_PATH', str(tmp_path / 'run.json'))
     monkeypatch.setattr(http_server, 'started', threading.Event())
-    monkeypatch.setattr(http_server, 'on_start', jm.install_profile)
+    monkeypatch.setattr(http_server, 'on_start', jm.start_run)
     monkeypatch.setattr(http_server, 'status_source',
                         lambda: (jm.status, jm.status_lock))
 
@@ -58,7 +58,7 @@ def test_start_rejects_a_bad_config_with_the_reason(server, monkeypatch):
     base, _ = server
     monkeypatch.setattr(config, 'LIVENESS_MAX_CONCURRENCY', 'many')
 
-    code, body = _post(base, '/start', '{}')
+    code, body = _post(base, '/start', json.dumps({"range": {"startingLedger": 0, "latestLedgerNum": 1000, "ledgersPerJob": 100}}))
 
     assert code == 400
     assert 'LIVENESS_MAX_CONCURRENCY must be an integer' in json.loads(body)['error']
@@ -69,12 +69,12 @@ def test_start_opens_the_gate_and_is_idempotent(server):
     """A driver that retries after a timeout must not restart a live run."""
     base, vol = server
 
-    assert _post(base, '/start', json.dumps({'ranges': {'300': {'seconds': 1.0}}}))[0] == 200
+    assert _post(base, '/start', json.dumps({"range": {"startingLedger": 0, "latestLedgerNum": 1000, "ledgersPerJob": 100}, "profile": {"ranges": {"300": {"seconds": 1.0}}}}))[0] == 200
     assert http_server.started.is_set()
-    assert (vol / 'profile.json').exists(), "the profile is kept for a restart"
+    assert (vol / 'run.json').exists(), "the profile is kept for a restart"
 
     # A second POST carrying nothing must not wipe the profile already installed.
-    assert _post(base, '/start', '{}')[0] == 200
+    assert _post(base, '/start', json.dumps({"range": {"startingLedger": 0, "latestLedgerNum": 1000, "ledgersPerJob": 100}}))[0] == 200
     assert config.PROFILE == [(300, {'seconds': 1.0})]
 
 

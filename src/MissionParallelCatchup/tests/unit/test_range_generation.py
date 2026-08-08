@@ -157,13 +157,13 @@ def test_preflight_rejects_longest_first_without_a_profile(monkeypatch, tmp_path
     dispatching a run whose ordering silently degrades to tip-first."""
     monkeypatch.setattr(config, 'RANGE_ORDER', 'longest-first')
     monkeypatch.setattr(config, 'LOG_DIR', str(tmp_path))
-    monkeypatch.setattr(config, 'PROFILE_PATH', str(tmp_path / 'profile.json'))
+    monkeypatch.setattr(config, 'RUN_PATH', str(tmp_path / 'run.json'))
 
     with pytest.raises(ValueError, match='longest-first requires a profile'):
-        jm.install_profile({})
+        jm.start_run({"range": {'startingLedger': 0, 'latestLedgerNum': 1000, 'ledgersPerJob': 100}})
 
     # A profile with ranges is accepted, and nothing is written until it passes.
-    jm.install_profile({'ranges': {'300': {'seconds': 1.0}}})
+    jm.start_run({'range': {'startingLedger': 0, 'latestLedgerNum': 1000, 'ledgersPerJob': 100}, 'profile': {'ranges': {'300': {'seconds': 1.0}}}})
     assert config.PROFILE == [(300, {'seconds': 1.0})]
 
 
@@ -176,14 +176,14 @@ def test_the_preflight_runs_before_anything_is_dispatched(monkeypatch, tmp_path)
     whole. It still has to bind before dispatch: a run that is misconfigured
     must be refused, not started and then discovered."""
     monkeypatch.setattr(config, 'LOG_DIR', str(tmp_path))
-    monkeypatch.setattr(config, 'PROFILE_PATH', str(tmp_path / 'profile.json'))
+    monkeypatch.setattr(config, 'RUN_PATH', str(tmp_path / 'run.json'))
     monkeypatch.setattr(config, 'RANGE_GENERATOR', 'nonsense')
 
     with pytest.raises(ValueError, match='RANGE_GENERATOR must be one of'):
-        jm.install_profile({})
+        jm.start_run({"range": {'startingLedger': 0, 'latestLedgerNum': 1000, 'ledgersPerJob': 100}})
 
     # Rejected, so nothing was written and no run can proceed from it.
-    assert not os.path.exists(config.PROFILE_PATH)
+    assert not os.path.exists(config.RUN_PATH)
 
 
 def jm_source():

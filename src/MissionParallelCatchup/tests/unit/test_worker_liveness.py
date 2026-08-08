@@ -200,21 +200,21 @@ def test_malformed_liveness_configuration_fails_with_an_explicit_message(monkeyp
     600s later with "not reachable". Now it comes back as a 400 with the reason.
     """
     monkeypatch.setattr(config, 'LOG_DIR', str(tmp_path))
-    monkeypatch.setattr(config, 'PROFILE_PATH', str(tmp_path / 'profile.json'))
+    monkeypatch.setattr(config, 'RUN_PATH', str(tmp_path / 'run.json'))
     monkeypatch.setattr(config, 'LIVENESS_MAX_CONCURRENCY', 'many')
 
     with pytest.raises(ValueError, match='LIVENESS_MAX_CONCURRENCY must be an integer'):
-        jm.install_profile({})
+        jm.start_run({"range": {'startingLedger': 0, 'latestLedgerNum': 1000, 'ledgersPerJob': 100}})
 
 
 def test_liveness_numbers_are_coerced_once_validation_passes(monkeypatch, tmp_path):
     """Callers must never see the string form; validate_config rebinds them."""
     monkeypatch.setattr(config, 'LOG_DIR', str(tmp_path))
-    monkeypatch.setattr(config, 'PROFILE_PATH', str(tmp_path / 'profile.json'))
+    monkeypatch.setattr(config, 'RUN_PATH', str(tmp_path / 'run.json'))
     monkeypatch.setattr(config, 'LIVENESS_MAX_CONCURRENCY', '8')
     monkeypatch.setattr(config, 'LIVENESS_SWEEP_SECONDS', '2.5')
 
-    jm.install_profile({})
+    jm.start_run({"range": {'startingLedger': 0, 'latestLedgerNum': 1000, 'ledgersPerJob': 100}})
 
     assert config.LIVENESS_MAX_CONCURRENCY == 8
     assert config.LIVENESS_SWEEP_SECONDS == 2.5

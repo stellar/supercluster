@@ -61,16 +61,15 @@ def main():
     # The driver POSTs the profile to /start. Kept on the volume so a restarted
     # monitor resumes a run already under way instead of waiting for a /start
     # that was delivered to its predecessor.
-    config.PROFILE_PATH = os.path.join(config.LOG_DIR, 'profile.json')
-    if os.path.exists(config.PROFILE_PATH):
-        config.PROFILE = profiles.load_profile()
-        # The gate opens without a /start on this path, so this is where the
-        # config gets coerced and checked instead.
-        validate_config()
-        http_server.started.set()
+    config.RUN_PATH = os.path.join(config.LOG_DIR, 'run.json')
+    if os.path.exists(config.RUN_PATH):
+        # Same path as a /start, so the range and the profile are both restored
+        # and validated exactly as they were.
+        with open(config.RUN_PATH) as fh:
+            start_run(json.load(fh))
 
     http_server.status_source = lambda: (status, status_lock)
-    http_server.on_start = install_profile
+    http_server.on_start = start_run
 
     # This is the reconcile loop --
     # dispatch, progress record, metrics, status.
@@ -80,13 +79,22 @@ def main():
     http_server.serve()
 
 
-def install_profile(doc):
-    """Land the driver's profile on the volume and size from it.
+def start_run(doc):
+    """Install the run the driver POSTed: the ledger range, and the profile.
 
-    Written before the gate opens, so the first Job dispatched is already sized
-    by it -- an unprofiled first wave would route every range to protostar.
+    Both are per-run input, so neither is env-derived any more -- the chart
+    installs a generic monitor and this defines what it runs. Written to the
+    volume before the gate opens, so the first Job dispatched is already sized
+    by the profile and a restart resumes the same run.
     """
-    profile = profiles.load_profile_doc(doc)
+    for key, name in (('generator', 'RANGE_GENERATOR'), ('order', 'RANGE_ORDER'),
+                      ('startingLedger', 'STARTING_LEDGER'),
+                      ('latestLedgerNum', 'LATEST_LEDGER_NUM'),
+                      ('ledgersPerJob', 'LEDGERS_PER_JOB'),
+                      ('overlapLedgers', 'OVERLAP_LEDGERS')):
+        if key in (doc.get('range') or {}):
+            setattr(config, name, (doc['range'])[key])
+    profile = profiles.load_profile_doc(doc.get('profile') or {})
     # The whole config, judged at the first moment it is complete. Anything
     # wrong rejects the POST with the reason rather than dispatching a run that
     # is already misconfigured.
@@ -96,7 +104,7 @@ def install_profile(doc):
             "RANGE_ORDER=longest-first requires a profile: it orders ranges by "
             "their measured seconds, and with no profile every range ties and "
             "dispatch stays tip-first. POST a profile, or set RANGE_ORDER.")
-    records.write_atomic(config.PROFILE_PATH, json.dumps(doc, separators=(',', ':')))
+    records.write_atomic(config.RUN_PATH, json.dumps(doc, separators=(',', ':')))
     config.PROFILE = profile
     logger.info("profile installed: %d ranges", len(config.PROFILE))
 
@@ -135,6 +143,19 @@ def validate_config():
     if config.RANGE_ORDER not in config.VALID_RANGE_ORDERS:
         raise ValueError("RANGE_ORDER must be one of %s, got %r"
                          % (', '.join(config.VALID_RANGE_ORDERS), config.RANGE_ORDER))
+    # The ledger range, which nothing checked while it came from helm values --
+    # an inverted or zero-width range generates no work and the run just ends,
+    # reporting success on nothing.
+    if config.LEDGERS_PER_JOB <= 0:
+        raise ValueError("ledgersPerJob must be greater than zero, got %r"
+                         % (config.LEDGERS_PER_JOB,))
+    if config.OVERLAP_LEDGERS < 0:
+        raise ValueError("overlapLedgers cannot be negative, got %r"
+                         % (config.OVERLAP_LEDGERS,))
+    if config.LATEST_LEDGER_NUM <= config.STARTING_LEDGER:
+        raise ValueError(
+            "latestLedgerNum must be greater than startingLedger, got %r and %r"
+            % (config.LATEST_LEDGER_NUM, config.STARTING_LEDGER))
 
 status = {
     'num_remain': 1,  # non-zero until the first real update, so callers don't see a premature 0

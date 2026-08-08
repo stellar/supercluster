@@ -64,7 +64,9 @@ def test_the_driver_really_does_configure_the_chart():
     """Guards the extraction: a regex that stopped matching would pass silently."""
     keys = set_keys()
     assert len(keys) >= 15, f"only found {sorted(keys)}; the --set scan has gone blind"
-    assert 'worker.stellar_core_image' in keys and 'range.ledgersPerJob' in keys
+    # Sentinels that must keep flowing through --set. The ledger range moved to
+    # POST /start, so it is deliberately not one of them any more.
+    assert 'worker.stellar_core_image' in keys and 'worker.replicas' in keys
 
 
 def test_every_helm_command_uses_the_mission_namespace():
@@ -296,36 +298,8 @@ def test_the_driver_reads_the_progress_file_where_the_monitor_writes_it():
         f"the driver cats {path}; the monitor writes {config.PROGRESS_FILE}")
 
 
-def test_the_driver_tars_the_directory_the_collector_writes_into():
-    """One exec replaces the ~1024 the StatefulSet design needed."""
-    cd = fs_extract(r'"cd (/\w+) && tar').group(1)
-    assert cd == config.LOG_DIR == config.LOG_DIR
 
 
-def test_the_tar_excludes_only_the_collectors_resume_bookkeeping():
-    """.state is a resume cursor and is worthless outside the pod.
-
-    Every other suffix on that volume is a deliverable: the archive, the
-    per-attempt metrics, the verdict. An exclusion pattern that drifted onto one
-    of those would quietly shrink the collected tar.
-    """
-    def suffix_of(path_fn):
-        return os.path.basename(path_fn('E', 1)).partition('-a1')[2]
-
-    bookkeeping = {suffix_of(records.state_path)}
-    deliverables = {suffix_of(f) for f in (records.log_path, records.metrics_path,
-                                           records.outcome_path, records.done_path)}
-    assert bookkeeping.isdisjoint(deliverables)
-
-    excludes = set(re.findall(r"--exclude='([^']+)'", FS))
-    assert excludes, "the tar no longer excludes anything -- update this test"
-    for pattern in excludes:
-        if not pattern.startswith('*'):
-            continue                          # ./lost+found, the PVC's ext4 root
-        assert pattern[1:] in bookkeeping, (
-            f"the tar excludes {pattern}, which is not resume bookkeeping")
-    for suffix in deliverables:
-        assert f"*{suffix}" not in excludes, f"the tar drops {suffix}, a deliverable"
 
 
 def test_the_driver_finds_the_monitor_pod_by_the_labels_the_chart_sets():
@@ -504,3 +478,19 @@ def test_every_helm_and_kubectl_call_is_namespaced():
     assert calls, "no helm/kubectl shell calls found -- did the driver change shape?"
     missing = [c.split('\n')[0] for c in calls if '"--namespace"' not in c]
     assert not missing, f"shell calls without --namespace: {missing}"
+
+
+def test_the_driver_pulls_from_the_directory_the_collector_writes_into():
+    """The puller and the collector must agree on where artifacts live.
+
+    Replaces the two tar-shape tests: there is no archive any more, so what
+    matters is that the monitor serves LOG_DIR and the driver asks for the
+    manifest of it. A mismatch would fetch an empty list and report success
+    on nothing collected.
+    """
+    fs = open(art.FSHARP_PATH).read()
+    assert '"/logs"' in fs, "the driver no longer requests the manifest"
+    assert '"/logs/" + name' in fs, "the driver no longer fetches artifacts by name"
+    # The monitor serves them out of the volume the collector writes to.
+    import http_server
+    assert 'config.LOG_DIR' in art.module_source(http_server)

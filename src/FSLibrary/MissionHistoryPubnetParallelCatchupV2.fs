@@ -132,17 +132,45 @@ let private monitorClient (context: MissionContext) =
     c.Timeout <- TimeSpan.FromMinutes(10.0)
     c
 
-/// POST the profile and let reconcile start. Retried: the route and the pod
+/// The run the monitor is asked to perform. The range travels with the profile
+/// because both are per-run input -- the chart installs a generic monitor, and
+/// this is what makes it a particular run. Validated as one document, so a bad
+/// ledger range comes back as a 400 rather than generating no work and
+/// reporting success on nothing.
+let runDocument (context: MissionContext) (profileJson: string option) : string =
+    let endLedger =
+        match context.pubnetParallelCatchupEndLedger with
+        | Some value -> value
+        | None -> GetLatestPubnetLedgerNumber()
+
+    // `run`, not `doc`: the profile ARTIFACT this mission writes is also a
+    // document, and the contract tests scan for its keys by name.
+    let rangeSpec = JObject()
+    rangeSpec.["startingLedger"] <- JValue(context.pubnetParallelCatchupStartingLedger)
+    rangeSpec.["latestLedgerNum"] <- JValue(endLedger)
+    rangeSpec.["ledgersPerJob"] <- JValue(context.pubnetParallelCatchupLedgersPerJob)
+    rangeSpec.["order"] <- JValue(context.pubnetParallelCatchupRangeOrder)
+
+    let run = JObject()
+    run.["range"] <- rangeSpec
+
+    match profileJson with
+    | Some body -> run.["profile"] <- JObject.Parse(body)
+    | None -> ()
+
+    run.ToString(Newtonsoft.Json.Formatting.None)
+
+/// POST the run and let reconcile start. Retried: the route and the pod
 /// both need a moment after `helm install`, and until this lands the monitor
 /// deliberately dispatches nothing.
-let startMission (context: MissionContext) (profileJson: string) =
+let startMission (context: MissionContext) (runJson: string) =
     use client = monitorClient context
     let deadline = DateTime.UtcNow.AddMinutes(5.0)
     let mutable started = false
 
     while not started && DateTime.UtcNow < deadline do
         try
-            use content = new StringContent(profileJson, Text.Encoding.UTF8, "application/json")
+            use content = new StringContent(runJson, Text.Encoding.UTF8, "application/json")
             let r = client.PostAsync("/start", content) |> Async.AwaitTask |> Async.RunSynchronously
             if r.IsSuccessStatusCode then
                 LogInfo "Mission started: profile POSTed to %s/start" (monitorEndpoint context)
@@ -209,7 +237,6 @@ let installProject (context: MissionContext) =
     setOptions.Add(sprintf "monitor.gatewayName=%s" context.gatewayName)
     setOptions.Add(sprintf "monitor.gatewayNamespace=%s" context.gatewayNamespace)
 
-    setOptions.Add(sprintf "range.order=%s" context.pubnetParallelCatchupRangeOrder)
 
     // Nodepool routing. Empty prefix ships the pre-tier behaviour: one label for
     // every worker. Set, each range goes to <prefix>-<tier> where the tier comes
@@ -247,16 +274,6 @@ let installProject (context: MissionContext) =
             sprintf "worker.tolerateNodeTaints[0]=%s" context.pubnetParallelCatchupPoolPrefix
         )
 
-    setOptions.Add(sprintf "range.startingLedger=%d" context.pubnetParallelCatchupStartingLedger)
-
-    let endLedger =
-        match context.pubnetParallelCatchupEndLedger with
-        | Some value -> value
-        | None -> GetLatestPubnetLedgerNumber()
-
-    setOptions.Add(sprintf "range.latestLedgerNum=%d" endLedger)
-
-    setOptions.Add(sprintf "range.ledgersPerJob=%d" context.pubnetParallelCatchupLedgersPerJob)
 
     // Skip known results by default
     setOptions.Add(
@@ -425,68 +442,10 @@ let installProject (context: MissionContext) =
 // 1. Automatically determines worker pod names from context.pubnetParallelCatchupNumWorkers
 // 2. For each pod, finds all files matching "stellar-core-*.log" in /data
 // 3. Creates a tar.gz archive and copies it to context.destination directory
-// How often the main loop fetches logs, and how much of the previous window it
-// re-fetches. One pass every 10 minutes flattens the teardown cost without
-// taking meaningful IOPS from the collector: --newer-mtime still stats every
-// file, and at ~4000 attempts that walk is the expensive part, not the bytes.
+// How often the main loop pulls logs. Every 10 minutes flattens the teardown
+// cost -- which measured ~20 minutes for a full run, all of it after the work
+// finished -- without the pull competing with the collector for the volume.
 let logFetchIntervalSecs = 600
-let logFetchOverlapSecs = 120L
-// Transfers of this archive are retried in-pass before the window is deferred.
-let logFetchAttempts = 3
-
-// An empty GNU tar is two zero blocks at the default blocking factor. A pass
-// with nothing new still writes that, so it is deleted rather than left to
-// clutter the destination with 19 identical 10K files.
-let emptyTarBytes = 10240L
-
-/// The archive written by one fetch. Parts are numbered rather than merged:
-/// extracting them in order reconstructs /logs, and a later part overwrites an
-/// earlier truncated copy of a file that was still being appended when it was
-/// first picked up.
-let logArchiveName (release: string) (part: int) : string =
-    sprintf "%s-worker-logs.part%02d.tar" release part
-
-/// tar of everything modified since `sinceEpoch`; 0 takes the whole volume,
-/// which is what teardown does when no incremental pass ever landed.
-///
-/// Entries are already gzipped by the streaming collector, so this bundles
-/// without re-compressing. Named range-<end>-a<attempt>.log.gz, so a failing
-/// range is findable directly rather than by worker ordinal. Keeps the
-/// per-attempt .outcome verdicts and drops .state, the collector's own resume
-/// bookkeeping.
-let logTarCommand (sinceEpoch: int64) : string [] =
-    let since =
-        if sinceEpoch > 0L then
-            sprintf " --newer-mtime=@%d" (max 0L (sinceEpoch - logFetchOverlapSecs))
-        else
-            ""
-
-    [| "sh"
-       "-c"
-       // lost+found is the ext4 root of the logs PVC, not ours.
-       sprintf "cd /logs && tar -cf -%s --exclude='*.state' --exclude='./lost+found' ." since |]
-
-/// Can every entry in this archive be read back?
-///
-/// A pass tars /logs while workers are still appending to it, so tar can hit
-/// "file changed as we read it", exit non-zero, and leave the stream cut
-/// mid-member. Verified on ssc-test 2026-08-07: at 200 workers a 64MB part came
-/// back truncated and 12 ranges lost their logs for good, because the watermark
-/// advanced anyway and their archives -- complete, and older than the new
-/// watermark -- were never re-sent. Checking here turns that into a re-transfer.
-let archiveIsIntact (path: string) : bool =
-    try
-        use stream = File.OpenRead(path)
-        use reader = new TarReader(stream)
-
-        let mutable entry = reader.GetNextEntry()
-
-        while not (isNull entry) do
-            entry <- reader.GetNextEntry()
-
-        true
-    with _ ->
-        false
 
 let private monitorPodName (context: MissionContext) : string option =
     context
@@ -499,117 +458,72 @@ let private monitorPodName (context: MissionContext) : string option =
     |> Seq.map (fun p -> p.Metadata.Name)
     |> Seq.tryHead
 
-/// Fetch everything written since `sinceEpoch` into numbered part `part`.
+/// Pull every artifact the destination does not already hold.
 ///
-/// Worker pods are per-range and are reaped within about a minute of finishing,
-/// so there is nothing left to exec into at teardown. The monitor pulls each
-/// pod's log while it is still alive onto its own volume, so one exec here
-/// replaces the ~1024 the StatefulSet design needed.
-///
-/// Returns the watermark for the next call, or None when nothing was fetched --
-/// the caller then keeps its old watermark and re-fetches that window next time,
-/// so a failed pass costs bandwidth rather than logs.
-let collectLogsSince (context: MissionContext) (sinceEpoch: int64) (part: int) : int64 option =
-    match monitorPodName context with
-    | None ->
-        LogWarn "No job-monitor pod found for release %s; worker logs cannot be collected" helmReleaseName
-        None
-    | Some podName ->
-        try
-            // The clock is read from the POD, and BEFORE the tar. This driver
-            // runs outside the cluster, so a few seconds of NTP skew either way
-            // would silently skip a file forever; and a watermark taken after
-            // the tar would exclude anything written while it walked the tree.
-            // Both failure modes lose logs; taking it early only re-sends.
-            let stampFile =
-                Path.Combine(Path.GetTempPath(), sprintf "%s-logstamp" helmReleaseName)
+/// Per file, over the monitor's HTTPRoute. The tar-over-exec this replaces put
+/// every byte through the API server -- ~0.3 MB per range, so ~1.2 GB on a
+/// 4000-range run -- and streamed the whole volume as one archive, which at 200
+/// workers came back truncated 2 times in 3 with no error surfaced. A file is
+/// its own unit here: a cut transfer resumes from the byte it reached, and one
+/// bad fetch costs one file rather than the pass.
+let collectLogs (context: MissionContext) (destination: string) =
+    Directory.CreateDirectory(destination) |> ignore
+    use client = monitorClient context
 
-            RemoteCommandRunner.RunRemoteCommandAndCaptureOutput(
-                kube = context.kube,
-                ns = context.namespaceProperty,
-                podName = podName,
-                containerName = "job-monitor",
-                command = [| "date"; "+%s" |],
-                outputFilePath = stampFile
-            )
+    let manifest =
+        client.GetStringAsync("/logs") |> Async.AwaitTask |> Async.RunSynchronously
+        |> JArray.Parse
 
-            let parsed, podEpoch = Int64.TryParse(File.ReadAllText(stampFile).Trim())
+    let fetchOne (entry: JToken) =
+        let name = entry.["name"].ToString()
+        let size = entry.["size"].Value<int64>()
+        let path = Path.Combine(destination, name)
+        let have = if File.Exists path then FileInfo(path).Length else 0L
 
-            if not parsed then
-                LogWarn "Could not read the clock from %s; skipping this log pass" podName
-                None
+        // Already whole. The collector only ever appends, so equal length means
+        // equal content -- and this is what stops a pass re-sending what the
+        // last one already took (the tar overlap re-sent 58% of files).
+        if have = size then
+            0L
+        else
+            let req = new HttpRequestMessage(HttpMethod.Get, "/logs/" + name)
+            if have > 0L && have < size then
+                req.Headers.Range <- Headers.RangeHeaderValue(Nullable(have), Nullable())
+
+            use resp = client.SendAsync(req) |> Async.AwaitTask |> Async.RunSynchronously
+            resp.EnsureSuccessStatusCode() |> ignore
+            let bytes = resp.Content.ReadAsByteArrayAsync() |> Async.AwaitTask |> Async.RunSynchronously
+
+            // Append on a partial answer, replace on a whole one: a server that
+            // ignored Range would otherwise double the file.
+            if resp.StatusCode = Net.HttpStatusCode.PartialContent then
+                use fs = new FileStream(path, FileMode.Append, FileAccess.Write)
+                fs.Write(bytes, 0, bytes.Length)
             else
-                let outputFile =
-                    Path.Combine(context.destination.Path, logArchiveName helmReleaseName part)
+                File.WriteAllBytes(path, bytes)
 
-                // The exec stream can end early on a large transfer and report
-                // success anyway -- the pod's tar exits 0, the status channel
-                // says Success, and the bytes simply stop. Measured on ssc-test
-                // 2026-08-07: a 64MB part arrived cut mid-member. So fetch, then
-                // read the archive back, and retry the whole transfer before
-                // giving up on this window.
-                let mutable attemptsLeft = logFetchAttempts
-                let mutable intact = false
+            int64 bytes.Length
 
-                while attemptsLeft > 0 && not intact do
-                    attemptsLeft <- attemptsLeft - 1
+    // Bounded: the monitor serves these from the same pod that runs reconcile.
+    let fetched =
+        manifest
+        |> Seq.toArray
+        |> Array.map (fun e -> async { return (try fetchOne e with ex ->
+                                                 LogWarn "log fetch failed for %s: %s"
+                                                     (e.["name"].ToString()) ex.Message
+                                                 0L) })
+        |> fun work -> Async.Parallel(work, 8)
+        |> Async.RunSynchronously
 
-                    RemoteCommandRunner.RunRemoteCommandAndCaptureOutput(
-                        kube = context.kube,
-                        ns = context.namespaceProperty,
-                        podName = podName,
-                        containerName = "job-monitor",
-                        command = logTarCommand sinceEpoch,
-                        outputFilePath = outputFile
-                    )
+    let moved = Array.sum fetched
+    let touched = fetched |> Array.filter (fun n -> n > 0L) |> Array.length
+    LogInfo "Collected %d of %d artifacts (%d bytes) from %s"
+        touched (Seq.length manifest) moved (monitorEndpoint context)
 
-                    let fi = FileInfo(outputFile)
-                    intact <- fi.Exists && (fi.Length <= emptyTarBytes || archiveIsIntact outputFile)
-
-                    if not intact && attemptsLeft > 0 then
-                        LogWarn "Worker log archive came back truncated; refetching (%d attempt(s) left)" attemptsLeft
-
-                let fileInfo = FileInfo(outputFile)
-
-                if not fileInfo.Exists then
-                    LogWarn "Worker log archive was not written: %s" outputFile
-                    None
-                elif fileInfo.Length <= emptyTarBytes then
-                    File.Delete(outputFile)
-                    LogInfo "No new worker logs since the last pass"
-                    Some podEpoch
-                elif not (archiveIsIntact outputFile) then
-                    // Keep the part -- it holds real entries, and a later
-                    // complete pass over the same window supersedes it on
-                    // extract. But hold the watermark, so that window IS
-                    // re-fetched rather than silently skipped.
-                    LogWarn
-                        "Worker log archive %s is truncated (%d bytes); keeping the old watermark so this window is fetched again"
-                        outputFile
-                        fileInfo.Length
-
-                    None
-                else
-                    LogInfo "Collected worker logs to %s (size: %d bytes)" outputFile fileInfo.Length
-                    Some podEpoch
-        with ex ->
-            LogWarn "Failed to collect worker logs: %s" ex.Message
-            None
-
-// Watermark and part counter for the incremental fetch. Module-level because
-// the main loop and the cleanup path both advance them.
-let mutable private logWatermark = 0L
-let mutable private logPartCount = 0
-
-/// One log pass. Advances the watermark only when the bytes are safely local.
+/// One log pass. Idempotent -- the manifest comparison is what makes a repeat
+/// pass cheap, so there is no watermark to keep.
 let collectLogsFromPods (context: MissionContext) =
-    let part = logPartCount + 1
-
-    match collectLogsSince context logWatermark part with
-    | Some epoch ->
-        logWatermark <- epoch
-        logPartCount <- part
-    | None -> ()
+    collectLogs context context.destination.Path
 
 // Cleanup on exit. `signalTriggered` indicates we're running under a hard
 // deadline (Jenkins' SoftKillWaitSeconds, ~5s by default, before SIGKILL).
@@ -955,7 +869,7 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
     // The monitor dispatches nothing until this arrives, so a profile that
     // cannot be delivered fails the run here rather than silently sizing every
     // range as unprofiled.
-    startMission context (defaultArg (resolveRangeProfile context) "{}")
+    startMission context (runDocument context (resolveRangeProfile context))
 
     let mutable allJobsFinished = false
     let mutable timeoutLeft = jobMonitorStatusCheckTimeOutSecs
