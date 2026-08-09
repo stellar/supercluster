@@ -107,6 +107,12 @@ def start_run(doc):
     records.write_atomic(config.RUN_PATH, json.dumps(doc, separators=(',', ':')))
     config.PROFILE = profile
     logger.info("profile installed: %d ranges", len(config.PROFILE))
+    # Opened here rather than in the POST handler, so a restart that reads
+    # run.json back resumes on exactly the same path. It did not, and a
+    # restarted monitor blocked on this forever while /status kept answering
+    # with its placeholder -- nothing was unreachable, so the driver polled a
+    # dead run indefinitely. Observed on ssc-test 2026-08-08.
+    http_server.started.set()
 
 
 _LIVENESS_NUMBERS = (('LIVENESS_PROBE_TIMEOUT_SECONDS', float),

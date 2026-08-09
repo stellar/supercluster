@@ -137,3 +137,28 @@ def test_the_collectors_resume_cursor_is_not_offered_for_pulling(server):
 
     assert 'range-300-a1.log.gz' in names
     assert 'range-300-a1.state' not in names
+
+
+def test_a_restart_resumes_without_waiting_for_another_start(server, tmp_path):
+    """run.json on the volume is what says "this monitor has a run".
+
+    Whoever installs it opens the gate -- a POST, or a restart reading it back.
+    It did not: the gate lived in the POST handler, so a restarted monitor
+    blocked on it forever while /status kept answering with its placeholder.
+    Nothing was unreachable, so the driver polled a dead run indefinitely.
+    Observed on ssc-test 2026-08-08 with 7 ranges already completed on the
+    volume and reconcile never running again.
+    """
+    base, vol = server
+    run = {"range": {"startingLedger": 0, "latestLedgerNum": 1000,
+                     "ledgersPerJob": 100}}
+    assert _post(base, '/start', json.dumps(run))[0] == 200
+    assert (vol / 'run.json').exists()
+
+    # A fresh process: same volume, gate closed again.
+    http_server.started.clear()
+    jm.start_run(json.loads((vol / 'run.json').read_text()))
+
+    assert http_server.started.is_set(), (
+        "a restart restored the run but never opened the gate, so reconcile "
+        "would block forever and the run would hang silently")

@@ -89,12 +89,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             try:
                 on_start(doc)
             except ValueError as e:
-                # A profile the run cannot proceed with. Answering 400 fails the
+                # A run the monitor cannot proceed with. Answering 400 fails the
                 # driver here, with the reason, rather than leaving it to poll a
-                # monitor that will never dispatch.
+                # monitor that will never dispatch. on_start opens the gate
+                # itself on success.
                 self._send(400, json.dumps({'error': str(e)}).encode())
                 return
-            started.set()
         self._send(200, b'{"started":true}')
 
     def _manifest(self):
