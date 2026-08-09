@@ -162,3 +162,21 @@ def test_a_restart_resumes_without_waiting_for_another_start(server, tmp_path):
     assert http_server.started.is_set(), (
         "a restart restored the run but never opened the gate, so reconcile "
         "would block forever and the run would hang silently")
+
+
+def test_status_says_whether_the_run_has_started(server):
+    """Placeholder zeros are indistinguishable from a run with nothing done.
+
+    Before the first reconcile pass /status answers with the module defaults, so
+    a caller cannot tell "nothing recorded yet" from "never going to dispatch".
+    That ambiguity is what let a wedged monitor be polled indefinitely: it kept
+    answering 200 and nothing was ever unreachable.
+    """
+    base, _ = server
+    assert json.loads(_get(base, '/status')[1])['started'] is False
+
+    _post(base, '/start', json.dumps({"range": {"startingLedger": 0,
+                                                "latestLedgerNum": 1000,
+                                                "ledgersPerJob": 100}}))
+
+    assert json.loads(_get(base, '/status')[1])['started'] is True

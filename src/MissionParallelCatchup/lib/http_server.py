@@ -64,8 +64,14 @@ class RequestHandler(BaseHTTPRequestHandler):
         elif self.path == '/status':
             snapshot, lock = status_source()
             with lock:
-                body = json.dumps(snapshot, separators=(',', ':')).encode()
-            self._send(200, body)
+                doc = dict(snapshot)
+            # Until the first reconcile pass lands, the counts are placeholders
+            # -- zeros that read exactly like a run with nothing done yet. This
+            # says which it is, so a caller can tell "no work recorded" from
+            # "not dispatching at all" instead of polling a monitor that never
+            # will.
+            doc['started'] = started.is_set()
+            self._send(200, json.dumps(doc, separators=(',', ':')).encode())
         elif self.path == '/logs':
             self._send(200, json.dumps(self._manifest(), separators=(',', ':')).encode())
         elif self.path.startswith('/logs/'):
