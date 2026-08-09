@@ -62,12 +62,13 @@ rules:
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
     verbs: ["get", "list", "create", "delete"]
-  # create/patch is for the progress ConfigMap, which is the durable record of
-  # completed ranges. Jobs are reclaimed during a long run, so their absence
-  # must not be read as "never ran".
+  # Read-only. The monitor owns no ConfigMap: progress lives on the volume and
+  # status is served from /status. This is only to read the chart's
+  # stellar-core-config, whose uid becomes the ownerReference on every Job and
+  # PVC the run creates.
   - apiGroups: [""]
     resources: ["configmaps"]
-    verbs: ["get", "list", "create", "patch"]
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -286,9 +287,6 @@ spec:
             # NodePool property; Karpenter labels every node with it itself.
             - name: CAPACITY_TYPE
               value: {{ .Values.monitor.capacityType | quote }}
-            {{- if .Values.monitor.profileConfigMap }}
-            - name: PROFILE_PATH
-              value: /profile/profile.json
             - name: PROFILE_MARGIN
               value: {{ .Values.monitor.profileMargin | quote }}
             - name: PROFILE_MAX_MEM
@@ -306,7 +304,6 @@ spec:
               value: {{ .Values.monitor.profileMaxEphemeral | quote }}
             - name: PROFILE_RUNTIME_MEMORY_INSURANCE
               value: {{ .Values.monitor.profileRuntimeMemoryInsurance | quote }}
-            {{- end }}
             # Failed ranges are always saved; successful ones are the bulk of
             # the volume and can be turned off for a cheap run.
             - name: SAVE_SUCCESS_LOGS
@@ -356,11 +353,6 @@ spec:
               mountPath: /data
             - name: logs
               mountPath: /logs
-            {{- if .Values.monitor.profileConfigMap }}
-            - name: profile
-              mountPath: /profile
-              readOnly: true
-            {{- end }}
             {{- if .Values.monitor.sourceConfigMap }}
             - name: monitor-src
               mountPath: /app
@@ -456,11 +448,6 @@ spec:
               mountPath: /app
             {{- end }}
       volumes:
-        {{- if .Values.monitor.profileConfigMap }}
-        - name: profile
-          configMap:
-            name: {{ .Values.monitor.profileConfigMap }}
-        {{- end }}
         {{- if .Values.monitor.sourceConfigMap }}
         - name: monitor-src
           configMap:

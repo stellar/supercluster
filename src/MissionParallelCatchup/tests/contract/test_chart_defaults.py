@@ -65,7 +65,6 @@ DELIBERATE = {
     'CORE_IMAGE': 'the image under test, supplied per mission run',
     'WORKER_SERVICE_ACCOUNT': 'derived from the release name for IRSA trust',
     'MISSION': 'the mission name, for the kube-state-metrics label',
-    'PROFILE_PATH': 'the mounted path of an optional profile ConfigMap',
     'ASAN_OPTIONS': 'passed through to the worker; empty means "unset", not "default"',
     'PARALLELISM': 'worker.replicas -- the whole point of the knob is to differ per run',
     'ATTEMPT_DEADLINE_SECONDS': 'a backstop the chart turns on and the code leaves off',
@@ -182,23 +181,20 @@ def test_each_deliberate_divergence_is_still_a_real_env_var():
     assert not stale, f"DELIBERATE excuses env vars the chart no longer sets: {stale}"
 
 
-def test_the_profile_block_only_renders_with_a_profile_configmap():
-    """PROFILE_PATH must not be set without the volume that backs it.
+def test_the_chart_does_not_dictate_where_the_profile_lives():
+    """PROFILE_PATH is the monitor's own business now.
 
-    load_profile() treats a non-empty PROFILE_PATH as "there is a profile" and
-    only an OSError sends it back to the configured requests. Setting the path
-    with no ConfigMap mounted would make every run log an unreadable-profile
-    warning for a profile nobody asked for.
+    The profile arrives with POST /start and is written to the volume, so a
+    chart-supplied path would point at a ConfigMap mount that no longer exists
+    and make every run log an unreadable-profile warning.
     """
-    without = art.env_of(art.containers()[art.MONITOR_CONTAINER])
-    assert 'PROFILE_PATH' not in without
-    with_cm = art.env_of(art.containers(SETS)[art.MONITOR_CONTAINER])
-    assert with_cm['PROFILE_PATH']
+    env = art.env_of(art.containers()[art.MONITOR_CONTAINER])
+    assert 'PROFILE_PATH' not in env
 
+    # And nothing mounts a profile volume any more.
     mounts = {m['mountPath']
-              for m in art.containers(SETS)[art.MONITOR_CONTAINER]['volumeMounts']}
-    assert os.path.dirname(with_cm['PROFILE_PATH']) in mounts, (
-        f"PROFILE_PATH={with_cm['PROFILE_PATH']} is not on any mounted volume")
+              for m in art.containers()[art.MONITOR_CONTAINER]['volumeMounts']}
+    assert '/profile' not in mounts
 
 
 def test_the_peak_flush_ratio_is_a_threshold_and_not_a_pass_through():
