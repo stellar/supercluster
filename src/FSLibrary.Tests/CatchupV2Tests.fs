@@ -28,11 +28,8 @@ open MissionHistoryPubnetParallelCatchupV2
 
 [<Fact>]
 let ``the job monitor image is overridable and defaults to the chart`` () =
-    // The monitor and collector ship as one image pinned in values.yaml. Passing
-    // it per run is what lets a build of them be tested without editing the
-    // chart -- but an empty flag must leave the chart's pin alone rather than
-    // setting monitor.image to nothing, which resolves to ":latest" or fails the
-    // pull outright.
+    // An empty flag must leave the chart's pin alone. monitor.image= resolves to
+    // ":latest" or fails the pull.
     let src =
         System.IO.File.ReadAllText(
             "../../../../FSLibrary/MissionHistoryPubnetParallelCatchupV2.fs")
@@ -47,12 +44,9 @@ let ``the job monitor image is overridable and defaults to the chart`` () =
 
 [<Fact>]
 let ``a pooled run does not let caller labels overwrite the routing label`` () =
-    // A pooled run claims worker.requireNodeLabels[0] for the label it routes
-    // on, and requireNodeLabelsPcV2 used to index its own entries from 0 as
-    // well. Both fire on a pooled run carrying a capacity label, and the second
-    // --set wins: the routing label is replaced, so the pod matches on capacity
-    // alone and lands on any tier at all -- a range sized for supergiant on a
-    // dwarf node, which is an OOM per range rather than a slow run.
+    // A pooled run claims index 0; the caller's entries must start at 1. Both at
+    // 0 and the second --set wins, so the pod matches on capacity alone and lands
+    // on any tier -- a supergiant range on a dwarf node, an OOM per range.
     let src =
         System.IO.File.ReadAllText(
             "../../../../FSLibrary/MissionHistoryPubnetParallelCatchupV2.fs")
@@ -63,46 +57,38 @@ let ``a pooled run does not let caller labels overwrite the routing label`` () =
 
 [<Fact>]
 let ``the pool maps ride their own --set with their commas escaped`` () =
-    // Every other option is folded into ONE comma-joined --set. The pool maps
-    // are themselves comma-separated, so folding them in would split each tier
-    // into a separate helm assignment and the map would arrive holding one
-    // tier. This is why the overlay used to be a second --values file.
+    // Every other option is folded into ONE comma-joined --set; these maps are
+    // themselves comma-separated, so folding them in delivers a map of one tier.
     let src =
         System.IO.File.ReadAllText(
             "../../../../FSLibrary/MissionHistoryPubnetParallelCatchupV2.fs")
 
     Assert.Contains("v.Replace(\",\", \"\\\\,\")", src)
     Assert.Contains("poolMapArgs", src)
-    // Empty must not reach helm at all: monitor.poolCpu= would blank the chart
-    // default and every tier would fall back to the flat request.
+    // Empty must not reach helm: monitor.poolCpu= blanks the chart default.
     Assert.Contains("List.filter (fun (_, v) -> not (String.IsNullOrWhiteSpace v))", src)
 
-// RACE #8 -- a measurement-free profile artifact that is indistinguishable from
-// a good one.
+// The profile artifact. A completed record always carries bookkeeping (attempts,
+// count) and may carry no measurement at all, when the collector never sampled
+// that range. Such a record must not become an entry.
 //
-// A completed record can carry bookkeeping (attempts, count) and no measurement
-// at all: the collector never wrote peaks for that range, or the read that would
-// have supplied them was degraded. Such a record must not become a profile entry.
+// RACE #8: count was attached BEFORE the `entry.Count > 0` guard, so every entry
+// was non-empty and none were skipped. Seen twice in the field -- 0%
+// peakAnonBytes in the artifact against 99% in progress.json.
 //
-// The `entry.Count > 0` guard exists to skip measurement-free entries, but count
-// used to be attached to the entry BEFORE the guard ran, so every entry had at
-// least one field and every entry passed. The result is an artifact with the
-// right number of ranges and zero measurements -- observed twice in the field,
-// reporting 0% peakAnonBytes while the monitor's own progress.json carried 99%.
-// The next run then sizes from a profile that silently has no data.
-//
-// These tests assert on the values the production projection actually returns,
-// never on the text of the source file.
+// What that costs: profile_for resolves a range to the nearest measured end
+// ABOVE it, so one junk entry at 1200 captures every range beneath it and hides
+// the real 1600. Range 1100 then routes to protostar instead of supergiant, and
+// nothing logs it.
 
 
-/// Every measurement a completed record can carry. A superset of
-/// rangeProfileFields: wallSeconds and txApply are recorded but never projected.
+/// Superset of rangeProfileFields: wallSeconds and txApply are recorded, never
+/// projected.
 let private measurementFields =
     [ "peakAnonBytes"; "peakWorkingSetBytes"; "peakEphemeralBytes"
       "txApply"; "seconds"; "wallSeconds" ]
 
-/// A completed record the way /logs/progress.json carries it: bookkeeping plus
-/// real measurements.
+/// A record as /logs/progress.json carries it.
 let private measuredRecord (count: int) (anon: int64) =
     let r = JObject()
     r.["attempts"] <- JValue(1)
@@ -114,8 +100,7 @@ let private measuredRecord (count: int) (anon: int64) =
     r.["peakWorkingSetBytes"] <- JValue(anon + 1000L)
     r
 
-/// The same record with every measurement stripped: what a range leaves behind
-/// when the collector never wrote peaks for it, or the read was degraded.
+/// The same record with every measurement stripped.
 let private unmeasured (record: JObject) =
     let r = record.DeepClone() :?> JObject
 
@@ -135,19 +120,8 @@ let private completedMap (pairs: (string * JObject) list) =
 
 [<Fact>]
 let ``a measurement-free record cannot become a profile entry`` () =
-    // A range the collector never sampled carries bookkeeping and nothing else.
-    // Letting it into the artifact does not merely add a useless entry -- it
-    // SHADOWS the real ones. profile_for resolves a range to the nearest
-    // measured end ABOVE it, so a junk entry at 1200 captures every range below
-    // it and hides the good measurement at 1600. The junk resolves as a truthy
-    // record with no peakAnonBytes, so _tier_for_bytes returns None and the
-    // range routes to protostar instead of the supergiant its neighbour implies.
-    // Verified: with the entry present, range 1100 sizes to protostar; without
-    // it, supergiant. Nothing logs the difference.
-    //
-    // When NO range measured, the whole document is refused -- an artifact with
-    // the right range count and zero measurements is indistinguishable from a
-    // good one.
+    // Nothing measured -- the whole document is refused, rather than written
+    // with the right range count and no data.
     let completed =
         completedMap
             [ "420", unmeasured (measuredRecord 420 900L)
@@ -167,7 +141,7 @@ let ``a measurement-free record cannot become a profile entry`` () =
 
 [<Fact>]
 let ``a measured run still produces a complete profile`` () =
-    // Guard against over-correcting: a good read must still write everything.
+    // The over-correction guard: a good read must still write everything.
     let completed =
         completedMap
             [ "420", measuredRecord 420 900L
@@ -181,8 +155,7 @@ let ``a measured run still produces a complete profile`` () =
         Assert.Equal(900L, ranges.["420"].["peakAnonBytes"].Value<int64>())
         Assert.Equal(950L, ranges.["840"].["peakAnonBytes"].Value<int64>())
         Assert.Equal(120.0, ranges.["420"].["seconds"].Value<float>())
-        // count is still carried, and the slicing is inferred from it rather
-        // than from the caller's default.
+        // Slicing is inferred from the records, not from the caller's 20000.
         Assert.Equal(420, ranges.["420"].["count"].Value<int>())
         Assert.Equal(420, doc.["ledgersPerRange"].Value<int>())
         Assert.Equal("pvc", doc.["storageMode"].Value<string>())
@@ -190,17 +163,9 @@ let ``a measured run still produces a complete profile`` () =
 
 [<Fact>]
 let ``a measured range does not drag its unmeasured neighbours in`` () =
-    // The realistic shape: a run where the collector missed a few ranges, not
-    // zero and not all. Neither all-measured nor all-unmeasured catches a guard
-    // that decides per RUN rather than per RECORD -- one that latches on the
-    // first real measurement passes both, and then every later junk record
-    // rides in behind it.
-    //
-    // Which is the case that costs something. profile_for resolves a range to
-    // the nearest measured end ABOVE it, so a junk entry at 1200 captures every
-    // range beneath it and hides the real 1600. Measured against the sizing
-    // code: range 1100 routes to protostar with the junk entry present and to
-    // supergiant without it.
+    // The realistic shape, and the only one that catches a guard deciding per RUN
+    // rather than per RECORD: one that latches on the first measurement passes
+    // both tests above while every later junk record rides in behind it.
     let completed =
         completedMap
             [ "1200", unmeasured (measuredRecord 400 900L)
