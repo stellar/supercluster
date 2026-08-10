@@ -932,23 +932,6 @@ def _resources(mem=None, eph=None, end=None, attempt=1):
     return client.V1ResourceRequirements(requests=req, limits=lim or None)
 
 
-def volume_spread_constraints():
-    """Keep PVC-mounting workers under the per-node EBS attachment limit.
-
-    Only in pvc mode: in ephemeral mode /data is an emptyDir, no volume is
-    attached, and spreading would just cost density.
-    """
-    if config.STORAGE_MODE != 'pvc' or config.MAX_VOLUMES_PER_NODE <= 0:
-        return None
-    min_domains = max(1, -(-config.PARALLELISM // config.MAX_VOLUMES_PER_NODE))   # ceil
-    return [client.V1TopologySpreadConstraint(
-        max_skew=config.MAX_VOLUMES_PER_NODE,
-        min_domains=min_domains,
-        topology_key='kubernetes.io/hostname',
-        when_unsatisfiable='DoNotSchedule',
-        label_selector=client.V1LabelSelector(match_labels={config.LABEL_RUN: config.RUN_NAME}))]
-
-
 def pod_labels(end, attempt):
     """Labels on the worker POD, which are not the Job's.
 
@@ -1080,9 +1063,6 @@ def build_job(end, count, attempt, owner, mem=None, eph=None):
                     # IRSA for the S3 history mirror; without it workers fall
                     # back to the public archive, which throttles at 1024.
                     service_account_name=config.WORKER_SERVICE_ACCOUNT or None,
-                    # Keeps PVC-mounting workers under the per-node EBS
-                    # attachment cap; inert at realistic CPU-bound density.
-                    topology_spread_constraints=volume_spread_constraints(),
                     # Never restarted in place: the pod stays terminal and
                     # inspectable for classification and the backstop log read.
                     restart_policy='Never',

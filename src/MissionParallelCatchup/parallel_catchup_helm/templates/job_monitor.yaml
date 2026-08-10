@@ -242,8 +242,6 @@ spec:
               value: {{ .Values.worker.storageClass | quote }}
             - name: STORAGE_SIZE
               value: {{ .Values.worker.storageSize | quote }}
-            - name: MAX_VOLUMES_PER_NODE
-              value: {{ .Values.worker.maxVolumesPerNode | quote }}
             - name: ASAN_OPTIONS
               value: {{ .Values.worker.asanOptions | quote }}
             - name: REQ_CPU

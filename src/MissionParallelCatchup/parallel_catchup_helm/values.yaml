@@ -17,12 +17,6 @@ worker:
   # 60Gi to match the tier nodes' ephemeral allowance: peakEphemeralBytes tops
   # out at 37.8Gi across the whole profile, so this covers 100% with headroom.
   storageSize: "60Gi"
-  # Cap on PVC-mounting workers per node, enforced with a topologySpread
-  # minDomains floor. A Nitro node allows ~26 EBS attachments and Karpenter does
-  # not size nodes for attachment capacity. Inert at realistic density (1800m
-  # CPU already yields ~4/node); only binds if CPU requests are small enough for
-  # 24+ pods to share a node. 0 disables. pvc mode only.
-  maxVolumesPerNode: 24
   requireNodeLabels: []
   avoidNodeLabels: []
   tolerateNodeTaints: []

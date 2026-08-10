@@ -176,18 +176,6 @@ STORAGE_CLASS = os.getenv('STORAGE_CLASS', '')
 # range measured, with headroom for the tip to keep growing.
 STORAGE_SIZE = os.getenv('STORAGE_SIZE', '60Gi')
 
-# A Nitro node allows ~26 EBS attachments (CSINode allocatable), and Karpenter
-# sizes nodes on CPU/memory only -- it will happily put 40 volume-mounting pods
-# on one 4-vCPU node, where they serialise through the attachment slots and get
-# rejected with VolumeAttachmentLimitExceeded (observed on ssc-test).
-#
-# Guard with a spread constraint rather than a warning. maxSkew alone cannot cap
-# per-node count -- with a single node there is one domain and therefore no skew
-# -- so minDomains is what forces enough nodes. Both are inert at realistic
-# density: REQ_CPU=1800m yields ~4 workers on an 8-vCPU node, so CPU demands far
-# more nodes than this floor ever asks for. 0 disables.
-MAX_VOLUMES_PER_NODE = int(os.getenv('MAX_VOLUMES_PER_NODE', 24))
-
 # Job/pod lifetimes.
 # SIGTERM -> SIGKILL budget. stellar-core exits ~7s after SIGTERM (measured), so
 # this is slack rather than a target.
