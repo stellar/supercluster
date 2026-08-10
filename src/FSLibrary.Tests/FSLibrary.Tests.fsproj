@@ -10,7 +10,6 @@
 
   <ItemGroup>
     <Compile Include="Tests.fs" />
-    <Compile Include="CatchupV2Tests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 
