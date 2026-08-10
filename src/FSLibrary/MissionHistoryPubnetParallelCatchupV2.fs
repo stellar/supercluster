@@ -33,6 +33,21 @@ let helmChartPath =
     | "" -> "/supercluster/src/MissionParallelCatchup/parallel_catchup_helm"
     | p -> p
 
+// An extra values file layered on top of the chart's own, for a run that wants
+// different values without a working copy of the chart. Unset is the normal
+// case: helm reads <chart>/values.yaml as its base regardless, so naming that
+// same path would only re-apply it to itself.
+//
+// Layered, not substituted, so it carries only the keys it changes.
+// SUPERCLUSTER_CHART_PATH repoints the whole chart including its values; this
+// repoints the values alone, so the baked chart can run against experimental
+// numbers.
+let extraValuesArgs =
+    match Environment.GetEnvironmentVariable("SUPERCLUSTER_VALUES_PATH") with
+    | null
+    | "" -> [||]
+    | p -> [| "--values"; p |]
+
 // Example command to run local testing (in the `supercluster/` directory):
 // $ dotnet run --project src/App/App.fsproj -- mission HistoryPubnetParallelCatchupV2 --image=docker-registry.services.stellar-ops.com/dev/stellar-core:23.0.3-2779.4d1df2b03.jammy-vnext-buildtests  --pubnet-parallel-catchup-num-workers=2 --pubnet-parallel-catchup-starting-ledger=0 --pubnet-parallel-catchup-end-ledger=6400 --pubnet-parallel-catchup-ledgers-per-job 1280  --destination ./logs
 
@@ -425,6 +440,7 @@ let installProject (context: MissionContext) =
     RunShellCommand(
         Array.concat [ [| "helm"; "install"; helmReleaseName; helmChartPath |]
                        [| "--namespace"; context.namespaceProperty |]
+                       extraValuesArgs
                        poolMapArgs
                        [| "--set"; String.Join(",", setOptions) |] ]
     )
