@@ -205,3 +205,11 @@ This mission simulates the full pubnet topology and tests how the network perfor
   - `--tx-size-bytes 120000 --tx-size-bytes-weights 1` - Generate only large transactions (~120KB)
   - `--tx-size-bytes 40000,120000 --tx-size-bytes-weights 1,1` - Generate a 50/50 mix of medium (~40KB) and large (~120KB) transactions
   - `--tx-size-bytes 20000,80000,120000 --tx-size-bytes-weights 3,2,1` - Weighted distribution: 50% small, 33% medium, 17% large
+
+## MissionQuorumIntersectionChecker
+
+Runs a 6-node network built around an intersection-critical "bridge" validator
+with stellar-core's V2 quorum intersection checker enabled, then restarts only
+the bridge with its quorum-set threshold relaxed from "both sides" to "either
+side", creating two disjoint quorums in configuration. Verifies that the
+self-sufficient side detects the split live.

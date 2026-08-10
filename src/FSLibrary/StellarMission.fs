@@ -51,6 +51,7 @@ open MissionUpgradeTxClusters
 open MissionValidatorSetup
 open MissionMinBlockTimeClassic
 open MissionMinBlockTimeMixed
+open MissionQuorumIntersectionChecker
 
 type Mission = (MissionContext -> unit)
 
@@ -103,4 +104,5 @@ let allMissions : Map<string, Mission> =
                  ("UpgradeTxClusters", upgradeTxClusters)
                  ("ValidatorSetup", validatorSetup)
                  ("MinBlockTimeClassic", minBlockTimeClassic)
-                 ("MinBlockTimeMixed", minBlockTimeMixed) |]
+                 ("MinBlockTimeMixed", minBlockTimeMixed)
+                 ("QuorumIntersectionChecker", quorumIntersectionChecker) |]
