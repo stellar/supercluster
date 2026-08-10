@@ -123,6 +123,7 @@ type MissionContext =
       pubnetParallelCatchupProfile: string
       pubnetParallelCatchupRangeOrder: string
       pubnetParallelCatchupPoolPrefix: string
+      jobMonitorImagePcV2: string
       pubnetParallelCatchupCpuRequest: string
       genesisTestAccountCount: int option
 

@@ -125,6 +125,7 @@ let ctx : MissionContext =
       pubnetParallelCatchupProfile = ""
       pubnetParallelCatchupRangeOrder = "tip-first"
       pubnetParallelCatchupPoolPrefix = ""
+      jobMonitorImagePcV2 = ""
       pubnetParallelCatchupCpuRequest = ""
       tag = None
       numPregeneratedTxs = None
@@ -744,3 +745,22 @@ let ``on-demand pool claims fit exactly one pod per node`` () =
         )
 
 
+
+
+[<Fact>]
+let ``the job monitor image is overridable and defaults to the chart`` () =
+    // The monitor and collector ship as one image pinned in values.yaml. Passing
+    // it per run is what lets a build of them be tested without editing the
+    // chart -- but an empty flag must leave the chart's pin alone rather than
+    // setting monitor.image to nothing, which resolves to ":latest" or fails the
+    // pull outright.
+    let src =
+        System.IO.File.ReadAllText(
+            "../../../../FSLibrary/MissionHistoryPubnetParallelCatchupV2.fs")
+
+    Assert.Contains("if context.jobMonitorImagePcV2 <> \"\" then", src)
+    Assert.Contains("monitor.image=%s", src)
+
+    let guard = src.IndexOf("if context.jobMonitorImagePcV2 <> \"\" then")
+    let use_ = src.IndexOf("monitor.image=%s")
+    Assert.True(guard < use_, "monitor.image must only be set inside the non-empty guard")

@@ -253,6 +253,11 @@ let installProject (context: MissionContext) =
     // from its measured peakAnonBytes, and gets that node to itself.
     setOptions.Add(sprintf "monitor.poolPrefix=%s" context.pubnetParallelCatchupPoolPrefix)
 
+    // The monitor and collector ship as one image, pinned in the chart. Passing
+    // it here is what lets a run test a build of them without editing values.
+    if context.jobMonitorImagePcV2 <> "" then
+        setOptions.Add(sprintf "monitor.image=%s" context.jobMonitorImagePcV2)
+
     // Capacity type is DERIVED, not configured. Both capacity variants of a tier
     // share one label value, so a pod needs this second expression to pick a
     // side -- and the storage mode already decides which side it must be. pvc

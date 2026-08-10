@@ -119,6 +119,7 @@ type MissionOptions
         pubnetParallelCatchupProfile: string,
         pubnetParallelCatchupRangeOrder: string,
         pubnetParallelCatchupPoolPrefix: string,
+        jobMonitorImagePcV2: string,
         pubnetParallelCatchupCpuRequest: string,
         tag: string option,
         numPregeneratedTxs: int option,
@@ -550,6 +551,12 @@ type MissionOptions
              Default = "")>]
     member self.PubnetParallelCatchupPoolPrefix : string = pubnetParallelCatchupPoolPrefix
 
+    [<Option("job-monitor-image-pc-v2",
+             HelpText = "Container image for the ParallelCatchupV2 job monitor and log collector. Empty uses the chart default.",
+             Required = false,
+             Default = "")>]
+    member self.JobMonitorImagePcV2 : string = jobMonitorImagePcV2
+
     [<Option("pubnet-parallel-catchup-cpu-request",
              HelpText = "override the worker cpu request, e.g. 1000m or 500m. Also the ceiling a profile-derived cpu request is clamped to, so it applies to profiled and unprofiled ranges alike. Empty = use StellarKubeSpecs (only supported for V2)",
              Required = false,
@@ -937,6 +944,7 @@ let main argv =
                                pubnetParallelCatchupProfile = mission.PubnetParallelCatchupProfile
                                pubnetParallelCatchupRangeOrder = mission.PubnetParallelCatchupRangeOrder
                                pubnetParallelCatchupPoolPrefix = mission.PubnetParallelCatchupPoolPrefix
+                               jobMonitorImagePcV2 = mission.JobMonitorImagePcV2
                                pubnetParallelCatchupCpuRequest = mission.PubnetParallelCatchupCpuRequest
                                tag = mission.Tag
                                numPregeneratedTxs = mission.NumPregeneratedTxs
