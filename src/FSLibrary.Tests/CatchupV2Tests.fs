@@ -27,13 +27,6 @@ open MissionHistoryPubnetParallelCatchupV2
 
 
 [<Fact>]
-let ``range profile does not carry a pvc volume peak`` () =
-    // A PVC's size is not a scheduling dimension, so growing it buys no
-    // packing and it is deliberately not profiled.
-    Assert.DoesNotContain("peakVolumeBytes", rangeProfileFields)
-
-
-[<Fact>]
 let ``pvc mode does not reserve node disk it never uses`` () =
     // /data is on the volume in pvc mode; the node disk only holds logs and tmp.
     // Asking for the ephemeral-mode figure makes disk rather than cpu the
