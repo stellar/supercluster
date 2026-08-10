@@ -332,8 +332,14 @@ spec:
                  Two accepted shapes: the mission emits structured selectors
                  ({key, operator, values}) like every other supercluster
                  mission, while a hand-run helm install more naturally passes
-                 "key:value" strings. Only the first entry is used -- the
-                 monitor takes a single label pair.
+                 "key:value" strings.
+
+                 Entry 0 is the POOL-ROUTED one: on a pooled run the monitor
+                 replaces its value per range with <prefix>-<tier>, so only its
+                 key is used. Every later entry is required literally, which is
+                 how a run pins itself to one capacity of a tier -- both
+                 capacities carry the same tier label value, so nothing else
+                 separates them.
             */}}
             {{- with (first .Values.worker.requireNodeLabels) }}
             {{- if kindIs "map" . }}
@@ -348,6 +354,8 @@ spec:
               value: {{ (splitList ":" .) | last | quote }}
             {{- end }}
             {{- end }}
+            - name: REQUIRE_NODE_LABELS
+              value: {{ include "catchup.labelPairs" (rest .Values.worker.requireNodeLabels) | quote }}
             {{- with (first .Values.worker.avoidNodeLabels) }}
             {{- if kindIs "map" . }}
             - name: AVOID_NODE_LABEL_KEY

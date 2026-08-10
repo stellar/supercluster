@@ -159,6 +159,23 @@ def validate_config():
         raise ValueError(
             "latestLedgerNum must be greater than startingLedger, got %r and %r"
             % (config.LATEST_LEDGER_NUM, config.STARTING_LEDGER))
+    # The pool maps arrive per run, so this is the first point they meet the
+    # ladder they are keyed to. A tier with no claim does not fail -- the pod
+    # keeps the flat REQ_CPU/REQ_MEM and a second one fits beside it, which
+    # undoes the isolation the whole tiering exists for: giving a pod its node
+    # to itself raised throughput 29-92%. Silent, and only visible afterwards as
+    # a run that cost more than it should.
+    if config.POOL_PREFIX:
+        routable = [name for _, name in sizing._parsed_pool_tiers()]
+        routable += [config.POOL_UNPROFILED, config.POOL_NO_PROFILE]
+        for env_name, raw in (('POOL_CPU', config.POOL_CPU), ('POOL_MEM', config.POOL_MEM)):
+            claimed = {k for k, _ in config.label_pairs(raw)}
+            missing = [t for t in routable if t and t not in claimed]
+            if missing:
+                raise ValueError(
+                    "%s has no entry for %s; a pooled range routed there would "
+                    "keep the flat request and share its node"
+                    % (env_name, ', '.join(sorted(set(missing)))))
 
 status = {
     'num_remain': 1,  # non-zero until the first real update, so callers don't see a premature 0
@@ -1005,12 +1022,11 @@ def build_job(end, count, attempt, owner, mem=None, eph=None):
         value = f"{config.POOL_PREFIX}-{tier}" if tier else config.NODE_LABEL_VALUE
         match.append(client.V1NodeSelectorRequirement(
             key=config.NODE_LABEL_KEY, operator='In', values=[value]))
-    if config.CAPACITY_TYPE:
-        # Capacity type is a NodePool property a pod cannot otherwise express,
-        # and Karpenter labels every node with it. ANDing it here keeps a
-        # pvc-mode run off on-demand nodes and vice versa.
+    for key, value in config.label_pairs(config.REQUIRE_NODE_LABELS):
+        # Literal, unlike the pool-routed pair above: these are properties of
+        # the pool rather than of the range, so they do not vary per attempt.
         match.append(client.V1NodeSelectorRequirement(
-            key='karpenter.sh/capacity-type', operator='In', values=[config.CAPACITY_TYPE]))
+            key=key, operator='In', values=[value]))
     if config.AVOID_NODE_LABEL_KEY:
         # No value means "avoid the label however it is set", which is
         # DoesNotExist; NotIn [""] would only exclude the empty value.

@@ -124,10 +124,6 @@ monitor:
   # No profile at all: nothing is known, so the biggest nodes and the configured
   # defaults.
   poolNoProfile: "nebula"
-  # ANDed with the tier label: "spot" or "on-demand". Both capacity variants of
-  # a tier share one label value, so this is what separates them. Empty means no
-  # capacity constraint.
-  capacityType: ""
   profileMargin: 1.15
   # No margin on cpu: it is compressible, so under-requesting costs contention
   # Ceiling for profile-derived memory. Above the configured worker limit on

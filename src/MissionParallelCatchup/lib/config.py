@@ -151,10 +151,30 @@ NODE_LABEL_KEY = os.getenv('NODE_LABEL_KEY', '')
 
 NODE_LABEL_VALUE = os.getenv('NODE_LABEL_VALUE', '')
 
-# ANDed with the label above when set: 'spot' or 'on-demand'. Both capacity
-# variants of a tier carry the same label value, so this is what separates them.
-# Karpenter labels every node with karpenter.sh/capacity-type itself.
-CAPACITY_TYPE = os.getenv('CAPACITY_TYPE', '')
+# Further labels a node must carry, "key:value" comma separated, ANDed with the
+# one above. Unlike that one these are literal -- the pair above is pool-routed,
+# its value replaced per range with <prefix>-<tier>.
+#
+# This is where a run pins itself to one capacity of a tier. Both capacities
+# carry the same tier label value, so nothing else separates them, and the
+# pairing matters: ephemeral has no resume, so a reclaim costs the whole range.
+# A plain label rather than karpenter.sh/capacity-type, because the pools
+# publish their own and the monitor has no business knowing who provisioned the
+# node.
+REQUIRE_NODE_LABELS = os.getenv('REQUIRE_NODE_LABELS', '')
+
+
+def label_pairs(raw):
+    """[(key, value)] from "k:v,k:v". Entries without a value are dropped: a
+    key alone would require the label be exactly "", which no node carries, and
+    a pod pinned to nothing sits Pending in a way that reads as slow
+    provisioning rather than as misconfiguration."""
+    out = []
+    for item in (raw or '').split(','):
+        key, _, value = item.strip().partition(':')
+        if key and value:
+            out.append((key, value))
+    return out
 
 AVOID_NODE_LABEL_KEY = os.getenv('AVOID_NODE_LABEL_KEY', '')
 

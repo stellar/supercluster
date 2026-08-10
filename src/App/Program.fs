@@ -122,6 +122,8 @@ type MissionOptions
         jobMonitorImagePcV2: string,
         pubnetParallelCatchupCpuRequest: string,
         pubnetParallelCatchupMemRequest: string,
+        pubnetParallelCatchupPoolCpu: string,
+        pubnetParallelCatchupPoolMem: string,
         tag: string option,
         numPregeneratedTxs: int option,
         genesisTestAccountCount: int option,
@@ -570,6 +572,18 @@ type MissionOptions
              Default = "")>]
     member self.PubnetParallelCatchupMemRequest : string = pubnetParallelCatchupMemRequest
 
+    [<Option("pubnet-parallel-catchup-pool-cpu",
+             HelpText = "per-tier cpu claim, \"tier:cores\" comma separated, e.g. \"dwarf:0.85,giant:1.85\". The right map depends on the capacity the run targets: spot pools were doubled so a claim is half a node and two pods share it, on-demand pools were not, and there the same claim is the node's nameplate, which is not allocatable and schedules nothing. Empty uses the chart default (only supported for V2)",
+             Required = false,
+             Default = "")>]
+    member self.PubnetParallelCatchupPoolCpu : string = pubnetParallelCatchupPoolCpu
+
+    [<Option("pubnet-parallel-catchup-pool-mem",
+             HelpText = "per-tier memory claim, \"tier:quantity\" comma separated, e.g. \"dwarf:1280Mi,giant:6656Mi\". This is what isolates a pod on its node, so it is the dimension that sets pods-per-node. Same capacity caveat as --pubnet-parallel-catchup-pool-cpu. Empty uses the chart default (only supported for V2)",
+             Required = false,
+             Default = "")>]
+    member self.PubnetParallelCatchupPoolMem : string = pubnetParallelCatchupPoolMem
+
     [<Option("tag", HelpText = "optional name to tag the run with", Required = false)>]
     member self.Tag = tag
 
@@ -954,6 +968,8 @@ let main argv =
                                jobMonitorImagePcV2 = mission.JobMonitorImagePcV2
                                pubnetParallelCatchupCpuRequest = mission.PubnetParallelCatchupCpuRequest
                                pubnetParallelCatchupMemRequest = mission.PubnetParallelCatchupMemRequest
+                               pubnetParallelCatchupPoolCpu = mission.PubnetParallelCatchupPoolCpu
+                               pubnetParallelCatchupPoolMem = mission.PubnetParallelCatchupPoolMem
                                tag = mission.Tag
                                numPregeneratedTxs = mission.NumPregeneratedTxs
                                enableTailLogging = true

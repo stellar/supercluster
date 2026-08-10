@@ -128,6 +128,8 @@ let ctx : MissionContext =
       jobMonitorImagePcV2 = ""
       pubnetParallelCatchupCpuRequest = ""
       pubnetParallelCatchupMemRequest = ""
+      pubnetParallelCatchupPoolCpu = ""
+      pubnetParallelCatchupPoolMem = ""
       tag = None
       numPregeneratedTxs = None
       enableTailLogging = true
@@ -651,104 +653,6 @@ let ``progress record is read from the volume and never from the configmap`` () 
 
 
 [<Fact>]
-let ``on-demand runs layer the one-pod-per-node overlay`` () =
-    // The chart defaults are the spot claims: the spot pools were doubled on
-    // 2026-08-04 so each claim is half a node and two pods share it. On-demand
-    // pools kept their original sizes, where those same claims are the node's
-    // NAMEPLATE -- and nameplate is not allocatable, so every on-demand tier
-    // becomes unschedulable. Measured on ssc-test: a 16 GiB node reports
-    // 13312Mi usable, against a 14336Mi supergiant claim.
-    let src =
-        System.IO.File.ReadAllText(
-            "../../../../FSLibrary/MissionHistoryPubnetParallelCatchupV2.fs")
-    Assert.Contains("values-ondemand.yaml", src)
-    // and it must be layered, never swapped in: the overlay only carries the
-    // pool claims, so dropping the base values would lose the whole chart config
-    Assert.Contains("[| \"--values\"; valuesFilePath; \"--values\"; onDemandValuesFilePath |]", src)
-
-
-[<Fact>]
-let ``the on-demand overlay is not applied to pvc runs`` () =
-    // pvc means spot means shared nodes. Layering the one-pod claims there would
-    // halve pods per node on pools that were doubled precisely to hold two.
-    let src =
-        System.IO.File.ReadAllText(
-            "../../../../FSLibrary/MissionHistoryPubnetParallelCatchupV2.fs")
-    let guard = src.IndexOf("if context.pubnetParallelCatchupStorageMode = \"pvc\" then\n            [| \"--values\"; valuesFilePath |]")
-    Assert.True(guard > 0, "pvc branch must pass the base values file alone")
-
-
-[<Fact>]
-let ``on-demand pool claims fit exactly one pod per node`` () =
-    // Both halves, on BOTH dimensions. The previous version of this test checked
-    // memory only and assumed 154Mi of daemonsets, so it passed while every
-    // on-demand tier was in fact unschedulable -- 2026-08-07, ten workers Pending
-    // forever because Karpenter needed 1820m/3054Mi against c8a.large's
-    // 1715m/2663Mi. A test that encodes a stale measurement is worse than none:
-    // it is why the table looked verified.
-    //
-    // 494Mi/245m measured on ssc-test, and it is what Karpenter enforces --
-    // ebs-csi-node-windows is 340Mi of it and cannot run on these nodes, but the
-    // nodepools constrain arch and not os, so it is reserved anyway.
-    let dsMem, dsCpu = 494.0, 245.0
-
-    let overlay =
-        System.IO.File.ReadAllText(
-            "../../../../MissionParallelCatchup/parallel_catchup_helm/values-ondemand.yaml")
-
-    let claim (map: string) (tier: string) =
-        let entry =
-            overlay.Split('\n')
-            |> Array.find (fun l -> l.TrimStart().StartsWith(map + ":"))
-        entry.Split(',')
-        |> Array.pick (fun kv ->
-            let parts = (kv.Split(':') |> Array.map (fun x -> x.Trim([| '"'; ' ' |])))
-            if parts.[parts.Length - 2] = tier then Some parts.[parts.Length - 1] else None)
-
-    // tier, measured allocatable MiB, measured allocatable millicores
-    let nodes =
-        [ "subdwarf", 1127.0, 725.0
-          "dwarf", 1127.0, 725.0
-          "subgiant", 2663.0, 1715.0
-          "giant", 5940.0, 1715.0
-          "supergiant", 13313.0, 1715.0
-          "nebula", 13313.0, 3705.0
-          "hypergiant", 28714.0, 3705.0
-          "protostar", 28714.0, 1715.0
-          "supernova", 59515.0, 7695.0 ]
-
-    for (tier, allocMem, allocCpu) in nodes do
-        let mem = float ((claim "poolMem" tier).Replace("Mi", ""))
-        let cpu = float (claim "poolCpu" tier) * 1000.0
-
-        // One pod must FIT once the daemonsets are counted -- this is the half
-        // that was missing, and it is why nothing provisioned.
-        Assert.True(
-            mem + dsMem <= allocMem,
-            sprintf "%s: %.0fMi + %.0fMi daemonsets exceeds %.0fMi allocatable" tier mem dsMem allocMem
-        )
-
-        Assert.True(
-            cpu + dsCpu <= allocCpu,
-            sprintf "%s: %.0fm + %.0fm daemonsets exceeds %.0fm allocatable" tier cpu dsCpu allocCpu
-        )
-
-        // And a second must NOT, or the isolation the on-demand ladder exists
-        // for is gone without anything failing.
-        Assert.True(
-            2.0 * mem + dsMem > allocMem,
-            sprintf "%s: two pods fit in %.0fMi; on-demand is one per node" tier allocMem
-        )
-
-        Assert.True(
-            2.0 * cpu + dsCpu > allocCpu,
-            sprintf "%s: two pods fit in %.0fm; on-demand is one per node" tier allocCpu
-        )
-
-
-
-
-[<Fact>]
 let ``the job monitor image is overridable and defaults to the chart`` () =
     // The monitor and collector ship as one image pinned in values.yaml. Passing
     // it per run is what lets a build of them be tested without editing the
@@ -765,3 +669,36 @@ let ``the job monitor image is overridable and defaults to the chart`` () =
     let guard = src.IndexOf("if context.jobMonitorImagePcV2 <> \"\" then")
     let use_ = src.IndexOf("monitor.image=%s")
     Assert.True(guard < use_, "monitor.image must only be set inside the non-empty guard")
+
+
+[<Fact>]
+let ``a pooled run does not let caller labels overwrite the routing label`` () =
+    // A pooled run claims worker.requireNodeLabels[0] for the label it routes
+    // on, and requireNodeLabelsPcV2 used to index its own entries from 0 as
+    // well. Both fire on a pooled run carrying a capacity label, and the second
+    // --set wins: the routing label is replaced, so the pod matches on capacity
+    // alone and lands on any tier at all -- a range sized for supergiant on a
+    // dwarf node, which is an OOM per range rather than a slow run.
+    let src =
+        System.IO.File.ReadAllText(
+            "../../../../FSLibrary/MissionHistoryPubnetParallelCatchupV2.fs")
+
+    Assert.Contains("worker.requireNodeLabels[0]=purpose:%s", src)
+    Assert.Contains("if context.pubnetParallelCatchupPoolPrefix <> \"\" then i + 1 else i", src)
+
+
+[<Fact>]
+let ``the pool maps ride their own --set with their commas escaped`` () =
+    // Every other option is folded into ONE comma-joined --set. The pool maps
+    // are themselves comma-separated, so folding them in would split each tier
+    // into a separate helm assignment and the map would arrive holding one
+    // tier. This is why the overlay used to be a second --values file.
+    let src =
+        System.IO.File.ReadAllText(
+            "../../../../FSLibrary/MissionHistoryPubnetParallelCatchupV2.fs")
+
+    Assert.Contains("v.Replace(\",\", \"\\\\,\")", src)
+    Assert.Contains("poolMapArgs", src)
+    // Empty must not reach helm at all: monitor.poolCpu= would blank the chart
+    // default and every tier would fall back to the flat request.
+    Assert.Contains("List.filter (fun (_, v) -> not (String.IsNullOrWhiteSpace v))", src)

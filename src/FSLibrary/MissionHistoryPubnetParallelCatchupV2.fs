@@ -36,13 +36,6 @@ let helmChartPath =
 // Example command to run local testing (in the `supercluster/` directory):
 // $ dotnet run --project src/App/App.fsproj -- mission HistoryPubnetParallelCatchupV2 --image=docker-registry.services.stellar-ops.com/dev/stellar-core:23.0.3-2779.4d1df2b03.jammy-vnext-buildtests  --pubnet-parallel-catchup-num-workers=2 --pubnet-parallel-catchup-starting-ledger=0 --pubnet-parallel-catchup-end-ledger=6400 --pubnet-parallel-catchup-ledgers-per-job 1280  --destination ./logs
 let valuesFilePath = helmChartPath + "/values.yaml"
-// Layered on top of values.yaml for on-demand runs only. The chart defaults are
-// the spot claims: the spot pools were doubled on 2026-08-04 so each claim is
-// half a node and two pods share it. On-demand pools kept their original sizes,
-// where those same claims are the node's NAMEPLATE -- and nameplate is not
-// allocatable, so nothing schedules at all. A 14336Mi claim has ~13313Mi to land
-// in on a 16 GiB node once the EKS reserve and 154Mi of daemonsets come out.
-let onDemandValuesFilePath = helmChartPath + "/values-ondemand.yaml"
 
 let jobMonitorLoggingIntervalSecs = 30 // frequency of the monitor reconcile loop: dispatch, liveness ping, status publish
 let jobMonitorStatusCheckIntervalSecs = 60
@@ -245,22 +238,10 @@ let installProject (context: MissionContext) =
     if context.jobMonitorImagePcV2 <> "" then
         setOptions.Add(sprintf "monitor.image=%s" context.jobMonitorImagePcV2)
 
-    // Capacity type is DERIVED, not configured. Both capacity variants of a tier
-    // share one label value, so a pod needs this second expression to pick a
-    // side -- and the storage mode already decides which side it must be. pvc
-    // exists so an evicted range resumes at LCL+1, which is what makes spot
-    // survivable; ephemeral has no resume, so it belongs on nodes that are not
-    // reclaimed underneath it. Letting these disagree would put a run with no
-    // resume path onto interruptible capacity.
     if context.pubnetParallelCatchupPoolPrefix <> "" then
-        let capacityType =
-            if context.pubnetParallelCatchupStorageMode = "pvc" then "spot" else "on-demand"
-
-        setOptions.Add(sprintf "monitor.capacityType=%s" capacityType)
-
         // Routing needs the label KEY and the taint toleration, and neither has
         // a sensible default for an unpooled run -- both ship as []. Derived
-        // here for the same reason capacityType is: a pooled run that sets only
+        // here because a pooled run that sets only
         // the prefix otherwise fails twice over, and both failures are quiet.
         // Karpenter labels these nodes purpose=<prefix>-<tier>, which is exactly
         // the value job_monitor builds per range, and taints them <prefix>:
@@ -372,7 +353,12 @@ let installProject (context: MissionContext) =
     if not (List.isEmpty context.requireNodeLabelsPcV2) then
         let requireLabelsHelm =
             context.requireNodeLabelsPcV2
-            |> List.mapi requireNodeLabelToHelmIndexed
+            // From 1: a pooled run claims index 0 for the label it routes on,
+            // and mapi from 0 would overwrite it with whichever came second.
+            |> List.mapi (fun i pair ->
+                requireNodeLabelToHelmIndexed
+                    (if context.pubnetParallelCatchupPoolPrefix <> "" then i + 1 else i)
+                    pair)
             |> String.concat ","
 
         setOptions.Add(requireLabelsHelm)
@@ -411,21 +397,30 @@ let installProject (context: MissionContext) =
     // installs its monitor, Jobs and PVCs into a different one. Observed
     // 2026-07-30: a mission run with --namespace sandbox put a monitor and four
     // Jobs into the production namespace alongside a live run.
-    // The overlay rides as a second --values, not as setOptions, because every
-    // option below is folded into ONE comma-separated --set and the pool maps are
-    // themselves comma-separated -- they would need every internal comma escaped.
-    // Derived from storage mode for the same reason capacityType is: pvc means
-    // spot means shared nodes, ephemeral means on-demand means one pod per node.
-    let valuesArgs =
-        if context.pubnetParallelCatchupStorageMode = "pvc" then
-            [| "--values"; valuesFilePath |]
-        else
-            [| "--values"; valuesFilePath; "--values"; onDemandValuesFilePath |]
+    let valuesArgs = [| "--values"; valuesFilePath |]
+
+    // The pool maps get their own --set each. Every other option is folded into
+    // ONE comma-joined --set, and these are themselves comma-separated, so
+    // folding them in would split each tier into a separate assignment. helm
+    // reads a backslash-escaped comma as data rather than as a separator.
+    //
+    // They arrive per run rather than from the chart because the claims differ
+    // by capacity: the spot pools were doubled on 2026-08-04 so a claim is half
+    // a node and two pods share it, while the on-demand pools kept their
+    // original sizes, where that same claim is the node's NAMEPLATE -- and
+    // nameplate is not allocatable, so nothing schedules at all.
+    let poolMapArgs =
+        [ "monitor.poolCpu", context.pubnetParallelCatchupPoolCpu
+          "monitor.poolMem", context.pubnetParallelCatchupPoolMem ]
+        |> List.filter (fun (_, v) -> not (String.IsNullOrWhiteSpace v))
+        |> List.collect (fun (key, v) -> [ "--set"; sprintf "%s=%s" key (v.Replace(",", "\\,")) ])
+        |> Array.ofList
 
     RunShellCommand(
         Array.concat [ [| "helm"; "install"; helmReleaseName; helmChartPath |]
                        [| "--namespace"; context.namespaceProperty |]
                        valuesArgs
+                       poolMapArgs
                        [| "--set"; String.Join(",", setOptions) |] ]
     )
     |> ignore
