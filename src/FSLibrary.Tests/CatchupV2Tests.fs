@@ -186,3 +186,32 @@ let ``a measured run still produces a complete profile`` () =
         Assert.Equal(420, ranges.["420"].["count"].Value<int>())
         Assert.Equal(420, doc.["ledgersPerRange"].Value<int>())
         Assert.Equal("pvc", doc.["storageMode"].Value<string>())
+
+
+[<Fact>]
+let ``a measured range does not drag its unmeasured neighbours in`` () =
+    // The realistic shape: a run where the collector missed a few ranges, not
+    // zero and not all. Neither all-measured nor all-unmeasured catches a guard
+    // that decides per RUN rather than per RECORD -- one that latches on the
+    // first real measurement passes both, and then every later junk record
+    // rides in behind it.
+    //
+    // Which is the case that costs something. profile_for resolves a range to
+    // the nearest measured end ABOVE it, so a junk entry at 1200 captures every
+    // range beneath it and hides the real 1600. Measured against the sizing
+    // code: range 1100 routes to protostar with the junk entry present and to
+    // supergiant without it.
+    let completed =
+        completedMap
+            [ "1200", unmeasured (measuredRecord 400 900L)
+              "1600", measuredRecord 400 950L
+              "2000", unmeasured (measuredRecord 400 990L) ]
+
+    match rangeProfileDocument "pvc" 20000 completed with
+    | None -> failwith "refused a profile that carries one real measurement"
+    | Some doc ->
+        let ranges = doc.["ranges"] :?> JObject
+        Assert.Equal(1, ranges.Count)
+        Assert.NotNull(ranges.["1600"])
+        Assert.Null(ranges.["1200"])
+        Assert.Null(ranges.["2000"])
