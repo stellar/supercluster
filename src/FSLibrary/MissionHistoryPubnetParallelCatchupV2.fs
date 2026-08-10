@@ -78,7 +78,14 @@ let resolveRangeProfile (context: MissionContext) : string option =
     else
         try
             let body =
-                if spec.StartsWith("https://", StringComparison.OrdinalIgnoreCase) then
+                // http as well as https: the only alternative is treating the
+                // URL as a filename, which fails as "could not load" without
+                // ever mentioning the scheme, and the run proceeds unprofiled --
+                // every range sized from defaults. A profile moves resource
+                // REQUESTS only, so a tampered one costs node size, not code
+                // execution, and it is parsed and range-counted before use.
+                if spec.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                   || spec.StartsWith("https://", StringComparison.OrdinalIgnoreCase) then
                     use client = new HttpClient()
                     client.Timeout <- TimeSpan.FromSeconds(30.0)
                     client.GetStringAsync(spec) |> Async.AwaitTask |> Async.RunSynchronously
