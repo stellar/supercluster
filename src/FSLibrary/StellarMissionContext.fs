@@ -125,6 +125,7 @@ type MissionContext =
       pubnetParallelCatchupPoolPrefix: string
       jobMonitorImagePcV2: string
       pubnetParallelCatchupCpuRequest: string
+      pubnetParallelCatchupMemRequest: string
       genesisTestAccountCount: int option
 
       asanOptions: string option

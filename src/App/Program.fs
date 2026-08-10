@@ -121,6 +121,7 @@ type MissionOptions
         pubnetParallelCatchupPoolPrefix: string,
         jobMonitorImagePcV2: string,
         pubnetParallelCatchupCpuRequest: string,
+        pubnetParallelCatchupMemRequest: string,
         tag: string option,
         numPregeneratedTxs: int option,
         genesisTestAccountCount: int option,
@@ -528,7 +529,7 @@ type MissionOptions
     member self.PubnetParallelCatchupNumWorkers = pubnetParallelCatchupNumWorkers
 
     [<Option("pubnet-parallel-catchup-storage-mode",
-             HelpText = "worker /data backing: 'pvc' keeps it across pods so an evicted range resumes at L+1 (needed for spot); 'ephemeral' puts it on the node disk, which packs denser but cannot resume (only supported for V2)",
+             HelpText = "worker /data backing: 'pvc' keeps it across pods so an evicted range resumes at L+1 (needed for spot); 'ephemeral' puts it on the node disk where retries cannot resume (only supported for V2)",
              Required = false,
              Default = "pvc")>]
     member self.PubnetParallelCatchupStorageMode : string = pubnetParallelCatchupStorageMode
@@ -558,10 +559,16 @@ type MissionOptions
     member self.JobMonitorImagePcV2 : string = jobMonitorImagePcV2
 
     [<Option("pubnet-parallel-catchup-cpu-request",
-             HelpText = "override the worker cpu request, e.g. 1000m or 500m. Also the ceiling a profile-derived cpu request is clamped to, so it applies to profiled and unprofiled ranges alike. Empty = use StellarKubeSpecs (only supported for V2)",
+             HelpText = "override the worker cpu request for an UNPOOLED run, e.g. 1000m or 500m. Ignored once --pubnet-parallel-catchup-pool-prefix is set: there the tier's own cut is the request, because a flat value shipped at a tier whose nodes are smaller leaves the pod permanently Pending. Empty = the chart default (only supported for V2)",
              Required = false,
              Default = "")>]
     member self.PubnetParallelCatchupCpuRequest : string = pubnetParallelCatchupCpuRequest
+
+    [<Option("pubnet-parallel-catchup-mem-request",
+             HelpText = "override the worker memory request for an UNPOOLED run, e.g. 9Gi or 12Gi. Same scope as --pubnet-parallel-catchup-cpu-request: ignored under a pool prefix, where the tier's cut is the request. A range the profile has measured overrides it. Empty = the chart default, 9Gi (only supported for V2)",
+             Required = false,
+             Default = "")>]
+    member self.PubnetParallelCatchupMemRequest : string = pubnetParallelCatchupMemRequest
 
     [<Option("tag", HelpText = "optional name to tag the run with", Required = false)>]
     member self.Tag = tag
@@ -946,6 +953,7 @@ let main argv =
                                pubnetParallelCatchupPoolPrefix = mission.PubnetParallelCatchupPoolPrefix
                                jobMonitorImagePcV2 = mission.JobMonitorImagePcV2
                                pubnetParallelCatchupCpuRequest = mission.PubnetParallelCatchupCpuRequest
+                               pubnetParallelCatchupMemRequest = mission.PubnetParallelCatchupMemRequest
                                tag = mission.Tag
                                numPregeneratedTxs = mission.NumPregeneratedTxs
                                enableTailLogging = true

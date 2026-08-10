@@ -127,6 +127,7 @@ let ctx : MissionContext =
       pubnetParallelCatchupPoolPrefix = ""
       jobMonitorImagePcV2 = ""
       pubnetParallelCatchupCpuRequest = ""
+      pubnetParallelCatchupMemRequest = ""
       tag = None
       numPregeneratedTxs = None
       enableTailLogging = true

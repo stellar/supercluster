@@ -16,12 +16,10 @@ open System
 open System.Diagnostics
 open System.Net.Http
 open System.IO
-open System.Formats.Tar
 
 open Newtonsoft.Json.Linq
 open Microsoft.FSharp.Control
 open System.Threading
-open System
 
 open k8s
 open CSLibrary
@@ -35,10 +33,8 @@ let helmChartPath =
     | "" -> "/supercluster/src/MissionParallelCatchup/parallel_catchup_helm"
     | p -> p
 
-// Comment out the path below for local testing
 // Example command to run local testing (in the `supercluster/` directory):
 // $ dotnet run --project src/App/App.fsproj -- mission HistoryPubnetParallelCatchupV2 --image=docker-registry.services.stellar-ops.com/dev/stellar-core:23.0.3-2779.4d1df2b03.jammy-vnext-buildtests  --pubnet-parallel-catchup-num-workers=2 --pubnet-parallel-catchup-starting-ledger=0 --pubnet-parallel-catchup-end-ledger=6400 --pubnet-parallel-catchup-ledgers-per-job 1280  --destination ./logs
-// let helmChartPath = "src/MissionParallelCatchup/parallel_catchup_helm"
 let valuesFilePath = helmChartPath + "/values.yaml"
 // Layered on top of values.yaml for on-demand runs only. The chart defaults are
 // the spot claims: the spot pools were doubled on 2026-08-04 so each claim is
@@ -48,12 +44,8 @@ let valuesFilePath = helmChartPath + "/values.yaml"
 // in on a 16 GiB node once the EKS reserve and 154Mi of daemonsets come out.
 let onDemandValuesFilePath = helmChartPath + "/values-ondemand.yaml"
 
-// Keys in the <release>-catchup-progress ConfigMap. These were HTTP paths when
-// the driver polled the monitor through a Gateway; it reads the ConfigMap now.
-let jobMonitorStatusKey = "status.json" // live queue counts
-
 let jobMonitorLoggingIntervalSecs = 30 // frequency of the monitor reconcile loop: dispatch, liveness ping, status publish
-let jobMonitorStatusCheckIntervalSecs = 60 // frequency of us reading the monitor's progress ConfigMap
+let jobMonitorStatusCheckIntervalSecs = 60
 let jobMonitorStatusCheckTimeOutSecs = 600
 let mutable toPerformCleanup = true
 let failedJobLogFileLineCount = 10000
@@ -62,11 +54,11 @@ let failedJobLogStreamLineCount = 1000
 let mutable nonce : String = ""
 let mutable helmReleaseName : String = ""
 
-// Resolve --pubnet-parallel-catchup-profile into a ConfigMap the monitor mounts.
+// Resolve --pubnet-parallel-catchup-profile into the profile body POSTed to /start.
 //
 // Accepts a local path or an https URL, so a profile can come off disk or
-// straight from a raw paste/gist link. Returns the ConfigMap name, or None to
-// size from the configured requests.
+// straight from a raw paste/gist link. Returns None to size from the
+// configured requests.
 //
 // Never fatal: a profile only tightens requests, so a run must still start when
 // one cannot be fetched. Failing the mission here would turn an optimisation
@@ -77,11 +69,6 @@ let resolveRangeProfile (context: MissionContext) : string option =
     if String.IsNullOrWhiteSpace spec then
         None
     else
-        // The options are built before the helm install sets this, and the
-        // ConfigMap has to land in the same cluster and namespace the release
-        // will use.
-        Environment.SetEnvironmentVariable("KUBECONFIG", ExpandHomeDirTilde context.kubeCfg)
-
         try
             let body =
                 if spec.StartsWith("https://", StringComparison.OrdinalIgnoreCase) then
@@ -329,16 +316,16 @@ let installProject (context: MissionContext) =
         storageReqGibi
         storageLimGibi
 
-    // This is the DEFAULT cpu request, not a ceiling. The monitor does NOT clamp
-    // profile-derived cpu to it: _slack_cpu returns the tier value straight
-    // through, so a PROFILE_CPU_TIERS band above this value really is issued --
-    // verified 2026-07-31, tiers of 1.5 and 2.0 rendered under a 1250m REQ_CPU.
-    // It applies to ranges the profile cannot size at all.
-    // Pushed only when the run explicitly asks. Otherwise the chart default stands,
-    // so the chart is the single place V2's worker sizing is written down.
+    // Both pushed only when the run explicitly asks. Otherwise the chart default
+    // stands, so the chart is the single place V2's worker sizing is written down.
     if not (String.IsNullOrWhiteSpace context.pubnetParallelCatchupCpuRequest) then
         setOptions.Add(
             sprintf "worker.resources.requests.cpu=%s" context.pubnetParallelCatchupCpuRequest
+        )
+
+    if not (String.IsNullOrWhiteSpace context.pubnetParallelCatchupMemRequest) then
+        setOptions.Add(
+            sprintf "worker.resources.requests.memory=%s" context.pubnetParallelCatchupMemRequest
         )
 
     setOptions.Add(sprintf "worker.resources.requests.ephemeral_storage=%s" storageReqGibi)
@@ -452,11 +439,6 @@ let installProject (context: MissionContext) =
     | Some valuesOutput -> LogInfo "%s" valuesOutput
     | _ -> ()
 
-// Collect log files from all parallel catchup worker pods
-// This function:
-// 1. Automatically determines worker pod names from context.pubnetParallelCatchupNumWorkers
-// 2. For each pod, finds all files matching "stellar-core-*.log" in /data
-// 3. Creates a tar.gz archive and copies it to context.destination directory
 // How often the main loop pulls logs. Every 10 minutes flattens the teardown
 // cost -- which measured ~20 minutes for a full run, all of it after the work
 // finished -- without the pull competing with the collector for the volume.
@@ -555,9 +537,7 @@ let collectLogsFromPods (context: MissionContext) =
 // collection and leak every worker pod, which is what we saw in practice
 // with a 1024-worker run aborted from Jenkins.
 
-let queryJobMonitor (context: MissionContext, key: String) =
-    // `key` is vestigial: /status returns the one document the ConfigMap used
-    // to hold under that key.
+let queryJobMonitor (context: MissionContext) =
     try
         use client = monitorClient context
         let body = client.GetStringAsync("/status") |> Async.AwaitTask |> Async.RunSynchronously
@@ -568,8 +548,8 @@ let queryJobMonitor (context: MissionContext, key: String) =
         None
 
 
-// Emit what this run measured, next to the worker-log tar, so a later run can
-// be given tighter per-range requests. An artifact rather than a ConfigMap or
+// Emit what this run measured, so a later run can be given tighter
+// per-range requests. An artifact rather than a ConfigMap or
 // an S3 object: nothing for ArgoCD to reconcile, no second writer racing a
 // concurrent mission, and not bounded by Prometheus retention.
 // Fields carried from the monitor's progress record into the profile artifact.
@@ -607,11 +587,6 @@ let projectRangeEntry (record: JObject) : JObject =
 
 
 // The progress record, read only from the monitor's volume.
-//
-// Not from the ConfigMap: that is a visibility mirror with every profiling
-// field stripped and a 1 MiB cap (~6100 ranges, reachable by halving
-// ledgersPerJob). A profile built from it would be empty but look complete, and
-// past the cap it stops updating while /logs/progress.json stays correct.
 // No record is the safe outcome -- the consumer falls back to its defaults.
 let readProgressRecord (context: MissionContext) : JObject option =
     let monitorPods =
@@ -740,9 +715,7 @@ let rangeProfileDocument (storageMode: string) (defaultLedgersPerRange: int) (co
 
     // A profile with no measurements is worse than no profile at all: it looks
     // complete, so nothing downstream can tell it from a good one, and the next
-    // run sizes itself from empty data. The usual cause is readProgressRecord
-    // falling back to the progress ConfigMap, which is a state mirror with
-    // every profiling field stripped. Writing nothing lets the consumer fall
+    // run sizes itself from empty data. Writing nothing lets the consumer fall
     // back to its configured defaults, which is the safe outcome.
     if ranges.Count = 0 then None else Some doc
 
@@ -909,7 +882,7 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
 
     while not allJobsFinished do
         Thread.Sleep(jobMonitorStatusCheckIntervalSecs * 1000)
-        let statusOpt = queryJobMonitor (context, jobMonitorStatusKey)
+        let statusOpt = queryJobMonitor context
 
         try
             match statusOpt with
