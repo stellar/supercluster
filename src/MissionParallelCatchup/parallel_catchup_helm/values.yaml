@@ -68,7 +68,7 @@ monitor:
   # this chart against it ships env vars the image cannot read. Built from this
   # branch and pinned by tag rather than :latest so a run is always traceable to
   # one image. Revert to the stellar/ repo once there is a push path for it.
-  image: "stellajuna/ssc-jm:2026-08-09a"
+  image: "stellajuna/ssc-jm:2026-08-10a"
   # The driver reaches the monitor through this route: profile in via POST
   # /start, status and logs out. Empty routeHost disables the HTTPRoute; the
   # Service still exists, so an in-cluster caller works either way.
