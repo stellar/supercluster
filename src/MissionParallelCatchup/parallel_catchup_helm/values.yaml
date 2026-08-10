@@ -78,6 +78,18 @@ monitor:
   # The driver reaches the monitor through this route: profile in via POST
   # /start, status and logs out. Empty routeHost disables the HTTPRoute; the
   # Service still exists, so an in-cluster caller works either way.
+  # The monitor's Role is the same for every run, so it is provisioned once per
+  # namespace in stellar/kube, bound to system:serviceaccounts:<namespace> --
+  # every ServiceAccount in the namespace, because a binding names its subject
+  # exactly and the monitor's is named after the release. Creating the Role per
+  # release instead needs the installer to hold RBAC-granting rights, which is a
+  # privilege every mission would then carry so that this one chart can install
+  # its own Role.
+  #
+  # true creates the Role and RoleBinding for a cluster where that provisioning
+  # does not exist -- a k3d/kind run, say. The ServiceAccount is created either
+  # way; creating one grants nothing.
+  createRbac: false
   routeHost: ""
   gatewayName: ""
   gatewayNamespace: ""

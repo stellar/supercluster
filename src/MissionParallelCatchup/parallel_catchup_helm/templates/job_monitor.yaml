@@ -1,19 +1,12 @@
+# The monitor's identity. Created unconditionally -- creating a ServiceAccount
+# grants nothing, so it needs no RBAC rights from whoever installs the chart.
+# What it may do comes from a RoleBinding the namespace provides, granted to
+# every ServiceAccount in the namespace; see monitor.createRbac for clusters
+# without one. No IRSA annotation: the S3 mirror is the workers' business.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: {{ .Release.Name }}-job-monitor
-  {{- with .Values.service_account.annotations }}
-  annotations:
-    {{- /* The mission sends an indexed array of {key,value}; a plain map is
-           also accepted so the chart stays usable standalone. */}}
-    {{- if kindIs "slice" . }}
-    {{- range . }}
-    {{ .key }}: {{ .value | quote }}
-    {{- end }}
-    {{- else }}
-    {{- toYaml . | nindent 4 }}
-    {{- end }}
-  {{- end }}
 ---
 # Worker pods run under this, not the monitor's SA: IRSA trust for the S3
 # history mirror is bound to this name/namespace. Same name the StatefulSet
@@ -35,6 +28,7 @@ metadata:
     {{- end }}
   {{- end }}
 ---
+{{- if .Values.monitor.createRbac }}
 # Namespaced and delete-free. The monitor creates Jobs and PVCs and reads their
 # state; it never patches finalizers and has no access to PersistentVolumes, so
 # it cannot orphan an EBS volume. Job/PVC cleanup happens through
@@ -81,6 +75,40 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: {{ .Release.Name }}-job-monitor
+---
+# The collector samples kubelet /stats/summary directly on :10250 for per-pod
+# disk use. nodes is cluster-scoped, so this pair has to be too -- which is why
+# ssc-eks provisions it outside the chart: creating a ClusterRole needs the
+# installer to already hold nodes/stats itself, on top of cluster-wide RBAC
+# rights. Only a cluster where the installer is admin can render this.
+#
+# Named after the release because cluster-scoped objects share one namespace:
+# a fixed name would let one run's uninstall delete another run's access.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-node-stats-reader
+rules:
+  - apiGroups: [""]
+    resources: ["nodes/stats"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-node-stats-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Name }}-node-stats-reader
+subjects:
+  # The collector is a sidecar in the monitor pod, so this is its account. The
+  # cluster-provisioned copy binds the whole namespace group instead, because it
+  # cannot know a name derived from the release.
+  - kind: ServiceAccount
+    name: {{ .Release.Name }}-job-monitor
+    namespace: {{ .Release.Namespace }}
+{{- end }}
 ---
 # Holds every worker's log for the run. The monitor is the only long-lived pod,
 # which is what the driver used to rely on the StatefulSet workers for; with a
