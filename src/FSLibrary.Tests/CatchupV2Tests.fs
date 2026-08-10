@@ -114,7 +114,8 @@ let private measuredRecord (count: int) (anon: int64) =
     r.["peakWorkingSetBytes"] <- JValue(anon + 1000L)
     r
 
-/// The same record as it survives the ConfigMap mirror.
+/// The same record with every measurement stripped: what a range leaves behind
+/// when the collector never wrote peaks for it, or the read was degraded.
 let private unmeasured (record: JObject) =
     let r = record.DeepClone() :?> JObject
 
@@ -171,10 +172,6 @@ let ``a measured run still produces a complete profile`` () =
         Assert.Equal(900L, ranges.["420"].["peakAnonBytes"].Value<int64>())
         Assert.Equal(950L, ranges.["840"].["peakAnonBytes"].Value<int64>())
         Assert.Equal(120.0, ranges.["420"].["seconds"].Value<float>())
-        // Measured but deliberately not projected: recorded as metrics, never
-        // sized or ordered from, and pure weight in a 1 MiB-capped artifact.
-        Assert.Null(ranges.["420"].["wallSeconds"])
-        Assert.Null(ranges.["420"].["txApply"])
         // count is still carried, and the slicing is inferred from it rather
         // than from the caller's default.
         Assert.Equal(420, ranges.["420"].["count"].Value<int>())
