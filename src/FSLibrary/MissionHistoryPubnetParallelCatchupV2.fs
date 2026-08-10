@@ -238,6 +238,13 @@ let installProject (context: MissionContext) =
     if context.jobMonitorImagePcV2 <> "" then
         setOptions.Add(sprintf "monitor.image=%s" context.jobMonitorImagePcV2)
 
+    // Off by default: ssc-eks provides the binding itself, and creating these
+    // needs the installer to hold the rights being granted. A cluster without
+    // that binding gets a 403 on the monitor's first ConfigMap read and
+    // dispatches nothing -- ssc-test is such a cluster.
+    if context.pubnetParallelCatchupCreateRbac then
+        setOptions.Add("monitor.createRbac=true")
+
     if context.pubnetParallelCatchupPoolPrefix <> "" then
         // Routing needs the label KEY and the taint toleration, and neither has
         // a sensible default for an unpooled run -- both ship as []. Derived

@@ -128,6 +128,7 @@ type MissionContext =
       pubnetParallelCatchupMemRequest: string
       pubnetParallelCatchupPoolCpu: string
       pubnetParallelCatchupPoolMem: string
+      pubnetParallelCatchupCreateRbac: bool
       genesisTestAccountCount: int option
 
       asanOptions: string option

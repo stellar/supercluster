@@ -124,6 +124,7 @@ type MissionOptions
         pubnetParallelCatchupMemRequest: string,
         pubnetParallelCatchupPoolCpu: string,
         pubnetParallelCatchupPoolMem: string,
+        pubnetParallelCatchupCreateRbac: bool,
         tag: string option,
         numPregeneratedTxs: int option,
         genesisTestAccountCount: int option,
@@ -584,6 +585,12 @@ type MissionOptions
              Default = "")>]
     member self.PubnetParallelCatchupPoolMem : string = pubnetParallelCatchupPoolMem
 
+    [<Option("pubnet-parallel-catchup-create-rbac",
+             HelpText = "have the chart create the monitor's Role, RoleBinding, ClusterRole and ClusterRoleBinding. Default false: on ssc-eks the namespace already provides them (a catchup-job-monitor RoleBinding covering system:serviceaccounts:stellar-supercluster), and creating them needs the installer to hold those rights. Set it on a cluster that has no such binding -- without it the monitor 403s on its first ConfigMap read and dispatches nothing (only supported for V2)",
+             Required = false,
+             Default = false)>]
+    member self.PubnetParallelCatchupCreateRbac : bool = pubnetParallelCatchupCreateRbac
+
     [<Option("tag", HelpText = "optional name to tag the run with", Required = false)>]
     member self.Tag = tag
 
@@ -970,6 +977,7 @@ let main argv =
                                pubnetParallelCatchupMemRequest = mission.PubnetParallelCatchupMemRequest
                                pubnetParallelCatchupPoolCpu = mission.PubnetParallelCatchupPoolCpu
                                pubnetParallelCatchupPoolMem = mission.PubnetParallelCatchupPoolMem
+                               pubnetParallelCatchupCreateRbac = mission.PubnetParallelCatchupCreateRbac
                                tag = mission.Tag
                                numPregeneratedTxs = mission.NumPregeneratedTxs
                                enableTailLogging = true

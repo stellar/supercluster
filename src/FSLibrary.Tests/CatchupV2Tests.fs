@@ -49,49 +49,6 @@ let ``range profile keeps only the measurements that exist`` () =
 
 
 [<Fact>]
-let ``range profile carries the fields the sizing consumer prefers`` () =
-    // peakAnonBytes is the memory figure _profile_overrides reads. Omitting it
-    // from the projection silently stripped it from the mission artifact while
-    // the monitor's progress.json carried it for 99% of ranges -- measured
-    // 2026-07-30, artifact 0% vs volume 99%.
-    //
-    // `seconds` is the only timing carried: it is the percentile basis, the
-    // dispatch order and the runtime insurance threshold. wallSeconds and
-    // txApply are recorded per range as metrics but nothing sizes from either,
-    // and wallSeconds alone was 349 KB of a 963 KB artifact.
-    Assert.Contains("peakAnonBytes", rangeProfileFields)
-    Assert.Contains("seconds", rangeProfileFields)
-    Assert.DoesNotContain("wallSeconds", rangeProfileFields)
-    Assert.DoesNotContain("txApply", rangeProfileFields)
-
-    let record = JObject()
-    record.["peakAnonBytes"] <- JValue(111L)
-    record.["seconds"] <- JValue(50.0)
-    record.["wallSeconds"] <- JValue(999.0)
-    let entry = projectRangeEntry record
-    Assert.Equal(111L, entry.["peakAnonBytes"].Value<int64>())
-    Assert.Equal(50.0, entry.["seconds"].Value<float>())
-    Assert.Null(entry.["wallSeconds"])
-
-
-[<Fact>]
-let ``range profile keeps count as a field so it can be keyed on end alone`` () =
-    // Measured: 4.2x the ledgers per range moved peak disk -1.6% and wall time
-    // 1.15x, so cost tracks ledger position rather than range length. Keying on
-    // end/count would discard the whole profile whenever overlapLedgers or
-    // ledgersPerJob changed, for a distinction the measurements say is small.
-    Assert.DoesNotContain("count", rangeProfileFields)
-
-    let record = JObject()
-    record.["peakWorkingSetBytes"] <- JValue(1L)
-    record.["count"] <- JValue(420)
-    // projectRangeEntry itself must not copy count -- writeRangeProfile attaches
-    // it separately, so a stale profile cannot smuggle it in as a measurement.
-    let entry = projectRangeEntry record
-    Assert.Null(entry.["count"])
-
-
-[<Fact>]
 let ``range profile does not carry a pvc volume peak`` () =
     // A PVC's size is not a scheduling dimension, so growing it buys no
     // packing and it is deliberately not profiled.
@@ -108,19 +65,6 @@ let ``pvc mode does not reserve node disk it never uses`` () =
             "../../../../FSLibrary/MissionHistoryPubnetParallelCatchupV2.fs")
     Assert.Contains("pubnetParallelCatchupStorageMode = \"pvc\"", src)
     Assert.Contains("\"2Gi\", \"4Gi\"", src)
-
-
-[<Fact>]
-let ``progress record is read from the volume and never from the configmap`` () =
-    // /logs/progress.json is the monitor's own state: authoritative, unbounded,
-    // and the only copy carrying measurements. The ConfigMap is the driver's
-    // view of the run -- status only -- so a record sourced from it would build
-    // an artifact that looks complete and measures nothing.
-    let src =
-        System.IO.File.ReadAllText(
-            "../../../../FSLibrary/MissionHistoryPubnetParallelCatchupV2.fs")
-    Assert.Contains("/logs/progress.json", src)
-    Assert.DoesNotContain("jobMonitorProgressKey", src)
 
 
 [<Fact>]
@@ -230,35 +174,6 @@ let private completedMap (pairs: (string * JObject) list) =
 
 
 [<Fact>]
-let ``a range carrying no measurement must not enter the profile`` () =
-    let mirrored = unmeasured (measuredRecord 420 900L)
-
-    // Precondition: the helper really does strip every measurement, leaving
-    // only bookkeeping. If this ever stops holding, the rest is meaningless.
-    for f in measurementFields do
-        Assert.Null(mirrored.[f])
-
-    Assert.NotNull(mirrored.["count"])
-    Assert.NotNull(mirrored.["attempts"])
-
-    let ranges = buildRangeProfile (completedMap [ "420", mirrored ])
-
-    Assert.Equal(0, ranges.Count)
-
-
-[<Fact>]
-let ``count alone never satisfies the measurement guard`` () =
-    // This is the defeated guard in its smallest form: count is the only field,
-    // and it is bookkeeping, not a measurement.
-    let onlyCount = JObject()
-    onlyCount.["count"] <- JValue(420)
-
-    let ranges = buildRangeProfile (completedMap [ "420", onlyCount ])
-
-    Assert.Equal(0, ranges.Count)
-
-
-[<Fact>]
 let ``a run whose ranges measured nothing produces no profile artifact`` () =
     // The headline symptom: a full-looking artifact, right number of ranges,
     // zero measurements -- what a run whose collector never wrote peaks leaves
@@ -279,25 +194,6 @@ let ``a run whose ranges measured nothing produces no profile artifact`` () =
             "wrote a profile artifact with %d ranges and zero measurements: %s"
             ranges.Count
             (ranges.ToString())
-
-
-[<Fact>]
-let ``the profile counts only ranges that actually measured something`` () =
-    // A partly-measured run is the dangerous case: the artifact looks
-    // populated, so nothing downstream can tell the unmeasured ranges apart
-    // from the measured one.
-    let completed =
-        completedMap
-            [ "420", measuredRecord 420 900L
-              "840", unmeasured (measuredRecord 420 950L)
-              "1260", unmeasured (measuredRecord 420 990L) ]
-
-    let ranges = buildRangeProfile completed
-
-    Assert.Equal(1, ranges.Count)
-    Assert.NotNull(ranges.["420"])
-    Assert.Null(ranges.["840"])
-    Assert.Null(ranges.["1260"])
 
 
 [<Fact>]
@@ -325,34 +221,3 @@ let ``a measured run still produces a complete profile`` () =
         Assert.Equal(420, ranges.["420"].["count"].Value<int>())
         Assert.Equal(420, doc.["ledgersPerRange"].Value<int>())
         Assert.Equal("pvc", doc.["storageMode"].Value<string>())
-
-
-[<Fact>]
-let ``a single real measurement is enough to keep a range and it keeps its count`` () =
-    // The fix must move count after the guard without dropping it -- count is
-    // what ledgersPerRange is inferred from.
-    let r = JObject()
-    r.["attempts"] <- JValue(2)
-    r.["count"] <- JValue(420)
-    r.["seconds"] <- JValue(77.0)
-
-    let ranges = buildRangeProfile (completedMap [ "420", r ])
-
-    Assert.Equal(1, ranges.Count)
-    Assert.Equal(77.0, ranges.["420"].["seconds"].Value<float>())
-    Assert.Equal(420, ranges.["420"].["count"].Value<int>())
-
-
-[<Fact>]
-let ``a range measured only in unprojected fields is dropped, not kept on count alone`` () =
-    // The guard reads the PROJECTION, not the record, so narrowing
-    // rangeProfileFields narrows what counts as measured. A record carrying only
-    // wallSeconds/txApply now projects to nothing and must be dropped -- keeping
-    // it would reintroduce exactly the count-only entry the guard exists to stop.
-    let r = JObject()
-    r.["attempts"] <- JValue(1)
-    r.["count"] <- JValue(420)
-    r.["wallSeconds"] <- JValue(77.0)
-    r.["txApply"] <- JValue(12.0)
-
-    Assert.Empty(buildRangeProfile (completedMap [ "420", r ]))

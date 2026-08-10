@@ -26,6 +26,18 @@ Plus the ones that already existed and are unchanged:
 --pubnet-parallel-catchup-storage-mode pvc|ephemeral
 ```
 
+### Not on ssc-eks
+
+`--pubnet-parallel-catchup-create-rbac` has the chart create the monitor's Role,
+RoleBinding, ClusterRole and ClusterRoleBinding. Leave it off for prod: ssc-eks
+provides them already, through a `catchup-job-monitor` RoleBinding covering
+`system:serviceaccounts:stellar-supercluster`.
+
+ssc-test has no such binding, so a run there needs the flag. Without it the
+monitor 403s reading its own `<release>-stellar-core-config` ConfigMap, never
+resolves the ownerReference, and dispatches nothing -- `/status` keeps answering
+with `num_remain` unchanged and the run simply never starts.
+
 ### The maps
 
 Copy these verbatim. They are the values that were in `values.yaml` and

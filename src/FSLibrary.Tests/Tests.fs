@@ -13,7 +13,6 @@ open StellarKubeSpecs
 open StellarNetworkData
 open StellarNetworkDelays
 open MissionCatchupHelpers
-open Newtonsoft.Json.Linq
 open Xunit.Abstractions
 
 
@@ -129,6 +128,7 @@ let ctx : MissionContext =
       pubnetParallelCatchupMemRequest = ""
       pubnetParallelCatchupPoolCpu = ""
       pubnetParallelCatchupPoolMem = ""
+      pubnetParallelCatchupCreateRbac = false
       tag = None
       numPregeneratedTxs = None
       enableTailLogging = true
