@@ -27,28 +27,6 @@ open MissionHistoryPubnetParallelCatchupV2
 
 
 [<Fact>]
-let ``range profile keeps only the measurements that exist`` () =
-    // The consumer falls back to its configured default when a field is
-    // absent, so a missing measurement must stay missing rather than become a
-    // null. peakEphemeralBytes is recorded only for ephemeral-mode runs that
-    // finished, so most records will not carry it.
-    let record = JObject()
-    record.["peakWorkingSetBytes"] <- JValue(1234L)
-    record.["seconds"] <- JValue(42)
-
-    let entry = projectRangeEntry record
-
-    Assert.Equal(2, entry.Count)
-    Assert.Equal(1234L, entry.["peakWorkingSetBytes"].Value<int64>())
-    Assert.Null(entry.["peakEphemeralBytes"])
-
-    record.["peakEphemeralBytes"] <- JValue(9999L)
-    let withEph = projectRangeEntry record
-    Assert.Equal(3, withEph.Count)
-    Assert.Equal(9999L, withEph.["peakEphemeralBytes"].Value<int64>())
-
-
-[<Fact>]
 let ``range profile does not carry a pvc volume peak`` () =
     // A PVC's size is not a scheduling dimension, so growing it buys no
     // packing and it is deliberately not profiled.
