@@ -35,7 +35,6 @@ let helmChartPath =
 
 // Example command to run local testing (in the `supercluster/` directory):
 // $ dotnet run --project src/App/App.fsproj -- mission HistoryPubnetParallelCatchupV2 --image=docker-registry.services.stellar-ops.com/dev/stellar-core:23.0.3-2779.4d1df2b03.jammy-vnext-buildtests  --pubnet-parallel-catchup-num-workers=2 --pubnet-parallel-catchup-starting-ledger=0 --pubnet-parallel-catchup-end-ledger=6400 --pubnet-parallel-catchup-ledgers-per-job 1280  --destination ./logs
-let valuesFilePath = helmChartPath + "/values.yaml"
 
 let jobMonitorLoggingIntervalSecs = 30 // frequency of the monitor reconcile loop: dispatch, liveness ping, status publish
 let jobMonitorStatusCheckIntervalSecs = 60
@@ -406,8 +405,6 @@ let installProject (context: MissionContext) =
     // installs its monitor, Jobs and PVCs into a different one. Observed
     // 2026-07-30: a mission run with --namespace sandbox put a monitor and four
     // Jobs into the production namespace alongside a live run.
-    let valuesArgs = [| "--values"; valuesFilePath |]
-
     // The pool maps get their own --set each. Every other option is folded into
     // ONE comma-joined --set, and these are themselves comma-separated, so
     // folding them in would split each tier into a separate assignment. helm
@@ -428,7 +425,6 @@ let installProject (context: MissionContext) =
     RunShellCommand(
         Array.concat [ [| "helm"; "install"; helmReleaseName; helmChartPath |]
                        [| "--namespace"; context.namespaceProperty |]
-                       valuesArgs
                        poolMapArgs
                        [| "--set"; String.Join(",", setOptions) |] ]
     )
