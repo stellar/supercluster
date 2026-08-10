@@ -134,11 +134,20 @@ let private completedMap (pairs: (string * JObject) list) =
 
 
 [<Fact>]
-let ``a run whose ranges measured nothing produces no profile artifact`` () =
-    // The headline symptom: a full-looking artifact, right number of ranges,
-    // zero measurements -- what a run whose collector never wrote peaks leaves
-    // behind. Writing nothing is correct: the next run then falls back to its
-    // configured defaults instead of sizing from empty data.
+let ``a measurement-free record cannot become a profile entry`` () =
+    // A range the collector never sampled carries bookkeeping and nothing else.
+    // Letting it into the artifact does not merely add a useless entry -- it
+    // SHADOWS the real ones. profile_for resolves a range to the nearest
+    // measured end ABOVE it, so a junk entry at 1200 captures every range below
+    // it and hides the good measurement at 1600. The junk resolves as a truthy
+    // record with no peakAnonBytes, so _tier_for_bytes returns None and the
+    // range routes to protostar instead of the supergiant its neighbour implies.
+    // Verified: with the entry present, range 1100 sizes to protostar; without
+    // it, supergiant. Nothing logs the difference.
+    //
+    // When NO range measured, the whole document is refused -- an artifact with
+    // the right range count and zero measurements is indistinguishable from a
+    // good one.
     let completed =
         completedMap
             [ "420", unmeasured (measuredRecord 420 900L)
