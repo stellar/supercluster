@@ -87,7 +87,7 @@ def start_run(doc):
     volume before the gate opens, so the first Job dispatched is already sized
     by the profile and a restart resumes the same run.
     """
-    for key, name in (('generator', 'RANGE_GENERATOR'), ('order', 'RANGE_ORDER'),
+    for key, name in (('order', 'RANGE_ORDER'),
                       ('startingLedger', 'STARTING_LEDGER'),
                       ('latestLedgerNum', 'LATEST_LEDGER_NUM'),
                       ('ledgersPerJob', 'LEDGERS_PER_JOB'),
@@ -143,9 +143,6 @@ def validate_config():
             raise ValueError(f"{name} must be greater than zero, got {raw!r}")
         setattr(config, name, value)
 
-    if config.RANGE_GENERATOR not in config.VALID_RANGE_GENERATORS:
-        raise ValueError("RANGE_GENERATOR must be one of %s, got %r"
-                         % (', '.join(config.VALID_RANGE_GENERATORS), config.RANGE_GENERATOR))
     if config.RANGE_ORDER not in config.VALID_RANGE_ORDERS:
         raise ValueError("RANGE_ORDER must be one of %s, got %r"
                          % (', '.join(config.VALID_RANGE_ORDERS), config.RANGE_ORDER))
@@ -1321,7 +1318,7 @@ def completion_record(end, attempt, status, pod, count=None):
                        "metric will be missing for this range", end)
     record = {'seconds': _range_compute_seconds(end, attempt, pod, wall),
               'wallSeconds': wall, 'txApply': tx, 'attempts': attempt}
-    # Ledger count travels with the record: the logarithmic generator varies it
+    # Ledger count travels with the record: ledgersPerJob is per-run input
     # per range, so it cannot be recomputed from config when the profile is read
     # back.
     if count is not None:

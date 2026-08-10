@@ -206,8 +206,6 @@ spec:
               value: {{ .Values.monitor.livenessSweepSeconds | quote }}
             - name: LIVENESS_MAX_CONCURRENCY
               value: {{ .Values.monitor.livenessMaxConcurrency | quote }}
-            - name: LOGARITHMIC_FLOOR_LEDGERS
-              value: {{ .Values.range.logarithmicFloorLedgers | quote }}
             - name: PARALLELISM
               value: {{ .Values.worker.replicas | quote }}
             - name: STORAGE_MODE

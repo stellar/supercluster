@@ -23,9 +23,7 @@ ASAN_OPTIONS = os.getenv('ASAN_OPTIONS', '')
 # Which ledger ranges to run. These are pure inputs to the range generator:
 # dispatch recomputes the whole list every reconcile, so a restart must
 # reproduce it exactly.
-RANGE_GENERATOR = 'uniform'  # from /start: uniform | logarithmic
 
-VALID_RANGE_GENERATORS = ('uniform', 'logarithmic')
 
 # Both generators emit tip-first, which front-loads the most expensive ranges:
 # the bucket set only grows with ledger position. 'oldest-first' reverses that,
@@ -43,8 +41,6 @@ LEDGERS_PER_JOB = 16000  # from /start
 
 OVERLAP_LEDGERS = 320  # from /start
 
-# logarithmic only: chunk size halves toward the tip and stops shrinking here.
-LOGARITHMIC_FLOOR_LEDGERS = int(os.getenv('LOGARITHMIC_FLOOR_LEDGERS', 64000))
 
 # =============================================================================
 # 2. Kubernetes objects this monitor creates

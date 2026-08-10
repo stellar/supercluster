@@ -37,7 +37,6 @@ DEFAULT_CONFIG = {
     'LATEST_LEDGER_NUM': 300,
     'LEDGERS_PER_JOB': 100,
     'OVERLAP_LEDGERS': 320,
-    'RANGE_GENERATOR': 'uniform',
     'RANGE_ORDER': 'tip-first',
     'PARALLELISM': 2,
     'STORAGE_MODE': 'pvc',

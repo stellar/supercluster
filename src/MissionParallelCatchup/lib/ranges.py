@@ -68,34 +68,16 @@ def _ordered(ranges):
                          % (', '.join(config.VALID_RANGE_ORDERS), config.RANGE_ORDER))
 
 
-def _logarithmic_ranges():
-    """Big chunks over cheap early history, halving toward the tip.
-
-    Aims for roughly equal wall-time per job rather than equal ledger count.
-    """
-    out = []
-    start_ledger = config.STARTING_LEDGER
-    end_ledger = config.LATEST_LEDGER_NUM // 2
-    chunk = (end_ledger - start_ledger + 1) // max(config.PARALLELISM, 1)
-    while chunk > config.LOGARITHMIC_FLOOR_LEDGERS:
-        out.extend(_uniform_segment(start_ledger, end_ledger, chunk))
-        start_ledger = end_ledger + 1
-        chunk //= 2
-        end_ledger = start_ledger + (chunk * config.PARALLELISM)
-    out.extend(_uniform_segment(end_ledger + 1, config.LATEST_LEDGER_NUM, config.LOGARITHMIC_FLOOR_LEDGERS))
-    return out
-
-
 def generate_ranges():
-    # An unrecognised generator used to fall through to logarithmic, so a typo
-    # silently produced a completely different range layout. validate_config()
-    # rejects that at startup; this raise is the backstop, not the primary check
-    # -- reached from inside reconcile it would only ever be logged and retried.
-    if config.RANGE_GENERATOR == 'uniform':
-        ranges = _uniform_segment(config.STARTING_LEDGER, config.LATEST_LEDGER_NUM, config.LEDGERS_PER_JOB)
-    elif config.RANGE_GENERATOR == 'logarithmic':
-        ranges = _logarithmic_ranges()
-    else:
-        raise ValueError("RANGE_GENERATOR must be one of %s, got %r"
-                         % (', '.join(config.VALID_RANGE_GENERATORS), config.RANGE_GENERATOR))
-    return _ordered(ranges)
+    """Uniform ranges over the whole window, in the configured dispatch order.
+
+    A logarithmic generator lived here -- big chunks over cheap early history,
+    halving toward the tip, aiming for equal wall-time per job. longest-first
+    supersedes it: same goal, but ordered from what ranges actually measured
+    rather than from an assumption about where the expensive ledgers are. It
+    also became unreachable when the range moved into /start, which carries no
+    generator. Recover it from 8553e77 if the guess ever beats the measurement.
+    """
+    return _ordered(_uniform_segment(config.STARTING_LEDGER,
+                                     config.LATEST_LEDGER_NUM,
+                                     config.LEDGERS_PER_JOB))

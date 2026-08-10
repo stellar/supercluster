@@ -60,10 +60,6 @@ worker:
 # The range itself -- start, end, size, order -- is per-run input and arrives
 # with the driver's POST /start, so the chart installs a generic monitor.
 range:
-  # uniform: equal ledger counts. logarithmic: big chunks over cheap early
-  # history, halving toward the tip, aiming for equal wall-time per job.
-  generator: "uniform"
-  logarithmicFloorLedgers: 64000
   overlapLedgers: 320
   # Dispatch order. Generators emit tip-first, which front-loads the most
   # expensive ranges. "oldest-first" reverses that so a profiling run

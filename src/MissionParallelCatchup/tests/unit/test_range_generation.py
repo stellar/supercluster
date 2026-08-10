@@ -16,22 +16,19 @@ import job_monitor as jm
 @pytest.fixture
 def build(monkeypatch):
     """Configure the generator and return a callable that runs it."""
-    def configure(generator='uniform', order='tip-first', parallelism=4,
-                  start=39990000, latest=40000000, per_job=1000,
-                  floor=64000, overlap=320):
-        monkeypatch.setattr(config, 'RANGE_GENERATOR', generator)
+    def configure(order='tip-first', parallelism=4,
+                  start=39990000, latest=40000000, per_job=1000, overlap=320):
         monkeypatch.setattr(config, 'RANGE_ORDER', order)
         monkeypatch.setattr(config, 'PARALLELISM', parallelism)
         monkeypatch.setattr(config, 'STARTING_LEDGER', start)
         monkeypatch.setattr(config, 'LATEST_LEDGER_NUM', latest)
         monkeypatch.setattr(config, 'LEDGERS_PER_JOB', per_job)
-        monkeypatch.setattr(config, 'LOGARITHMIC_FLOOR_LEDGERS', floor)
         monkeypatch.setattr(config, 'OVERLAP_LEDGERS', overlap)
         return ranges.generate_ranges()
     return configure
 
 
-def test_generators_emit_tip_first_by_default(build):
+def test_ranges_are_emitted_tip_first_by_default(build):
     r = build()
     assert r[0][0] > r[-1][0], "index 0 must be the tip"
 
@@ -68,39 +65,6 @@ def test_a_short_tail_segment_is_not_padded_past_the_start(build):
     assert sorted(r) == [(500, 500), (1500, 1000), (2500, 1000)]
 
 
-def test_logarithmic_ranges_match_the_shell_generator(build):
-    # Verbatim output of logarithmic_range_generator.sh with
-    # floor=16000 overlap=320 start=0 latest=500000 parallelism=4, captured
-    # before it was deleted. Chunk size halves toward the tip, so exact values
-    # are pinned rather than a count.
-    expected = ("250000/62820 187500/62820 125000/62820 62500/62820 "
-                "375001/31570 343751/31570 312501/31570 281251/31570 "
-                "500000/16320 484000/16320 468000/16320 452000/14817").split()
-    r = build(generator='logarithmic', floor=16000, overlap=320,
-               start=0, latest=500000, parallelism=4)
-    assert [f"{end}/{count}" for end, count in r] == expected
-
-
-def test_the_logarithmic_generator_also_honours_dispatch_order(build):
-    tip = build(generator='logarithmic', floor=16000, start=0, latest=500000)
-    old = build(generator='logarithmic', floor=16000, start=0, latest=500000,
-                 order='oldest-first')
-    assert old == list(reversed(tip))
-
-
-@pytest.mark.parametrize('generator', ['uniforn', 'log', '', 'LOGARITHMIC'])
-def test_an_unrecognised_generator_fails_instead_of_becoming_logarithmic(build, generator):
-    """A typo used to silently produce a different range layout.
-
-    Both arms are explicit now, so anything else raises. This is the failure
-    mode worth a test: the run still SUCCEEDS with the wrong ranges, and no
-    downstream artifact records which generator produced them, so there is
-    nothing to notice afterwards.
-    """
-    with pytest.raises(ValueError, match='RANGE_GENERATOR'):
-        build(generator=generator)
-
-
 def test_longest_first_is_inert_without_a_profile(build, monkeypatch):
     """Ordering is driven by RANGE_ORDER, never by profile detection.
 
@@ -129,8 +93,7 @@ def test_an_unrecognised_order_fails_instead_of_becoming_tip_first(build, order)
 
 @pytest.fixture
 def preflight(monkeypatch):
-    def configure(generator='uniform', order='tip-first', profile=None):
-        monkeypatch.setattr(config, 'RANGE_GENERATOR', generator)
+    def configure(order='tip-first', profile=None):
         monkeypatch.setattr(config, 'RANGE_ORDER', order)
         monkeypatch.setattr(config, 'PROFILE', profile)
         return jm.validate_config
@@ -138,12 +101,7 @@ def preflight(monkeypatch):
 
 
 def test_valid_config_passes(preflight):
-    preflight(generator='logarithmic', order='oldest-first')()
-
-
-def test_preflight_rejects_an_unknown_generator(preflight):
-    with pytest.raises(ValueError, match='RANGE_GENERATOR'):
-        preflight(generator='uniforn')()
+    preflight(order='oldest-first')()
 
 
 def test_preflight_rejects_an_unknown_order(preflight):
@@ -177,9 +135,9 @@ def test_the_preflight_runs_before_anything_is_dispatched(monkeypatch, tmp_path)
     must be refused, not started and then discovered."""
     monkeypatch.setattr(config, 'LOG_DIR', str(tmp_path))
     monkeypatch.setattr(config, 'RUN_PATH', str(tmp_path / 'run.json'))
-    monkeypatch.setattr(config, 'RANGE_GENERATOR', 'nonsense')
+    monkeypatch.setattr(config, 'RANGE_ORDER', 'nonsense')
 
-    with pytest.raises(ValueError, match='RANGE_GENERATOR must be one of'):
+    with pytest.raises(ValueError, match='RANGE_ORDER must be one of'):
         jm.start_run({"range": {'startingLedger': 0, 'latestLedgerNum': 1000, 'ledgersPerJob': 100}})
 
     # Rejected, so nothing was written and no run can proceed from it.
