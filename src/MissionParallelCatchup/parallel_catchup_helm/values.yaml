@@ -278,51 +278,6 @@ monitor:
   # margin, and OOMKilled on BOTH during bucket-apply before closing a ledger.
   poolPrefix: ""
   poolTiers: "0:subdwarf,0.79:dwarf,1.61:subgiant,3.87:giant,8.85:supergiant,18.38:hypergiant,:supernova"
-  # cpu is a claim token, not a demand estimate -- replay draws ~1.05 cores
-  # whatever it is given and is flat in core count from 2 upward (+2.8% at 2->4,
-  # +1.5% at 4->8). Kept at or below the SMALLEST node in each tier so the
-  # low-weight fallback rungs stay schedulable.
-  # Exactly 50% of each tier node's nameplate capacity. Two pods would need the
-  # whole node, which always exceeds allocatable, so a second can never fit --
-  # isolation without depending on how the kubelet reserves.
-  # hypergiant and supernova are NOT half their node: they are sized to the
-  # smallest shape in the pool. x8i.large is r8a.xlarge with half the cores and
-  # the same 32 GiB, and x8i.xlarge is r8a.2xlarge with half the cores and the
-  # same 64 GiB, so preferring the x8i shapes buys the same RAM for half the
-  # spot quota -- 2128 -> 1800 vCPU on a 900-worker wave, 15% back.
-  #
-  # A "half the node" claim of 2.00/4.00 exceeds what an x8i node can offer once
-  # daemonsets are counted (215m: alloy 10 + aws-node 75 + ebs-csi-node 30 +
-  # kube-proxy 100), so those pools never won a single node in either run on
-  # 2026-08-03 despite being weighted in. 1.70 and 3.60 sit under the 1715m and
-  # 3705m that are actually schedulable.
-  #
-  # Dropping cpu below half stops cpu from isolating the pod on the larger
-  # fallback shapes -- two 1.70 claims do fit a 4-vCPU r8a.xlarge. Memory is
-  # what isolates here instead, and it holds on every type in both pools because
-  # they all carry the same RAM: 2 x 16384Mi > 28713Mi usable, 2 x 32768Mi >
-  # 59515Mi usable.
-  # vCPU of the smallest node in each tier's pool -- what decides whether a
-  # promotion is free. Cannot be inferred from poolCpu, which is a claim rather
-  # than a node size.
-  #
-  # Reading the SMALLEST shape was quietly wrong while the x8i pools existed:
-  # hypergiant listed x8i.xlarge (4 vCPU) at w80 beneath two 8-vCPU rungs, so this
-  # said 4 and supergiant->hypergiant priced as free, while Karpenter tried w100
-  # first and the promotion really cost 4->8. The finished 1200-worker run put 12
-  # hypergiant nodes on 2xlarge shapes against 1 on x8i.xlarge. x8i was removed
-  # from spot on 2026-08-04, so these are now both the smallest and the
-  # top-weighted shape and the top rungs cross a class honestly.
-  # Rungs allowed to cross a vCPU class anyway. hypergiant->supernova costs
-  # +2 vCPU and gains only 1.23x, worth 0 minutes on its own -- but the long
-  # jobs alternate between the two tiers, so paired with supergiant->hypergiant
-  # it takes the floor from 2.90h to 2.44h where either alone gets 8 min or none.
-  # supergiant->hypergiant is listed but is a no-op at today's sizes: the doubled
-  # spot pools put both tiers on 4-vCPU nodes, so the rung is already free and
-  # passes the guard without a whitelist entry. It is here so the rung survives
-  # the pools diverging again -- if hypergiant ever bottoms out above supergiant,
-  # the guard would silently shut a rung that is deliberately open.
-  poolCrossRungs: "supergiant->hypergiant"
   # Rungs that never run regardless of the vCPU comparison. Empty: with the spot
   # pools doubled a promotion lands the range on a bigger SHARED node, and that
   # sharing is what it buys. Measured 2026-08-04, two pods per node on one range:
@@ -330,8 +285,7 @@ monitor:
   # against 1.58x on a 4-vCPU node. Note the bump fires on working set, which does
   # NOT predict throughput -- same box, memory.max 28GiB ran 1.83 lps vs 56GiB at
   # 1.70 -- so it reaches the right nodes by the wrong signal.
-  poolBlockRungs: "hypergiant->supernova"
-  poolVcpu: "subdwarf:2,dwarf:2,subgiant:4,giant:4,supergiant:4,hypergiant:8,supernova:16,protostar:8,nebula:4"
+  poolBlockRungs: "dwarf->subgiant,hypergiant->supernova"
   poolCpu: "subdwarf:0.85,dwarf:0.85,subgiant:1.85,giant:1.85,supergiant:1.85,hypergiant:1.85,supernova:3.80,protostar:1.85,nebula:1.80"
   poolMem: "subdwarf:1280Mi,dwarf:1280Mi,subgiant:2816Mi,giant:6656Mi,supergiant:14336Mi,hypergiant:29696Mi,supernova:60416Mi,protostar:29696Mi,nebula:9216Mi"
   # Profiled run, range past the profile's top: newest ledgers, and the newest

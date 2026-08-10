@@ -59,21 +59,3 @@ monitor:
   # supernova       r8a.2xlarge        8    59515Mi / 7695m  57216Mi / 7.20
   poolCpu: "subdwarf:0.45,dwarf:0.45,subgiant:1.40,giant:1.40,supergiant:1.40,hypergiant:3.35,supernova:7.20,protostar:1.40,nebula:3.35"
   poolMem: "subdwarf:576Mi,dwarf:576Mi,subgiant:2048Mi,giant:5248Mi,supergiant:12416Mi,hypergiant:27328Mi,supernova:57216Mi,protostar:27328Mi,nebula:12416Mi"
-  # vCPU of the smallest node each tier can land on. Differs from the spot map
-  # because on-demand pools were never doubled -- supergiant bottoms out at
-  # r8a.large (2), not at a 4-vCPU shape.
-  poolVcpu: "subdwarf:1,dwarf:1,subgiant:2,giant:2,supergiant:2,hypergiant:4,supernova:8,protostar:2,nebula:4"
-  # Both top rungs open, as on spot -- but they get here by the other route. On
-  # this map supergiant bottoms out at 2 vCPU and hypergiant at 4, so BOTH rungs
-  # cross a vCPU class (2->4 and 4->8) and the whitelist is what carries them;
-  # an empty denylist alone would leave them shut. On spot only the supernova
-  # rung needs listing, because the doubled pools put supergiant and hypergiant
-  # on equally-sized nodes.
-  #
-  # The cost is higher here than on spot: one pod per node means a promotion buys
-  # a bigger node outright, with no co-tenant to amortise it, so each promoted
-  # range doubles its vCPU draw. And the bump fires on working set, which does not
-  # predict throughput -- same box, memory.max 28GiB ran 1.83 lps against 56GiB at
-  # 1.70 -- so some of what it promotes will gain nothing.
-  poolCrossRungs: "supergiant->hypergiant"
-  poolBlockRungs: "hypergiant->supernova"

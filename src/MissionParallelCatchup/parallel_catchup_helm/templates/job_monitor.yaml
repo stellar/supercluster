@@ -296,10 +296,6 @@ spec:
               value: {{ .Values.monitor.poolTiers | quote }}
             - name: POOL_BLOCK_RUNGS
               value: {{ .Values.monitor.poolBlockRungs | quote }}
-            - name: POOL_CROSS_RUNGS
-              value: {{ .Values.monitor.poolCrossRungs | quote }}
-            - name: POOL_VCPU
-              value: {{ .Values.monitor.poolVcpu | quote }}
             - name: POOL_CPU
               value: {{ .Values.monitor.poolCpu | quote }}
             - name: POOL_UNPROFILED

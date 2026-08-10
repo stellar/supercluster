@@ -468,40 +468,6 @@ POOL_CPU = os.getenv(
     'POOL_CPU',
     'subdwarf:0.85,dwarf:0.85,subgiant:1.85,giant:1.85,supergiant:1.85,hypergiant:1.85,supernova:3.80,protostar:1.85,nebula:1.80')
 
-# vCPU of the SMALLEST node in each tier's pool. This is what decides whether a
-# promotion is free, and it cannot be inferred from POOL_CPU, which is a claim
-# rather than a node size.
-#
-# It reads the smallest shape, not the likeliest one, and that was quietly wrong
-# while the x8i pools existed. hypergiant listed x8i.xlarge (4 vCPU) at w80 under
-# two 8-vCPU rungs at w100/w90, so this map said 4 and supergiant->hypergiant
-# priced as free -- while Karpenter tried w100 first and the promotion really cost
-# 4->8. The finished 1200-worker run landed 12 hypergiant nodes on 2xlarge shapes
-# against 1 on x8i.xlarge. The x8i spot pools were removed on 2026-08-04, so these
-# figures are now both the smallest AND the top-weighted shape, and the two top
-# rungs cross a class honestly -- which is what POOL_CROSS_RUNGS now carries.
-POOL_VCPU = os.getenv(
-    'POOL_VCPU',
-    'subdwarf:2,dwarf:2,subgiant:4,giant:4,supergiant:4,hypergiant:8,supernova:16,protostar:8,nebula:4')
-
-# Rungs allowed to cross a vCPU class anyway, "from->to", comma separated. The
-# guard exists because a speculative promotion that doubles cores is usually a
-# bad trade, so anything listed here needs a measurement behind it.
-#
-# hypergiant->supernova costs +2 vCPU per range and measured only 1.23x, so on
-# its own it is not worth it -- simulated over the 2026-08-03 run it saved
-# exactly 0 minutes, because the longest job was a supergiant that this rung
-# cannot reach. It earns its place only in company: the long jobs alternate
-# between the two tiers, so fixing one exposes the other. supergiant->hypergiant
-# alone is worth 8 min, this alone 0, and the pair 27 min.
-#
-# supergiant->hypergiant is listed too, and is a no-op at today's spot sizes: the
-# doubled pools put both tiers on 4-vCPU nodes, so that rung is free and clears
-# the guard without an entry. It is here so the rung survives the pools diverging
-# -- if hypergiant ever bottoms out above supergiant, the guard would silently
-# shut a rung that is deliberately open. On on-demand, where supergiant is 2 vCPU
-# and hypergiant 4, the same entry is load-bearing.
-POOL_CROSS_RUNGS = os.getenv('POOL_CROSS_RUNGS', 'supergiant->hypergiant')
 
 # Rungs that never run, whatever the vCPU comparison says. Empty by default: with
 # the spot pools doubled, promotion lands a range on a bigger SHARED node, and
@@ -519,13 +485,21 @@ POOL_CROSS_RUNGS = os.getenv('POOL_CROSS_RUNGS', 'supergiant->hypergiant')
 # Sizing the rung on peakAnonBytes, or widening the tier->instance map directly,
 # would target those nodes deliberately.
 #
+# This is now the ONLY thing standing between a working set and a promotion, so
+# a rung that should not be taken has to be named here -- nothing is inferred.
+#
 # hypergiant->supernova is denied on both capacity types. Its cost rose once the
 # x8i pools were removed on 2026-08-04: supernova's only spot shapes are now
 # 4xlarges, so the rung moves a range from 8 vCPU to 16 rather than the 8-vCPU
-# x8i.2xlarge it used to reach. It is denied here rather than merely dropped from
-# POOL_CROSS_RUNGS so it stays shut if the tiers ever land on equal-sized nodes,
-# which is the state that made the guard unable to hold supergiant->hypergiant.
-POOL_BLOCK_RUNGS = os.getenv('POOL_BLOCK_RUNGS', 'hypergiant->supernova')
+# x8i.2xlarge it used to reach. Simulated over the 2026-08-03 run it saved
+# exactly 0 minutes on its own, because the longest job was a supergiant this
+# rung cannot reach. It pays only in company -- supergiant->hypergiant alone is
+# worth 8 min, this alone 0, the pair 27 -- and that pairing is not on offer
+# while its cost is 8->16 vCPU.
+#
+# dwarf->subgiant is the same doubling at the bottom of the ladder, 2->4 vCPU on
+# spot and 1->2 on on-demand.
+POOL_BLOCK_RUNGS = os.getenv('POOL_BLOCK_RUNGS', 'dwarf->subgiant,hypergiant->supernova')
 
 # Memory request for a pooled range is the TIER'S CUT, not the range's own
 # measurement, and that is deliberate two ways.

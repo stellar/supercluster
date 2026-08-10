@@ -65,19 +65,9 @@ def eph_for_attempt(attempt):
     return units.bytes_to_quantity(min(want, units.quantity_bytes(config.EPH_ESCALATION_CAP)))
 
 
-def pool_vcpu(tier):
-    """vCPU of the smallest node this tier can land on, or None if unmapped."""
-    return _pool_map(config.POOL_VCPU, 'POOL_VCPU').get(tier)
-
-
 def _rung_listed(raw, tier, nxt):
     want = f"{tier}->{nxt}"
     return any(item.strip() == want for item in raw.split(','))
-
-
-def _crossing_allowed(tier, nxt):
-    """Is this specific rung whitelisted to cross a vCPU class?"""
-    return _rung_listed(config.POOL_CROSS_RUNGS, tier, nxt)
 
 
 def _rung_blocked(tier, nxt):
@@ -148,21 +138,24 @@ def _cache_bump(tier, anon_bytes, ws_bytes):
         m8in.large  8 GiB   540 reads/ledger   21% iowait   1.86 lps
         r8in.large 16 GiB    65 reads/ledger    7% iowait   3.14 lps  (100% of profile)
 
-    Only rungs that keep the same node vCPU, read from POOL_VCPU. giant->
-    supergiant is m8a.large->r8a.large: twice the RAM for the same 2 vCPU and
-    +8% spot. supergiant->hypergiant is r8a.large->x8i.large, also 2 vCPU, and
-    that rung measured 1.86x on ssc-test 2026-08-03 -- 1.64 -> 2.99 lps across
-    nine ranges, the largest gain found anywhere.
+    Which rungs are worth taking is stated outright in POOL_BLOCK_RUNGS, not
+    inferred. giant->supergiant is m8a.large->r8a.large: twice the RAM for the
+    same 2 vCPU and +8% spot. supergiant->hypergiant is r8a.large->x8i.large,
+    also 2 vCPU, and that rung measured 1.86x on ssc-test 2026-08-03 -- 1.64 ->
+    2.99 lps across nine ranges, the largest gain found anywhere.
 
-    Do NOT read POOL_CPU for this. It was half the node's vCPU everywhere, so
-    equal claims used to imply equal nodes, but hypergiant and supernova are now
-    sized to the smallest shape in their pool (1.70 on a 2-vCPU x8i.large). A
-    claim comparison silently refuses supergiant->hypergiant, which is the whole
-    reason the x8i shapes were promoted to top weight.
+    Blocked: hypergiant->supernova, whose ranges measured healthy at 6-11
+    reads/ledger and gained only 1.23x, and dwarf->subgiant, the same doubling
+    at the bottom of the ladder. Both double the cores for a weak return.
 
-    What stays blocked is hypergiant->supernova, 2 vCPU -> 4. Those ranges
-    measured healthy at 6-11 reads/ledger and gained only 1.23x, so doubling
-    their cores is the expensive rung with the weak return.
+    This used to be derived instead, by refusing any rung whose POOL_VCPU
+    differed and keeping an allowlist of exceptions. POOL_VCPU reads the
+    SMALLEST shape a pool can land on, so it mispriced every tier spanning node
+    sizes -- an x8i at w80 hid a 4->8 promotion -- and the allowlist existed
+    only to undo its wrong answers. Deriving it bought one rung that a block
+    entry states directly, so a list of refusals replaced both. The cost is that
+    a new tier is allowed by default: a rung that should be refused now has to
+    be named here.
 
     Deliberately loose about false positives. Promoting a range that did not need
     it costs +8% on its node-hours and nothing in quota; leaving one starving
@@ -185,9 +178,6 @@ def _cache_bump(tier, anon_bytes, ws_bytes):
         return tier                     # working set does not reach the next tier
     if _rung_blocked(tier, nxt):
         return tier                     # denied outright, see POOL_BLOCK_RUNGS
-    a, b = pool_vcpu(tier), pool_vcpu(nxt)
-    if (a is None or b is None or a != b) and not _crossing_allowed(tier, nxt):
-        return tier                     # crosses a vCPU class; not free, skip it
     return nxt
 
 
