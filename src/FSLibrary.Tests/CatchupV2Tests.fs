@@ -27,18 +27,6 @@ open MissionHistoryPubnetParallelCatchupV2
 
 
 [<Fact>]
-let ``pvc mode does not reserve node disk it never uses`` () =
-    // /data is on the volume in pvc mode; the node disk only holds logs and tmp.
-    // Asking for the ephemeral-mode figure makes disk rather than cpu the
-    // binding dimension and cuts pods per node.
-    let src =
-        System.IO.File.ReadAllText(
-            "../../../../FSLibrary/MissionHistoryPubnetParallelCatchupV2.fs")
-    Assert.Contains("pubnetParallelCatchupStorageMode = \"pvc\"", src)
-    Assert.Contains("\"2Gi\", \"4Gi\"", src)
-
-
-[<Fact>]
 let ``the job monitor image is overridable and defaults to the chart`` () =
     // The monitor and collector ship as one image pinned in values.yaml. Passing
     // it per run is what lets a build of them be tested without editing the

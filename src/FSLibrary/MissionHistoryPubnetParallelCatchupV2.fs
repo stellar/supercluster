@@ -285,25 +285,6 @@ let installProject (context: MissionContext) =
     // in parallel_catchup_helm/values.yaml, overridable per run with
     // --pubnet-parallel-catchup-cpu-request.
     let resourceRequirements = ParallelCatchupCoreResourceRequirements
-    // StellarKubeSpecs sizes ephemeral-storage for ephemeral mode, where /data is
-    // an emptyDir on the node. In pvc mode /data is on the volume and the node
-    // disk only holds logs and tmp, so asking for the full amount reserves disk
-    // nothing uses -- and makes disk, not cpu, the binding dimension for packing.
-    let storageReqGibi, storageLimGibi =
-        if context.pubnetParallelCatchupStorageMode = "pvc" then
-            "2Gi", "4Gi"
-        else
-            resourceRequirements.Requests.["ephemeral-storage"].ToString(),
-            resourceRequirements.Limits.["ephemeral-storage"].ToString()
-
-    LogInfo
-        "Worker storage from StellarKubeCfg:\n\
-             Storage request: %s\n\
-             Storage limit: %s\n\
-             (cpu and memory come from the chart; workers run with no cpu or memory limit)"
-        storageReqGibi
-        storageLimGibi
-
     // Both pushed only when the run explicitly asks. Otherwise the chart default
     // stands, so the chart is the single place V2's worker sizing is written down.
     if not (String.IsNullOrWhiteSpace context.pubnetParallelCatchupCpuRequest) then
@@ -316,8 +297,29 @@ let installProject (context: MissionContext) =
             sprintf "worker.resources.requests.memory=%s" context.pubnetParallelCatchupMemRequest
         )
 
-    setOptions.Add(sprintf "worker.resources.requests.ephemeral_storage=%s" storageReqGibi)
-    setOptions.Add(sprintf "worker.resources.limits.ephemeral_storage=%s" storageLimGibi)
+    // Ephemeral-storage is an ephemeral-mode concept: /data is an emptyDir on the
+    // node there, and StellarKubeSpecs sizes it. In pvc mode /data is on the
+    // volume and the node disk holds only logs and tmp, so the run reserves
+    // nothing -- _resources already reads an empty REQ_EPHEMERAL as "leave both
+    // axes off the pod", and a request sized for the other mode would make disk
+    // rather than cpu the binding dimension for packing.
+    if context.pubnetParallelCatchupStorageMode <> "pvc" then
+        LogInfo
+            "Worker ephemeral storage from StellarKubeCfg: request %s, limit %s"
+            (resourceRequirements.Requests.["ephemeral-storage"].ToString())
+            (resourceRequirements.Limits.["ephemeral-storage"].ToString())
+
+        setOptions.Add(
+            sprintf
+                "worker.resources.requests.ephemeral_storage=%s"
+                (resourceRequirements.Requests.["ephemeral-storage"].ToString())
+        )
+
+        setOptions.Add(
+            sprintf
+                "worker.resources.limits.ephemeral_storage=%s"
+                (resourceRequirements.Limits.["ephemeral-storage"].ToString())
+        )
 
     // Construct command for fetching history files from S3 for core node
     // `index` and set the corresponding Helm option
