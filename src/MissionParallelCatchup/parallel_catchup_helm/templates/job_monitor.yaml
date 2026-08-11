@@ -302,11 +302,6 @@ spec:
               value: {{ .Values.monitor.poolNoProfile | quote }}
             - name: POOL_MEM
               value: {{ .Values.monitor.poolMem | quote }}
-            # Pods AND this with the tier label. Both capacity variants of a
-            # tier share one label value, and a pod cannot otherwise express a
-            # NodePool property; Karpenter labels every node with it itself.
-            - name: CAPACITY_TYPE
-              value: {{ .Values.monitor.capacityType | quote }}
             - name: PROFILE_MARGIN
               value: {{ .Values.monitor.profileMargin | quote }}
             - name: PROFILE_MAX_MEM
