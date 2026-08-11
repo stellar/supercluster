@@ -486,6 +486,29 @@ let private monitorPodName (context: MissionContext) : string option =
 /// workers came back truncated 2 times in 3 with no error surfaced. A file is
 /// its own unit here: a cut transfer resumes from the byte it reached, and one
 /// bad fetch costs one file rather than the pass.
+/// Which subfolder of the destination an artifact belongs in.
+///
+/// Sorted on the way out, not on the volume: the monitor's paths are an
+/// implementation detail, while this is what a human opens. Flat, a 4000-range
+/// run lands ~16000 files beside the five that summarise it -- three per range
+/// that are per-range detail, and one bundle-wide file each for the monitor log,
+/// the driver log, the progress record, the profile it produced and the run it
+/// was asked for.
+///
+/// Keeping the volume flat also leaves the HTTP surface alone: /logs/<name>
+/// takes one path element and no separator, which is what stops the route --
+/// reachable from outside the cluster once its HTTPRoute is attached -- being
+/// walked out of LOG_DIR.
+let artifactFolder (name: string) =
+    if name.EndsWith(".log.gz") then "range-logs"
+    elif name.EndsWith(".metrics") then "metrics"
+    elif name.EndsWith(".done")
+         || name.EndsWith(".started")
+         || name.EndsWith(".state")
+         || name = "mission_started" then
+        "state"
+    else ""
+
 let collectLogs (context: MissionContext) (destination: string) =
     Directory.CreateDirectory(destination) |> ignore
     use client = monitorClient context
@@ -497,7 +520,15 @@ let collectLogs (context: MissionContext) (destination: string) =
     let fetchOne (entry: JToken) =
         let name = entry.["name"].ToString()
         let size = entry.["size"].Value<int64>()
-        let path = Path.Combine(destination, name)
+        let folder = artifactFolder name
+
+        let path =
+            if folder = "" then
+                Path.Combine(destination, name)
+            else
+                Directory.CreateDirectory(Path.Combine(destination, folder)) |> ignore
+                Path.Combine(destination, folder, name)
+
         let have = if File.Exists path then FileInfo(path).Length else 0L
 
         // Already whole. The collector only ever appends, so equal length means
