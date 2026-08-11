@@ -108,13 +108,9 @@ monitor:
   # margin, and OOMKilled on BOTH during bucket-apply before closing a ledger.
   poolPrefix: ""
   poolTiers: "0:subdwarf,0.79:dwarf,1.61:subgiant,3.87:giant,8.85:supergiant,18.38:hypergiant,:supernova"
-  # Rungs that never run regardless of the vCPU comparison. Empty: with the spot
-  # pools doubled a promotion lands the range on a bigger SHARED node, and that
-  # sharing is what it buys. Measured 2026-08-04, two pods per node on one range:
-  # a co-tenant cost 1.02x per pod on an 8-vCPU node (r8id.2xlarge, 3.78/3.91 lps)
-  # against 1.58x on a 4-vCPU node. Note the bump fires on working set, which does
-  # NOT predict throughput -- same box, memory.max 28GiB ran 1.83 lps vs 56GiB at
-  # 1.70 -- so it reaches the right nodes by the wrong signal.
+  # Rungs the cache bump may never take, "from->to" comma separated. Nothing
+  # else refuses a promotion, so a rung that should not be taken has to be
+  # named here -- see POOL_BLOCK_RUNGS in lib/config.py.
   poolBlockRungs: "dwarf->subgiant,hypergiant->supernova"
   poolCpu: "subdwarf:0.85,dwarf:0.85,subgiant:1.85,giant:1.85,supergiant:1.85,hypergiant:1.85,supernova:3.80,protostar:1.85,nebula:1.80"
   poolMem: "subdwarf:1280Mi,dwarf:1280Mi,subgiant:2816Mi,giant:6656Mi,supergiant:14336Mi,hypergiant:29696Mi,supernova:60416Mi,protostar:29696Mi,nebula:9216Mi"
@@ -125,26 +121,19 @@ monitor:
   # defaults.
   poolNoProfile: "nebula"
   profileMargin: 1.15
-  # No margin on cpu: it is compressible, so under-requesting costs contention
-  # Ceiling for profile-derived memory. Above the configured worker limit on
-  # purpose: a range needing more than that must be able to ask for it
-  # rather than be pinned under its own measured peak.
+  # Ceiling for profile-derived memory, deliberately above the unprofiled
+  # limit: a range that needs more must be able to ask for it.
   profileMaxMemory: "32Gi"
-  # Disk allowances, mirroring the memory ones. The 2026-08-01 ephemeral run
-  # peaked at 37.76Gi against a flat 40Gi limit -- 6% of margin, on a detection
-  # and escalation path that has never executed on real data. These give a
-  # measured range its own sizing instead: flat headroom for image/logs/WAL,
-  # plus a runtime-weighted share because disk tracks runtime at pearson 0.920.
+  # The disk allowances, mirroring the memory ones above. See
+  # PROFILE_EPHEMERAL_HEADROOM in lib/config.py.
   profileEphemeralHeadroom: "2Gi"
   profileRuntimeEphemeralInsurance: "8Gi"
   # Above the flat LIM_EPHEMERAL on purpose: that limit is what an UNMEASURED
   # range gets, and capping a measured one at it would discard the measurement.
   profileMaxEphemeral: "64Gi"
-  # Fixed allowance added to a range's measured rss, on top of profileMargin.
-  # Not zero: memory.max bounds anon PLUS page cache, and a multiplicative
-  # margin is meaningless at small rss. Measured with headroom 0, ranges
-  # profiled at 190MiB rss got a 209MiB limit and 90 of them OOMKilled within
-  # 90s of dispatch.
+  # Flat allowance added to a range's measured rss. Not zero: a multiplicative
+  # margin is meaningless at small rss -- see PROFILE_CACHE_HEADROOM in
+  # lib/config.py for the 90 OOMKills that established it.
   profileCacheHeadroom: "512Mi"
   # Extra memory allowance weighted by a range's runtime relative to the
   # longest valid runtime in the profile. Long-running ranges need more slack
@@ -223,20 +212,10 @@ monitor:
   # stays readable, so a sweep that notices late still finds the medida block.
   # Must stay well under graceSeconds or the kubelet kills the hook.
   prestopSleepSeconds: 5
-  # Must exceed any plausible monitor outage: completion is recorded to the
-  # progress ConfigMap by the monitor, and a Job reclaimed before that happens
-  # reads as "never ran" and gets redone.
-  # 0 = no deadline. Catches a range wedged in archive retries: stellar-core
-  # retries a missing/unreachable archive indefinitely rather than failing.
-  #
-  # 12h, not the 3h this used to be. "A prod range runs ~50 min" was the median
-  # talking -- runtimes span 190x. In the 2026-07-30 16320-ledger pubnet profile
-  # 793 ranges exceeded 3h and the longest wall time was 21488s, so 3h killed 941
-  # legitimate ranges and had to be hand-patched to 12h mid-run. A timeout is
-  # terminal, so each of those would have failed the mission. 12h leaves ~2x the
-  # measured maximum.
-  # Flat for every range; see ATTEMPT_DEADLINE_SECONDS in job_monitor.py for why
-  # scaling it per-range by the profile was tried and removed.
+  # Per-attempt wall-clock cap, seconds. 0 = none. Catches a range wedged in
+  # archive retries, which stellar-core retries forever rather than failing.
+  # A timeout is TERMINAL, so too low fails the mission -- see
+  # ATTEMPT_DEADLINE_SECONDS in lib/config.py for why 12h and not 3h.
   attemptDeadlineSeconds: 43200
   jobTtlSeconds: 600
   # Worker logs are pulled to the monitor's volume while each pod is still
@@ -278,15 +257,11 @@ monitor:
   peakFlushRatio: 1.05
   # Poll cycles a stream gets to finalize after its pod leaves the pod list,
   # before it is cancelled and its connection slot reclaimed.
-  # Where the monitor pod runs, as native k8s fields so nothing here assumes
-  # tiered nodepools -- empty means anywhere untainted, which is what it does
-  # today and what an installation without this tiering wants. The mission fills
-  # them from --job-monitor-node-labels and --job-monitor-tolerate-taints.
-  #
-  # Worth knowing before pinning it to a worker tier: the monitor holds the logs
-  # PVC for the whole run, so the node it lands on cannot be consolidated away
-  # while it is there. On a small tier that reserves a node a range could have
-  # used.
+  # Where the monitor runs. Empty = anywhere untainted, which is what an
+  # installation without tiered nodepools wants. Set from
+  # --job-monitor-node-labels and --job-monitor-tolerate-taints. Pinning it to a
+  # worker tier reserves that node for the run: the monitor holds the logs PVC,
+  # so the node cannot be consolidated away while it is there.
   nodeSelector: {}
   collectorVanishedGraceCycles: 3
   collectorResources:
