@@ -539,19 +539,27 @@ let collectLogs (context: MissionContext) (destination: string) =
 
         let have = if File.Exists path then FileInfo(path).Length else 0L
 
-        // Already whole. The collector only ever appends, so equal length means
-        // equal content -- and this is what stops a pass re-sending what the
-        // last one already took (the tar overlap re-sent 58% of files).
-        //
+        // Resume and skip both assume the file only ever grew, which is true of
+        // a worker log and of nothing else here. progress.json is rewritten
+        // whole on every reconcile and grows as ranges complete, so a Range
+        // request would splice the new document's tail onto the old one's
+        // prefix -- invalid JSON, in the bundle, silently, since the profile is
+        // built from the copy read off the pod rather than this one. Equal
+        // length is no safer: a rewrite can change a value without changing the
+        // length. Everything that is not append-only is refetched whole, which
+        // costs little -- progress.json is ~1 MB at 4000 ranges against ~1.4 GB
+        // of worker logs.
+        let appendOnly = name.EndsWith(".log.gz")
+
         // File.Exists is not redundant: a .done marker is zero bytes, so a
         // length comparison alone reads "absent locally" as "already have it"
         // and never fetches it. Measured 2026-08-08: 88 of 110 artifacts
         // collected, and every .done was among the 22 missing.
-        if File.Exists path && have = size then
+        if appendOnly && File.Exists path && have = size then
             -1L   // already whole; distinct from a zero-byte file we did fetch
         else
             let req = new HttpRequestMessage(HttpMethod.Get, "/logs/" + name)
-            if have > 0L && have < size then
+            if appendOnly && have > 0L && have < size then
                 req.Headers.Range <- Headers.RangeHeaderValue(Nullable(have), Nullable())
 
             use resp = client.SendAsync(req) |> Async.AwaitTask |> Async.RunSynchronously
