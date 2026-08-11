@@ -649,6 +649,69 @@ type Tests(output: ITestOutputHelper) =
         Assert.Equal("56/6", jobArr3.[1].[1])
         Assert.Equal("61/6", jobArr3.[2].[1])
 
+    [<Fact>]
+    member __.``ParseQuorumIntersectionInfo handles intersecting result``() =
+        let json = """{ "node": "GAAA", "qset": {},
+                 "transitive": { "intersection": true, "node_count": 6,
+                                 "last_check_ledger": 12,
+                                 "critical": [["GBBB"], ["GCCC", "GDDD"]] } }"""
+
+        match ParseQuorumIntersectionInfo json with
+        | None -> failwith "expected Some"
+        | Some qi ->
+            Assert.True(qi.intersection)
+            Assert.Equal(6, qi.nodeCount)
+            Assert.Equal(12, qi.lastCheckLedger)
+            Assert.Equal<Set<string> list>([ Set.ofList [ "GBBB" ]; Set.ofList [ "GCCC"; "GDDD" ] ], qi.criticalGroups)
+            Assert.True(qi.potentialSplit.IsNone)
+
+    [<Fact>]
+    member __.``ParseQuorumIntersectionInfo handles split result``() =
+        let json = """{ "node": "GAAA", "qset": {},
+                 "transitive": { "intersection": false, "node_count": 6,
+                                 "last_check_ledger": 20, "last_good_ledger": 15,
+                                 "potential_split": [["GBBB", "GCCC"], ["GDDD"]] } }"""
+
+        match ParseQuorumIntersectionInfo json with
+        | None -> failwith "expected Some"
+        | Some qi ->
+            Assert.False(qi.intersection)
+            Assert.Equal<Set<string> list>([], qi.criticalGroups)
+
+            match qi.potentialSplit with
+            | Some (a, b) ->
+                Assert.Equal<Set<string>>(Set.ofList [ "GBBB"; "GCCC" ], a)
+                Assert.Equal<Set<string>>(Set.ofList [ "GDDD" ], b)
+            | None -> failwith "expected potential_split"
+
+    [<Fact>]
+    member __.``ParseQuorumIntersectionInfo returns None without results``() =
+        Assert.True((ParseQuorumIntersectionInfo """{ "node": "GAAA", "qset": {} }""").IsNone)
+
+        let json = """{ "transitive": { "intersection": true, "node_count": 3,
+                                 "last_check_ledger": 5, "critical": null } }"""
+
+        match ParseQuorumIntersectionInfo json with
+        | Some qi -> Assert.Equal<Set<string> list>([], qi.criticalGroups)
+        | None -> failwith "expected Some"
+
+    [<Fact>]
+    member __.``ParseMetricCount reads counter or defaults to zero``() =
+        let json = """{ "metrics": { "scp.qic.successful-run": { "type": "counter", "count": 3 },
+                              "scp.qic.result-potential-split": { "type": "counter", "count": 1 },
+                              "scp.qic.no-count": { "type": "counter" } } }"""
+
+        Assert.Equal(3, ParseMetricCount json "scp.qic.successful-run")
+        Assert.Equal(1, ParseMetricCount json "scp.qic.result-potential-split")
+        Assert.Equal(0, ParseMetricCount json "scp.qic.no-count")
+        Assert.Equal(0, ParseMetricCount json "scp.qic.failed-run")
+        Assert.Equal(0, ParseMetricCount """{ }""" "scp.qic.failed-run")
+
+    [<Fact>]
+    member __.``QuorumIntersectionChecker mission is registered``() =
+        Assert.True(StellarMission.allMissions.ContainsKey "QuorumIntersectionChecker")
+
+
 // ---------------------------------------------------------------------------
 // MissionHistoryPubnetParallelCatchupV2
 // ---------------------------------------------------------------------------
@@ -801,64 +864,3 @@ let ``a measured range does not drag its unmeasured neighbours in`` () =
         Assert.NotNull(ranges.["1600"])
         Assert.Null(ranges.["1200"])
         Assert.Null(ranges.["2000"])
-    [<Fact>]
-    member __.``ParseQuorumIntersectionInfo handles intersecting result``() =
-        let json = """{ "node": "GAAA", "qset": {},
-                 "transitive": { "intersection": true, "node_count": 6,
-                                 "last_check_ledger": 12,
-                                 "critical": [["GBBB"], ["GCCC", "GDDD"]] } }"""
-
-        match ParseQuorumIntersectionInfo json with
-        | None -> failwith "expected Some"
-        | Some qi ->
-            Assert.True(qi.intersection)
-            Assert.Equal(6, qi.nodeCount)
-            Assert.Equal(12, qi.lastCheckLedger)
-            Assert.Equal<Set<string> list>([ Set.ofList [ "GBBB" ]; Set.ofList [ "GCCC"; "GDDD" ] ], qi.criticalGroups)
-            Assert.True(qi.potentialSplit.IsNone)
-
-    [<Fact>]
-    member __.``ParseQuorumIntersectionInfo handles split result``() =
-        let json = """{ "node": "GAAA", "qset": {},
-                 "transitive": { "intersection": false, "node_count": 6,
-                                 "last_check_ledger": 20, "last_good_ledger": 15,
-                                 "potential_split": [["GBBB", "GCCC"], ["GDDD"]] } }"""
-
-        match ParseQuorumIntersectionInfo json with
-        | None -> failwith "expected Some"
-        | Some qi ->
-            Assert.False(qi.intersection)
-            Assert.Equal<Set<string> list>([], qi.criticalGroups)
-
-            match qi.potentialSplit with
-            | Some (a, b) ->
-                Assert.Equal<Set<string>>(Set.ofList [ "GBBB"; "GCCC" ], a)
-                Assert.Equal<Set<string>>(Set.ofList [ "GDDD" ], b)
-            | None -> failwith "expected potential_split"
-
-    [<Fact>]
-    member __.``ParseQuorumIntersectionInfo returns None without results``() =
-        Assert.True((ParseQuorumIntersectionInfo """{ "node": "GAAA", "qset": {} }""").IsNone)
-
-        let json = """{ "transitive": { "intersection": true, "node_count": 3,
-                                 "last_check_ledger": 5, "critical": null } }"""
-
-        match ParseQuorumIntersectionInfo json with
-        | Some qi -> Assert.Equal<Set<string> list>([], qi.criticalGroups)
-        | None -> failwith "expected Some"
-
-    [<Fact>]
-    member __.``ParseMetricCount reads counter or defaults to zero``() =
-        let json = """{ "metrics": { "scp.qic.successful-run": { "type": "counter", "count": 3 },
-                              "scp.qic.result-potential-split": { "type": "counter", "count": 1 },
-                              "scp.qic.no-count": { "type": "counter" } } }"""
-
-        Assert.Equal(3, ParseMetricCount json "scp.qic.successful-run")
-        Assert.Equal(1, ParseMetricCount json "scp.qic.result-potential-split")
-        Assert.Equal(0, ParseMetricCount json "scp.qic.no-count")
-        Assert.Equal(0, ParseMetricCount json "scp.qic.failed-run")
-        Assert.Equal(0, ParseMetricCount """{ }""" "scp.qic.failed-run")
-
-    [<Fact>]
-    member __.``QuorumIntersectionChecker mission is registered``() =
-        Assert.True(StellarMission.allMissions.ContainsKey "QuorumIntersectionChecker")
