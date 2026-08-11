@@ -232,6 +232,20 @@ let tolerateTaintToHelmIndexed (index: int) ((key: string), (effect: string opti
     let effectValue = Option.defaultValue "NoSchedule" effect
     sprintf "worker.tolerateNodeTaints[%d].key=%s,worker.tolerateNodeTaints[%d].effect=%s" index key index effectValue
 
+// The monitor's own placement. A plain nodeSelector map rather than the
+// worker's affinity terms: its node is chosen once for the run, not per range,
+// so there is nothing to express that an equality match cannot.
+let monitorNodeLabelToHelm ((key: string), (value: string option)) =
+    sprintf "monitor.nodeSelector.%s=%s" key (Option.defaultValue "" value)
+
+let monitorTolerateTaintToHelmIndexed (index: int) ((key: string), (effect: string option)) =
+    sprintf
+        "monitor.tolerateNodeTaints[%d].key=%s,monitor.tolerateNodeTaints[%d].effect=%s"
+        index
+        key
+        index
+        (Option.defaultValue "NoSchedule" effect)
+
 let serviceAccountAnnotationsToHelmIndexed (index: int) (key: string, value: string) =
     sprintf "service_account.annotations[%d].key=%s,service_account.annotations[%d].value=%s" index key index value
 
@@ -388,6 +402,24 @@ let installProject (context: MissionContext) =
     | None -> ()
 
     // Convert labels and taints to Helm array format
+    // Left empty the monitor lands wherever it fits, which on a cluster whose
+    // catchup pools are tainted means the untainted shared nodes -- alongside
+    // ingress and whatever else lives there. Both are needed together to move
+    // it: the labels alone leave it unschedulable on a tainted pool.
+    if not (List.isEmpty context.jobMonitorNodeLabels) then
+        setOptions.Add(
+            context.jobMonitorNodeLabels
+            |> List.map monitorNodeLabelToHelm
+            |> String.concat ","
+        )
+
+    if not (List.isEmpty context.jobMonitorTolerateTaints) then
+        setOptions.Add(
+            context.jobMonitorTolerateTaints
+            |> List.mapi monitorTolerateTaintToHelmIndexed
+            |> String.concat ","
+        )
+
     if not (List.isEmpty context.requireNodeLabelsPcV2) then
         let requireLabelsHelm =
             context.requireNodeLabelsPcV2

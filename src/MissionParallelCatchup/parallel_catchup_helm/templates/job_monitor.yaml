@@ -191,6 +191,10 @@ spec:
         prometheus.io/path: "/prometheus"
     spec:
       serviceAccountName: {{ .Release.Name }}-job-monitor
+      {{- with .Values.monitor.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.monitor.tolerateNodeTaints }}
       tolerations:
         {{- toYaml . | nindent 8 }}

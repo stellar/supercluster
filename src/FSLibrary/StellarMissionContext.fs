@@ -129,6 +129,8 @@ type MissionContext =
       pubnetParallelCatchupPoolCpu: string
       pubnetParallelCatchupPoolMem: string
       pubnetParallelCatchupCreateRbac: bool
+      jobMonitorNodeLabels: ((string * string option) list)
+      jobMonitorTolerateTaints: ((string * string option) list)
       genesisTestAccountCount: int option
 
       asanOptions: string option

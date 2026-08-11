@@ -125,6 +125,8 @@ type MissionOptions
         pubnetParallelCatchupPoolCpu: string,
         pubnetParallelCatchupPoolMem: string,
         pubnetParallelCatchupCreateRbac: bool,
+        jobMonitorNodeLabels: seq<string>,
+        jobMonitorTolerateTaints: seq<string>,
         tag: string option,
         numPregeneratedTxs: int option,
         genesisTestAccountCount: int option,
@@ -591,6 +593,16 @@ type MissionOptions
              Default = false)>]
     member self.PubnetParallelCatchupCreateRbac : bool = pubnetParallelCatchupCreateRbac
 
+    [<Option("job-monitor-node-labels",
+             HelpText = "`key:value` labels the job monitor's node must carry, e.g. purpose:catchup-dwarf catchup-capacity:od. All of them must match. Empty puts it wherever it fits, which for a cluster whose catchup pools are tainted means the untainted shared nodes (only supported for V2)",
+             Required = false)>]
+    member self.JobMonitorNodeLabels = jobMonitorNodeLabels
+
+    [<Option("job-monitor-tolerate-taints",
+             HelpText = "taints the job monitor tolerates, `key` or `key:effect`, effect defaulting to NoSchedule. Needed to put it on a tainted pool -- --job-monitor-node-labels alone leaves it unschedulable there (only supported for V2)",
+             Required = false)>]
+    member self.JobMonitorTolerateTaints = jobMonitorTolerateTaints
+
     [<Option("tag", HelpText = "optional name to tag the run with", Required = false)>]
     member self.Tag = tag
 
@@ -981,6 +993,8 @@ let main argv =
                                pubnetParallelCatchupPoolCpu = mission.PubnetParallelCatchupPoolCpu
                                pubnetParallelCatchupPoolMem = mission.PubnetParallelCatchupPoolMem
                                pubnetParallelCatchupCreateRbac = mission.PubnetParallelCatchupCreateRbac
+                               jobMonitorNodeLabels = List.map splitLabel (List.ofSeq mission.JobMonitorNodeLabels)
+                               jobMonitorTolerateTaints = List.map splitLabel (List.ofSeq mission.JobMonitorTolerateTaints)
                                tag = mission.Tag
                                numPregeneratedTxs = mission.NumPregeneratedTxs
                                enableTailLogging = true

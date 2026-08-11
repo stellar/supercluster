@@ -278,6 +278,16 @@ monitor:
   peakFlushRatio: 1.05
   # Poll cycles a stream gets to finalize after its pod leaves the pod list,
   # before it is cancelled and its connection slot reclaimed.
+  # Where the monitor pod runs, as native k8s fields so nothing here assumes
+  # tiered nodepools -- empty means anywhere untainted, which is what it does
+  # today and what an installation without this tiering wants. The mission fills
+  # them from --job-monitor-node-labels and --job-monitor-tolerate-taints.
+  #
+  # Worth knowing before pinning it to a worker tier: the monitor holds the logs
+  # PVC for the whole run, so the node it lands on cannot be consolidated away
+  # while it is there. On a small tier that reserves a node a range could have
+  # used.
+  nodeSelector: {}
   collectorVanishedGraceCycles: 3
   collectorResources:
     requests: { cpu: "200m", memory: "512Mi" }
