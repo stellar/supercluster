@@ -183,6 +183,10 @@ type StellarCoreCfg =
       forceOldStyleTriggerTimer: bool option
       clockOffsetMs: int option
       surveyPhaseDuration: int option
+      quorumIntersectionChecker: bool
+      useQuorumIntersectionCheckerV2: bool
+      quorumIntersectionCheckerTimeLimitMs: int64 option
+      quorumIntersectionCheckerMemoryLimitBytes: int64 option
       containerType: CoreContainerType
       skipHighCriticalValidatorChecks: bool }
 
@@ -365,7 +369,19 @@ type StellarCoreCfg =
         t.Add("MAX_ADDITIONAL_PEER_CONNECTIONS", self.targetPeerConnections * 3)
         |> ignore
 
-        t.Add("QUORUM_INTERSECTION_CHECKER", false) |> ignore
+        t.Add("QUORUM_INTERSECTION_CHECKER", self.quorumIntersectionChecker) |> ignore
+
+        if self.useQuorumIntersectionCheckerV2 then
+            t.Add("USE_QUORUM_INTERSECTION_CHECKER_V2", true) |> ignore
+
+        match self.quorumIntersectionCheckerTimeLimitMs with
+        | Some ms -> t.Add("QUORUM_INTERSECTION_CHECKER_TIME_LIMIT_MS", ms) |> ignore
+        | None -> ()
+
+        match self.quorumIntersectionCheckerMemoryLimitBytes with
+        | Some b -> t.Add("QUORUM_INTERSECTION_CHECKER_MEMORY_LIMIT_BYTES", b) |> ignore
+        | None -> ()
+
         t.Add("MANUAL_CLOSE", self.manualClose) |> ignore
 
         if self.forceOldStyleLeaderElection then
@@ -672,6 +688,10 @@ type NetworkCfg with
               |> Option.orElse self.missionContext.forceOldStyleTriggerTimer
           clockOffsetMs = None
           surveyPhaseDuration = opts.surveyPhaseDuration
+          quorumIntersectionChecker = opts.quorumIntersectionChecker
+          useQuorumIntersectionCheckerV2 = opts.useQuorumIntersectionCheckerV2
+          quorumIntersectionCheckerTimeLimitMs = opts.quorumIntersectionCheckerTimeLimitMs
+          quorumIntersectionCheckerMemoryLimitBytes = opts.quorumIntersectionCheckerMemoryLimitBytes
           containerType = MainCoreContainer
           skipHighCriticalValidatorChecks = opts.skipHighCriticalValidatorChecks }
 
@@ -733,5 +753,9 @@ type NetworkCfg with
                   Some offsets.[i]
               | None -> None
           surveyPhaseDuration = c.options.surveyPhaseDuration
+          quorumIntersectionChecker = c.options.quorumIntersectionChecker
+          useQuorumIntersectionCheckerV2 = c.options.useQuorumIntersectionCheckerV2
+          quorumIntersectionCheckerTimeLimitMs = c.options.quorumIntersectionCheckerTimeLimitMs
+          quorumIntersectionCheckerMemoryLimitBytes = c.options.quorumIntersectionCheckerMemoryLimitBytes
           containerType = ctype
           skipHighCriticalValidatorChecks = c.options.skipHighCriticalValidatorChecks }

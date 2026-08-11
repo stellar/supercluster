@@ -143,6 +143,21 @@ type NetworkCfg =
         let coreSet = self.FindCoreSet(name).WithLive live
         { self with coreSets = self.coreSets.Add(name, coreSet) }
 
+    // Returns a NetworkCfg with the named CoreSet's options replaced, keeping
+    // its keys and liveness unchanged.
+    member self.WithCoreSetOptions (name: CoreSetName) (options: CoreSetOptions) : NetworkCfg =
+        let coreSet = self.FindCoreSet name
+
+        if options.nodeCount <> coreSet.options.nodeCount then
+            failwithf
+                "WithCoreSetOptions %s: cannot change nodeCount from %d to %d"
+                name.StringName
+                coreSet.options.nodeCount
+                options.nodeCount
+
+        { self with
+              coreSets = self.coreSets.Add(name, { coreSet with options = options }) }
+
     member self.IsJobMode : bool = if self.jobCoreSetOptions = None then false else true
 
     member self.AnchorConfigMapName : string = sprintf "%s-anchor" self.Nonce

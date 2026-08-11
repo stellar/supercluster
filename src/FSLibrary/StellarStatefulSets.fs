@@ -166,6 +166,29 @@ type StellarFormation with
 
     member self.Stop name = self.WithLive name false
 
+    // Replaces the named CoreSet's options (preserving its keys) and pushes the
+    // regenerated per-peer ConfigMaps to the cluster. Callers should Stop the
+    // core set first, call this, then Start it so the pods boot with the new
+    // configuration.
+    member self.ChangeCoreSetOptions (name: CoreSetName) (options: CoreSetOptions) =
+        let newCfg = self.NetworkCfg.WithCoreSetOptions name options
+        let coreSet = newCfg.FindCoreSet name
+
+        for i in 0 .. coreSet.keys.Length - 1 do
+            let cm = newCfg.PeerConfigMap(coreSet, i)
+            self.sleepUntilNextRateLimitedApiCallTime ()
+
+            self.Kube.ReplaceNamespacedConfigMap(
+                body = cm,
+                name = cm.Metadata.Name,
+                namespaceParameter = newCfg.NamespaceProperty
+            )
+            |> ignore
+
+            LogInfo "Replaced ConfigMap %s with reconfigured options" cm.Metadata.Name
+
+        self.SetNetworkCfg newCfg
+
     member self.WaitUntilReady() = self.NetworkCfg.EachPeer(fun p -> p.WaitUntilReady())
 
     member self.WaitUntilAllLiveSynced() = self.NetworkCfg.EachPeer(fun p -> p.WaitUntilSynced())
