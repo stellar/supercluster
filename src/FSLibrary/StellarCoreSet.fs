@@ -224,6 +224,16 @@ type CoreSetOptions =
       clockOffsets: int list option
       surveyPhaseDuration: int option
       updateSorobanCosts: bool option
+      // Enable stellar-core's quorum intersection checker
+      // (QUORUM_INTERSECTION_CHECKER). Supercluster disables it by default.
+      quorumIntersectionChecker: bool
+      // Use the V2 (Rust SAT-solver, subprocess-based) quorum intersection
+      // checker (USE_QUORUM_INTERSECTION_CHECKER_V2). Only meaningful when
+      // quorumIntersectionChecker is true.
+      useQuorumIntersectionCheckerV2: bool
+      // Optional overrides for the V2 checker's resource limits.
+      quorumIntersectionCheckerTimeLimitMs: int64 option
+      quorumIntersectionCheckerMemoryLimitBytes: int64 option
       // `skipHighCriticalValidatorChecks` exists to allow supercluster to
       // remain compatible with older stellar-core images that do not have the
       // ability to turn of validator checks for HIGH and CRITICAL validators
@@ -267,6 +277,10 @@ type CoreSetOptions =
           clockOffsets = None
           surveyPhaseDuration = None
           updateSorobanCosts = None
+          quorumIntersectionChecker = false
+          useQuorumIntersectionCheckerV2 = false
+          quorumIntersectionCheckerTimeLimitMs = None
+          quorumIntersectionCheckerMemoryLimitBytes = None
           skipHighCriticalValidatorChecks = true }
 
 type CoreSet =
@@ -283,11 +297,14 @@ type CoreSet =
         { name = self.name; options = self.options; keys = self.keys; live = live }
 
 
+let MakeLiveCoreSetWithKeys (name: string) (keys: KeyPair array) (options: CoreSetOptions) : CoreSet =
+    if keys.Length <> options.nodeCount then
+        failwithf "MakeLiveCoreSetWithKeys %s: %d keys supplied for nodeCount=%d" name keys.Length options.nodeCount
+
+    { name = CoreSetName name; options = options; keys = keys; live = true }
+
 let MakeLiveCoreSet (name: string) (options: CoreSetOptions) : CoreSet =
-    { name = CoreSetName name
-      options = options
-      keys = Array.init options.nodeCount (fun _ -> KeyPair.Random())
-      live = true }
+    MakeLiveCoreSetWithKeys name (Array.init options.nodeCount (fun _ -> KeyPair.Random())) options
 
 let MakeDeferredCoreSet (name: string) (options: CoreSetOptions) : CoreSet =
     { name = CoreSetName name

@@ -1,6 +1,7 @@
 module Tests
 
 open StellarDestination
+open StellarDotnetSdk.Accounts
 open StellarMissionContext
 open Xunit
 open Newtonsoft.Json.Linq
@@ -14,6 +15,7 @@ open StellarNetworkCfg
 open StellarKubeSpecs
 open StellarNetworkData
 open StellarNetworkDelays
+open StellarCoreHTTP
 open MissionCatchupHelpers
 open Xunit.Abstractions
 
@@ -211,6 +213,87 @@ type Tests(output: ITestOutputHelper) =
         // explicitly configured on the CoreSet or the mission context.
         Assert.DoesNotContain("FORCE_OLD_STYLE_PREPARE_START_TRIGGER_TIMER", toml)
         Assert.DoesNotContain("ARTIFICIALLY_SET_SYSTEM_CLOCK_OFFSET_FOR_TESTING", toml)
+
+    [<Fact>]
+    member __.``Quorum intersection checker config defaults to disabled``() =
+        let cfg = nCfg.StellarCoreCfg(coreSet, 1, MainCoreContainer)
+        let toml = cfg.ToString()
+        Assert.Contains("QUORUM_INTERSECTION_CHECKER = false", toml)
+        Assert.DoesNotContain("USE_QUORUM_INTERSECTION_CHECKER_V2", toml)
+        Assert.DoesNotContain("QUORUM_INTERSECTION_CHECKER_TIME_LIMIT_MS", toml)
+        Assert.DoesNotContain("QUORUM_INTERSECTION_CHECKER_MEMORY_LIMIT_BYTES", toml)
+
+    [<Fact>]
+    member __.``Quorum intersection checker config can be enabled with V2 and limits``() =
+        let opts =
+            { coreSetOptions with
+                  quorumIntersectionChecker = true
+                  useQuorumIntersectionCheckerV2 = true
+                  quorumIntersectionCheckerTimeLimitMs = Some 10000L
+                  quorumIntersectionCheckerMemoryLimitBytes = Some 209715200L }
+
+        let cs = MakeLiveCoreSet "qic" opts
+        let cfg = (MakeNetworkCfg ctx [ cs ] passOpt).StellarCoreCfg(cs, 0, MainCoreContainer)
+        let toml = cfg.ToString()
+        Assert.Contains("QUORUM_INTERSECTION_CHECKER = true", toml)
+        Assert.Contains("USE_QUORUM_INTERSECTION_CHECKER_V2 = true", toml)
+        Assert.Contains("QUORUM_INTERSECTION_CHECKER_TIME_LIMIT_MS = 10000", toml)
+        Assert.Contains("QUORUM_INTERSECTION_CHECKER_MEMORY_LIMIT_BYTES = 209715200", toml)
+
+    [<Fact>]
+    member __.``MakeLiveCoreSetWithKeys preserves supplied keys``() =
+        let keys = Array.init 3 (fun _ -> KeyPair.Random())
+        let cs = MakeLiveCoreSetWithKeys "withkeys" keys coreSetOptions
+        Assert.Equal<KeyPair array>(keys, cs.keys)
+        Assert.True(cs.live)
+        Assert.Equal(CoreSetName "withkeys", cs.name)
+
+    [<Fact>]
+    member __.``MakeLiveCoreSetWithKeys rejects key count mismatch``() =
+        let keys = Array.init 2 (fun _ -> KeyPair.Random())
+
+        Assert.Throws<System.Exception>(fun () -> MakeLiveCoreSetWithKeys "withkeys" keys coreSetOptions |> ignore)
+        |> ignore
+
+    [<Fact>]
+    member __.``WithCoreSetOptions swaps options preserving keys and liveness``() =
+        let nCfg2 = MakeNetworkCfg ctx [ coreSet ] passOpt
+        let newOpts = { coreSetOptions with quorumIntersectionChecker = true }
+        let nCfg3 = nCfg2.WithCoreSetOptions(CoreSetName "test") newOpts
+        let before = nCfg2.FindCoreSet(CoreSetName "test")
+        let after = nCfg3.FindCoreSet(CoreSetName "test")
+        Assert.Equal<KeyPair array>(before.keys, after.keys)
+        Assert.Equal(before.live, after.live)
+        Assert.True(after.options.quorumIntersectionChecker)
+        let toml = nCfg3.StellarCoreCfg(after, 0, MainCoreContainer).ToString()
+        Assert.Contains("QUORUM_INTERSECTION_CHECKER = true", toml)
+
+    [<Fact>]
+    member __.``WithCoreSetOptions rejects nodeCount changes``() =
+        let nCfg2 = MakeNetworkCfg ctx [ coreSet ] passOpt
+        let newOpts = { coreSetOptions with nodeCount = coreSetOptions.nodeCount + 1 }
+
+        Assert.Throws<System.Exception>(fun () -> nCfg2.WithCoreSetOptions(CoreSetName "test") newOpts |> ignore)
+        |> ignore
+
+    [<Fact>]
+    member __.``PeerConfigMap matches ToConfigMaps output``() =
+        let ctx = { ctx with installNetworkDelay = None }
+        let nCfg2 = MakeNetworkCfg ctx [ coreSet ] passOpt
+
+        let fromAll =
+            nCfg2.ToConfigMaps()
+            |> Array.find (fun cm -> cm.Metadata.Name = nCfg2.PeerCfgMapName coreSet 0)
+
+        let single = nCfg2.PeerConfigMap(coreSet, 0)
+        Assert.Equal(fromAll.Metadata.Name, single.Metadata.Name)
+
+        Assert.Equal<string seq>(
+            Seq.sort (
+                Seq.map (fun (kv: System.Collections.Generic.KeyValuePair<string, string>) -> kv.Key) fromAll.Data
+            ),
+            Seq.sort (Seq.map (fun (kv: System.Collections.Generic.KeyValuePair<string, string>) -> kv.Key) single.Data)
+        )
 
     [<Fact>]
     member __.``TOML Config emits trigger timer and per-node clock offsets``() =
@@ -718,3 +801,64 @@ let ``a measured range does not drag its unmeasured neighbours in`` () =
         Assert.NotNull(ranges.["1600"])
         Assert.Null(ranges.["1200"])
         Assert.Null(ranges.["2000"])
+    [<Fact>]
+    member __.``ParseQuorumIntersectionInfo handles intersecting result``() =
+        let json = """{ "node": "GAAA", "qset": {},
+                 "transitive": { "intersection": true, "node_count": 6,
+                                 "last_check_ledger": 12,
+                                 "critical": [["GBBB"], ["GCCC", "GDDD"]] } }"""
+
+        match ParseQuorumIntersectionInfo json with
+        | None -> failwith "expected Some"
+        | Some qi ->
+            Assert.True(qi.intersection)
+            Assert.Equal(6, qi.nodeCount)
+            Assert.Equal(12, qi.lastCheckLedger)
+            Assert.Equal<Set<string> list>([ Set.ofList [ "GBBB" ]; Set.ofList [ "GCCC"; "GDDD" ] ], qi.criticalGroups)
+            Assert.True(qi.potentialSplit.IsNone)
+
+    [<Fact>]
+    member __.``ParseQuorumIntersectionInfo handles split result``() =
+        let json = """{ "node": "GAAA", "qset": {},
+                 "transitive": { "intersection": false, "node_count": 6,
+                                 "last_check_ledger": 20, "last_good_ledger": 15,
+                                 "potential_split": [["GBBB", "GCCC"], ["GDDD"]] } }"""
+
+        match ParseQuorumIntersectionInfo json with
+        | None -> failwith "expected Some"
+        | Some qi ->
+            Assert.False(qi.intersection)
+            Assert.Equal<Set<string> list>([], qi.criticalGroups)
+
+            match qi.potentialSplit with
+            | Some (a, b) ->
+                Assert.Equal<Set<string>>(Set.ofList [ "GBBB"; "GCCC" ], a)
+                Assert.Equal<Set<string>>(Set.ofList [ "GDDD" ], b)
+            | None -> failwith "expected potential_split"
+
+    [<Fact>]
+    member __.``ParseQuorumIntersectionInfo returns None without results``() =
+        Assert.True((ParseQuorumIntersectionInfo """{ "node": "GAAA", "qset": {} }""").IsNone)
+
+        let json = """{ "transitive": { "intersection": true, "node_count": 3,
+                                 "last_check_ledger": 5, "critical": null } }"""
+
+        match ParseQuorumIntersectionInfo json with
+        | Some qi -> Assert.Equal<Set<string> list>([], qi.criticalGroups)
+        | None -> failwith "expected Some"
+
+    [<Fact>]
+    member __.``ParseMetricCount reads counter or defaults to zero``() =
+        let json = """{ "metrics": { "scp.qic.successful-run": { "type": "counter", "count": 3 },
+                              "scp.qic.result-potential-split": { "type": "counter", "count": 1 },
+                              "scp.qic.no-count": { "type": "counter" } } }"""
+
+        Assert.Equal(3, ParseMetricCount json "scp.qic.successful-run")
+        Assert.Equal(1, ParseMetricCount json "scp.qic.result-potential-split")
+        Assert.Equal(0, ParseMetricCount json "scp.qic.no-count")
+        Assert.Equal(0, ParseMetricCount json "scp.qic.failed-run")
+        Assert.Equal(0, ParseMetricCount """{ }""" "scp.qic.failed-run")
+
+    [<Fact>]
+    member __.``QuorumIntersectionChecker mission is registered``() =
+        Assert.True(StellarMission.allMissions.ContainsKey "QuorumIntersectionChecker")

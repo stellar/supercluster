@@ -507,6 +507,30 @@ type NetworkCfg with
         let filedata = (self.StellarCoreCfgForJob opts).ToString()
         V1ConfigMap(metadata = self.NamespacedMeta cfgmapname, data = Map.empty.Add(filename, filedata))
 
+    // Returns the per-peer ConfigMap for peer i of the given CoreSet,
+    // containing its stellar-core.cfg (and init cfg, and optionally the
+    // network-delay script), regenerated from the CoreSet's current options.
+    member self.PeerConfigMap(coreSet: CoreSet, i: int) : V1ConfigMap =
+        let cfgMapName = (self.PeerCfgMapName coreSet i)
+        let cfgFileData = (self.StellarCoreCfg(coreSet, i, MainCoreContainer)).ToString()
+        let cfgMap = Map.empty.Add(CfgVal.peerCfgFileName, cfgFileData)
+
+        let startupCfgFileData = (self.StellarCoreCfg(coreSet, i, InitCoreContainer)).ToString()
+        let cfgMap = cfgMap.Add(CfgVal.peerInitCfgFileName, startupCfgFileData)
+
+        let cfgMap =
+            if self.NeedNetworkDelayScript then
+                let delayFileData = (self.NetworkDelayScript coreSet i).ToString()
+
+                LogInfo "Adding NetworkDelayScript to cfgMap of %s-%d" (coreSet.name.StringName) i
+                |> ignore
+
+                cfgMap.Add(CfgVal.peerDelayCfgFileName, delayFileData)
+            else
+                cfgMap
+
+        V1ConfigMap(metadata = self.NamespacedMeta cfgMapName, data = cfgMap)
+
     // Returns an array of ConfigMaps, which is either a single Job ConfigMap if
     // running a job, or a set of per-peer ConfigMaps, each of which is a volume
     // named peer-0-cfg .. peer-N-cfg, to be mounted on /peer-0-cfg ..
@@ -522,28 +546,8 @@ type NetworkCfg with
     // possibly more -- see comments in ToPodTemplateSpec), and each must then
     // figure out its own name to pick the volume(s) that contain its config(s).
     member self.ToConfigMaps() : V1ConfigMap array =
-        let peerCfgMap (coreSet: CoreSet) (i: int) =
-            let cfgMapName = (self.PeerCfgMapName coreSet i)
-            let cfgFileData = (self.StellarCoreCfg(coreSet, i, MainCoreContainer)).ToString()
-            let cfgMap = Map.empty.Add(CfgVal.peerCfgFileName, cfgFileData)
-
-            let startupCfgFileData = (self.StellarCoreCfg(coreSet, i, InitCoreContainer)).ToString()
-            let cfgMap = cfgMap.Add(CfgVal.peerInitCfgFileName, startupCfgFileData)
-
-            let cfgMap =
-                if self.NeedNetworkDelayScript then
-                    let delayFileData = (self.NetworkDelayScript coreSet i).ToString()
-
-                    LogInfo "Adding NetworkDelayScript to cfgMap of %s-%d" (coreSet.name.StringName) i
-                    |> ignore
-
-                    cfgMap.Add(CfgVal.peerDelayCfgFileName, delayFileData)
-                else
-                    cfgMap
-
-            V1ConfigMap(metadata = self.NamespacedMeta cfgMapName, data = cfgMap)
-
-        let cfgs = Array.append (self.MapAllPeers peerCfgMap) [| self.HistoryConfigMap() |]
+        let cfgs =
+            Array.append (self.MapAllPeers(fun cs i -> self.PeerConfigMap(cs, i))) [| self.HistoryConfigMap() |]
 
         match self.jobCoreSetOptions with
         | None -> cfgs
