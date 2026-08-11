@@ -150,7 +150,19 @@ monitor:
   # longest valid runtime in the profile. Long-running ranges need more slack
   # for page cache and allocator growth. 0 disables.
   profileRuntimeMemoryInsurance: "3Gi"
-  imagePullPolicy: IfNotPresent
+  # Always, because runs name this image by a MUTABLE tag: the mission passes
+  # --job-monitor-image-pc-v2 stellajuna/ssc-jm:latest, and IfNotPresent then
+  # pins a node to whatever it cached the first time it saw that tag. Worker
+  # nodes churn under Karpenter so they would repull anyway, but the monitor
+  # carries no tolerations and lands on the long-lived default pool, where the
+  # layer persists for good -- run #183 shipped a job_monitor.log of 0 bytes
+  # from an image whose fix for exactly that had been pushed hours earlier.
+  #
+  # Kubernetes defaults :latest to Always for this reason; the explicit
+  # IfNotPresent was overriding it. Costs one pull per run for one pod, and
+  # makes a registry outage fail the run at start rather than run something
+  # stale.
+  imagePullPolicy: Always
   mission: "HistoryPubnetParallelCatchup"
   # Adds a `mission` label to worker pods, which kube-state-metrics exposes as
   # label_mission for the Grafana container panels. Default OFF: those panels
