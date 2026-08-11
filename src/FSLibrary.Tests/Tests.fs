@@ -574,8 +574,7 @@ let ``the job monitor image is overridable and defaults to the chart`` () =
     // An empty flag must leave the chart's pin alone. monitor.image= resolves to
     // ":latest" or fails the pull.
     let src =
-        System.IO.File.ReadAllText(
-            "../../../../FSLibrary/MissionHistoryPubnetParallelCatchupV2.fs")
+        System.IO.File.ReadAllText("../../../../FSLibrary/MissionHistoryPubnetParallelCatchupV2.fs")
 
     Assert.Contains("if context.jobMonitorImagePcV2 <> \"\" then", src)
     Assert.Contains("monitor.image=%s", src)
@@ -591,8 +590,7 @@ let ``a pooled run does not let caller labels overwrite the routing label`` () =
     // 0 and the second --set wins, so the pod matches on capacity alone and lands
     // on any tier -- a supergiant range on a dwarf node, an OOM per range.
     let src =
-        System.IO.File.ReadAllText(
-            "../../../../FSLibrary/MissionHistoryPubnetParallelCatchupV2.fs")
+        System.IO.File.ReadAllText("../../../../FSLibrary/MissionHistoryPubnetParallelCatchupV2.fs")
 
     Assert.Contains("worker.requireNodeLabels[0]=purpose:%s", src)
     Assert.Contains("if context.pubnetParallelCatchupPoolPrefix <> \"\" then i + 1 else i", src)
@@ -603,8 +601,7 @@ let ``the pool maps ride their own --set with their commas escaped`` () =
     // Every other option is folded into ONE comma-joined --set; these maps are
     // themselves comma-separated, so folding them in delivers a map of one tier.
     let src =
-        System.IO.File.ReadAllText(
-            "../../../../FSLibrary/MissionHistoryPubnetParallelCatchupV2.fs")
+        System.IO.File.ReadAllText("../../../../FSLibrary/MissionHistoryPubnetParallelCatchupV2.fs")
 
     Assert.Contains("v.Replace(\",\", \"\\\\,\")", src)
     Assert.Contains("poolMapArgs", src)
@@ -628,8 +625,12 @@ let ``the pool maps ride their own --set with their commas escaped`` () =
 /// Superset of rangeProfileFields: wallSeconds and txApply are recorded, never
 /// projected.
 let private measurementFields =
-    [ "peakAnonBytes"; "peakWorkingSetBytes"; "peakEphemeralBytes"
-      "txApply"; "seconds"; "wallSeconds" ]
+    [ "peakAnonBytes"
+      "peakWorkingSetBytes"
+      "peakEphemeralBytes"
+      "txApply"
+      "seconds"
+      "wallSeconds" ]
 
 /// A record as /logs/progress.json carries it.
 let private measuredRecord (count: int) (anon: int64) =
@@ -666,29 +667,24 @@ let ``a measurement-free record cannot become a profile entry`` () =
     // Nothing measured -- the whole document is refused, rather than written
     // with the right range count and no data.
     let completed =
-        completedMap
-            [ "420", unmeasured (measuredRecord 420 900L)
-              "840", unmeasured (measuredRecord 420 950L)
-              "1260", unmeasured (measuredRecord 420 990L) ]
+        completedMap [ "420", unmeasured (measuredRecord 420 900L)
+                       "840", unmeasured (measuredRecord 420 950L)
+                       "1260", unmeasured (measuredRecord 420 990L) ]
 
     match rangeProfileDocument "pvc" 20000 completed with
     | None -> ()
     | Some doc ->
         let ranges = doc.["ranges"] :?> JObject
 
-        failwithf
-            "wrote a profile artifact with %d ranges and zero measurements: %s"
-            ranges.Count
-            (ranges.ToString())
+        failwithf "wrote a profile artifact with %d ranges and zero measurements: %s" ranges.Count (ranges.ToString())
 
 
 [<Fact>]
 let ``a measured run still produces a complete profile`` () =
     // The over-correction guard: a good read must still write everything.
     let completed =
-        completedMap
-            [ "420", measuredRecord 420 900L
-              "840", measuredRecord 420 950L ]
+        completedMap [ "420", measuredRecord 420 900L
+                       "840", measuredRecord 420 950L ]
 
     match rangeProfileDocument "pvc" 20000 completed with
     | None -> failwith "refused to write a profile that carries real measurements"
@@ -710,10 +706,9 @@ let ``a measured range does not drag its unmeasured neighbours in`` () =
     // rather than per RECORD: one that latches on the first measurement passes
     // both tests above while every later junk record rides in behind it.
     let completed =
-        completedMap
-            [ "1200", unmeasured (measuredRecord 400 900L)
-              "1600", measuredRecord 400 950L
-              "2000", unmeasured (measuredRecord 400 990L) ]
+        completedMap [ "1200", unmeasured (measuredRecord 400 900L)
+                       "1600", measuredRecord 400 950L
+                       "2000", unmeasured (measuredRecord 400 990L) ]
 
     match rangeProfileDocument "pvc" 20000 completed with
     | None -> failwith "refused a profile that carries one real measurement"

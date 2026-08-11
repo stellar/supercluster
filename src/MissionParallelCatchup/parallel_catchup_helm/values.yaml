@@ -9,13 +9,9 @@ worker:
   # Sized from what a range actually uses: the old node-local /data ran on a
   # 35Gi request / 40Gi limit. 40Gi x 1024 workers is 40 TiB of gp3 rather than
   # 100 TiB, which matters against the per-region storage quota.
-  # One PVC per ledger range, not per concurrency slot. Measured on ssc-test:
-  # 300 jobs each with their own PVC took 3151s vs 3210s reusing 40 -- 7.5x the
-  # volume lifecycles for no measurable cost and no CSI throttling. Reuse only
-  # bought bookkeeping, plus pinning every later range to the AZ the slot's
-  # first volume happened to land in.
-  # 60Gi to match the tier nodes' ephemeral allowance: peakEphemeralBytes tops
-  # out at 37.8Gi across the whole profile, so this covers 100% with headroom.
+  # One PVC per ledger range, not per concurrency slot: measured on ssc-test,
+  # 7.5x the volume lifecycles cost nothing (3151s vs 3210s) and reuse pinned
+  # every later range to one AZ. 60Gi covers the profile's 37.8Gi peak.
   storageSize: "60Gi"
   requireNodeLabels: []
   avoidNodeLabels: []
@@ -28,11 +24,9 @@ worker:
       # a different execution model), and sizing V2 there silently resized them
       # too -- it took their cpu request from 250m to 1800m.
       #
-      # 1800m/9Gi is the unprofiled default: on r8*.2xlarge (7.91 cpu, 61.7Gi
-      # allocatable) that lands 4 workers per node, cpu-bound; on m8*.2xlarge
-      # (7.91 cpu, 29.7Gi) it lands 3, memory-bound. A range the profile has
-      # measured overrides both. --pubnet-parallel-catchup-cpu-request overrides
-      # the cpu for a whole run.
+      # 1800m/9Gi is the unprofiled default: 4 workers per r8*.2xlarge node
+      # (cpu-bound) or 3 per m8*.2xlarge (memory-bound). A measured range
+      # overrides both; --pubnet-parallel-catchup-cpu-request overrides the run.
       cpu: "1800m"
       memory: "9Gi"
       # Still filled in by the mission: ephemeral-storage is 2Gi/4Gi in pvc mode
@@ -63,11 +57,9 @@ monitor:
   # Reuses the existing hand-built job-monitor image slot -- no new image and no
   # new push path (nothing in .github/workflows builds these).
   #
-  # TEMPORARY dev pin, 2026-08-07: stellar/ssc-job-monitor:latest predates the
-  # apps/+lib/ split, ATTEMPT_BUDGETS and per-cause budget counting, so running
-  # this chart against it ships env vars the image cannot read. Built from this
-  # branch and pinned by tag rather than :latest so a run is always traceable to
-  # one image. Revert to the stellar/ repo once there is a push path for it.
+  # TEMPORARY dev pin: stellar/ssc-job-monitor:latest predates the apps/+lib/
+  # split and ATTEMPT_BUDGETS, so this chart would ship env vars it cannot read.
+  # Revert to the stellar/ repo once there is a push path for it.
   image: "stellajuna/ssc-jm:2026-08-11b"
   # The driver reaches the monitor through this route: profile in via POST
   # /start, status and logs out. Empty routeHost disables the HTTPRoute; the
@@ -80,9 +72,9 @@ monitor:
   # privilege every mission would then carry so that this one chart can install
   # its own Role.
   #
-  # true creates the Role and RoleBinding for a cluster where that provisioning
-  # does not exist -- a k3d/kind run, say. The ServiceAccount is created either
-  # way; creating one grants nothing.
+  # true creates the Role, RoleBinding and node-stats ClusterRole for a cluster
+  # that does not provide them -- ssc-eks does, through a catchup-job-monitor
+  # RoleBinding, so leave it false there. With neither, the monitor 403s.
   createRbac: false
   routeHost: ""
   gatewayName: ""
@@ -101,11 +93,9 @@ monitor:
   # itself. Empty prefix disables all of it and every worker keeps the single
   # global node label, which is exactly the pre-tier behaviour.
   #
-  # Cuts are node_usable/1.60, covering the p99 of run-to-run growth in the same
-  # range's peakAnonBytes (18,073 observations across five profiles: p50 0.97,
-  # p90 1.28, p99 1.60, max 2.83). Learned the hard way -- range 63080767
-  # measured 13.75Gi went onto nodes with 14.1/14.3Gi allocatable, a 1.03x
-  # margin, and OOMKilled on BOTH during bucket-apply before closing a ledger.
+  # Cuts are node_usable/1.60, the p99 of run-to-run growth in the same range's
+  # peakAnonBytes (18,073 observations). Range 63080767 measured 13.75Gi, landed
+  # on 14.1Gi nodes at a 1.03x margin, and OOMKilled on both.
   poolPrefix: ""
   poolTiers: "0:subdwarf,0.79:dwarf,1.61:subgiant,3.87:giant,8.85:supergiant,18.38:hypergiant,:supernova"
   # Rungs the cache bump may never take, "from->to" comma separated. Nothing
@@ -139,18 +129,10 @@ monitor:
   # longest valid runtime in the profile. Long-running ranges need more slack
   # for page cache and allocator growth. 0 disables.
   profileRuntimeMemoryInsurance: "3Gi"
-  # Always, because runs name this image by a MUTABLE tag: the mission passes
-  # --job-monitor-image-pc-v2 stellajuna/ssc-jm:latest, and IfNotPresent then
-  # pins a node to whatever it cached the first time it saw that tag. Worker
-  # nodes churn under Karpenter so they would repull anyway, but the monitor
-  # carries no tolerations and lands on the long-lived default pool, where the
-  # layer persists for good -- run #183 shipped a job_monitor.log of 0 bytes
-  # from an image whose fix for exactly that had been pushed hours earlier.
-  #
-  # Kubernetes defaults :latest to Always for this reason; the explicit
-  # IfNotPresent was overriding it. Costs one pull per run for one pod, and
-  # makes a registry outage fail the run at start rather than run something
-  # stale.
+  # Always, because runs name this image by a MUTABLE tag and IfNotPresent then
+  # pins a node to whatever it cached first -- run #183 shipped a 0-byte
+  # job_monitor.log from an image fixed hours earlier, off a node up since June.
+  # Kubernetes defaults :latest to Always for this reason.
   imagePullPolicy: Always
   mission: "HistoryPubnetParallelCatchup"
   # Adds a `mission` label to worker pods, which kube-state-metrics exposes as
@@ -196,25 +178,14 @@ monitor:
   maxEphemeral: "200Gi"
   maxMem: "48Gi"
   graceSeconds: 100
-  # preStop stall before SIGTERM, in seconds. 0 is off.
-  #
-  # Buys the collector time to NOTICE the disruption before the kill; it is not
-  # what captures the metric. The hook cannot widen the ~4ms between the medida
-  # block and the process exiting -- measured, a 60s hook with 10s polling and
-  # no detection still lost txApply, while 1s polling with no hook captured it.
-  # What it prevents is SIGTERM landing while the poller is still on its lazy
-  # cadence because the pod-list cycle has not come round yet.
-  #
-  # Sized against the collector CYCLE (sleep + pod list + kubelet sweep), not
-  # against collectorPollSeconds. Overshooting is NOT free on spot: the hook is
-  # dead time inside the ~120s AWS reclaim budget. Undershooting the cycle is
-  # survivable because the pod lives out graceSeconds after SIGTERM and its log
-  # stays readable, so a sweep that notices late still finds the medida block.
-  # Must stay well under graceSeconds or the kubelet kills the hook.
+  # preStop stall before SIGTERM in seconds, 0 = off, sized against the
+  # collector CYCLE rather than collectorPollSeconds. It buys time to NOTICE the
+  # disruption, not to capture the metric -- a 60s hook with 10s polling still
+  # lost txApply where 1s polling with no hook caught it. Overshooting is dead
+  # time inside the ~120s spot reclaim budget; it must stay under graceSeconds.
   prestopSleepSeconds: 5
-  # Per-attempt wall-clock cap, seconds. 0 = none. Catches a range wedged in
-  # archive retries, which stellar-core retries forever rather than failing.
-  # A timeout is TERMINAL, so too low fails the mission -- see
+  # Per-attempt wall-clock cap in seconds, 0 = none, catching a range wedged in
+  # archive retries. A timeout is TERMINAL, so too low fails the mission; see
   # ATTEMPT_DEADLINE_SECONDS in lib/config.py for why 12h and not 3h.
   attemptDeadlineSeconds: 43200
   jobTtlSeconds: 600
@@ -257,11 +228,9 @@ monitor:
   peakFlushRatio: 1.05
   # Poll cycles a stream gets to finalize after its pod leaves the pod list,
   # before it is cancelled and its connection slot reclaimed.
-  # Where the monitor runs. Empty = anywhere untainted, which is what an
-  # installation without tiered nodepools wants. Set from
-  # --job-monitor-node-labels and --job-monitor-tolerate-taints. Pinning it to a
-  # worker tier reserves that node for the run: the monitor holds the logs PVC,
-  # so the node cannot be consolidated away while it is there.
+  # Where the monitor runs, from --job-monitor-node-labels and
+  # --job-monitor-tolerate-taints. Empty = anywhere untainted. Pinning it to a
+  # worker tier reserves that node: it holds the logs PVC for the whole run.
   nodeSelector: {}
   collectorVanishedGraceCycles: 3
   collectorResources:

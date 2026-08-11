@@ -994,7 +994,8 @@ let main argv =
                                pubnetParallelCatchupPoolMem = mission.PubnetParallelCatchupPoolMem
                                pubnetParallelCatchupCreateRbac = mission.PubnetParallelCatchupCreateRbac
                                jobMonitorNodeLabels = List.map splitLabel (List.ofSeq mission.JobMonitorNodeLabels)
-                               jobMonitorTolerateTaints = List.map splitLabel (List.ofSeq mission.JobMonitorTolerateTaints)
+                               jobMonitorTolerateTaints =
+                                   List.map splitLabel (List.ofSeq mission.JobMonitorTolerateTaints)
                                tag = mission.Tag
                                numPregeneratedTxs = mission.NumPregeneratedTxs
                                enableTailLogging = true

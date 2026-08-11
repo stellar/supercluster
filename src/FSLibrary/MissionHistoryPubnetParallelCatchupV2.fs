@@ -52,6 +52,7 @@ let extraValuesArgs =
 // $ dotnet run --project src/App/App.fsproj -- mission HistoryPubnetParallelCatchupV2 --image=docker-registry.services.stellar-ops.com/dev/stellar-core:23.0.3-2779.4d1df2b03.jammy-vnext-buildtests  --pubnet-parallel-catchup-num-workers=2 --pubnet-parallel-catchup-starting-ledger=0 --pubnet-parallel-catchup-end-ledger=6400 --pubnet-parallel-catchup-ledgers-per-job 1280  --destination ./logs
 
 let jobMonitorLoggingIntervalSecs = 30 // frequency of the monitor reconcile loop: dispatch, liveness ping, status publish
+
 let jobMonitorStatusCheckIntervalSecs = 60
 let jobMonitorStatusCheckTimeOutSecs = 600
 
@@ -61,6 +62,7 @@ let jobMonitorStatusCheckTimeOutSecs = 600
 // would make a single transient blip fail the run. Nothing is lost by printing
 // less: a range failure logs the moment it is seen, on its own line.
 let jobMonitorStatusLogEveryNChecks = 10
+
 let mutable toPerformCleanup = true
 let failedJobLogFileLineCount = 10000
 let failedJobLogStreamLineCount = 1000
@@ -92,8 +94,14 @@ let resolveRangeProfile (context: MissionContext) : string option =
                 // every range sized from defaults. A profile moves resource
                 // REQUESTS only, so a tampered one costs node size, not code
                 // execution, and it is parsed and range-counted before use.
-                if spec.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
-                   || spec.StartsWith("https://", StringComparison.OrdinalIgnoreCase) then
+                if
+                    spec.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                    || spec.StartsWith
+                        (
+                            "https://",
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                then
                     use client = new HttpClient()
                     client.Timeout <- TimeSpan.FromSeconds(30.0)
                     client.GetStringAsync(spec) |> Async.AwaitTask |> Async.RunSynchronously
@@ -148,8 +156,7 @@ let private monitorClientWith (context: MissionContext) (timeout: TimeSpan) =
 
 // Log pulls move whole files, so they get room; everything else is a short
 // request that should fail fast and be retried.
-let private monitorClient (context: MissionContext) =
-    monitorClientWith context (TimeSpan.FromMinutes(10.0))
+let private monitorClient (context: MissionContext) = monitorClientWith context (TimeSpan.FromMinutes(10.0))
 
 /// The run the monitor is asked to perform. The range travels with the profile
 /// because both are per-run input -- the chart installs a generic monitor, and
@@ -191,6 +198,7 @@ let startMission (context: MissionContext) (runJson: string) =
         try
             use content = new StringContent(runJson, Text.Encoding.UTF8, "application/json")
             let r = client.PostAsync("/start", content) |> Async.AwaitTask |> Async.RunSynchronously
+
             if r.IsSuccessStatusCode then
                 LogInfo "Mission started: profile POSTed to %s/start" (monitorEndpoint context)
                 started <- true
@@ -299,13 +307,9 @@ let installProject (context: MissionContext) =
         // schedule anywhere); without the toleration they schedule nowhere.
         // Observed on ssc-test 2026-08-07: 10 workers Pending indefinitely,
         // "did not tolerate taint (taint=catchup:NoSchedule)".
-        setOptions.Add(
-            sprintf "worker.requireNodeLabels[0]=purpose:%s" context.pubnetParallelCatchupPoolPrefix
-        )
+        setOptions.Add(sprintf "worker.requireNodeLabels[0]=purpose:%s" context.pubnetParallelCatchupPoolPrefix)
 
-        setOptions.Add(
-            sprintf "worker.tolerateNodeTaints[0]=%s" context.pubnetParallelCatchupPoolPrefix
-        )
+        setOptions.Add(sprintf "worker.tolerateNodeTaints[0]=%s" context.pubnetParallelCatchupPoolPrefix)
 
 
     // Skip known results by default
@@ -331,14 +335,10 @@ let installProject (context: MissionContext) =
     // Both pushed only when the run explicitly asks. Otherwise the chart default
     // stands, so the chart is the single place V2's worker sizing is written down.
     if not (String.IsNullOrWhiteSpace context.pubnetParallelCatchupCpuRequest) then
-        setOptions.Add(
-            sprintf "worker.resources.requests.cpu=%s" context.pubnetParallelCatchupCpuRequest
-        )
+        setOptions.Add(sprintf "worker.resources.requests.cpu=%s" context.pubnetParallelCatchupCpuRequest)
 
     if not (String.IsNullOrWhiteSpace context.pubnetParallelCatchupMemRequest) then
-        setOptions.Add(
-            sprintf "worker.resources.requests.memory=%s" context.pubnetParallelCatchupMemRequest
-        )
+        setOptions.Add(sprintf "worker.resources.requests.memory=%s" context.pubnetParallelCatchupMemRequest)
 
     // Ephemeral-storage is an ephemeral-mode concept: /data is an emptyDir on the
     // node there, and StellarKubeSpecs sizes it. In pvc mode /data is on the
@@ -425,10 +425,11 @@ let installProject (context: MissionContext) =
             context.requireNodeLabelsPcV2
             // From 1: a pooled run claims index 0 for the label it routes on,
             // and mapi from 0 would overwrite it with whichever came second.
-            |> List.mapi (fun i pair ->
-                requireNodeLabelToHelmIndexed
-                    (if context.pubnetParallelCatchupPoolPrefix <> "" then i + 1 else i)
-                    pair)
+            |> List.mapi
+                (fun i pair ->
+                    requireNodeLabelToHelmIndexed
+                        (if context.pubnetParallelCatchupPoolPrefix <> "" then i + 1 else i)
+                        pair)
             |> String.concat ","
 
         setOptions.Add(requireLabelsHelm)
@@ -540,21 +541,26 @@ let private monitorPodName (context: MissionContext) : string option =
 /// reachable from outside the cluster once its HTTPRoute is attached -- being
 /// walked out of LOG_DIR.
 let artifactFolder (name: string) =
-    if name.EndsWith(".log.gz") then "range-logs"
-    elif name.EndsWith(".metrics") then "metrics"
+    if name.EndsWith(".log.gz") then
+        "range-logs"
+    elif name.EndsWith(".metrics") then
+        "metrics"
     elif name.EndsWith(".done")
          || name.EndsWith(".started")
          || name.EndsWith(".state")
          || name = "mission_started" then
         "state"
-    else ""
+    else
+        ""
 
 let collectLogs (context: MissionContext) (destination: string) =
     Directory.CreateDirectory(destination) |> ignore
     use client = monitorClient context
 
     let manifest =
-        client.GetStringAsync("/logs") |> Async.AwaitTask |> Async.RunSynchronously
+        client.GetStringAsync("/logs")
+        |> Async.AwaitTask
+        |> Async.RunSynchronously
         |> JArray.Parse
 
     let fetchOne (entry: JToken) =
@@ -588,9 +594,10 @@ let collectLogs (context: MissionContext) (destination: string) =
         // and never fetches it. Measured 2026-08-08: 88 of 110 artifacts
         // collected, and every .done was among the 22 missing.
         if appendOnly && File.Exists path && have = size then
-            -1L   // already whole; distinct from a zero-byte file we did fetch
+            -1L // already whole; distinct from a zero-byte file we did fetch
         else
             let req = new HttpRequestMessage(HttpMethod.Get, "/logs/" + name)
+
             if appendOnly && have > 0L && have < size then
                 req.Headers.Range <- Headers.RangeHeaderValue(Nullable(have), Nullable())
 
@@ -612,10 +619,16 @@ let collectLogs (context: MissionContext) (destination: string) =
     let fetched =
         manifest
         |> Seq.toArray
-        |> Array.map (fun e -> async { return (try fetchOne e with ex ->
-                                                 LogWarn "log fetch failed for %s: %s"
-                                                     (e.["name"].ToString()) ex.Message
-                                                 -1L) })
+        |> Array.map
+            (fun e ->
+                async {
+                    return
+                        (try
+                            fetchOne e
+                         with ex ->
+                             LogWarn "log fetch failed for %s: %s" (e.["name"].ToString()) ex.Message
+                             -1L)
+                })
         |> fun work -> Async.Parallel(work, 8)
         |> Async.RunSynchronously
 
@@ -624,13 +637,17 @@ let collectLogs (context: MissionContext) (destination: string) =
     // empty by design, so "bytes > 0" undercounts exactly the files whose
     // existence IS the signal.
     let touched = fetched |> Array.filter (fun n -> n >= 0L) |> Array.length
-    LogInfo "Collected %d of %d artifacts (%d bytes) from %s"
-        touched (Seq.length manifest) moved (monitorEndpoint context)
+
+    LogInfo
+        "Collected %d of %d artifacts (%d bytes) from %s"
+        touched
+        (Seq.length manifest)
+        moved
+        (monitorEndpoint context)
 
 /// One log pass. Idempotent -- the manifest comparison is what makes a repeat
 /// pass cheap, so there is no watermark to keep.
-let collectLogsFromPods (context: MissionContext) =
-    collectLogs context context.destination.Path
+let collectLogsFromPods (context: MissionContext) = collectLogs context context.destination.Path
 
 // Cleanup on exit. `signalTriggered` indicates we're running under a hard
 // deadline (Jenkins' SoftKillWaitSeconds, ~5s by default, before SIGKILL).
