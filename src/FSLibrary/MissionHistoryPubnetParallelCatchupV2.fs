@@ -54,10 +54,18 @@ let extraValuesArgs =
 let jobMonitorLoggingIntervalSecs = 30 // frequency of the monitor reconcile loop: dispatch, liveness ping, status publish
 let jobMonitorStatusCheckIntervalSecs = 60
 let jobMonitorStatusCheckTimeOutSecs = 600
+
+// Print one status line in ten. The poll stays at a minute because
+// jobMonitorStatusCheckTimeOutSecs is spent in units of it -- 600 over a 60s
+// interval tolerates ten consecutive failures, and slowing the poll instead
+// would make a single transient blip fail the run. Nothing is lost by printing
+// less: a range failure logs the moment it is seen, on its own line.
+let jobMonitorStatusLogEveryNChecks = 10
 let mutable toPerformCleanup = true
 let failedJobLogFileLineCount = 10000
 let failedJobLogStreamLineCount = 1000
 
+let mutable statusChecks = 0
 let mutable nonce : String = ""
 let mutable helmReleaseName : String = ""
 
@@ -595,7 +603,12 @@ let queryJobMonitor (context: MissionContext) =
     try
         use client = monitorClient context
         let body = client.GetStringAsync("/status") |> Async.AwaitTask |> Async.RunSynchronously
-        LogInfo "job monitor status: %s" body
+
+        statusChecks <- statusChecks + 1
+
+        if statusChecks % jobMonitorStatusLogEveryNChecks = 1 then
+            LogInfo "job monitor status: %s" body
+
         Some(JObject.Parse(body))
     with ex ->
         LogError "Error reading job monitor status: %s" ex.Message

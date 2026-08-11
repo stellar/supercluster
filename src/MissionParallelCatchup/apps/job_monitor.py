@@ -925,17 +925,30 @@ def _resources(mem=None, eph=None, end=None, attempt=1):
     # unbounded pod takes the node down rather than itself.
     lim = {}
 
+    # A profiled range on a pooled run has its node to itself -- the tier's
+    # memory cut is sized to exclude a second pod -- so an ephemeral limit
+    # guards no neighbour and only turns spare disk into an eviction. Measured:
+    # a dwarf range capped at 5211Mi alone on a 20Gi root, dying the moment it
+    # exceeded its profiled peak by more than the margin, with most of the disk
+    # unused. The request goes with the limit because its only remaining job is
+    # scheduling, and the tier label already decides placement.
+    #
+    # Unprofiled pooled runs keep both: nothing measured them, so there is no
+    # peak to have been generous about.
+    pooled_profiled = bool(config.POOL_PREFIX and config.PROFILE)
+
     # Only meaningful in ephemeral mode. In PVC mode a large request makes disk
     # the binding dimension and halves workers-per-node for no reason.
-    if config.REQ_EPHEMERAL:
+    if config.REQ_EPHEMERAL and not pooled_profiled:
         # Raise the request with the limit: ephemeral-storage is a scheduling
         # dimension, so a pod that outgrew it no longer fits where it was.
         req['ephemeral-storage'] = eph or config.REQ_EPHEMERAL
     else:
         # pvc mode: /data is not on the node disk, so an ephemeral override
-        # would size a dimension this run does not use.
+        # would size a dimension this run does not use. Pooled+profiled: the
+        # pod owns its node and the axis is dropped deliberately.
         overrides.pop('ephemeral-storage', None)
-    if config.LIM_EPHEMERAL:
+    if config.LIM_EPHEMERAL and not pooled_profiled:
         lim['ephemeral-storage'] = eph or config.LIM_EPHEMERAL
 
     # The profile moves requests only. Disk excepted, because its limit is what
