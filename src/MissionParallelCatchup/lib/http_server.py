@@ -13,6 +13,7 @@ prometheus.io/path onto __metrics_path__ and so reaches the non-standard path.
 """
 
 import json
+import logging
 import os
 import re
 import threading
@@ -21,9 +22,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from prometheus_client import CONTENT_TYPE_LATEST, REGISTRY, generate_latest
 
 import config
-from logger import build_logger
-
-logger = build_logger('http_server')
+# Not build_logger: this module is imported BY job_monitor, so configuring here
+# would run first and logging.basicConfig is a no-op once root has handlers --
+# job_monitor's own call was then silently discarded, and the FileHandler it
+# built still created job_monitor_<stamp>.log, which stayed empty in every run's
+# artifacts while this module's file held the whole process's output. The
+# entrypoint configures; this just takes a logger.
+logger = logging.getLogger('http_server')
 
 # Set by job_monitor before serve(). A tuple rather than an import, because
 # job_monitor imports this module.
