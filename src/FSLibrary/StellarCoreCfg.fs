@@ -180,7 +180,7 @@ type StellarCoreCfg =
       maxBatchWriteCount: int
       emitMeta: bool
       addArtificialDelayUsec: int option // optional delay for testing in microseconds
-      experimentalTriggerTimer: bool option
+      forceOldStyleTriggerTimer: bool option
       clockOffsetMs: int option
       surveyPhaseDuration: int option
       containerType: CoreContainerType
@@ -285,8 +285,8 @@ type StellarCoreCfg =
         | None -> maybeAddGlobalDelay ()
         | Some sleep -> t.Add("ARTIFICIALLY_SLEEP_MAIN_THREAD_FOR_TESTING", sleep) |> ignore
 
-        match self.experimentalTriggerTimer with
-        | Some v -> t.Add("EXPERIMENTAL_TRIGGER_TIMER", v) |> ignore
+        match self.forceOldStyleTriggerTimer with
+        | Some v -> t.Add("FORCE_OLD_STYLE_PREPARE_START_TRIGGER_TIMER", v) |> ignore
         | None -> ()
 
         match self.clockOffsetMs with
@@ -667,9 +667,9 @@ type NetworkCfg with
           maxBatchWriteCount = opts.maxBatchWriteCount
           emitMeta = opts.emitMeta
           addArtificialDelayUsec = opts.addArtificialDelayUsec
-          experimentalTriggerTimer =
-              opts.experimentalTriggerTimer
-              |> Option.orElse self.missionContext.enableTriggerTimer
+          forceOldStyleTriggerTimer =
+              opts.forceOldStyleTriggerTimer
+              |> Option.orElse self.missionContext.forceOldStyleTriggerTimer
           clockOffsetMs = None
           surveyPhaseDuration = opts.surveyPhaseDuration
           containerType = MainCoreContainer
@@ -713,11 +713,12 @@ type NetworkCfg with
           emitMeta = c.options.emitMeta
           addArtificialDelayUsec = c.options.addArtificialDelayUsec
           // CoreSet-level setting wins; otherwise fall back to the
-          // mission-level --enable-trigger-timer flag (unset by default, in
-          // which case the key is omitted from the config entirely).
-          experimentalTriggerTimer =
-              c.options.experimentalTriggerTimer
-              |> Option.orElse self.missionContext.enableTriggerTimer
+          // mission-level --force-old-style-trigger-timer flag (unset by
+          // default, in which case the key is omitted from the config
+          // entirely and core selects the timer by protocol version).
+          forceOldStyleTriggerTimer =
+              c.options.forceOldStyleTriggerTimer
+              |> Option.orElse self.missionContext.forceOldStyleTriggerTimer
           clockOffsetMs =
               match c.options.clockOffsets with
               | Some offsets ->

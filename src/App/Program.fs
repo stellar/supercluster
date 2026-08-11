@@ -150,12 +150,12 @@ type MissionOptions
         minBlockTimeMixedMode: string,
         minBlockTimeMixedClassicTxRate: int option,
         minBlockTimeMixedSorobanTxRate: int option,
-        triggerTimerFlagPct: int,
+        forceOldStyleTriggerTimerPct: int,
         uniformDrift: seq<int>,
         bimodalDrift: seq<int>,
         driftPct: int,
         ledgerCloseTimeMs: int option,
-        enableTriggerTimer: bool option
+        forceOldStyleTriggerTimer: bool option
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -721,11 +721,11 @@ type MissionOptions
              Required = false)>]
     member self.MinBlockTimeMixedSorobanTxRate = minBlockTimeMixedSorobanTxRate
 
-    [<Option("trigger-timer-flag-pct",
-             HelpText = "Percentage (0-100) of nodes with EXPERIMENTAL_TRIGGER_TIMER enabled",
+    [<Option("force-old-style-trigger-timer-pct",
+             HelpText = "Percentage (0-100) of nodes with FORCE_OLD_STYLE_PREPARE_START_TRIGGER_TIMER set, i.e. forced onto the pre-protocol-28 prepare-start trigger timer. The remaining nodes use the protocol default",
              Required = false,
-             Default = 100)>]
-    member self.TriggerTimerFlagPct = triggerTimerFlagPct
+             Default = 0)>]
+    member self.ForceOldStyleTriggerTimerPct = forceOldStyleTriggerTimerPct
 
     [<Option("uniform-drift",
              Separator = ',',
@@ -750,10 +750,10 @@ type MissionOptions
              Required = false)>]
     member self.LedgerCloseTimeMs = ledgerCloseTimeMs
 
-    [<Option("enable-trigger-timer",
-             HelpText = "Enable or disable EXPERIMENTAL_TRIGGER_TIMER on all nodes (true/false). Defaults to true in the max TPS missions and to the stellar-core default everywhere else. Not supported by TriggerTimerMixConsensus, which uses --trigger-timer-flag-pct instead",
+    [<Option("force-old-style-trigger-timer",
+             HelpText = "Set FORCE_OLD_STYLE_PREPARE_START_TRIGGER_TIMER on all nodes (true/false), forcing the pre-protocol-28 prepare-start trigger timer. Unset by default, in which case core picks the timer by protocol version. Not supported by TriggerTimerMixConsensus, which uses --force-old-style-trigger-timer-pct instead",
              Required = false)>]
-    member self.EnableTriggerTimer = enableTriggerTimer
+    member self.ForceOldStyleTriggerTimer = forceOldStyleTriggerTimer
 
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' |> Array.toList with
@@ -1009,12 +1009,12 @@ let main argv =
                                minBlockTimeMixedClassicTxRate = mission.MinBlockTimeMixedClassicTxRate
                                minBlockTimeMixedSorobanTxRate = mission.MinBlockTimeMixedSorobanTxRate
                                runForMinBlockTime = false
-                               triggerTimerFlagPct = mission.TriggerTimerFlagPct
+                               forceOldStyleTriggerTimerPct = mission.ForceOldStyleTriggerTimerPct
                                uniformDrift = List.ofSeq mission.UniformDrift
                                bimodalDrift = List.ofSeq mission.BimodalDrift
                                driftPct = mission.DriftPct
                                ledgerCloseTimeMs = mission.LedgerCloseTimeMs
-                               enableTriggerTimer = mission.EnableTriggerTimer }
+                               forceOldStyleTriggerTimer = mission.ForceOldStyleTriggerTimer }
 
                          allMissions.[m] missionContext
 

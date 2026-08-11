@@ -121,7 +121,7 @@ Stress test a network of simulated Tier1 topology with classic traffic and repor
 
 ### Parameters
 
-- `--enable-trigger-timer=<true|false>`: Enable or disable `EXPERIMENTAL_TRIGGER_TIMER` on all nodes. Defaults to enabled for this mission.
+- `--force-old-style-trigger-timer=<true|false>`: Set `FORCE_OLD_STYLE_PREPARE_START_TRIGGER_TIMER` on all nodes, forcing the pre-protocol-28 prepare-start trigger timer. Unset by default, in which case core picks the timer by protocol version (the consensus-close-time timer from protocol 28 on).
 
 ## MissionSorobanLoadGeneration
 
@@ -157,7 +157,7 @@ Stress test a network of simulated Tier1 topology with a mix of classic and soro
 
 ### Parameters
 
-- `--enable-trigger-timer=<true|false>`: Enable or disable `EXPERIMENTAL_TRIGGER_TIMER` on all nodes. Defaults to enabled for this mission.
+- `--force-old-style-trigger-timer=<true|false>`: Set `FORCE_OLD_STYLE_PREPARE_START_TRIGGER_TIMER` on all nodes, forcing the pre-protocol-28 prepare-start trigger timer. Unset by default, in which case core picks the timer by protocol version (the consensus-close-time timer from protocol 28 on).
 
 ## MissionMinBlockTimeClassic
 
@@ -169,11 +169,11 @@ Same as `MissionMinBlockTimeClassic`, but drives an explicit `MIXED_PREGEN_*` ov
 
 ## MissionTriggerTimerMixConsensus
 
-Tests the `EXPERIMENTAL_TRIGGER_TIMER` feature on a simulated Public Network topology with a configurable mix of nodes that have the flag enabled versus disabled, under configurable clock-drift distributions. It drives the same `MIXED_PREGEN_*` (classic + synthetic Soroban) overlay-only load as `MissionMinBlockTimeMixed`, but instead of binary-searching for a minimum block time it runs a single load pass at a fixed ledger close time and verifies consensus stays healthy (no errors, pairwise-consistent, all nodes in sync). Requires a generated pubnet topology via `--pubnet-data`.
+Tests the protocol-28 consensus-close-time trigger timer on a simulated Public Network topology with a configurable mix of nodes running it versus nodes forced back onto the older prepare-start timer via `FORCE_OLD_STYLE_PREPARE_START_TRIGGER_TIMER`, under configurable clock-drift distributions. It drives the same `MIXED_PREGEN_*` (classic + synthetic Soroban) overlay-only load as `MissionMinBlockTimeMixed`, but instead of binary-searching for a minimum block time it runs a single load pass at a fixed ledger close time and verifies consensus stays healthy (no errors, pairwise-consistent, all nodes in sync). Requires a generated pubnet topology via `--pubnet-data`.
 
 ### Parameters
 
-- `--trigger-timer-flag-pct`: Percentage (0-100) of nodes with `EXPERIMENTAL_TRIGGER_TIMER` enabled. Default 100. This mission rejects `--enable-trigger-timer`; use this flag instead.
+- `--force-old-style-trigger-timer-pct`: Percentage (0-100) of nodes with `FORCE_OLD_STYLE_PREPARE_START_TRIGGER_TIMER` set, i.e. forced onto the old prepare-start timer. The rest use the protocol default. Default 0. This mission rejects `--force-old-style-trigger-timer`; use this flag instead.
 - `--drift-pct`: Percentage (0-100) of nodes that receive clock drift. Default 0.
 - `--uniform-drift=lower,upper`: Uniform random clock drift, in signed ms, applied to each drifting node (e.g. `--uniform-drift=-2000,+2000`).
 - `--bimodal-drift=min1,max1,min2,max2`: Bimodal clock drift, in signed ms — the first half of the drifting nodes draw from `[min1,max1]`, the second half from `[min2,max2]` (e.g. `--bimodal-drift=-5000,-2000,+2000,+5000`).

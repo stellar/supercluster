@@ -159,12 +159,12 @@ let ctx : MissionContext =
       minBlockTimeMixedClassicTxRate = None
       minBlockTimeMixedSorobanTxRate = None
       runForMinBlockTime = false
-      triggerTimerFlagPct = 100
+      forceOldStyleTriggerTimerPct = 0
       uniformDrift = []
       bimodalDrift = []
       driftPct = 0
       ledgerCloseTimeMs = None
-      enableTriggerTimer = None }
+      forceOldStyleTriggerTimer = None }
 
 let netdata = __SOURCE_DIRECTORY__ + "/../../../data/public-network-data-2024-08-01.json"
 let pubkeys = __SOURCE_DIRECTORY__ + "/../../../data/tier1keys.json"
@@ -207,14 +207,14 @@ type Tests(output: ITestOutputHelper) =
         Assert.Contains("HTTP_PORT = " + CfgVal.httpPort.ToString(), toml)
         // Trigger timer and clock offset settings must be omitted unless
         // explicitly configured on the CoreSet or the mission context.
-        Assert.DoesNotContain("EXPERIMENTAL_TRIGGER_TIMER", toml)
+        Assert.DoesNotContain("FORCE_OLD_STYLE_PREPARE_START_TRIGGER_TIMER", toml)
         Assert.DoesNotContain("ARTIFICIALLY_SET_SYSTEM_CLOCK_OFFSET_FOR_TESTING", toml)
 
     [<Fact>]
     member __.``TOML Config emits trigger timer and per-node clock offsets``() =
         let opts =
             { coreSetOptions with
-                  experimentalTriggerTimer = Some true
+                  forceOldStyleTriggerTimer = Some true
                   clockOffsets = Some [ 0; -800; 1500 ] }
 
         let cs = MakeLiveCoreSet "test" opts
@@ -223,7 +223,7 @@ type Tests(output: ITestOutputHelper) =
         let tomlOfNode i = cfg.StellarCoreCfg(cs, i, MainCoreContainer).ToString()
 
         for i in 0 .. 2 do
-            Assert.Contains("EXPERIMENTAL_TRIGGER_TIMER = true", tomlOfNode i)
+            Assert.Contains("FORCE_OLD_STYLE_PREPARE_START_TRIGGER_TIMER = true", tomlOfNode i)
 
         Assert.Contains("ARTIFICIALLY_SET_SYSTEM_CLOCK_OFFSET_FOR_TESTING = 0", tomlOfNode 0)
         Assert.Contains("ARTIFICIALLY_SET_SYSTEM_CLOCK_OFFSET_FOR_TESTING = -800", tomlOfNode 1)
@@ -237,18 +237,27 @@ type Tests(output: ITestOutputHelper) =
 
         // The CoreSet leaves the option unset, so the mission-level flag
         // decides whether (and with which value) the key is emitted.
-        Assert.Contains("EXPERIMENTAL_TRIGGER_TIMER = true", tomlWith { ctx with enableTriggerTimer = Some true })
-        Assert.Contains("EXPERIMENTAL_TRIGGER_TIMER = false", tomlWith { ctx with enableTriggerTimer = Some false })
-        Assert.DoesNotContain("EXPERIMENTAL_TRIGGER_TIMER", tomlWith ctx)
+        Assert.Contains(
+            "FORCE_OLD_STYLE_PREPARE_START_TRIGGER_TIMER = true",
+            tomlWith { ctx with forceOldStyleTriggerTimer = Some true }
+        )
+
+        Assert.Contains(
+            "FORCE_OLD_STYLE_PREPARE_START_TRIGGER_TIMER = false",
+            tomlWith { ctx with forceOldStyleTriggerTimer = Some false }
+        )
+
+        Assert.DoesNotContain("FORCE_OLD_STYLE_PREPARE_START_TRIGGER_TIMER", tomlWith ctx)
 
         // A CoreSet-level setting wins over the mission-level flag.
         let csOn =
-            MakeLiveCoreSet "test" { coreSetOptions with experimentalTriggerTimer = Some true }
+            MakeLiveCoreSet "test" { coreSetOptions with forceOldStyleTriggerTimer = Some true }
 
-        let cfgOn = MakeNetworkCfg { ctx with enableTriggerTimer = Some false } [ csOn ] passOpt
+        let cfgOn =
+            MakeNetworkCfg { ctx with forceOldStyleTriggerTimer = Some false } [ csOn ] passOpt
 
         Assert.Contains(
-            "EXPERIMENTAL_TRIGGER_TIMER = true",
+            "FORCE_OLD_STYLE_PREPARE_START_TRIGGER_TIMER = true",
             cfgOn.StellarCoreCfg(csOn, 0, MainCoreContainer).ToString()
         )
 
