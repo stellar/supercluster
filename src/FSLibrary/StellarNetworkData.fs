@@ -489,17 +489,23 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
 
     let allPubnetNodeKeys = Array.map (fun (n: PubnetNode) -> n.PublicKey) allPubnetNodes |> Set.ofArray
 
-    // Check if we removed any tier1 or loadgen nodes.
+    // Fail if we removed any tier1 or loadgen nodes.
     let keptNodes : Set<string> =
         allPubnetNodeKeys
         |> Seq.filter (fun (n: string) -> Set.contains n tier1KeySet || Set.contains n loadgenKeySet)
         |> Set.ofSeq
 
-    for removedNode in Set.difference tier1KeySet keptNodes do
-        LogWarn "Removed tier1 node %s from simulation" removedNode
+    let removedTier1 = Set.difference tier1KeySet keptNodes
+    let removedLoadgen = Set.difference loadgenKeySet keptNodes
 
-    for removedNode in Set.difference loadgenKeySet keptNodes do
-        LogWarn "Removed loadgen node %s from simulation" removedNode
+    for removedNode in removedTier1 do
+        LogError "Removed tier1 node %s from simulation" removedNode
+
+    for removedNode in removedLoadgen do
+        LogError "Removed loadgen node %s from simulation" removedNode
+
+    if not (Set.isEmpty removedTier1 && Set.isEmpty removedLoadgen) then
+        failwithf "Removed %d tier1 and %d loadgen nodes from simulation" removedTier1.Count removedLoadgen.Count
 
     LogInfo "SimulatePubnet will run with %d nodes" (Array.length allPubnetNodes)
 
