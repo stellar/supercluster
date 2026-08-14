@@ -3,7 +3,7 @@
 # SLP mixed-load evaluation wrapper.
 #
 # This script runs the MinBlockTimeMixed mission against a stellar-core image
-# using the 2025-06-24 pubnet topology data (by default; see --pubnet-data) and
+# using the 2026-06-03 pubnet topology data (by default; see --pubnet-data) and
 # the fixed benchmark parameters below. It is intended to answer: "does this
 # image sustain the selected mixed classic/Soroban load at the normal 5s ledger
 # close target?"
@@ -72,7 +72,7 @@ SIMULATE_APPLY_WEIGHT=100
 SIMULATE_APPLY_BUDGET_MS=600
 DEFAULT_NETWORK_SIZE_LIMIT=277
 NETWORK_SIZE_LIMIT="$DEFAULT_NETWORK_SIZE_LIMIT"
-DEFAULT_PUBNET_DATA_FILE="public-network-data-2025-06-24.json"
+DEFAULT_PUBNET_DATA_FILE="public-network-data-2026-06-03-trimmed-located.json"
 
 usage() {
 	cat <<EOF
