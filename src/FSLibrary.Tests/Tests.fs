@@ -158,7 +158,9 @@ let ctx : MissionContext =
       ledgerCloseTimeMs = None
       forceOldStyleTriggerTimer = None }
 
-let netdata = __SOURCE_DIRECTORY__ + "/../../../data/public-network-data-2024-08-01.json"
+let netdata =
+    __SOURCE_DIRECTORY__
+    + "/../../../data/public-network-data-2026-06-03-trimmed-located.json"
 let pubkeys = __SOURCE_DIRECTORY__ + "/../../../data/tier1keys.json"
 let pubnetctx = { ctx with pubnetData = Some netdata; tier1Keys = Some pubkeys }
 
@@ -476,9 +478,10 @@ type Tests(output: ITestOutputHelper) =
              let nCfg = MakeNetworkCfg pubnetctx coreSets passOpt
              let sdfCoreSetName = CoreSetName "stellar"
              Assert.Contains(coreSets, (fun cs -> cs.name = sdfCoreSetName))
-             // Ensure that 'validator.stellar.expert' got a different name from
-             // 'www.stellar.org'.
-             Assert.Contains(coreSets, (fun cs -> cs.name = (CoreSetName "expert-non-tier1")))
+             // Ensure that an org with both tier1 and non-tier1 nodes (such as
+             // Public Node) got split into two separate core sets.
+             Assert.Contains(coreSets, (fun cs -> cs.name = (CoreSetName "publicnode")))
+             Assert.Contains(coreSets, (fun cs -> cs.name = (CoreSetName "publicnode-non-tier1")))
              let sdfCoreSet = List.find (fun cs -> cs.name = sdfCoreSetName) coreSets
              Assert.Equal(3, sdfCoreSet.options.nodeCount)
              let cfg = nCfg.StellarCoreCfg(sdfCoreSet, 0, MainCoreContainer)
@@ -489,9 +492,12 @@ type Tests(output: ITestOutputHelper) =
              Assert.Matches(Regex("VALIDATORS.*stellar-0"), toml)
              Assert.Matches(Regex("VALIDATORS.*publicnode-0"), toml)
              Assert.Matches(Regex("VALIDATORS.*creit-0"), toml)
-             Assert.Matches(Regex("VALIDATORS.*satoshipay-0"), toml)
              Assert.Matches(Regex("VALIDATORS.*lobstr-0"), toml)
-             Assert.Matches(Regex("VALIDATORS.*franklintempleton-0"), toml))
+             Assert.Matches(Regex("VALIDATORS.*franklintempleton-0"), toml)
+             Assert.Matches(Regex("VALIDATORS.*moneygram-0"), toml)
+             Assert.Matches(Regex("VALIDATORS.*range-0"), toml)
+             Assert.Matches(Regex("VALIDATORS.*withobsrvr-0"), toml)
+             Assert.Matches(Regex("VALIDATORS.*ylds-0"), toml))
 
     [<Fact>]
     member __.``Geographic calculations are reasonable``() =
