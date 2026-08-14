@@ -14,6 +14,7 @@ import logging
 import aiohttp
 
 import config
+import monitor_config as mc
 
 logger = logging.getLogger()
 
@@ -57,9 +58,9 @@ async def sweep(targets, concurrency=None, timeout=None, deadline=None):
     must not discard the other 1023 answers. asyncio.wait with a deadline keeps
     whatever finished and cancels only the stragglers.
     """
-    concurrency = int(concurrency or config.LIVENESS_MAX_CONCURRENCY)
-    timeout = float(timeout or config.LIVENESS_PROBE_TIMEOUT_SECONDS)
-    deadline = float(deadline or config.LIVENESS_SWEEP_SECONDS)
+    concurrency = int(concurrency or mc.LIVENESS_MAX_CONCURRENCY)
+    timeout = float(timeout or mc.LIVENESS_PROBE_TIMEOUT_SECONDS)
+    deadline = float(deadline or mc.LIVENESS_SWEEP_SECONDS)
     counts = {'up': 0, 'down': 0, 'unknown': len(targets)}
     if not targets:
         return {'up': 0, 'down': 0, 'unknown': 0}

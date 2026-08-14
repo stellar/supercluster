@@ -29,7 +29,12 @@ RUN pip install --no-cache-dir \
 COPY ./apps/job_monitor.py /app
 # Same image, second entrypoint: runs as a sidecar streaming worker logs.
 COPY ./apps/log_collector.py /app
-COPY ./lib/ /app/
+# Flattened one directory at a time: `COPY ./lib/ /app/` would preserve
+# lib/monitor and lib/collector as subdirectories, and a bare `import sizing`
+# does not look inside them.
+COPY ./lib/*.py /app/
+COPY ./lib/monitor/ /app/
+COPY ./lib/collector/ /app/
 
 EXPOSE 8080
 

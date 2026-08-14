@@ -6,6 +6,7 @@ cluster or the volume.
 """
 
 import config
+import monitor_config as mc
 import profiles
 
 
@@ -15,7 +16,7 @@ def _uniform_segment(start_ledger, end_ledger, seg_size):
     el = end_ledger
     while el > start_ledger:
         ledgers_per_job = min(el - start_ledger, seg_size)
-        out.append((el, ledgers_per_job + config.OVERLAP_LEDGERS))
+        out.append((el, ledgers_per_job + mc.OVERLAP_LEDGERS))
         el -= ledgers_per_job
     return out
 
@@ -57,15 +58,15 @@ def _ordered(ranges):
     """
     # validate_config() rejects an unknown order at startup; the raise here is
     # the backstop for a caller that skipped it, never the primary check.
-    if config.RANGE_ORDER == 'tip-first':
+    if mc.RANGE_ORDER == 'tip-first':
         return ranges
-    elif config.RANGE_ORDER == 'oldest-first':
+    elif mc.RANGE_ORDER == 'oldest-first':
         return list(reversed(ranges))
-    elif config.RANGE_ORDER == 'longest-first':
+    elif mc.RANGE_ORDER == 'longest-first':
         return _longest_first(ranges)
     else:
         raise ValueError("RANGE_ORDER must be one of %s, got %r"
-                         % (', '.join(config.VALID_RANGE_ORDERS), config.RANGE_ORDER))
+                         % (', '.join(mc.VALID_RANGE_ORDERS), mc.RANGE_ORDER))
 
 
 def generate_ranges():
@@ -78,6 +79,6 @@ def generate_ranges():
     also became unreachable when the range moved into /start, which carries no
     generator. Recover it from 8553e77 if the guess ever beats the measurement.
     """
-    return _ordered(_uniform_segment(config.STARTING_LEDGER,
-                                     config.LATEST_LEDGER_NUM,
-                                     config.LEDGERS_PER_JOB))
+    return _ordered(_uniform_segment(mc.STARTING_LEDGER,
+                                     mc.LATEST_LEDGER_NUM,
+                                     mc.LEDGERS_PER_JOB))

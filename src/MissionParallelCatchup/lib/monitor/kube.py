@@ -14,6 +14,7 @@ import os
 from kubernetes import client, config as kube_config
 
 import config
+import monitor_config as mc
 
 # The env var is exactly what load_incluster_config() itself keys on, so in a pod
 # this is the unconditional call it always was -- a missing token or CA still
@@ -27,7 +28,7 @@ if IN_CLUSTER:
 # client-go's Python equivalent defaults are fine for a few LISTs per cycle, but
 # dispatching ~1024 Jobs + PVCs at once needs headroom.
 _cfg = client.Configuration.get_default_copy()
-_cfg.connection_pool_maxsize = config.CONNECTION_POOL
+_cfg.connection_pool_maxsize = mc.CONNECTION_POOL
 client.Configuration.set_default(_cfg)
 
 core_v1 = client.CoreV1Api()

@@ -40,6 +40,7 @@ from kubernetes.client.rest import ApiException
 
 import attempts
 import config
+import monitor_config as mc
 import http_server
 import kube
 import metrics
@@ -61,11 +62,11 @@ def main():
     # The driver POSTs the profile to /start. Kept on the volume so a restarted
     # monitor resumes a run already under way instead of waiting for a /start
     # that was delivered to its predecessor.
-    config.RUN_PATH = os.path.join(config.LOG_DIR, 'run.json')
-    if os.path.exists(config.RUN_PATH):
+    mc.RUN_PATH = os.path.join(config.LOG_DIR, 'run.json')
+    if os.path.exists(mc.RUN_PATH):
         # Same path as a /start, so the range and the profile are both restored
         # and validated exactly as they were.
-        with open(config.RUN_PATH) as fh:
+        with open(mc.RUN_PATH) as fh:
             start_run(json.load(fh))
 
     http_server.status_source = lambda: (status, status_lock)
@@ -93,20 +94,20 @@ def start_run(doc):
                       ('ledgersPerJob', 'LEDGERS_PER_JOB'),
                       ('overlapLedgers', 'OVERLAP_LEDGERS')):
         if key in (doc.get('range') or {}):
-            setattr(config, name, (doc['range'])[key])
+            setattr(mc, name, (doc['range'])[key])
     profile = profiles.load_profile_doc(doc.get('profile') or {})
     # The whole config, judged at the first moment it is complete. Anything
     # wrong rejects the POST with the reason rather than dispatching a run that
     # is already misconfigured.
     validate_config()
-    if config.RANGE_ORDER == 'longest-first' and not profile:
+    if mc.RANGE_ORDER == 'longest-first' and not profile:
         raise ValueError(
             "RANGE_ORDER=longest-first requires a profile: it orders ranges by "
             "their measured seconds, and with no profile every range ties and "
             "dispatch stays tip-first. POST a profile, or set RANGE_ORDER.")
-    records.write_atomic(config.RUN_PATH, json.dumps(doc, separators=(',', ':')))
-    config.PROFILE = profile
-    logger.info("profile installed: %d ranges", len(config.PROFILE))
+    records.write_atomic(mc.RUN_PATH, json.dumps(doc, separators=(',', ':')))
+    mc.PROFILE = profile
+    logger.info("profile installed: %d ranges", len(mc.PROFILE))
     # Opened here rather than in the POST handler, so a restart that reads
     # run.json back resumes on exactly the same path. It did not, and a
     # restarted monitor blocked on this forever while /status kept answering
@@ -132,7 +133,7 @@ def validate_config():
     string form.
     """
     for name, cast in _LIVENESS_NUMBERS:
-        raw = getattr(config, name)
+        raw = getattr(mc, name)
         try:
             value = cast(raw)
         except (TypeError, ValueError):
@@ -141,35 +142,35 @@ def validate_config():
                 "numbers; LIVENESS_MAX_CONCURRENCY must be an integer") from None
         if value <= 0:
             raise ValueError(f"{name} must be greater than zero, got {raw!r}")
-        setattr(config, name, value)
+        setattr(mc, name, value)
 
-    if config.RANGE_ORDER not in config.VALID_RANGE_ORDERS:
+    if mc.RANGE_ORDER not in mc.VALID_RANGE_ORDERS:
         raise ValueError("RANGE_ORDER must be one of %s, got %r"
-                         % (', '.join(config.VALID_RANGE_ORDERS), config.RANGE_ORDER))
+                         % (', '.join(mc.VALID_RANGE_ORDERS), mc.RANGE_ORDER))
     # The ledger range, which nothing checked while it came from helm values --
     # an inverted or zero-width range generates no work and the run just ends,
     # reporting success on nothing.
-    if config.LEDGERS_PER_JOB <= 0:
+    if mc.LEDGERS_PER_JOB <= 0:
         raise ValueError("ledgersPerJob must be greater than zero, got %r"
-                         % (config.LEDGERS_PER_JOB,))
-    if config.OVERLAP_LEDGERS < 0:
+                         % (mc.LEDGERS_PER_JOB,))
+    if mc.OVERLAP_LEDGERS < 0:
         raise ValueError("overlapLedgers cannot be negative, got %r"
-                         % (config.OVERLAP_LEDGERS,))
-    if config.LATEST_LEDGER_NUM <= config.STARTING_LEDGER:
+                         % (mc.OVERLAP_LEDGERS,))
+    if mc.LATEST_LEDGER_NUM <= mc.STARTING_LEDGER:
         raise ValueError(
             "latestLedgerNum must be greater than startingLedger, got %r and %r"
-            % (config.LATEST_LEDGER_NUM, config.STARTING_LEDGER))
+            % (mc.LATEST_LEDGER_NUM, mc.STARTING_LEDGER))
     # The pool maps arrive per run, so this is the first point they meet the
     # ladder they are keyed to. A tier with no claim does not fail -- the pod
     # keeps the flat REQ_CPU/REQ_MEM and a second one fits beside it, which
     # undoes the isolation the whole tiering exists for: giving a pod its node
     # to itself raised throughput 29-92%. Silent, and only visible afterwards as
     # a run that cost more than it should.
-    if config.POOL_PREFIX:
+    if mc.POOL_PREFIX:
         routable = [name for _, name in sizing._parsed_pool_tiers()]
-        routable += [config.POOL_UNPROFILED, config.POOL_NO_PROFILE]
-        for env_name, raw in (('POOL_CPU', config.POOL_CPU), ('POOL_MEM', config.POOL_MEM)):
-            claimed = {k for k, _ in config.label_pairs(raw)}
+        routable += [mc.POOL_UNPROFILED, mc.POOL_NO_PROFILE]
+        for env_name, raw in (('POOL_CPU', mc.POOL_CPU), ('POOL_MEM', mc.POOL_MEM)):
+            claimed = {k for k, _ in mc.label_pairs(raw)}
             missing = [t for t in routable if t and t not in claimed]
             if missing:
                 raise ValueError(
@@ -259,7 +260,7 @@ def reconcile_loop():
         except Exception as e:
             logger.exception("Error while reconciling: %s", str(e))
 
-        time.sleep(config.RECONCILE_INTERVAL_SECONDS)
+        time.sleep(mc.RECONCILE_INTERVAL_SECONDS)
 
 
 def reconcile(state):
@@ -426,7 +427,7 @@ def reconcile(state):
     created = 0
     # No slots: a range's PVC is keyed by the range itself, so concurrency is
     # simply how many are in flight.
-    capacity = config.PARALLELISM - len(in_progress)
+    capacity = mc.PARALLELISM - len(in_progress)
     for end, count in desired:
         if capacity <= 0:
             break
@@ -498,7 +499,7 @@ def load_progress():
     closed ledger.
     """
     try:
-        with open(config.PROGRESS_FILE) as fh:
+        with open(mc.PROGRESS_FILE) as fh:
             return json.load(fh)
     except (OSError, ValueError):
         return {}
@@ -508,7 +509,7 @@ def save_progress(progress):
     # The monitor's own state, and the only copy. The driver's view of the run
     # is status.json in the ConfigMap; this document is not published.
     blob = json.dumps(progress, separators=(',', ':'))
-    records.write_atomic(config.PROGRESS_FILE, blob)
+    records.write_atomic(mc.PROGRESS_FILE, blob)
 
 
 
@@ -904,9 +905,9 @@ def ensure_pvc(end, owner):
             raise
     spec = client.V1PersistentVolumeClaimSpec(
         access_modes=['ReadWriteOnce'],
-        resources=client.V1VolumeResourceRequirements(requests={'storage': config.STORAGE_SIZE}))
-    if config.STORAGE_CLASS:
-        spec.storage_class_name = config.STORAGE_CLASS
+        resources=client.V1VolumeResourceRequirements(requests={'storage': mc.STORAGE_SIZE}))
+    if mc.STORAGE_CLASS:
+        spec.storage_class_name = mc.STORAGE_CLASS
     kube.core_v1.create_namespaced_persistent_volume_claim(config.NAMESPACE, client.V1PersistentVolumeClaim(
         metadata=client.V1ObjectMeta(name=name, owner_references=owner,
                                      labels={config.LABEL_RUN: config.RUN_NAME, config.LABEL_RANGE: str(end)}),
@@ -920,7 +921,7 @@ def _resources(mem=None, eph=None, end=None, attempt=1):
     overrides = sizing._profile_overrides(end, escalated=(mem is not None or eph is not None),
                                    attempt=attempt)
     # `mem` is the escalated request on an OOM retry, else the configured one.
-    req = {'cpu': config.REQ_CPU, 'memory': mem or config.REQ_MEM}
+    req = {'cpu': mc.REQ_CPU, 'memory': mem or mc.REQ_MEM}
     # Only ephemeral-storage is limited: it is the one dimension where an
     # unbounded pod takes the node down rather than itself.
     lim = {}
@@ -935,27 +936,27 @@ def _resources(mem=None, eph=None, end=None, attempt=1):
     #
     # Unprofiled pooled runs keep both: nothing measured them, so there is no
     # peak to have been generous about.
-    pooled_profiled = bool(config.POOL_PREFIX and config.PROFILE)
+    pooled_profiled = bool(mc.POOL_PREFIX and mc.PROFILE)
 
     # Only meaningful in ephemeral mode. In PVC mode a large request makes disk
     # the binding dimension and halves workers-per-node for no reason.
-    if config.REQ_EPHEMERAL and not pooled_profiled:
+    if mc.REQ_EPHEMERAL and not pooled_profiled:
         # Raise the request with the limit: ephemeral-storage is a scheduling
         # dimension, so a pod that outgrew it no longer fits where it was.
-        req['ephemeral-storage'] = eph or config.REQ_EPHEMERAL
+        req['ephemeral-storage'] = eph or mc.REQ_EPHEMERAL
     else:
         # pvc mode: /data is not on the node disk, so an ephemeral override
         # would size a dimension this run does not use. Pooled+profiled: the
         # pod owns its node and the axis is dropped deliberately.
         overrides.pop('ephemeral-storage', None)
-    if config.LIM_EPHEMERAL and not pooled_profiled:
-        lim['ephemeral-storage'] = eph or config.LIM_EPHEMERAL
+    if mc.LIM_EPHEMERAL and not pooled_profiled:
+        lim['ephemeral-storage'] = eph or mc.LIM_EPHEMERAL
 
     # The profile moves requests only. Disk excepted, because its limit is what
     # the kubelet enforces.
     for key, value in overrides.items():
         req[key] = value
-        if key == 'ephemeral-storage' and config.LIM_EPHEMERAL:
+        if key == 'ephemeral-storage' and mc.LIM_EPHEMERAL:
             lim[key] = value
     # Unmeasured range: the configured requests, exactly as if there were no
     # profile at all.
@@ -972,8 +973,8 @@ def pod_labels(end, attempt):
     """
     labels = {config.LABEL_RUN: config.RUN_NAME, config.LABEL_RANGE: str(end),
               config.LABEL_ATTEMPT: str(attempt)}
-    if config.EMIT_MISSION_LABEL and config.MISSION:
-        labels['mission'] = config.MISSION
+    if mc.EMIT_MISSION_LABEL and mc.MISSION:
+        labels['mission'] = mc.MISSION
     return labels
 
 
@@ -990,18 +991,18 @@ def _prestop_delay():
     anyway -- so the delay is not bought and an error is logged for every
     evicted pod.
     """
-    if config.WORKER_PRESTOP_SLEEP_SECONDS <= 0:
+    if mc.WORKER_PRESTOP_SLEEP_SECONDS <= 0:
         return None
-    if config.WORKER_PRESTOP_SLEEP_SECONDS >= config.WORKER_GRACE_SECONDS:
+    if mc.WORKER_PRESTOP_SLEEP_SECONDS >= mc.WORKER_GRACE_SECONDS:
         logger.warning(
             "PRESTOP_SLEEP_SECONDS=%s does not fit in GRACE_SECONDS=%s; "
             "not installing a preStop hook that the kubelet would kill",
-            config.WORKER_PRESTOP_SLEEP_SECONDS, config.WORKER_GRACE_SECONDS)
+            mc.WORKER_PRESTOP_SLEEP_SECONDS, mc.WORKER_GRACE_SECONDS)
         return None
     return client.V1Lifecycle(
         pre_stop=client.V1LifecycleHandler(
             _exec=client.V1ExecAction(
-                command=['/bin/sleep', str(config.WORKER_PRESTOP_SLEEP_SECONDS)])))
+                command=['/bin/sleep', str(mc.WORKER_PRESTOP_SLEEP_SECONDS)])))
 
 
 def build_job(end, count, attempt, owner, mem=None, eph=None):
@@ -1014,7 +1015,7 @@ def build_job(end, count, attempt, owner, mem=None, eph=None):
     else:
         data_vol = client.V1Volume(name='data', empty_dir=client.V1EmptyDirVolumeSource())
 
-    env = [client.V1EnvVar(name='ASAN_OPTIONS', value=config.ASAN_OPTIONS)] if config.ASAN_OPTIONS else []
+    env = [client.V1EnvVar(name='ASAN_OPTIONS', value=mc.ASAN_OPTIONS)] if mc.ASAN_OPTIONS else []
     command = ['/bin/sh', '-c', script]
     volumes = [data_vol, client.V1Volume(
         name='config', config_map=client.V1ConfigMapVolumeSource(
@@ -1027,26 +1028,26 @@ def build_job(end, count, attempt, owner, mem=None, eph=None):
     # term are ANDed, separate terms are ORed, and an avoid-only pod in its own
     # term would match every node.
     match = []
-    if config.NODE_LABEL_KEY:
+    if mc.NODE_LABEL_KEY:
         # Pooled runs route per range: the label names the tier this range's
         # memory puts it in. An escalated attempt resolves to a promoted tier,
         # which is what moves the pod to nodes its memory fits.
         tier = sizing.pool_for(end, attempt)
-        value = f"{config.POOL_PREFIX}-{tier}" if tier else config.NODE_LABEL_VALUE
+        value = f"{mc.POOL_PREFIX}-{tier}" if tier else mc.NODE_LABEL_VALUE
         match.append(client.V1NodeSelectorRequirement(
-            key=config.NODE_LABEL_KEY, operator='In', values=[value]))
-    for key, value in config.label_pairs(config.REQUIRE_NODE_LABELS):
+            key=mc.NODE_LABEL_KEY, operator='In', values=[value]))
+    for key, value in mc.label_pairs(mc.REQUIRE_NODE_LABELS):
         # Literal, unlike the pool-routed pair above: these are properties of
         # the pool rather than of the range, so they do not vary per attempt.
         match.append(client.V1NodeSelectorRequirement(
             key=key, operator='In', values=[value]))
-    if config.AVOID_NODE_LABEL_KEY:
+    if mc.AVOID_NODE_LABEL_KEY:
         # No value means "avoid the label however it is set", which is
         # DoesNotExist; NotIn [""] would only exclude the empty value.
         match.append(client.V1NodeSelectorRequirement(
-            key=config.AVOID_NODE_LABEL_KEY,
-            operator='NotIn' if config.AVOID_NODE_LABEL_VALUE else 'DoesNotExist',
-            values=[config.AVOID_NODE_LABEL_VALUE] if config.AVOID_NODE_LABEL_VALUE else None))
+            key=mc.AVOID_NODE_LABEL_KEY,
+            operator='NotIn' if mc.AVOID_NODE_LABEL_VALUE else 'DoesNotExist',
+            values=[mc.AVOID_NODE_LABEL_VALUE] if mc.AVOID_NODE_LABEL_VALUE else None))
     affinity = None
     if match:
         affinity = client.V1Affinity(node_affinity=client.V1NodeAffinity(
@@ -1055,10 +1056,10 @@ def build_job(end, count, attempt, owner, mem=None, eph=None):
 
     # Taint value must be absent: the mission emits {key, effect} with no value,
     # and the default Equal operator does not match "" against "true".
-    tolerations = [client.V1Toleration(key=config.TOLERATE_TAINT, effect='NoSchedule')] if config.TOLERATE_TAINT else None
+    tolerations = [client.V1Toleration(key=mc.TOLERATE_TAINT, effect='NoSchedule')] if mc.TOLERATE_TAINT else None
 
     container = client.V1Container(
-        name='stellar-core', image=config.CORE_IMAGE,
+        name='stellar-core', image=mc.CORE_IMAGE,
         command=command, env=env, resources=_resources(mem, eph, end, attempt),
         ports=[client.V1ContainerPort(container_port=11626, name='http')],
         lifecycle=_prestop_delay(),
@@ -1077,11 +1078,11 @@ def build_job(end, count, attempt, owner, mem=None, eph=None):
             # On the JobSpec, not the pod: a pod-level deadline is immutable once
             # the pod exists, so a mis-set value could not be corrected on a live
             # run.
-            active_deadline_seconds=config.ATTEMPT_DEADLINE_SECONDS or None,
+            active_deadline_seconds=mc.ATTEMPT_DEADLINE_SECONDS or None,
             backoff_limit=0,
             pod_failure_policy=client.V1PodFailurePolicy(
                 rules=[r for _, r in _failure_rules()]),
-            ttl_seconds_after_finished=config.JOB_TTL_SECONDS,
+            ttl_seconds_after_finished=mc.JOB_TTL_SECONDS,
             template=client.V1PodTemplateSpec(
                 metadata=client.V1ObjectMeta(labels=pod_labels(end, attempt)),
                 spec=client.V1PodSpec(
@@ -1091,11 +1092,11 @@ def build_job(end, count, attempt, owner, mem=None, eph=None):
                     # pod-level field starts at container start.
                     # IRSA for the S3 history mirror; without it workers fall
                     # back to the public archive, which throttles at 1024.
-                    service_account_name=config.WORKER_SERVICE_ACCOUNT or None,
+                    service_account_name=mc.WORKER_SERVICE_ACCOUNT or None,
                     # Never restarted in place: the pod stays terminal and
                     # inspectable for classification and the backstop log read.
                     restart_policy='Never',
-                    termination_grace_period_seconds=config.WORKER_GRACE_SECONDS,
+                    termination_grace_period_seconds=mc.WORKER_GRACE_SECONDS,
                     affinity=affinity, tolerations=tolerations,
                     containers=[container],
                     volumes=volumes))))
@@ -1362,7 +1363,7 @@ def verdict_for(end, attempt, job, pod):
     """
     from_pod = records.read_outcome(end, attempt)
     from_job = classify_from_job(job)
-    if from_pod and from_pod.get('outcome') in config.POD_AUTHORITATIVE_OUTCOMES:
+    if from_pod and from_pod.get('outcome') in mc.POD_AUTHORITATIVE_OUTCOMES:
         verdict = from_pod
     elif from_job and from_job.get('outcome') == 'timeout':
         verdict = from_job
@@ -1376,7 +1377,7 @@ def verdict_for(end, attempt, job, pod):
     # "did not complete", which a SIGTERM drain and a real failure share, so the
     # archive is what separates them -- and only once the collector has finished
     # writing it. Until then the verdict stays `failed` and the decision defers.
-    if (verdict.get('exitCode') == config.CATCHUP_INCOMPLETE_EXIT
+    if (verdict.get('exitCode') == mc.CATCHUP_INCOMPLETE_EXIT
             and _attempt_finalized(end, attempt)
             and attempts.exit3_retry_cause(end, attempt)):
         verdict = dict(verdict, outcome='fetch-fault')
@@ -1393,7 +1394,7 @@ def _condemn_timeout(end, attempt):
                  "on attempt %s; this fails the mission. Check its archived "
                  "log for 'maybe stale archive' -- an unreachable history "
                  "mirror is the usual cause.",
-                 end, config.ATTEMPT_DEADLINE_SECONDS, attempt)
+                 end, mc.ATTEMPT_DEADLINE_SECONDS, attempt)
     return CONDEMN
 
 
@@ -1407,7 +1408,7 @@ def _retry_oom(end, attempt):
     """
     base = (sizing._profile_overrides(end, escalated=False) or {}).get('memory')
     ooms = records._oom_count(end, attempt)
-    had = (sizing.pool_memory(sizing.pool_for(end, attempt)) if config.POOL_PREFIX
+    had = (sizing.pool_memory(sizing.pool_for(end, attempt)) if mc.POOL_PREFIX
            else sizing.mem_for_attempt(ooms, base))
     return _retry(f"OOM-killed at memory request {had}",
                   memory=sizing.mem_for_attempt(ooms + 1, base, end=end))
@@ -1452,7 +1453,7 @@ def retry_decision(verdict, end, attempt):
     elif outcome == 'disrupted':
         return _retry("lost to node disruption")
     elif outcome == 'fetch-fault':
-        return _retry(f"exited {config.CATCHUP_INCOMPLETE_EXIT} after a fetch fault "
+        return _retry(f"exited {mc.CATCHUP_INCOMPLETE_EXIT} after a fetch fault "
                       f"({attempts.exit3_retry_cause(end, attempt)})")
     elif outcome == 'oom':
         return _retry_oom(end, attempt)
@@ -1463,7 +1464,7 @@ def retry_decision(verdict, end, attempt):
         # reaped node from a range that really failed, and a run that reports
         # success on a range nobody verified is worse than one that stops.
         return CONDEMN
-    elif verdict.get('exitCode') == config.CATCHUP_INCOMPLETE_EXIT:
+    elif verdict.get('exitCode') == mc.CATCHUP_INCOMPLETE_EXIT:
         return _decide_exit3(end, attempt)
     elif verdict.get('exitCode') is None:
         # The verdict came from the Job condition, which says Failed and nothing
@@ -1476,14 +1477,14 @@ def retry_decision(verdict, end, attempt):
 def budget_for(verdict, end, attempt):
     """(spent, cap) for the cause that killed this attempt.
 
-    config.ATTEMPT_BUDGETS is the whole retry policy; a cause with no entry caps
+    mc.ATTEMPT_BUDGETS is the whole retry policy; a cause with no entry caps
     at 0 and is condemned on sight. `spent` counts only THIS cause, so evictions
     cannot drain the OOM or disk budgets. This verdict is already on disk, so
     the Nth failure is the one that exhausts a budget of N.
     """
     outcome = verdict['outcome']
     return (records._cause_count(end, attempt, (outcome,)),
-            config.ATTEMPT_BUDGETS.get(outcome, 0))
+            mc.ATTEMPT_BUDGETS.get(outcome, 0))
 
 
 def _log_retry(end, attempt, verdict, decision, cap):

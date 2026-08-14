@@ -11,6 +11,7 @@ import logging
 import math
 
 import config
+import monitor_config as mc
 import profiles
 import records
 import units
@@ -38,16 +39,16 @@ def mem_for_attempt(attempt, base=None, end=None):
     with the memory actually free, and a higher bar before the kubelet picks it
     as an eviction victim.
     """
-    if config.POOL_PREFIX:
+    if mc.POOL_PREFIX:
         promoted = pool_memory(pool_for(end, attempt))
         if promoted:
             return promoted
         # Above the ladder (nebula/protostar/supernova): nothing left to promote
         # into, so hold at the configured request rather than inventing a value.
-        return base or config.REQ_MEM
-    base_q = units.quantity_bytes(base or config.REQ_MEM)
-    want = int(base_q * (config.MEM_BUMP_FACTOR ** max(0, attempt - 1)))
-    cap = units.quantity_bytes(config.MEM_ESCALATION_CAP)
+        return base or mc.REQ_MEM
+    base_q = units.quantity_bytes(base or mc.REQ_MEM)
+    want = int(base_q * (mc.MEM_BUMP_FACTOR ** max(0, attempt - 1)))
+    cap = units.quantity_bytes(mc.MEM_ESCALATION_CAP)
     return units.bytes_to_quantity(min(want, cap))
 
 
@@ -58,11 +59,11 @@ def eph_for_attempt(attempt):
     still be evicted under node disk pressure, and there is nothing to raise.
     Every other reader of LIM_EPHEMERAL already guards on it being set.
     """
-    if not config.LIM_EPHEMERAL:
+    if not mc.LIM_EPHEMERAL:
         return None
-    base_q = units.quantity_bytes(config.LIM_EPHEMERAL)
-    want = int(base_q * (config.EPH_BUMP_FACTOR ** max(0, attempt - 1)))
-    return units.bytes_to_quantity(min(want, units.quantity_bytes(config.EPH_ESCALATION_CAP)))
+    base_q = units.quantity_bytes(mc.LIM_EPHEMERAL)
+    want = int(base_q * (mc.EPH_BUMP_FACTOR ** max(0, attempt - 1)))
+    return units.bytes_to_quantity(min(want, units.quantity_bytes(mc.EPH_ESCALATION_CAP)))
 
 
 def _rung_listed(raw, tier, nxt):
@@ -72,7 +73,7 @@ def _rung_listed(raw, tier, nxt):
 
 def _rung_blocked(tier, nxt):
     """Is this rung denied outright? Beats every other consideration."""
-    return _rung_listed(config.POOL_BLOCK_RUNGS, tier, nxt)
+    return _rung_listed(mc.POOL_BLOCK_RUNGS, tier, nxt)
 
 
 def _parsed_pool_tiers():
@@ -82,7 +83,7 @@ def _parsed_pool_tiers():
     which is how supernova is expressed without inventing a ceiling.
     """
     out = []
-    for item in config.POOL_TIERS.split(','):
+    for item in mc.POOL_TIERS.split(','):
         item = item.strip()
         if not item:
             continue
@@ -203,24 +204,24 @@ def pool_for(end, attempt=1, rungs=None):
     burned ~260 vCPU of a 2304 quota escalating away from a problem that was
     never memory.
     """
-    if not config.POOL_PREFIX:
+    if not mc.POOL_PREFIX:
         return None
     if rungs is None:
         # Attempts before this one, since this attempt has not run yet. Anything
         # on disk for it is from a previous incarnation of the same attempt.
         rungs = records._oom_count(end, attempt - 1) if attempt and attempt > 1 else 0
-    if not config.PROFILE:
-        return _promote(config.POOL_NO_PROFILE, rungs)
+    if not mc.PROFILE:
+        return _promote(mc.POOL_NO_PROFILE, rungs)
     prof = profiles.profile_for(end) if end is not None else None
     if not prof:
-        return _promote(config.POOL_UNPROFILED, rungs)
+        return _promote(mc.POOL_UNPROFILED, rungs)
     anon = prof.get('peakAnonBytes')
     tier = _cache_bump(_tier_for_bytes(anon), anon,
                        prof.get('peakWorkingSetBytes'))
     if not tier:
         # An entry with no memory measurement tells us nothing about size --
         # treat it as unprofiled rather than guessing a tier.
-        return _promote(config.POOL_UNPROFILED, rungs)
+        return _promote(mc.POOL_UNPROFILED, rungs)
     return _promote(tier, rungs)
 
 
@@ -241,7 +242,7 @@ def _pool_map(raw, what):
 
 def pool_cpu(tier):
     """cpu request for a tier, or None to keep the configured one."""
-    return _pool_map(config.POOL_CPU, 'POOL_CPU').get(tier)
+    return _pool_map(mc.POOL_CPU, 'POOL_CPU').get(tier)
 
 
 def pool_memory(tier):
@@ -255,7 +256,7 @@ def pool_memory(tier):
     Half is the smallest value that still excludes a second pod once the
     daemonsets are counted, and the largest that reliably schedules the first.
     """
-    return _pool_str_map(config.POOL_MEM, 'POOL_MEM').get(tier)
+    return _pool_str_map(mc.POOL_MEM, 'POOL_MEM').get(tier)
 
 
 def _pool_str_map(raw, what):
@@ -284,10 +285,10 @@ def _positive_seconds(value):
 
 def _profile_seconds():
     """Every valid measured runtime in the profile, sorted."""
-    if config._SORTED_SECONDS is None:
-        values = (_positive_seconds(r.get('seconds')) for _, r in (config.PROFILE or []))
-        config._SORTED_SECONDS = sorted(seconds for seconds in values if seconds is not None)
-    return config._SORTED_SECONDS
+    if mc._SORTED_SECONDS is None:
+        values = (_positive_seconds(r.get('seconds')) for _, r in (mc.PROFILE or []))
+        mc._SORTED_SECONDS = sorted(seconds for seconds in values if seconds is not None)
+    return mc._SORTED_SECONDS
 
 
 def _runtime_insurance(seconds, allowance):
@@ -315,7 +316,7 @@ def _profile_overrides(end, escalated, attempt=1):
     """
     if end is None:
         return {}
-    if escalated and not config.POOL_PREFIX:
+    if escalated and not mc.POOL_PREFIX:
         # Unpooled: an escalation measures THIS run and outranks anything an
         # earlier one saw. Pooled: the promotion IS the escalation, and the
         # promoted tier's cut is the escalated request -- bailing out here would
@@ -325,14 +326,14 @@ def _profile_overrides(end, escalated, attempt=1):
     out = {}
     if prof:
         disk = prof.get('peakEphemeralBytes')
-        if disk and config.LIM_EPHEMERAL:
-            want = (int(disk * config.PROFILE_MARGIN)
-                    + units.quantity_bytes(config.PROFILE_EPHEMERAL_HEADROOM)
+        if disk and mc.LIM_EPHEMERAL:
+            want = (int(disk * mc.PROFILE_MARGIN)
+                    + units.quantity_bytes(mc.PROFILE_EPHEMERAL_HEADROOM)
                     + _runtime_insurance(prof.get('seconds'),
-                                         config.PROFILE_RUNTIME_EPHEMERAL_INSURANCE))
+                                         mc.PROFILE_RUNTIME_EPHEMERAL_INSURANCE))
             out['ephemeral-storage'] = units.bytes_to_quantity(
-                min(want, units.quantity_bytes(config.PROFILE_MAX_EPHEMERAL)))
-    if config.POOL_PREFIX:
+                min(want, units.quantity_bytes(mc.PROFILE_MAX_EPHEMERAL)))
+    if mc.POOL_PREFIX:
         # Deliberately BEFORE the no-profile bail. pool_for resolves a tier for
         # every range -- protostar when the range is newer than the profile,
         # nebula when there is no profile at all -- so returning {} here would
@@ -368,9 +369,9 @@ def _profile_overrides(end, escalated, attempt=1):
     # tracked anon still sizes exactly as it used to.
     rss = prof.get('peakAnonBytes')
     if rss:
-        want = (int(rss * config.PROFILE_MARGIN)
-                + units.quantity_bytes(config.PROFILE_CACHE_HEADROOM)
+        want = (int(rss * mc.PROFILE_MARGIN)
+                + units.quantity_bytes(mc.PROFILE_CACHE_HEADROOM)
                 + _runtime_insurance(prof.get('seconds'),
-                                     config.PROFILE_RUNTIME_MEMORY_INSURANCE))
-        out['memory'] = units.bytes_to_quantity(min(want, units.quantity_bytes(config.PROFILE_MAX_MEM)))
+                                     mc.PROFILE_RUNTIME_MEMORY_INSURANCE))
+        out['memory'] = units.bytes_to_quantity(min(want, units.quantity_bytes(mc.PROFILE_MAX_MEM)))
     return out
