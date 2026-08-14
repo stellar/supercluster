@@ -3533,6 +3533,30 @@
         "5_min_rate": 6.91049e-08,
         "15_min_rate": 6.91049e-08
       },
+      "loadgen.tx-latency-run.max-ms": {
+        "type": "counter",
+        "count": 14797
+      },
+      "loadgen.tx-latency-run.mean-ms": {
+        "type": "counter",
+        "count": 7573
+      },
+      "loadgen.tx-latency-run.min-ms": {
+        "type": "counter",
+        "count": 1947
+      },
+      "loadgen.tx-latency-run.p50-ms": {
+        "type": "counter",
+        "count": 7482
+      },
+      "loadgen.tx-latency-run.p75-ms": {
+        "type": "counter",
+        "count": 9334
+      },
+      "loadgen.tx-latency-run.p99-ms": {
+        "type": "counter",
+        "count": 12706
+      },
       "overlay.byte.read": {
         "type": "meter",
         "count": 5,

@@ -3,9 +3,10 @@
 # SLP mixed-load evaluation wrapper.
 #
 # This script runs the MinBlockTimeMixed mission against a stellar-core image
-# using the 2025-06-24 pubnet topology data and the fixed benchmark parameters
-# below. It is intended to answer: "does this image sustain the selected mixed
-# classic/Soroban load at the normal 5s ledger close target?"
+# using the 2025-06-24 pubnet topology data (by default; see --pubnet-data) and
+# the fixed benchmark parameters below. It is intended to answer: "does this
+# image sustain the selected mixed classic/Soroban load at the normal 5s ledger
+# close target?"
 #
 # Benchmark setup:
 # - One mission run is started for each selected Soroban load flag:
@@ -15,7 +16,8 @@
 #   match current network conditions. The flag value supplies only the Soroban
 #   TPS for that run, so total TPS is CLASSIC_TX_RATE + selected Soroban TPS.
 # - The mission uses MinBlockTimeMixed's MIXED_PREGEN_* overlay-only loadgen
-#   mode, simulated pubnet network delay, with NETWORK_SIZE_LIMIT nodes.
+#   mode, simulated pubnet network delay, with a configurable number of nodes
+#   (--network-size-limit, default 277).
 # - The block-time search range is intentionally narrow:
 #   [MIN_BLOCK_TIME_MS, MAX_BLOCK_TIME_MS] = [4900, 5100]. With the mission's
 #   100ms binary-search threshold, this effectively evaluates the 5s target
@@ -23,6 +25,9 @@
 # - simulate-apply-duration is derived from SIMULATE_APPLY_BUDGET_MS and the
 #   total TPS so the synthetic apply sleep budget remains roughly constant as
 #   the requested Soroban rate changes.
+# - Arguments after a trailing "--" are appended verbatim to every mission
+#   command line, so one-off flags can be added without editing this script.
+#   scripts/measure_e2e.sh is a preset built on top of that mechanism.
 #
 # Result interpretation:
 # - A zero exit and a "Minimum sustainable block time: ..." log line means the
@@ -41,6 +46,7 @@ STELLAR_CORE_IMAGE=
 SAC_TX_RATE=
 OZ_TX_RATE=
 SOROSWAP_TX_RATE=
+PUBNET_DATA=
 
 IMAGE_REPOSITORY="746476062914.dkr.ecr.us-east-1.amazonaws.com/dev"
 
@@ -64,11 +70,15 @@ NUM_PREGENERATED_TXS=1000000
 GENESIS_TEST_ACCOUNT_COUNT=1000000
 SIMULATE_APPLY_WEIGHT=100
 SIMULATE_APPLY_BUDGET_MS=600
-NETWORK_SIZE_LIMIT=277
+DEFAULT_NETWORK_SIZE_LIMIT=277
+NETWORK_SIZE_LIMIT="$DEFAULT_NETWORK_SIZE_LIMIT"
+DEFAULT_PUBNET_DATA_FILE="public-network-data-2025-06-24.json"
 
 usage() {
 	cat <<EOF
-Usage: $0 --stellar-core-image IMAGE [--data-root PATH] [--sac RATE] [--oz RATE] [--soroswap RATE]
+Usage: $0 --stellar-core-image IMAGE [--data-root PATH] [--network-size-limit N]
+       [--pubnet-data PATH] [--sac RATE] [--oz RATE] [--soroswap RATE]
+       [-- MISSION_ARG...]
 
 Runs one MinBlockTimeMixed mission per selected load flag against IMAGE.
 Each run always generates ${CLASSIC_TX_RATE} classic payment TPS plus the
@@ -78,6 +88,10 @@ TPS + 50 SAC Soroban TPS; "--sac 50 --oz 25" runs two separate benchmarks.
 Options:
   --stellar-core-image, --image IMAGE   Stellar Core image to evaluate. Required.
   --data-root, --supercluster-root PATH Root containing data/. Defaults to pwd.
+  --network-size-limit N                Number of pubnet nodes to run.
+                                        Defaults to ${DEFAULT_NETWORK_SIZE_LIMIT}.
+  --pubnet-data PATH                    Pubnet connectivity graph to run against.
+                                        Defaults to <data-root>/data/${DEFAULT_PUBNET_DATA_FILE}.
   --sac RATE                            Run SAC load with the given Soroban tx rate.
                                         Can be supplied with other load flags to run benchmarks sequentially.
   --oz RATE                             Run OZ load with the given Soroban tx rate.
@@ -85,12 +99,13 @@ Options:
   --soroswap RATE                       Run Soroswap load with the given Soroban tx rate.
                                         Can be supplied with other load flags to run benchmarks sequentially.
   -h, --help                            Show this help.
+  -- MISSION_ARG...                     Everything after "--" is appended verbatim to each
+                                        mission command line. Use it for one-off flags this
+                                        wrapper does not expose.
 
 Benchmark constants:
   Classic TPS:        ${CLASSIC_TX_RATE}
   Target close time:  ${BLOCK_TIME_MS}ms, evaluated via [${MIN_BLOCK_TIME_MS}, ${MAX_BLOCK_TIME_MS}]
-  Network size limit: ${NETWORK_SIZE_LIMIT}
-  Data set:           data/public-network-data-2025-06-24.json
 
 Results:
   PASS: command exits 0 and logs "Minimum sustainable block time: ...".
@@ -112,7 +127,13 @@ is_nonnegative_integer() {
 	esac
 }
 
+# Parses the wrapper's own options and stops at a "--" separator. Sets
+# PARSED_ARG_COUNT to the number of arguments consumed (including the
+# separator) so the caller can shift them off and keep the mission arguments
+# that followed in "$@".
 parse_args() {
+	total_arg_count="$#"
+
 	while [ "$#" -gt 0 ]; do
 		case "$1" in
 		--stellar-core-image | --image)
@@ -180,6 +201,43 @@ parse_args() {
 			SOROSWAP_TX_RATE="${1#*=}"
 			shift
 			;;
+		--network-size-limit)
+			if [ "$#" -lt 2 ] || [ -z "$2" ]; then
+				printf '%s\n' "--network-size-limit requires a node count." >&2
+				usage >&2
+				exit 1
+			fi
+			NETWORK_SIZE_LIMIT="$2"
+			shift 2
+			;;
+		--network-size-limit=*)
+			NETWORK_SIZE_LIMIT="${1#*=}"
+			shift
+			;;
+		--pubnet-data)
+			if [ "$#" -lt 2 ] || [ -z "$2" ]; then
+				printf '%s\n' "--pubnet-data requires a path." >&2
+				usage >&2
+				exit 1
+			fi
+			PUBNET_DATA="$2"
+			shift 2
+			;;
+		--pubnet-data=*)
+			PUBNET_DATA="${1#*=}"
+			# An empty value here would silently fall back to the
+			# default data set, so reject it like the two-token form.
+			if [ -z "$PUBNET_DATA" ]; then
+				printf '%s\n' "--pubnet-data requires a path." >&2
+				usage >&2
+				exit 1
+			fi
+			shift
+			;;
+		--)
+			shift
+			break
+			;;
 		-h | --help)
 			usage
 			exit 0
@@ -191,6 +249,8 @@ parse_args() {
 			;;
 		esac
 	done
+
+	PARSED_ARG_COUNT=$((total_arg_count - $#))
 }
 
 validate_tx_rate() {
@@ -226,6 +286,13 @@ validate_args() {
 
 	if [ -n "$SOROSWAP_TX_RATE" ]; then
 		validate_tx_rate "--soroswap" "$SOROSWAP_TX_RATE"
+	fi
+
+	# Non-numeric values make "[" exit 2 rather than 1, so test for the
+	# accepted range and negate: anything unparseable is rejected too.
+	if ! [ "$NETWORK_SIZE_LIMIT" -ge 1 ] 2>/dev/null; then
+		printf '%s\n' "--network-size-limit must be a positive integer." >&2
+		exit 1
 	fi
 }
 
@@ -266,8 +333,9 @@ resolve_min_block_time_mixed_mode() {
 }
 
 run_min_block_time_mixed() {
-	mode_alias="${1:?usage: run_min_block_time_mixed MODE SOROBAN_TX_RATE}"
-	soroban_tx_rate="${2:?usage: run_min_block_time_mixed MODE SOROBAN_TX_RATE}"
+	mode_alias="${1:?usage: run_min_block_time_mixed MODE SOROBAN_TX_RATE [MISSION_ARG...]}"
+	soroban_tx_rate="${2:?usage: run_min_block_time_mixed MODE SOROBAN_TX_RATE [MISSION_ARG...]}"
+	shift 2
 	min_block_time_mixed_mode="$(resolve_min_block_time_mixed_mode "$mode_alias")"
 	simulate_apply_duration="$(calculate_simulate_apply_duration "$CLASSIC_TX_RATE" "$soroban_tx_rate")"
 
@@ -296,23 +364,28 @@ run_min_block_time_mixed() {
 		--tier1-keys "$TIER1_KEYS" \
 		--network-size-limit "$NETWORK_SIZE_LIMIT" \
 		--require-node-labels=purpose:largetests \
-		--tolerate-node-taints=largetests
+		--tolerate-node-taints=largetests \
+		"$@"
 }
 
 parse_args "$@"
+shift "$PARSED_ARG_COUNT"
 validate_args
 
-PUBNET_DATA="$DATA_ROOT/data/public-network-data-2025-06-24.json"
+if [ -z "$PUBNET_DATA" ]; then
+	PUBNET_DATA="$DATA_ROOT/data/$DEFAULT_PUBNET_DATA_FILE"
+fi
+
 TIER1_KEYS="$DATA_ROOT/data/tier1keys.json"
 
 if [ -n "$SAC_TX_RATE" ]; then
-	run_min_block_time_mixed sac "$SAC_TX_RATE"
+	run_min_block_time_mixed sac "$SAC_TX_RATE" "$@"
 fi
 
 if [ -n "$OZ_TX_RATE" ]; then
-	run_min_block_time_mixed oz "$OZ_TX_RATE"
+	run_min_block_time_mixed oz "$OZ_TX_RATE" "$@"
 fi
 
 if [ -n "$SOROSWAP_TX_RATE" ]; then
-	run_min_block_time_mixed soroswap "$SOROSWAP_TX_RATE"
+	run_min_block_time_mixed soroswap "$SOROSWAP_TX_RATE" "$@"
 fi

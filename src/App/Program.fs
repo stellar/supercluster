@@ -73,8 +73,10 @@ type MissionOptions
         apiRateLimit: int,
         httpProxyReplicas: int,
         pubnetData: string option,
+        measureE2eLatency: bool,
         flatQuorum: bool option,
         tier1Keys: string option,
+        loadgenKeys: string option,
         maxConnections: int option,
         fullyConnectTier1: bool,
         byteCountValues: seq<int>,
@@ -318,11 +320,20 @@ type MissionOptions
     [<Option("pubnet-data", HelpText = "JSON file containing pubnet connectivity graph data", Required = false)>]
     member self.PubnetData = pubnetData
 
+    [<Option("measure-e2e-latency",
+             HelpText = "Set to enable the loadgen e2e metrics",
+             Required = false,
+             Default = false)>]
+    member self.MeasureE2eLatency = measureE2eLatency
+
     [<Option("flat-quorum", HelpText = "Use flat Tier1 quorum", Required = false)>]
     member self.FlatQuorum = flatQuorum
 
     [<Option("tier1-keys", HelpText = "JSON file containing list of 'tier-1' pubkeys from pubnet", Required = false)>]
     member self.Tier1Keys = tier1Keys
+
+    [<Option("loadgen-keys", HelpText = "JSON file containing list of pubkeys to generate load", Required = false)>]
+    member self.LoadgenKeys = loadgenKeys
 
     [<Option("max-connections",
              HelpText = "Maximum number of connections to allow any node in pubnet data to have. When enabled, this option will prune connections for any node with more than this number of connections. (default: no limit)",
@@ -743,6 +754,12 @@ let main argv =
             0
 
         | :? MissionOptions as mission ->
+            if mission.LoadgenKeys.IsSome && mission.PubnetData.IsNone then
+                failwith "Error: --loadgen-keys requires --pubnet-data to be set"
+
+            if mission.MeasureE2eLatency && mission.LoadgenKeys.IsNone then
+                failwith "Error: --measure-e2e-latency requires --loadgen-keys"
+
             let _ = logToConsoleAndFile (sprintf "%s/stellar-supercluster.log" mission.Destination)
 
             let ll =
@@ -848,8 +865,10 @@ let main argv =
                                apiRateLimit = mission.ApiRateLimit
                                httpProxyReplicas = mission.HttpProxyReplicas
                                pubnetData = mission.PubnetData
+                               measureE2eLatency = mission.MeasureE2eLatency
                                flatQuorum = mission.FlatQuorum
                                tier1Keys = mission.Tier1Keys
+                               loadgenKeys = mission.LoadgenKeys
                                maxConnections = mission.MaxConnections
                                fullyConnectTier1 = mission.FullyConnectTier1
                                byteCountDistribution =
