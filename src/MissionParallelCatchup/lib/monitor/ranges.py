@@ -5,7 +5,6 @@ so a restarted monitor has to reproduce it exactly. Nothing here reads the
 cluster or the volume.
 """
 
-import config
 import monitor_config as mc
 import profiles
 

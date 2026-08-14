@@ -10,10 +10,9 @@ timeout all produce a retry and none of them says the range needed a bigger node
 import logging
 import math
 
-import config
 import monitor_config as mc
 import profiles
-import records
+import attempt_files
 import units
 
 logger = logging.getLogger()
@@ -209,7 +208,7 @@ def pool_for(end, attempt=1, rungs=None):
     if rungs is None:
         # Attempts before this one, since this attempt has not run yet. Anything
         # on disk for it is from a previous incarnation of the same attempt.
-        rungs = records._oom_count(end, attempt - 1) if attempt and attempt > 1 else 0
+        rungs = attempt_files._oom_count(end, attempt - 1) if attempt and attempt > 1 else 0
     if not mc.PROFILE:
         return _promote(mc.POOL_NO_PROFILE, rungs)
     prof = profiles.profile_for(end) if end is not None else None

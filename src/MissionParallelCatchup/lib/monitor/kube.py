@@ -13,7 +13,6 @@ import os
 
 from kubernetes import client, config as kube_config
 
-import config
 import monitor_config as mc
 
 # The env var is exactly what load_incluster_config() itself keys on, so in a pod

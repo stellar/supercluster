@@ -195,10 +195,6 @@ monitor:
   logStorageSize: "100Gi"
   saveSuccessLogs: true
   collectorPollSeconds: 5
-  # Log collection polls rather than holding a follow=true stream per pod, so
-  # concurrency is independent of worker.replicas. At 4096 pods and a 10s
-  # interval this is ~90 in-flight polls.
-  logPollSeconds: 10
   # Spot gives ~120s of notice; past roughly double that the drain was
   # cancelled and the stream should go back to interval polling.
   doomedFollowSeconds: 300
@@ -206,10 +202,6 @@ monitor:
   # poll slot and blackout the rest of the run. Condemned pods beyond this fall
   # back to polling, which is the pre-existing behaviour.
   maxDoomedFollows: 256
-  # Poll interval for a pod the cluster has condemned. The cheap half of the
-  # disruption fix: preStop delays SIGTERM but leaves ~9s between the medida
-  # block and the pod object vanishing, which a 10s poll straddles.
-  doomedPollSeconds: 1
   # Lifetime of each pod watch before the apiserver closes it and the collector
   # reconnects from its last resourceVersion. The watch is what makes a
   # condemnation visible immediately rather than on the next collectorPollSeconds
@@ -220,19 +212,22 @@ monitor:
   watchRetrySeconds: 1
   maxConcurrentPolls: 96
   maxPollChars: 8388608
-  # Failed polls tolerated after a pod goes terminal before the collector stops
-  # asking. Its log is not coming back and the task holds a poll slot.
-  terminalPollAttempts: 3
-  # Growth factor before an in-flight peak is flushed to its .metrics file, so a
-  # collector restart cannot silently reset a range's high-water to zero.
-  peakFlushRatio: 1.05
+  # Concurrent kubelet sweeps. One request per node, and a dead one costs the
+  # connect timeout, so this stays small next to the log-read budget.
+  maxConcurrentSamples: 16
+  # Longest one log read may stall before it is abandoned. A cycle reads every
+  # pod together, so a wedged read would hold up the whole pass.
+  readTimeoutSeconds: 60
+  # How far back the terminal read reaches past the resume point, so a medida
+  # block split across two reads is whole in one. The archive dedups the
+  # overlap, so this only widens what the scan sees.
+  terminalRereadSeconds: 30
   # Poll cycles a stream gets to finalize after its pod leaves the pod list,
   # before it is cancelled and its connection slot reclaimed.
   # Where the monitor runs, from --job-monitor-node-labels and
   # --job-monitor-tolerate-taints. Empty = anywhere untainted. Pinning it to a
   # worker tier reserves that node: it holds the logs PVC for the whole run.
   nodeSelector: {}
-  collectorVanishedGraceCycles: 3
   collectorResources:
     requests: { cpu: "200m", memory: "512Mi" }
     limits:   { cpu: "2",    memory: "2Gi" }

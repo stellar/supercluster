@@ -23,17 +23,14 @@ Finally the monitor exposes a simple HTTP server for health checks, status, and 
 
 """
 
-import bisect
 import collections
 import gzip
 import json
-import math
 import os
 import re
 import threading
 import time
-import zlib
-from datetime import datetime, timezone
+from datetime import datetime
 
 from kubernetes import client
 from kubernetes.client.rest import ApiException
@@ -46,6 +43,7 @@ import kube
 import metrics
 import profiles
 import ranges
+import attempt_files
 import records
 import sizing
 import worker_liveness
@@ -552,7 +550,7 @@ def record_range_start(end, job):
     wallSeconds measures. Written at creation because attempt 1's Job is gone
     on the first retry.
     """
-    path = records.started_path(end)
+    path = attempt_files.started_path(end)
     if os.path.exists(path):
         return
     created = job.metadata.creation_timestamp if job and job.metadata else None
@@ -567,7 +565,7 @@ def record_range_start(end, job):
 def range_started_at(end):
     """attempt 1's Job creationTimestamp, or None if it was never recorded."""
     try:
-        with open(records.started_path(end)) as fh:
+        with open(attempt_files.started_path(end)) as fh:
             return datetime.fromisoformat(fh.read().strip())
     except (OSError, ValueError):
         return None
@@ -726,7 +724,7 @@ def save_verdict(end, attempt, outcome):
     once, and this is where the answer is kept, on the same durable logs volume
     as everything else, so a monitor restart does not reset a range's budgets.
     """
-    path = records.verdict_path(end, attempt)
+    path = attempt_files.verdict_path(end, attempt)
     try:
         records.write_atomic(path, str(outcome))
     except OSError as e:
@@ -1178,7 +1176,7 @@ def _retry_counter_totals(progress, current_attempts=()):
     effective = {}
     for end, attempt in verdict_files:
         try:
-            with open(records.verdict_path(end, attempt)) as fh:
+            with open(attempt_files.verdict_path(end, attempt)) as fh:
                 verdict = fh.read().strip()
         except OSError:
             continue
@@ -1361,7 +1359,7 @@ def verdict_for(end, attempt, job, pod):
          the drained pod reads as a plain `failed`
       3. else whichever exists, unknown over nothing: retry rather than condemn
     """
-    from_pod = records.read_outcome(end, attempt)
+    from_pod = attempt_files.read_outcome(end, attempt)
     from_job = classify_from_job(job)
     if from_pod and from_pod.get('outcome') in mc.POD_AUTHORITATIVE_OUTCOMES:
         verdict = from_pod
@@ -1407,7 +1405,7 @@ def _retry_oom(end, attempt):
     `attempt` instead names a rung nobody occupied.
     """
     base = (sizing._profile_overrides(end, escalated=False) or {}).get('memory')
-    ooms = records._oom_count(end, attempt)
+    ooms = attempt_files._oom_count(end, attempt)
     had = (sizing.pool_memory(sizing.pool_for(end, attempt)) if mc.POOL_PREFIX
            else sizing.mem_for_attempt(ooms, base))
     return _retry(f"OOM-killed at memory request {had}",
@@ -1420,7 +1418,7 @@ def _retry_ephemeral(end, attempt):
     Rungs climbed = evictions seen, not attempts made, as with the OOM ladder:
     on spot most retries are disruptions. The count includes this attempt.
     """
-    evictions = records._cause_count(end, attempt, ('ephemeral',))
+    evictions = attempt_files._cause_count(end, attempt, ('ephemeral',))
     had = sizing.eph_for_attempt(evictions)
     reason = (f"evicted for exceeding its {had} ephemeral-storage limit" if had
               else "evicted under node disk pressure with no configured limit")
@@ -1483,7 +1481,7 @@ def budget_for(verdict, end, attempt):
     the Nth failure is the one that exhausts a budget of N.
     """
     outcome = verdict['outcome']
-    return (records._cause_count(end, attempt, (outcome,)),
+    return (attempt_files._cause_count(end, attempt, (outcome,)),
             mc.ATTEMPT_BUDGETS.get(outcome, 0))
 
 

@@ -10,10 +10,9 @@ so it is the seam an executor would wrap if the monitor ever moved onto a loop.
 import gzip
 import json
 import logging
-import os
 import zlib
 
-import config
+import attempt_files
 import records
 
 logger = logging.getLogger()
@@ -64,7 +63,7 @@ def peaks_for_range(end, attempt=1):
 
 def _hit_a_ceiling(end, attempt):
     """Was this attempt killed at one of its own resource limits?"""
-    return (records.read_outcome(end, attempt) or {}).get('outcome') in ('oom', 'ephemeral')
+    return (attempt_files.read_outcome(end, attempt) or {}).get('outcome') in ('oom', 'ephemeral')
 
 
 def _peak_attempts(end, attempt):
@@ -269,7 +268,7 @@ def _attempt_seconds(end, attempt):
     # .outcome carries the pod's own terminated timestamps, and is absent
     # whenever the pod was reaped before classification -- every spot eviction --
     # so fall back to the collector's estimate.
-    leg = (records.read_outcome(end, attempt) or {}).get('attemptSeconds')
+    leg = (attempt_files.read_outcome(end, attempt) or {}).get('attemptSeconds')
     if leg is not None:
         return leg
     try:

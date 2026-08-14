@@ -434,14 +434,6 @@ spec:
               value: /logs
             - name: COLLECTOR_POLL_SECONDS
               value: {{ .Values.monitor.collectorPollSeconds | quote }}
-            - name: TERMINAL_POLL_ATTEMPTS
-              value: {{ .Values.monitor.terminalPollAttempts | quote }}
-            - name: LOG_POLL_SECONDS
-              value: {{ .Values.monitor.logPollSeconds | quote }}
-            # Ceiling on how long a follow stream is held for a condemned pod,
-            # so a withdrawn drain notice cannot pin one open for a whole range.
-            - name: DOOMED_POLL_SECONDS
-              value: {{ .Values.monitor.doomedPollSeconds | quote }}
             - name: WATCH_TIMEOUT_SECONDS
               value: {{ .Values.monitor.watchTimeoutSeconds | quote }}
             - name: WATCH_RETRY_SECONDS
@@ -454,10 +446,12 @@ spec:
               value: {{ .Values.monitor.maxConcurrentPolls | quote }}
             - name: MAX_POLL_CHARS
               value: {{ .Values.monitor.maxPollChars | int64 | quote }}
-            - name: PEAK_FLUSH_RATIO
-              value: {{ .Values.monitor.peakFlushRatio | quote }}
-            - name: COLLECTOR_VANISHED_GRACE_CYCLES
-              value: {{ .Values.monitor.collectorVanishedGraceCycles | quote }}
+            - name: MAX_CONCURRENT_SAMPLES
+              value: {{ .Values.monitor.maxConcurrentSamples | quote }}
+            - name: READ_TIMEOUT_SECONDS
+              value: {{ .Values.monitor.readTimeoutSeconds | quote }}
+            - name: TERMINAL_REREAD_SECONDS
+              value: {{ .Values.monitor.terminalRereadSeconds | quote }}
             # Failures are always kept; successes are the bulk of the volume.
             - name: SAVE_SUCCESS_LOGS
               value: {{ .Values.monitor.saveSuccessLogs | quote }}

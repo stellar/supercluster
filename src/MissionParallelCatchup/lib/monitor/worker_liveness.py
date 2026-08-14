@@ -13,7 +13,6 @@ import logging
 
 import aiohttp
 
-import config
 import monitor_config as mc
 
 logger = logging.getLogger()
