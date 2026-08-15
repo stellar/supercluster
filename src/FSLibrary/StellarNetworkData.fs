@@ -960,12 +960,15 @@ let TestnetCoreSetOptions (image: string) =
 let StableApproximateTier1CoreSets (image: string) (flatQuorum: bool) : CoreSet list =
     let allOrgs : Map<string, GeoLoc list> =
         Map.ofList [ ("bd", [ Brussels; CouncilBluffs; Taipei ])
-                     ("cq", [ Falkenstein; Helsinki; HongKong ])
-                     ("kb", [ Ashburn; Frankfurt; Portland ])
-                     ("lo", [ Ashburn; Bengaluru; Falkenstein; Helsinki; Singapore ])
-                     ("sp", [ CouncilBluffs; Frankfurt; Singapore ])
-                     ("sdf", [ Ashburn; Ashburn; Ashburn ])
-                     ("wx", [ CouncilBluffs; Purfleet; Singapore ]) ]
+                     ("ct", [ Frankfurt; Purfleet; Brussels ])
+                     ("fg", [ CouncilBluffs; Ashburn; Portland ])
+                     ("ft", [ Ashburn; Portland; Portland ])
+                     ("lo", [ Falkenstein; Frankfurt; Bengaluru ])
+                     ("mg", [ Columbus; Columbus; Columbus ])
+                     ("ob", [ Clifton; Portland; Beauharnois ])
+                     ("pn", [ Beauharnois; Helsinki; Purfleet ])
+                     ("rg", [ Brussels; Frankfurt; Brussels ])
+                     ("sdf", [ Ashburn; Ashburn; Ashburn ]) ]
 
     let allOrgPairs = Map.toList allOrgs
     let orgKeys _ nodes = List.map (fun _ -> KeyPair.Random()) nodes
