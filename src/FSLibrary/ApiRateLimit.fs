@@ -54,21 +54,20 @@ type ThrottleRetryHandler(deadline: System.TimeSpan) =
             let rec attempt backoffMs =
                 task {
                     let! r = this.Send(req, ct)
-                    let remaining = deadline - sw.Elapsed
 
+                    // Retry-After is a floor, not a replacement, or a server repeating `Retry-After: 1` pins us at one attempt per second.
+                    let hint =
+                        match r.Headers.RetryAfter with
+                        | ra when not (isNull ra) && ra.Delta.HasValue -> int ra.Delta.Value.TotalMilliseconds
+                        | _ -> 0
+
+                    let waitMs = max backoffMs hint
+
+                    // The wait counts against the budget, so an attempt the budget cannot pay for is never started: a long Retry-After would otherwise begin one past the deadline and past HttpClientTimeout, replacing the 429 with a TaskCanceledException.
                     if r.StatusCode <> HttpStatusCode.TooManyRequests
-                       || remaining <= System.TimeSpan.Zero then
+                       || sw.Elapsed + System.TimeSpan.FromMilliseconds(float waitMs) >= deadline then
                         return r
                     else
-                        // Retry-After is a floor, not a replacement, or a server repeating `Retry-After: 1` pins us at one attempt per second.
-                        let hint =
-                            match r.Headers.RetryAfter with
-                            | ra when not (isNull ra) && ra.Delta.HasValue -> int ra.Delta.Value.TotalMilliseconds
-                            | _ -> 0
-
-                        // Clamped to what is left, because the wait is otherwise unbudgeted and a long Retry-After would start an attempt past the deadline and past HttpClientTimeout, replacing the 429 with a TaskCanceledException.
-                        let waitMs = min (max backoffMs hint) (int remaining.TotalMilliseconds)
-
                         LogWarn
                             "apiserver throttled %s %s (%O elapsed); retrying in %d ms"
                             req.Method.Method

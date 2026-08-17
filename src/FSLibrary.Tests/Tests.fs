@@ -764,15 +764,15 @@ let ``Throttle retry gives up at the deadline and surfaces the 429`` () =
     Assert.Equal(1, stub.Calls)
 
 [<Fact>]
-let ``Throttle retry clamps the last wait so it never overruns the deadline`` () =
+let ``Throttle retry never starts an attempt the budget cannot pay for`` () =
     let stub = ThrottlingStub(1000)
-    // 750ms budget: 500ms backoff fits, the 1000ms one is clamped to what is left.
+    // 750ms budget: the 500ms backoff fits, the 1000ms one does not, so it stops.
     let handler = new ApiRateLimit.ThrottleRetryHandler(System.TimeSpan.FromMilliseconds 750.0)
     let sw = System.Diagnostics.Stopwatch.StartNew()
     let resp = sendThrough handler stub System.Net.Http.HttpMethod.Get
     sw.Stop()
     Assert.Equal(System.Net.HttpStatusCode.TooManyRequests, resp.StatusCode)
-    // Two waits (500ms, then 250ms clamped) and three attempts.
-    Assert.Equal(3, stub.Calls)
-    // The clamp is the point: without it the second wait would have run to 1500ms.
-    Assert.True(sw.Elapsed < System.TimeSpan.FromMilliseconds 1400.0, sprintf "took %O" sw.Elapsed)
+    // One wait of 500ms and two attempts; the second wait would have overrun.
+    Assert.Equal(2, stub.Calls)
+    // Stopping early is the point: it must not have slept out the full budget.
+    Assert.True(sw.Elapsed < System.TimeSpan.FromMilliseconds 750.0, sprintf "took %O" sw.Elapsed)
