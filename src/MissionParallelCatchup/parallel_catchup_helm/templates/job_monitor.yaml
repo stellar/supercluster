@@ -259,6 +259,8 @@ spec:
               value: {{ .Values.monitor.attemptBudgets.oom | quote }}
             - name: MAX_EPHEMERAL_ATTEMPTS
               value: {{ .Values.monitor.attemptBudgets.ephemeral | quote }}
+            - name: MAX_UNKNOWN_ATTEMPTS
+              value: {{ .Values.monitor.attemptBudgets.unknown | quote }}
             - name: MEM_BUMP_FACTOR
               value: {{ .Values.monitor.memBumpFactor | quote }}
             - name: EPH_BUMP_FACTOR

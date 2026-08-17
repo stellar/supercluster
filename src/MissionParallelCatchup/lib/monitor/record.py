@@ -33,6 +33,10 @@ def done_path(end, attempt):
     return os.path.join(config.LOG_DIR, f"range-{end}-a{attempt}.done")
 
 
+def state_path(end, attempt):
+    return os.path.join(config.LOG_DIR, f"range-{end}-a{attempt}.state")
+
+
 # --- the monitor writes these -----------------------------------------------
 
 
@@ -72,6 +76,12 @@ def is_done(end, attempt):
     measurements being present -- an attempt may legitimately have none.
     """
     return os.path.exists(done_path(end, attempt))
+
+
+def unclaimed(end, attempt):
+    """No .state, so the collector never opened this attempt and no .done is
+    coming. A pod deleted before its container started is never pollable."""
+    return not os.path.exists(state_path(end, attempt))
 
 
 def read_outcome(end, attempt):

@@ -152,6 +152,7 @@ ATTEMPT_BUDGETS = {
     'fetch-fault': int(os.getenv('MAX_FETCH_FAULT_ATTEMPTS', '20')),
     'oom': int(os.getenv('MAX_OOM_ATTEMPTS', '5')),
     'ephemeral': int(os.getenv('MAX_EPHEMERAL_ATTEMPTS', '4')),
+    'unknown': int(os.getenv('MAX_UNKNOWN_ATTEMPTS', '2')),
 }
 
 # --- liveness ---------------------------------------------------------------

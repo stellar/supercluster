@@ -161,6 +161,8 @@ monitor:
     # Each retry escalates the disk limit one rung. Smallest, because an
     # eviction repeats identically until the range gets more disk.
     ephemeral: 4
+    # Destroyed before its container started, so the Job carries no exit code.
+    unknown: 2
   memBumpFactor: 1.5
   ephBumpFactor: 1.5
   maxEphemeral: "200Gi"
