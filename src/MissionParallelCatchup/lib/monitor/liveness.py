@@ -10,7 +10,7 @@ import logging
 
 import aiohttp
 
-import config
+import monitor_config as mc
 
 logger = logging.getLogger('job_monitor')
 
@@ -51,12 +51,12 @@ async def sweep(targets):
     counts = {'up': 0, 'down': 0, 'unknown': len(targets)}
     # force_close: a pooled socket to a vanished pod gets handed back out.
     # `limit` is the concurrency bound; a semaphore would double-enforce it.
-    connector = aiohttp.TCPConnector(limit=config.LIVENESS_MAX_CONCURRENCY,
+    connector = aiohttp.TCPConnector(limit=mc.LIVENESS_MAX_CONCURRENCY,
                                      force_close=True)
-    timeout = aiohttp.ClientTimeout(total=config.LIVENESS_PROBE_TIMEOUT_SECONDS)
+    timeout = aiohttp.ClientTimeout(total=mc.LIVENESS_PROBE_TIMEOUT_SECONDS)
     async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
         tasks = [asyncio.create_task(_probe(session, ip)) for _, ip in targets.values()]
-        done, pending = await asyncio.wait(tasks, timeout=config.LIVENESS_SWEEP_SECONDS)
+        done, pending = await asyncio.wait(tasks, timeout=mc.LIVENESS_SWEEP_SECONDS)
         for task in pending:
             task.cancel()
         if pending:

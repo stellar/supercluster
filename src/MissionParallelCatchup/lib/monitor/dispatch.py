@@ -5,6 +5,7 @@ from kubernetes.aio import client
 
 import cluster
 import config
+import monitor_config as mc
 import sizing
 
 logger = logging.getLogger('job_monitor')
@@ -56,8 +57,8 @@ def range_list():
     different list means work silently duplicated or skipped, and nothing else
     would notice.
     """
-    start, latest = config.STARTING_LEDGER, config.LATEST_LEDGER_NUM
-    per_job, overlap = config.LEDGERS_PER_JOB, config.OVERLAP_LEDGERS
+    start, latest = mc.STARTING_LEDGER, mc.LATEST_LEDGER_NUM
+    per_job, overlap = mc.LEDGERS_PER_JOB, mc.OVERLAP_LEDGERS
 
     # Strictly greater, and overlap added on top of the clamped stride: `>=`
     # emits a range ending AT the start ledger, which is below genesis and
@@ -68,11 +69,11 @@ def range_list():
         ranges.append((end, stride + overlap))
         end -= stride
 
-    if config.RANGE_ORDER == 'oldest-first':
+    if mc.RANGE_ORDER == 'oldest-first':
         # The cheap ranges finish first, which is what a profiling run wants: it
         # measures the inexpensive end before anything can interrupt it.
         return list(reversed(ranges))
-    if config.RANGE_ORDER == 'longest-first':
+    if mc.RANGE_ORDER == 'longest-first':
         # Validated at /start, so a profile exists here.
         return sorted(ranges, key=_measured_seconds, reverse=True)
     # tip-first: the bucket set only grows with ledger position, so the tip
@@ -128,8 +129,8 @@ def _job(end, count, attempt, owner, data_volume, oom_count, memory, ephemeral):
             # Retries are the monitor's, not the controller's: raising a memory
             # request needs a new Job, because spec.template is immutable.
             backoff_limit=0,
-            active_deadline_seconds=config.ATTEMPT_DEADLINE_SECONDS or None,
-            ttl_seconds_after_finished=config.JOB_TTL_SECONDS,
+            active_deadline_seconds=mc.ATTEMPT_DEADLINE_SECONDS or None,
+            ttl_seconds_after_finished=mc.JOB_TTL_SECONDS,
             pod_failure_policy=client.V1PodFailurePolicy(rules=_failure_rules()),
             template=client.V1PodTemplateSpec(
                 # LABEL_ATTEMPT has to be on the POD too: the collector reads it
@@ -166,10 +167,10 @@ def _pod(end, count, attempt, data_volume, oom_count, memory, ephemeral):
     requests, limits = sizing.requests_for(end, oom_count, memory, ephemeral)
     script = RESUME_SCRIPT % {'key': job_key(end, count), 'target': end, 'count': count}
     container = client.V1Container(
-        name='stellar-core', image=config.CORE_IMAGE,
+        name='stellar-core', image=mc.CORE_IMAGE,
         command=['/bin/sh', '-c', script],
-        env=([client.V1EnvVar(name='ASAN_OPTIONS', value=config.ASAN_OPTIONS)]
-             if config.ASAN_OPTIONS else []),
+        env=([client.V1EnvVar(name='ASAN_OPTIONS', value=mc.ASAN_OPTIONS)]
+             if mc.ASAN_OPTIONS else []),
         resources=client.V1ResourceRequirements(requests=requests, limits=limits),
         ports=[client.V1ContainerPort(container_port=11626, name='http')],
         lifecycle=_prestop(),
@@ -178,13 +179,13 @@ def _pod(end, count, attempt, data_volume, oom_count, memory, ephemeral):
     return client.V1PodSpec(
         # IRSA for the S3 history mirror; without it workers fall back to the
         # public archive, which throttles at 1024.
-        service_account_name=config.WORKER_SERVICE_ACCOUNT or None,
+        service_account_name=mc.WORKER_SERVICE_ACCOUNT or None,
         # Never restarted in place: the pod stays terminal and inspectable.
         restart_policy='Never',
-        termination_grace_period_seconds=config.WORKER_GRACE_SECONDS,
+        termination_grace_period_seconds=mc.WORKER_GRACE_SECONDS,
         affinity=_affinity(end, oom_count),
-        tolerations=([client.V1Toleration(key=config.TOLERATE_TAINT, effect='NoSchedule')]
-                     if config.TOLERATE_TAINT else None),
+        tolerations=([client.V1Toleration(key=mc.TOLERATE_TAINT, effect='NoSchedule')]
+                     if mc.TOLERATE_TAINT else None),
         containers=[container],
         volumes=[data_volume, client.V1Volume(
             name='config', config_map=client.V1ConfigMapVolumeSource(
@@ -198,22 +199,22 @@ def _affinity(end, oom_count):
     avoid-only pod in its own term would match every node.
     """
     match = []
-    if config.NODE_LABEL_KEY:
+    if mc.NODE_LABEL_KEY:
         match.append(client.V1NodeSelectorRequirement(
-            key=config.NODE_LABEL_KEY, operator='In',
+            key=mc.NODE_LABEL_KEY, operator='In',
             values=[sizing.node_label_value(end, oom_count)]))
-    for key, value in config.label_pairs(config.REQUIRE_NODE_LABELS):
+    for key, value in mc.label_pairs(mc.REQUIRE_NODE_LABELS):
         # Literal, unlike the pool-routed pair above: properties of the pool
         # rather than of the range, so they do not vary per attempt.
         match.append(client.V1NodeSelectorRequirement(
             key=key, operator='In', values=[value]))
-    if config.AVOID_NODE_LABEL_KEY:
+    if mc.AVOID_NODE_LABEL_KEY:
         # No value means "avoid the label however it is set", which is
         # DoesNotExist; NotIn [""] would only exclude the empty value.
         match.append(client.V1NodeSelectorRequirement(
-            key=config.AVOID_NODE_LABEL_KEY,
-            operator='NotIn' if config.AVOID_NODE_LABEL_VALUE else 'DoesNotExist',
-            values=[config.AVOID_NODE_LABEL_VALUE] if config.AVOID_NODE_LABEL_VALUE else None))
+            key=mc.AVOID_NODE_LABEL_KEY,
+            operator='NotIn' if mc.AVOID_NODE_LABEL_VALUE else 'DoesNotExist',
+            values=[mc.AVOID_NODE_LABEL_VALUE] if mc.AVOID_NODE_LABEL_VALUE else None))
     if not match:
         return None
     return client.V1Affinity(node_affinity=client.V1NodeAffinity(
@@ -229,12 +230,12 @@ def _prestop():
     container anyway -- so the delay is not bought and an error is logged for
     every evicted pod.
     """
-    sleep = config.WORKER_PRESTOP_SLEEP_SECONDS
+    sleep = mc.WORKER_PRESTOP_SLEEP_SECONDS
     if sleep <= 0:
         return None
-    if sleep >= config.WORKER_GRACE_SECONDS:
+    if sleep >= mc.WORKER_GRACE_SECONDS:
         logger.warning("preStop %ss does not fit in grace %ss; not installing it",
-                       sleep, config.WORKER_GRACE_SECONDS)
+                       sleep, mc.WORKER_GRACE_SECONDS)
         return None
     return client.V1Lifecycle(pre_stop=client.V1LifecycleHandler(
         _exec=client.V1ExecAction(command=['/bin/sleep', str(sleep)])))

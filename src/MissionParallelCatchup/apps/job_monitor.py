@@ -20,6 +20,7 @@ import config
 import dispatch
 import liveness
 import metrics
+import monitor_config as mc
 import policy
 import record
 import server
@@ -57,7 +58,7 @@ async def reconcile_loop(state, stop):
                 # leaves the run with no writer.
                 logger.exception("reconcile pass failed")
         try:
-            async with asyncio.timeout(config.RECONCILE_INTERVAL_SECONDS):
+            async with asyncio.timeout(mc.RECONCILE_INTERVAL_SECONDS):
                 await stop.wait()
         except TimeoutError:
             pass
@@ -190,7 +191,7 @@ async def act(states, state):
             work.append(_reap(st, state))
 
     for st in states:
-        if st.status == 'pending' and active < config.PARALLELISM:
+        if st.status == 'pending' and active < mc.PARALLELISM:
             active += 1
             work.append(_dispatch(st, state))
 
@@ -307,12 +308,12 @@ class State:
                           ('ledgersPerJob', 'LEDGERS_PER_JOB'),
                           ('overlapLedgers', 'OVERLAP_LEDGERS')):
             if key in spec:
-                setattr(config, name, spec[key])
-        config.set_profile(sizing.load_profile(doc.get('profile') or {}))
-        config.validate()
+                setattr(mc, name, spec[key])
+        mc.set_profile(sizing.load_profile(doc.get('profile') or {}))
+        mc.validate()
         self.ranges = dispatch.range_list()
         logger.info("run started: %d ranges, %s, profile of %d",
-                    len(self.ranges), config.RANGE_ORDER, len(config.PROFILE))
+                    len(self.ranges), mc.RANGE_ORDER, len(mc.PROFILE))
 
     def condemn(self, st, reason):
         """Mark terminal; commit() persists it at the end of the pass.

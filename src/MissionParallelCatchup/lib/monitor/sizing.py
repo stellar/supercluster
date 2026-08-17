@@ -11,7 +11,7 @@ import bisect
 import math
 import re
 
-import config
+import monitor_config as mc
 
 _QUANTITY = re.compile(r'^(?P<n>\d+(?:\.\d+)?)(?P<unit>[EPTGMK]i?|m)?$')
 _FACTOR = {'K': 10 ** 3, 'M': 10 ** 6, 'G': 10 ** 9, 'T': 10 ** 12,
@@ -56,11 +56,11 @@ def profile_for(end):
     position because the bucket set only grows, so a lower neighbour
     under-reports. Past the top there is nothing safe to extrapolate from.
     """
-    if not config.PROFILE:
+    if not mc.PROFILE:
         return None
-    idx = bisect.bisect_left(config.PROFILE, (int(end),))
-    if idx < len(config.PROFILE):
-        return config.PROFILE[idx][1]
+    idx = bisect.bisect_left(mc.PROFILE, (int(end),))
+    if idx < len(mc.PROFILE):
+        return mc.PROFILE[idx][1]
     return None
 
 
@@ -73,10 +73,10 @@ def _positive(value):
 
 
 def _longest_seconds():
-    if config._SORTED_SECONDS is None:
-        values = (_positive(rec.get('seconds')) for _, rec in (config.PROFILE or []))
-        config._SORTED_SECONDS = sorted(v for v in values if v is not None)
-    return config._SORTED_SECONDS[-1] if config._SORTED_SECONDS else None
+    if mc._SORTED_SECONDS is None:
+        values = (_positive(rec.get('seconds')) for _, rec in (mc.PROFILE or []))
+        mc._SORTED_SECONDS = sorted(v for v in values if v is not None)
+    return mc._SORTED_SECONDS[-1] if mc._SORTED_SECONDS else None
 
 
 def _runtime_insurance(seconds, allowance):
@@ -97,7 +97,7 @@ def _tiers():
     """[(gib_cut, name)] cheapest first; an empty cut on the last entry means
     everything above the previous one."""
     out = []
-    for item in config.POOL_TIERS.split(','):
+    for item in mc.POOL_TIERS.split(','):
         cut, _, name = item.strip().rpartition(':')
         if name:
             out.append((float(cut) if cut else float('inf'), name))
@@ -118,11 +118,11 @@ def pool_memory(tier):
     (one size larger) spot node. Not the range's own measurement -- isolation is
     the point, and freeing a pod of its neighbours raised throughput 29-92%
     while its cpu draw FELL."""
-    return _str_map(config.POOL_MEM).get(tier)
+    return _str_map(mc.POOL_MEM).get(tier)
 
 
 def pool_cpu(tier):
-    return _str_map(config.POOL_CPU).get(tier)
+    return _str_map(mc.POOL_CPU).get(tier)
 
 
 def _tier_for_bytes(anon):
@@ -149,7 +149,7 @@ def _promote(tier, steps):
 
 def _rung_blocked(tier, nxt):
     want = f"{tier}->{nxt}"
-    return any(item.strip() == want for item in config.POOL_BLOCK_RUNGS.split(','))
+    return any(item.strip() == want for item in mc.POOL_BLOCK_RUNGS.split(','))
 
 
 def _cache_bump(tier, anon, working_set):
@@ -181,17 +181,17 @@ def pool_for(end, oom_count=0):
     attempt-1 verdicts were `timeout`, burning ~260 vCPU of a 2304 quota
     escalating away from a problem that was never memory.
     """
-    if not config.POOL_PREFIX:
+    if not mc.POOL_PREFIX:
         return None
-    if not config.PROFILE:
-        return _promote(config.POOL_NO_PROFILE, oom_count)
+    if not mc.PROFILE:
+        return _promote(mc.POOL_NO_PROFILE, oom_count)
     prof = profile_for(end)
     if not prof:
-        return _promote(config.POOL_UNPROFILED, oom_count)
+        return _promote(mc.POOL_UNPROFILED, oom_count)
     anon = prof.get('peakAnonBytes')
     tier = _cache_bump(_tier_for_bytes(anon), anon, prof.get('peakWorkingSetBytes'))
     if not tier:
-        return _promote(config.POOL_UNPROFILED, oom_count)
+        return _promote(mc.POOL_UNPROFILED, oom_count)
     return _promote(tier, oom_count)
 
 
@@ -211,14 +211,14 @@ def next_memory(end, base, oom_count):
     Escalating a 209Mi profiled range off the configured default jumps to
     36000Mi, a 172x overshoot that throws away the packing win on the first OOM.
     """
-    if config.POOL_PREFIX:
+    if mc.POOL_PREFIX:
         promoted = pool_memory(pool_for(end, oom_count))
         # Above the ladder there is nothing to promote into, so hold rather than
         # invent a value.
-        return promoted or base or config.REQ_MEM
-    want = int(quantity_bytes(base or config.REQ_MEM)
-               * (config.MEM_BUMP_FACTOR ** max(0, oom_count)))
-    return bytes_to_quantity(min(want, quantity_bytes(config.MEM_ESCALATION_CAP)))
+        return promoted or base or mc.REQ_MEM
+    want = int(quantity_bytes(base or mc.REQ_MEM)
+               * (mc.MEM_BUMP_FACTOR ** max(0, oom_count)))
+    return bytes_to_quantity(min(want, quantity_bytes(mc.MEM_ESCALATION_CAP)))
 
 
 def next_ephemeral(base, eviction_count):
@@ -227,11 +227,11 @@ def next_ephemeral(base, eviction_count):
     Only ephemeral mode has this axis: a pvc run sets no ephemeral request or
     limit at all, so there is nothing to raise.
     """
-    if not config.LIM_EPHEMERAL:
+    if not mc.LIM_EPHEMERAL:
         return None
-    want = int(quantity_bytes(base or config.LIM_EPHEMERAL)
-               * (config.EPH_BUMP_FACTOR ** max(0, eviction_count)))
-    return bytes_to_quantity(min(want, quantity_bytes(config.EPH_ESCALATION_CAP)))
+    want = int(quantity_bytes(base or mc.LIM_EPHEMERAL)
+               * (mc.EPH_BUMP_FACTOR ** max(0, eviction_count)))
+    return bytes_to_quantity(min(want, quantity_bytes(mc.EPH_ESCALATION_CAP)))
 
 
 # --- the request ------------------------------------------------------------
@@ -245,20 +245,20 @@ def _profile_overrides(end, escalated, oom_count):
     the escalation, and bailing here would send the pod to the new pool still
     asking for the old tier's memory.
     """
-    if end is None or (escalated and not config.POOL_PREFIX):
+    if end is None or (escalated and not mc.POOL_PREFIX):
         return {}
     prof = profile_for(end)
     out = {}
     if prof:
         disk = prof.get('peakEphemeralBytes')
-        if disk and config.LIM_EPHEMERAL:
-            want = (int(disk * config.PROFILE_MARGIN)
-                    + quantity_bytes(config.PROFILE_EPHEMERAL_HEADROOM)
+        if disk and mc.LIM_EPHEMERAL:
+            want = (int(disk * mc.PROFILE_MARGIN)
+                    + quantity_bytes(mc.PROFILE_EPHEMERAL_HEADROOM)
                     + _runtime_insurance(prof.get('seconds'),
-                                         config.PROFILE_RUNTIME_EPHEMERAL_INSURANCE))
+                                         mc.PROFILE_RUNTIME_EPHEMERAL_INSURANCE))
             out['ephemeral-storage'] = bytes_to_quantity(
-                min(want, quantity_bytes(config.PROFILE_MAX_EPHEMERAL)))
-    if config.POOL_PREFIX:
+                min(want, quantity_bytes(mc.PROFILE_MAX_EPHEMERAL)))
+    if mc.POOL_PREFIX:
         # Deliberately BEFORE the no-profile bail: pool_for resolves a tier for
         # every range, so returning {} here would pin the pod to that pool while
         # sizing it from the flat REQ_CPU. That shipped a 6780m request at a
@@ -277,12 +277,12 @@ def _profile_overrides(end, escalated, oom_count):
     # 19Mi of slack, and 90 ranges OOMKilled inside 90s without it.
     rss = prof.get('peakAnonBytes')
     if rss:
-        want = (int(rss * config.PROFILE_MARGIN)
-                + quantity_bytes(config.PROFILE_CACHE_HEADROOM)
+        want = (int(rss * mc.PROFILE_MARGIN)
+                + quantity_bytes(mc.PROFILE_CACHE_HEADROOM)
                 + _runtime_insurance(prof.get('seconds'),
-                                     config.PROFILE_RUNTIME_MEMORY_INSURANCE))
+                                     mc.PROFILE_RUNTIME_MEMORY_INSURANCE))
         out['memory'] = bytes_to_quantity(
-            min(want, quantity_bytes(config.PROFILE_MAX_MEM)))
+            min(want, quantity_bytes(mc.PROFILE_MAX_MEM)))
     return out
 
 
@@ -294,27 +294,27 @@ def requests_for(end, oom_count=0, memory=None, ephemeral=None):
     """
     overrides = _profile_overrides(end, escalated=bool(memory or ephemeral),
                                    oom_count=oom_count)
-    req = {'cpu': config.REQ_CPU, 'memory': memory or config.REQ_MEM}
+    req = {'cpu': mc.REQ_CPU, 'memory': memory or mc.REQ_MEM}
     lim = {}
 
     # A profiled pooled range owns its node -- the tier's cut excludes a second
     # pod -- so a disk limit guards no neighbour and only turns spare disk into
     # an eviction. Unprofiled pooled runs keep both: nothing measured them.
-    pooled_profiled = bool(config.POOL_PREFIX and config.PROFILE)
-    if config.REQ_EPHEMERAL and not pooled_profiled:
-        req['ephemeral-storage'] = ephemeral or config.REQ_EPHEMERAL
+    pooled_profiled = bool(mc.POOL_PREFIX and mc.PROFILE)
+    if mc.REQ_EPHEMERAL and not pooled_profiled:
+        req['ephemeral-storage'] = ephemeral or mc.REQ_EPHEMERAL
     else:
         overrides.pop('ephemeral-storage', None)
-    if config.LIM_EPHEMERAL and not pooled_profiled:
-        lim['ephemeral-storage'] = ephemeral or config.LIM_EPHEMERAL
+    if mc.LIM_EPHEMERAL and not pooled_profiled:
+        lim['ephemeral-storage'] = ephemeral or mc.LIM_EPHEMERAL
 
     for key, value in overrides.items():
         req[key] = value
-        if key == 'ephemeral-storage' and config.LIM_EPHEMERAL:
+        if key == 'ephemeral-storage' and mc.LIM_EPHEMERAL:
             lim[key] = value
     return req, (lim or None)
 
 
 def node_label_value(end, oom_count):
     tier = pool_for(end, oom_count)
-    return f"{config.POOL_PREFIX}-{tier}" if tier else config.NODE_LABEL_VALUE
+    return f"{mc.POOL_PREFIX}-{tier}" if tier else mc.NODE_LABEL_VALUE

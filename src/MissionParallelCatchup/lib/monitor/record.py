@@ -1,11 +1,10 @@
-"""The volume: the collector's files, the monitor's own, and the run record.
+"""What the monitor keeps on the volume: the run record, and reads of the
+collector's files.
 
-Filenames are the entire cross-process contract. The collector writes while a
-pod still exists and the monitor reads them back, so a disagreement about a name
-is a measurement silently lost and nothing reports it.
-
-Every write goes through tmp+rename. Both sides write while the other reads, so
-a torn .metrics or .outcome reads as corrupt and the measurement is gone.
+The filenames themselves are NOT here. They are the cross-process contract and
+live in records.py, which both processes import -- a second copy is a second
+place for the two sides to disagree about a name, which is a measurement lost
+with nothing to report it.
 """
 import collections
 import json
@@ -13,29 +12,8 @@ import os
 import time
 
 import config
-
-# --- the collector writes these ---------------------------------------------
-
-
-def log_path(end, attempt):
-    return os.path.join(config.LOG_DIR, f"range-{end}-a{attempt}.log.gz")
-
-
-def outcome_path(end, attempt):
-    return os.path.join(config.LOG_DIR, f"range-{end}-a{attempt}.outcome")
-
-
-def metrics_path(end, attempt):
-    return os.path.join(config.LOG_DIR, f"range-{end}-a{attempt}.metrics")
-
-
-def done_path(end, attempt):
-    return os.path.join(config.LOG_DIR, f"range-{end}-a{attempt}.done")
-
-
-def state_path(end, attempt):
-    return os.path.join(config.LOG_DIR, f"range-{end}-a{attempt}.state")
-
+from records import (done_path, log_path, metrics_path, outcome_path,  # noqa: F401
+                     state_path, write_atomic)
 
 # --- the monitor writes these -----------------------------------------------
 
@@ -49,13 +27,6 @@ def started_path(end):
 PROGRESS_PATH = os.path.join(config.LOG_DIR, 'progress.json')
 RUN_PATH = os.path.join(config.LOG_DIR, 'run.json')
 MISSION_START_PATH = os.path.join(config.LOG_DIR, 'mission_started')
-
-
-def write_atomic(path, body):
-    tmp = path + '.tmp'
-    with open(tmp, 'wt') as fh:
-        fh.write(body)
-    os.replace(tmp, path)
 
 
 def _read_json(path):

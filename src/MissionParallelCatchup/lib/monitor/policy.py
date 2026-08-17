@@ -10,7 +10,7 @@ the retry ladder testable without a cluster.
 """
 import collections
 
-import config
+import monitor_config as mc
 import sizing
 
 Decision = collections.namedtuple('Decision', 'action reason memory ephemeral')
@@ -27,7 +27,7 @@ def decide(end, verdict, spent, base_memory=None, base_ephemeral=None):
     is broken.
     """
     cause = verdict.get('outcome')
-    cap = config.ATTEMPT_BUDGETS.get(cause)
+    cap = mc.ATTEMPT_BUDGETS.get(cause)
     if cap is None:
         return Decision(CONDEMN, f"{cause} is not retryable", None, None)
 

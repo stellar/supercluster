@@ -200,7 +200,7 @@ def _finish(pod, end, attempt, succeeded):
         if (pod.get('status') or {}).get('phase') == 'Failed':
             verdicts.record_outcome(pod, end, attempt)
         write_metrics(end, attempt, _duration(pod))
-    if not config.SAVE_SUCCESS_LOGS and succeeded:
+    if not cc.SAVE_SUCCESS_LOGS and succeeded:
         # .metrics survives on purpose: it holds tx_apply for a range that
         # succeeded, and a retention flag must not delete a Grafana series.
         discard(end, attempt)

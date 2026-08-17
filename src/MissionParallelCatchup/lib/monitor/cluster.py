@@ -22,7 +22,8 @@ import logging
 from kubernetes.aio import client, config as kube_config
 from kubernetes.aio.client import ApiException
 
-import config as cfg
+import config
+import monitor_config as mc
 
 logger = logging.getLogger('job_monitor')
 
@@ -45,7 +46,7 @@ async def session():
         kube_config.load_incluster_config()
     except Exception:
         await kube_config.load_kube_config()
-    _slots = asyncio.Semaphore(cfg.APISERVER_CONCURRENCY)
+    _slots = asyncio.Semaphore(mc.APISERVER_CONCURRENCY)
     async with client.ApiClient() as api:
         _api, batch_v1, core_v1 = api, client.BatchV1Api(api), client.CoreV1Api(api)
         try:
@@ -55,7 +56,7 @@ async def session():
 
 
 def _selector():
-    return f"{cfg.LABEL_RUN}={cfg.RUN_NAME}"
+    return f"{config.LABEL_RUN}={config.RUN_NAME}"
 
 
 async def snapshot():
@@ -65,12 +66,12 @@ async def snapshot():
     must not be assembled from two different moments.
     """
     jobs_raw, pods_raw = await asyncio.gather(
-        batch_v1.list_namespaced_job(cfg.NAMESPACE, label_selector=_selector()),
-        core_v1.list_namespaced_pod(cfg.NAMESPACE, label_selector=_selector()))
+        batch_v1.list_namespaced_job(config.NAMESPACE, label_selector=_selector()),
+        core_v1.list_namespaced_pod(config.NAMESPACE, label_selector=_selector()))
 
     jobs = {}
     for job in jobs_raw.items:
-        end = (job.metadata.labels or {}).get(cfg.LABEL_RANGE)
+        end = (job.metadata.labels or {}).get(config.LABEL_RANGE)
         if end is not None:
             jobs.setdefault(str(end), []).append(job)
 
@@ -91,7 +92,7 @@ async def owner_ref():
     global _owner
     if _owner is None:
         cm = await core_v1.read_namespaced_config_map(
-            f"{cfg.RUN_NAME}-stellar-core-config", cfg.NAMESPACE)
+            f"{config.RUN_NAME}-stellar-core-config", config.NAMESPACE)
         _owner = [client.V1OwnerReference(
             api_version='v1', kind='ConfigMap', name=cm.metadata.name,
             uid=cm.metadata.uid, block_owner_deletion=True)]
@@ -107,7 +108,7 @@ async def create_job(body):
     """
     async with _slots:
         try:
-            return await batch_v1.create_namespaced_job(cfg.NAMESPACE, body)
+            return await batch_v1.create_namespaced_job(config.NAMESPACE, body)
         except ApiException as e:
             if e.status != 409:
                 raise
@@ -115,10 +116,10 @@ async def create_job(body):
 
 
 async def ensure_pvc(end, owner):
-    name = f"{cfg.RUN_NAME}-data-r{end}"
+    name = f"{config.RUN_NAME}-data-r{end}"
     async with _slots:
         try:
-            await core_v1.read_namespaced_persistent_volume_claim(name, cfg.NAMESPACE)
+            await core_v1.read_namespaced_persistent_volume_claim(name, config.NAMESPACE)
             return name
         except ApiException as e:
             if e.status != 404:
@@ -126,16 +127,16 @@ async def ensure_pvc(end, owner):
         spec = client.V1PersistentVolumeClaimSpec(
             access_modes=['ReadWriteOnce'],
             resources=client.V1VolumeResourceRequirements(
-                requests={'storage': cfg.STORAGE_SIZE}))
-        if cfg.STORAGE_CLASS:
-            spec.storage_class_name = cfg.STORAGE_CLASS
+                requests={'storage': mc.STORAGE_SIZE}))
+        if mc.STORAGE_CLASS:
+            spec.storage_class_name = mc.STORAGE_CLASS
         try:
             await core_v1.create_namespaced_persistent_volume_claim(
-                cfg.NAMESPACE, client.V1PersistentVolumeClaim(
+                config.NAMESPACE, client.V1PersistentVolumeClaim(
                     metadata=client.V1ObjectMeta(
                         name=name, owner_references=owner,
-                        labels={cfg.LABEL_RUN: cfg.RUN_NAME,
-                                cfg.LABEL_RANGE: str(end)}),
+                        labels={config.LABEL_RUN: config.RUN_NAME,
+                                config.LABEL_RANGE: str(end)}),
                     spec=spec))
         except ApiException as e:
             if e.status != 409:
@@ -150,14 +151,14 @@ async def reap(end, job_names):
     leaving it behind holds a PVC and shows up in the next pass's list.
     """
     await asyncio.gather(*(delete_job(name) for name in job_names))
-    if cfg.STORAGE_MODE == 'pvc':
+    if config.STORAGE_MODE == 'pvc':
         await _release_pvc(end)
 
 
 async def delete_job(name):
     async with _slots:
         try:
-            await batch_v1.delete_namespaced_job(name, cfg.NAMESPACE,
+            await batch_v1.delete_namespaced_job(name, config.NAMESPACE,
                                                  propagation_policy='Background')
             return True
         except ApiException as e:
@@ -170,7 +171,7 @@ async def _release_pvc(end):
     async with _slots:
         try:
             await core_v1.delete_namespaced_persistent_volume_claim(
-                f"{cfg.RUN_NAME}-data-r{end}", cfg.NAMESPACE)
+                f"{config.RUN_NAME}-data-r{end}", config.NAMESPACE)
             return True
         except ApiException as e:
             if e.status != 404:

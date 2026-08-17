@@ -56,3 +56,7 @@ WATCH_RETRY_SECONDS = float(os.getenv('WATCH_RETRY_SECONDS', 1))
 # split across two reads is whole in one of them. The archive dedups the
 # overlap, so this only widens what the scan sees.
 TERMINAL_REREAD_SECONDS = int(os.getenv('TERMINAL_REREAD_SECONDS', 30))
+# Discards a succeeded attempt's archive. .metrics survives it on purpose: that
+# holds tx_apply for a range that succeeded, and a retention flag must not
+# delete a Grafana series.
+SAVE_SUCCESS_LOGS = os.getenv('SAVE_SUCCESS_LOGS', 'true').lower() == 'true'

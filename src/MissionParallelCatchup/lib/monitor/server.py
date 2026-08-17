@@ -12,6 +12,7 @@ from aiohttp import web
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 import config
+import monitor_config as mc
 import record
 
 logger = logging.getLogger('job_monitor')
@@ -40,9 +41,9 @@ async def serve(state, stop):
     """
     runner = web.AppRunner(build(state), access_log=None)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', config.HTTP_PORT)
+    site = web.TCPSite(runner, '0.0.0.0', mc.HTTP_PORT)
     await site.start()
-    logger.info("listening on :%d", config.HTTP_PORT)
+    logger.info("listening on :%d", mc.HTTP_PORT)
     try:
         await stop.wait()
     finally:
@@ -70,7 +71,7 @@ async def _start(request):
     # on disk.
     record.save_run(doc)
     return web.json_response({'ranges': len(state.ranges),
-                              'profile': len(config.PROFILE)})
+                              'profile': len(mc.PROFILE)})
 
 
 async def _status(request):
