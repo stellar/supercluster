@@ -217,18 +217,33 @@ let DumpPodInfo (kube: Kubernetes) (apiRateLimit: int) (ns: string) =
     let pods = kube.ListNamespacedPod(namespaceParameter = ns)
 
     if pods <> null then
-        // A count per phase rather than a line per pod. This fires every 5
-        // minutes for the whole mission, so at 1024 workers the old form wrote
-        // ~1026 lines a time -- ~57000 over a 4.7h catchup -- and buried the
-        // only thing worth reading, which is anything not Running.
-        let byPhase =
-            pods.Items
-            |> Seq.countBy (fun p -> p.Status.Phase)
-            |> Seq.sortBy fst
-            |> Seq.map (fun (phase, n) -> sprintf "%s=%d" phase n)
-            |> String.concat " "
+        let total = Seq.length pods.Items
 
-        LogInfo "Pods: %d total  %s" (Seq.length pods.Items) byPhase
+        // A line per pod carries the name and the age, which is what tells a
+        // stuck pod from a slow one. Kept for every mission small enough to read
+        // it; past that it is the parallel catchups, where at 1024 workers this
+        // wrote ~1026 lines every 5 minutes -- ~57000 over a 4.7h run -- and
+        // buried the only thing worth reading.
+        if total < 500 then
+            LogInfo "There are %d pods in total" total
+
+            for p in pods.Items do
+                let age =
+                    if p.Status.StartTime.HasValue then
+                        System.DateTime.UtcNow.Subtract(p.Status.StartTime.Value).ToString(@"hh\:mm")
+                    else
+                        "00:00"
+
+                LogInfo "Pod: name=%s phase=%s age=%s (hr:min)" p.Metadata.Name p.Status.Phase age
+        else
+            let byPhase =
+                pods.Items
+                |> Seq.countBy (fun p -> p.Status.Phase)
+                |> Seq.sortBy fst
+                |> Seq.map (fun (phase, n) -> sprintf "%s=%d" phase n)
+                |> String.concat " "
+
+            LogInfo "Pods: %d total  %s" total byPhase
 
 // Create a per-run "anchor" ConfigMap and stash an owner reference to it on
 // `nCfg.anchorOwnerRef` so every subsequent resource the mission creates will

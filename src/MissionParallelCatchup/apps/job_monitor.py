@@ -408,7 +408,7 @@ def aggregate(st):
     out.update(peaks)
 
     # Resumed chain only: a fresh retry discarded its predecessor's work.
-    chain = _resumed_chain(seen, st.attempt)
+    chain = _resumed_chain(st.end, seen, st.attempt)
     for field, source in (('seconds', 'attemptSeconds'),
                           ('txApply', 'txApplySeconds')):
         legs = [seen[n].get(source) for n in chain]
@@ -421,16 +421,23 @@ def aggregate(st):
     return out
 
 
-def _resumed_chain(seen, attempt):
+def _resumed_chain(end, seen, attempt):
     """The winning attempt, plus every predecessor it continued from.
 
     `resumed` sits on the attempt that continued, so it names its own
     predecessor. A fresh start breaks the chain: an attempt that ran new-db
     discarded whatever came before it.
+
+    An attempt that ran nothing is stepped over rather than counted: it left no
+    LCL, so what its successor resumed was written further back. Counting it
+    would need a leg it never produced and drop the range's compute total;
+    stopping there would credit the range with only its last attempt.
     """
     chain, n = [attempt], attempt
     while n > 1 and seen[n].get('resumed'):
         n -= 1
+        while n > 1 and record.ran_nothing(end, n, seen[n]):
+            n -= 1
         chain.append(n)
     return sorted(chain)
 

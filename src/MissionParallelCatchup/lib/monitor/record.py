@@ -55,6 +55,20 @@ def unclaimed(end, attempt):
     return not os.path.exists(state_path(end, attempt))
 
 
+def ran_nothing(end, attempt, metrics):
+    """Opened, but it ingested no line and nothing was measured either.
+
+    An empty .state alone is not enough: a follow writes .metrics before the
+    first read, so a pod condemned seconds in has both. That one ran.
+    """
+    if metrics:
+        return False
+    try:
+        return os.path.getsize(state_path(end, attempt)) == 0
+    except OSError:
+        return False
+
+
 def read_outcome(end, attempt):
     return _read_json(outcome_path(end, attempt))
 

@@ -879,10 +879,7 @@ let main argv =
                              DumpPodInfo kube mission.ApiRateLimit ns
                      with x -> LogError "Connection issue! Api call failed."
 
-                 // Every 10 minutes, not 5: this lists every pod in the
-                 // namespace, and on a 1024-worker run that is a large response
-                 // fetched purely to print one summary line.
-                 let timer = new System.Threading.Timer(TimerCallback(podLogger), null, 1000, 600000)
+                 let timer = new System.Threading.Timer(TimerCallback(podLogger), null, 1000, 300000)
 
                  for m in mission.Missions do
                      LogInfo "-----------------------------------"
