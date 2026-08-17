@@ -739,7 +739,7 @@ let private sendThrough
 
 [<Fact>]
 let ``Throttle retry rides out 429s and returns the eventual success`` () =
-    let stub = ThrottlingStub(3)
+    let stub = new ThrottlingStub(3)
     let handler = new ApiRateLimit.ThrottleRetryHandler(System.TimeSpan.FromSeconds 30.0)
     let resp = sendThrough handler stub System.Net.Http.HttpMethod.Get
     Assert.Equal(System.Net.HttpStatusCode.OK, resp.StatusCode)
@@ -748,7 +748,7 @@ let ``Throttle retry rides out 429s and returns the eventual success`` () =
 
 [<Fact>]
 let ``Throttle retry leaves DELETE alone so teardown stays bounded`` () =
-    let stub = ThrottlingStub(5)
+    let stub = new ThrottlingStub(5)
     let handler = new ApiRateLimit.ThrottleRetryHandler(System.TimeSpan.FromSeconds 30.0)
     let resp = sendThrough handler stub System.Net.Http.HttpMethod.Delete
     Assert.Equal(System.Net.HttpStatusCode.TooManyRequests, resp.StatusCode)
@@ -756,7 +756,7 @@ let ``Throttle retry leaves DELETE alone so teardown stays bounded`` () =
 
 [<Fact>]
 let ``Throttle retry gives up at the deadline and surfaces the 429`` () =
-    let stub = ThrottlingStub(1000)
+    let stub = new ThrottlingStub(1000)
     let handler = new ApiRateLimit.ThrottleRetryHandler(System.TimeSpan.Zero)
     let resp = sendThrough handler stub System.Net.Http.HttpMethod.Get
     // The 429 must reach the caller rather than being swallowed or masked.
@@ -765,7 +765,7 @@ let ``Throttle retry gives up at the deadline and surfaces the 429`` () =
 
 [<Fact>]
 let ``Throttle retry never starts an attempt the budget cannot pay for`` () =
-    let stub = ThrottlingStub(1000)
+    let stub = new ThrottlingStub(1000)
     // 750ms budget: the 500ms backoff fits, the 1000ms one does not, so it stops.
     let handler = new ApiRateLimit.ThrottleRetryHandler(System.TimeSpan.FromMilliseconds 750.0)
     let sw = System.Diagnostics.Stopwatch.StartNew()
