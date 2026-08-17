@@ -122,6 +122,7 @@ let ctx : MissionContext =
       pubnetParallelCatchupStartingLedger = 0
       pubnetParallelCatchupEndLedger = None
       pubnetParallelCatchupLedgersPerJob = 16000
+      pubnetParallelCatchupOverlapLedgers = 320
       pubnetParallelCatchupNumWorkers = 192
       pubnetParallelCatchupStorageMode = "pvc"
       pubnetParallelCatchupProfile = ""

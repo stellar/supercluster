@@ -203,16 +203,7 @@ spec:
         - name: job-monitor
           image: {{ .Values.monitor.image }}
           imagePullPolicy: {{ .Values.monitor.imagePullPolicy }}
-          {{- if .Values.monitor.sourceConfigMap }}
-          command: ["/bin/sh", "-c"]
-          args:
-            - >-
-              {{- if .Values.monitor.sourceInstallDependencies }}
-              pip install --no-cache-dir -q 'kubernetes~=36.0' 'aiohttp~=3.9'
-              'prometheus-client~=0.19' &&
-              {{- end }}
-              exec python3 /app/job_monitor.py
-          {{- end }}
+          # No command: the image's CMD is job_monitor.py.
           ports:
             - containerPort: 8080
           env:
@@ -380,10 +371,6 @@ spec:
               mountPath: /data
             - name: logs
               mountPath: /logs
-            {{- if .Values.monitor.sourceConfigMap }}
-            - name: monitor-src
-              mountPath: /app
-            {{- end }}
           # No readinessProbe: nothing consumes Ready. There is no Service, and
           # the prometheus kubernetes-pods job keeps targets on the scrape
           # annotation alone, with no pod-ready filter.
@@ -406,23 +393,12 @@ spec:
         - name: log-collector
           image: {{ .Values.monitor.image }}
           imagePullPolicy: {{ .Values.monitor.imagePullPolicy }}
-          {{- if .Values.monitor.sourceConfigMap }}
-          command: ["/bin/sh", "-c"]
-          args:
-            - >-
-              {{- if .Values.monitor.sourceInstallDependencies }}
-              pip install --no-cache-dir -q 'kubernetes~=36.0' 'aiohttp~=3.9'
-              'prometheus-client~=0.19' &&
-              {{- end }}
-              exec python3 /app/log_collector.py
-          {{- else }}
           # Resolved on PATH, not /usr/bin/python3: Dockerfile.jobmonitor builds
           # on python:3.12-slim, which ships the interpreter at
           # /usr/local/bin/python3. An absolute path here pins the chart to one
           # base image and fails as StartError -- the monitor container comes up
           # (it inherits the image CMD) and only the sidecar crashloops.
           command: ["python3", "log_collector.py"]
-          {{- end }}
           env:
             - name: NAMESPACE
               valueFrom:
@@ -464,16 +440,7 @@ spec:
           volumeMounts:
             - name: logs
               mountPath: /logs
-            {{- if .Values.monitor.sourceConfigMap }}
-            - name: monitor-src
-              mountPath: /app
-            {{- end }}
       volumes:
-        {{- if .Values.monitor.sourceConfigMap }}
-        - name: monitor-src
-          configMap:
-            name: {{ .Values.monitor.sourceConfigMap }}
-        {{- end }}
         - name: data
           emptyDir: {}
         - name: logs

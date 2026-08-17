@@ -118,6 +118,7 @@ type MissionContext =
       pubnetParallelCatchupStartingLedger: int
       pubnetParallelCatchupEndLedger: int option
       pubnetParallelCatchupLedgersPerJob: int
+      pubnetParallelCatchupOverlapLedgers: int
       pubnetParallelCatchupNumWorkers: int
       pubnetParallelCatchupStorageMode: string
       pubnetParallelCatchupProfile: string

@@ -19,13 +19,11 @@ WORKDIR /app
 # classification at all.
 RUN pip install --no-cache-dir \
     'kubernetes~=36.0' \
-    'aiohttp~=3.9' \
+    'aiohttp~=3.14' \
     'prometheus-client~=0.19'
 
 # apps/ and lib/ flatten into one directory here, and the modules import each
-# other by bare name. /app is a single flat directory in the dev path too: that
-# ConfigMap is built with --from-file, whose keys are basenames and cannot
-# contain '/'. The split is for reading the repo, not for the runtime.
+# other by bare name. The split is for reading the repo, not for the runtime.
 COPY ./apps/job_monitor.py /app
 # Same image, second entrypoint: runs as a sidecar streaming worker logs.
 COPY ./apps/log_collector.py /app

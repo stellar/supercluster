@@ -169,8 +169,11 @@ def _start_follow(session, name, end, attempt, pod):
     if not doom:
         return False
     # Recorded now: once the object is gone there is no telling a drain we lost
-    # a race with from a corpse that never had a metric to lose.
-    write_metrics(end, attempt, {'disruptionReason': doom})
+    # a race with from a corpse that never had a metric to lose. The duration
+    # goes with it, and for the same reason -- an evicted pod is usually deleted
+    # before it is ever seen terminal, and _finish has nothing to read it from.
+    # It runs short by the drain, and merges by max, so it is only ever a floor.
+    write_metrics(end, attempt, {'disruptionReason': doom, **_duration(pod)})
     logger.info("range %s condemned (%s), opening follow", end, doom)
     _follows[key] = asyncio.create_task(_run_follow(session, name, end, attempt))
     return True

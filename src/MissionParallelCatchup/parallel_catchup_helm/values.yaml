@@ -45,13 +45,9 @@ worker:
     "curl -sf http://history.stellar.org/prd/core-live/core_live_003/{0} -o {1}"
 
 # Index -> ledger range is computed in the Job template; no queue to preload.
-# The range itself -- start, end, size, order -- is per-run input and arrives
-# with the driver's POST /start, so the chart installs a generic monitor.
-range:
-  overlapLedgers: 320
-  # Dispatch order. Generators emit tip-first, which front-loads the most
-  # expensive ranges. "oldest-first" reverses that so a profiling run
-  # measures the cheap early ranges before it can be interrupted.
+# The range itself -- start, end, size, overlap, order -- is per-run input and
+# arrives with the driver's POST /start, so the chart installs a generic
+# monitor and holds none of it.
 
 monitor:
   # Reuses the existing hand-built job-monitor image slot -- no new image and no
@@ -60,7 +56,7 @@ monitor:
   # TEMPORARY dev pin: stellar/ssc-job-monitor:latest predates the apps/+lib/
   # split and ATTEMPT_BUDGETS, so this chart would ship env vars it cannot read.
   # Revert to the stellar/ repo once there is a push path for it.
-  image: "stellajuna/ssc-jm:2026-08-11b"
+  image: "stellajuna/ssc-jm:latest"
   # The driver reaches the monitor through this route: profile in via POST
   # /start, status and logs out. Empty routeHost disables the HTTPRoute; the
   # Service still exists, so an in-cluster caller works either way.
@@ -79,14 +75,6 @@ monitor:
   routeHost: ""
   gatewayName: ""
   gatewayNamespace: ""
-  # Dev loop: run the monitor and collector from a ConfigMap holding
-  # job_monitor.py and log_collector.py instead of a built image. Set it to the
-  # ConfigMap name and point monitor.image at a plain python base; the deps the
-  # Dockerfile bakes get pip-installed at start. Empty = use the image as built.
-  sourceConfigMap: ""
-  # Source-mode development normally installs dependencies at container start.
-  # Disable only when the selected image already contains them.
-  sourceInstallDependencies: true
   # --- nodepool tiers -------------------------------------------------------
   #
   # A range picks a NODEPOOL by its measured memory and gets that node to

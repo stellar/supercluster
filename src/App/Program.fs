@@ -114,6 +114,7 @@ type MissionOptions
         pubnetParallelCatchupStartingLedger: int,
         pubnetParallelCatchupEndLedger: int option,
         pubnetParallelCatchupLedgersPerJob: int,
+        pubnetParallelCatchupOverlapLedgers: int,
         pubnetParallelCatchupNumWorkers: int,
         pubnetParallelCatchupStorageMode: string,
         pubnetParallelCatchupProfile: string,
@@ -526,6 +527,12 @@ type MissionOptions
              Required = false,
              Default = 16000)>]
     member self.PubnetParallelCatchupLedgersPerJob = pubnetParallelCatchupLedgersPerJob
+
+    [<Option("pubnet-parallel-catchup-overlap-ledgers",
+             HelpText = "ledgers each job replays before its own range, so a range is ledgersPerJob + this. Not a tuning knob: a profile measured at one overlap does not describe a run at another, and 0 measures a job that skips the buckets the next one needs (only supported for V2)",
+             Required = false,
+             Default = 320)>]
+    member self.PubnetParallelCatchupOverlapLedgers = pubnetParallelCatchupOverlapLedgers
 
     [<Option("pubnet-parallel-catchup-num-workers",
              HelpText = "number of workers to run parallel catchup with (only supported for V2)",
@@ -982,6 +989,7 @@ let main argv =
                                pubnetParallelCatchupStartingLedger = mission.PubnetParallelCatchupStartingLedger
                                pubnetParallelCatchupEndLedger = mission.PubnetParallelCatchupEndLedger
                                pubnetParallelCatchupLedgersPerJob = mission.PubnetParallelCatchupLedgersPerJob
+                               pubnetParallelCatchupOverlapLedgers = mission.PubnetParallelCatchupOverlapLedgers
                                pubnetParallelCatchupNumWorkers = mission.PubnetParallelCatchupNumWorkers
                                pubnetParallelCatchupStorageMode = mission.PubnetParallelCatchupStorageMode
                                pubnetParallelCatchupProfile = mission.PubnetParallelCatchupProfile

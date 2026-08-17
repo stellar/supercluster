@@ -3,8 +3,8 @@
 This is the entire cross-process contract. The collector writes these files
 while a pod still exists and the monitor reads them back, so a disagreement
 about a name is a measurement silently lost. Everything either side does with
-the contents lives on its own side: attempt_files for the monitor, state_files
-for the collector.
+the contents lives on its own side: record for the monitor, state_files for the
+collector.
 """
 import os
 

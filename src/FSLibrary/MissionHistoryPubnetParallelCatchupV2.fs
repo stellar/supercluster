@@ -175,6 +175,10 @@ let runDocument (context: MissionContext) (profileJson: string option) : string 
     rangeSpec.["startingLedger"] <- JValue(context.pubnetParallelCatchupStartingLedger)
     rangeSpec.["latestLedgerNum"] <- JValue(endLedger)
     rangeSpec.["ledgersPerJob"] <- JValue(context.pubnetParallelCatchupLedgersPerJob)
+    // Sent, not left to the monitor's default: the range list is
+    // ledgersPerJob + overlap, so a monitor that guesses it generates a
+    // different list than the one the profile was measured against.
+    rangeSpec.["overlapLedgers"] <- JValue(context.pubnetParallelCatchupOverlapLedgers)
     rangeSpec.["order"] <- JValue(context.pubnetParallelCatchupRangeOrder)
 
     let run = JObject()
@@ -994,14 +998,6 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
     let mutable allJobsFinished = false
     let mutable timeoutLeft = jobMonitorStatusCheckTimeOutSecs
 
-    // Failures are reported once the run drains, not at first sight. Aborting on
-    // the first condemned range abandons every range still in flight, and the
-    // ranges that survive to the end of a run are the expensive tip ones this
-    // mission exists to measure. Measured 2026-07-30: one condemned range at 97%
-    // discarded 123 ranges of completed and in-flight work. The mission still
-    // fails -- it just finishes the work it can first.
-    let failedJobs = ResizeArray<string>()
-    let seenFailures = System.Collections.Generic.HashSet<string>()
     let mutable lastLogFetch = DateTime.UtcNow
 
     while not allJobsFinished do
@@ -1016,12 +1012,29 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
                 let jobsFailed = status.["jobs_failed"] :?> JArray
                 let jobsInProgress = status.Value<int>("queue_in_progress_count")
 
-                for job in jobsFailed do
-                    let text = job.ToString()
+                // At first sight, not once the run drains: the monitor has no
+                // way to be told to stop dispatching, so draining means running
+                // the whole remaining queue after the outcome is already known.
+                if jobsFailed.Count <> 0 then
+                    LogError "%d job(s) failed:" jobsFailed.Count
 
-                    if seenFailures.Add(text) then
-                        failedJobs.Add(text)
-                        LogError "RANGE FAILED: %s -- run continues, mission will fail once it drains" text
+                    for job in jobsFailed do
+                        let text = job.ToString()
+                        let ident = text.Split('|')
+                        LogInfo "%s, logs >>> " text
+
+                        // A condemned range need not name a pod: an attempt that
+                        // never scheduled has none, and its log is on the monitor
+                        // volume either way, so a missing pod must not mask the
+                        // failure below.
+                        if ident.Length > 1 then
+                            try
+                                dumpLogs (context, ident.[1])
+                            with ex -> LogInfo "could not read pod log (%s); see collected logs" (ex.Message)
+
+                        LogInfo "<<<"
+
+                    failwith "Catch up failed, check logs for more info"
 
                 if remainSize = 0 && jobsInProgress = 0 then
                     LogInfo "All queues empty. Mission complete."
@@ -1046,25 +1059,5 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
         with ex ->
             cleanup false context
             raise ex
-
-    if failedJobs.Count <> 0 then
-        LogInfo "%d job(s) failed:" failedJobs.Count
-
-        for job in failedJobs do
-            let ident = job.Split('|')
-            LogInfo "%s, logs >>> " job
-
-            // The pod is very likely reaped by now -- draining first means the
-            // wait is the length of the run. Its log is on the monitor volume
-            // either way, so a missing pod must not mask the failure below.
-            if ident.Length > 1 then
-                try
-                    dumpLogs (context, ident.[1])
-                with ex -> LogInfo "could not read pod log (%s); see collected logs" (ex.Message)
-
-            LogInfo "<<<"
-
-        cleanup false context
-        failwith "Catch up failed, check logs for more info"
 
     cleanup false context
