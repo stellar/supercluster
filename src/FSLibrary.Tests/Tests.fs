@@ -762,3 +762,17 @@ let ``Throttle retry gives up at the deadline and surfaces the 429`` () =
     // The 429 must reach the caller rather than being swallowed or masked.
     Assert.Equal(System.Net.HttpStatusCode.TooManyRequests, resp.StatusCode)
     Assert.Equal(1, stub.Calls)
+
+[<Fact>]
+let ``Throttle retry clamps the last wait so it never overruns the deadline`` () =
+    let stub = ThrottlingStub(1000)
+    // 750ms budget: 500ms backoff fits, the 1000ms one is clamped to what is left.
+    let handler = new ApiRateLimit.ThrottleRetryHandler(System.TimeSpan.FromMilliseconds 750.0)
+    let sw = System.Diagnostics.Stopwatch.StartNew()
+    let resp = sendThrough handler stub System.Net.Http.HttpMethod.Get
+    sw.Stop()
+    Assert.Equal(System.Net.HttpStatusCode.TooManyRequests, resp.StatusCode)
+    // Two waits (500ms, then 250ms clamped) and three attempts.
+    Assert.Equal(3, stub.Calls)
+    // The clamp is the point: without it the second wait would have run to 1500ms.
+    Assert.True(sw.Elapsed < System.TimeSpan.FromMilliseconds 1400.0, sprintf "took %O" sw.Elapsed)

@@ -54,8 +54,10 @@ type ThrottleRetryHandler(deadline: System.TimeSpan) =
             let rec attempt backoffMs =
                 task {
                     let! r = this.Send(req, ct)
+                    let remaining = deadline - sw.Elapsed
 
-                    if r.StatusCode <> HttpStatusCode.TooManyRequests || sw.Elapsed >= deadline then
+                    if r.StatusCode <> HttpStatusCode.TooManyRequests
+                       || remaining <= System.TimeSpan.Zero then
                         return r
                     else
                         // Retry-After is a floor, not a replacement, or a server repeating `Retry-After: 1` pins us at one attempt per second.
@@ -64,7 +66,8 @@ type ThrottleRetryHandler(deadline: System.TimeSpan) =
                             | ra when not (isNull ra) && ra.Delta.HasValue -> int ra.Delta.Value.TotalMilliseconds
                             | _ -> 0
 
-                        let waitMs = max backoffMs hint
+                        // Clamped to what is left, because the wait is otherwise unbudgeted and a long Retry-After would start an attempt past the deadline and past HttpClientTimeout, replacing the 429 with a TaskCanceledException.
+                        let waitMs = min (max backoffMs hint) (int remaining.TotalMilliseconds)
 
                         LogWarn
                             "apiserver throttled %s %s (%O elapsed); retrying in %d ms"
