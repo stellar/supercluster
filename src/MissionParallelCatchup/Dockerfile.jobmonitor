@@ -1,20 +1,39 @@
-FROM --platform=linux/amd64 ubuntu:24.04
+FROM --platform=linux/amd64 python:3.12-slim
 
 VOLUME /data
 
 WORKDIR /app
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    python3 \
-    python3-redis \
-    python3-requests \
-    python3-prometheus-client && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+# Client major tracks a cluster minor (36.x <-> Kubernetes 1.36). Upstream's
+# compatibility table marks an exact match as supported and everything above or
+# below as partial, which is where the 1.34 clusters sit today -- the same
+# category 1.35 would be. Every API this mission uses (batch/v1 Job,
+# podFailurePolicy, ttlSecondsAfterFinished) has been GA since 1.31.
+#
+# 36 rather than 35 because kubernetes.aio, the aiohttp-backed async client,
+# does not exist before it: 35.0.0 ships no kubernetes/aio at all.
+#
+# The floor matters independently: podFailurePolicy (V1PodFailurePolicy*) needs
+# >=26 and V1VolumeResourceRequirements needs >=29. Ubuntu's distro package is
+# 22.6.0 and has neither, so it cannot express this mission's failure
+# classification at all.
+RUN pip install --no-cache-dir \
+    'kubernetes~=36.0' \
+    'aiohttp~=3.14' \
+    'prometheus-client~=0.19'
 
-COPY ./job_monitor.py /app
+# apps/ and lib/ flatten into one directory here, and the modules import each
+# other by bare name. The split is for reading the repo, not for the runtime.
+COPY ./apps/job_monitor.py /app
+# Same image, second entrypoint: runs as a sidecar streaming worker logs.
+COPY ./apps/log_collector.py /app
+# Flattened one directory at a time: `COPY ./lib/ /app/` would preserve
+# lib/monitor and lib/collector as subdirectories, and a bare `import sizing`
+# does not look inside them.
+COPY ./lib/*.py /app/
+COPY ./lib/monitor/ /app/
+COPY ./lib/collector/ /app/
 
 EXPOSE 8080
 
-CMD ["/usr/bin/python3", "job_monitor.py"]
+CMD ["python3", "job_monitor.py"]

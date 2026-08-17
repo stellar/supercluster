@@ -1,32 +1,41 @@
-redis:
-  hostname: "" # to be set by the mission
-  port: 6379
-  job_queue: "ranges"
-  success_queue: "succeeded"
-  failed_queue: "failed"
-  progress_queue: "in_progress"
-  metrics: "metrics"
-  job_owners: "job_owners"
-  resources:
-    requests:
-      cpu: "100m"
-      memory: "100Mi"
-
 worker:
   stellar_core_image: "stellar/stellar-core:latest"
   replicas: 5
+  # pvc: /data survives the pod, so an evicted range resumes at L+1 -- this is
+  # what makes spot viable. ephemeral: /data is an emptyDir on the node, no
+  # resume, and ephemeral_storage must be sized to hold it.
+  storageMode: "pvc"
+  storageClass: ""
+  # Sized from what a range actually uses: the old node-local /data ran on a
+  # 35Gi request / 40Gi limit. 40Gi x 1024 workers is 40 TiB of gp3 rather than
+  # 100 TiB, which matters against the per-region storage quota.
+  # One PVC per ledger range, not per concurrency slot: measured on ssc-test,
+  # 7.5x the volume lifecycles cost nothing (3151s vs 3210s) and reuse pinned
+  # every later range to one AZ. 60Gi covers the profile's 37.8Gi peak.
+  storageSize: "60Gi"
   requireNodeLabels: []
   avoidNodeLabels: []
   tolerateNodeTaints: []
   asanOptions: "quarantine_size_mb=1:malloc_context_size=5:alloc_dealloc_mismatch=0"
-  resources: # resources below are left empty on purpose, they are read and overridden from `StellarKubeCfg.fs`
+  resources:
     requests:
-      cpu: ""
-      memory: ""
+      # V2's worker sizing lives HERE, not in StellarKubeSpecs.fs. That spec is
+      # shared with the V1 parallel catchup missions (parallelism 128 and 256,
+      # a different execution model), and sizing V2 there silently resized them
+      # too -- it took their cpu request from 250m to 1800m.
+      #
+      # 1800m/9Gi is the unprofiled default: 4 workers per r8*.2xlarge node
+      # (cpu-bound) or 3 per m8*.2xlarge (memory-bound). A measured range
+      # overrides both; --pubnet-parallel-catchup-cpu-request overrides the run.
+      cpu: "1800m"
+      memory: "9Gi"
+      # Still filled in by the mission: ephemeral-storage is 2Gi/4Gi in pvc mode
+      # and the StellarKubeSpecs value in ephemeral mode.
       ephemeral_storage: ""
     limits:
-      cpu: ""
-      memory: ""
+      # cpu and memory are deliberately absent -- workers run unlimited on both.
+      # See REQ_CPU/REQ_MEM in job_monitor.py. Only disk is capped, because that
+      # is the one dimension where an unbounded pod takes the node with it.
       ephemeral_storage: ""
   historyGetCommandCore001:
     "curl -sf http://history.stellar.org/prd/core-live/core_live_001/{0} -o {1}"
@@ -35,26 +44,187 @@ worker:
   historyGetCommandCore003:
     "curl -sf http://history.stellar.org/prd/core-live/core_live_003/{0} -o {1}"
 
-monitor:
-  gateway_name: "traefik-gateway-private"
-  gateway_namespace: "traefik"
-  hostname: "" # to be set by the mission
-  path_prefix: "/default"
-  logging_interval_seconds: 300
-  logging_level: "INFO" # 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'
-  resources:
-    requests:
-      cpu: "100m"
-      memory: "100Mi"
+# Index -> ledger range is computed in the Job template; no queue to preload.
+# The range itself -- start, end, size, overlap, order -- is per-run input and
+# arrives with the driver's POST /start, so the chart installs a generic
+# monitor and holds none of it.
 
-range_generator:
-  strategy: "uniform" # "uniform" or "logarithmic"
-  params:
-    starting_ledger: 0
-    latest_ledger_num: 100000
-    overlap_ledgers: 320
-    uniform_ledgers_per_job: 16000 # only for strategy="uniform"
-    logarithmic_floor_ledgers: 16000 # only for strategy="logarithmic"
+monitor:
+  # Reuses the existing hand-built job-monitor image slot -- no new image and no
+  # new push path (nothing in .github/workflows builds these).
+  #
+  # TEMPORARY dev pin: stellar/ssc-job-monitor:latest predates the apps/+lib/
+  # split and ATTEMPT_BUDGETS, so this chart would ship env vars it cannot read.
+  # Revert to the stellar/ repo once there is a push path for it.
+  image: "stellajuna/ssc-jm:latest"
+  # The driver reaches the monitor through this route: profile in via POST
+  # /start, status and logs out. Empty routeHost disables the HTTPRoute; the
+  # Service still exists, so an in-cluster caller works either way.
+  # The monitor's Role is the same for every run, so it is provisioned once per
+  # namespace in stellar/kube, bound to system:serviceaccounts:<namespace> --
+  # every ServiceAccount in the namespace, because a binding names its subject
+  # exactly and the monitor's is named after the release. Creating the Role per
+  # release instead needs the installer to hold RBAC-granting rights, which is a
+  # privilege every mission would then carry so that this one chart can install
+  # its own Role.
+  #
+  # true creates the Role, RoleBinding and node-stats ClusterRole for a cluster
+  # that does not provide them -- ssc-eks does, through a catchup-job-monitor
+  # RoleBinding, so leave it false there. With neither, the monitor 403s.
+  createRbac: false
+  routeHost: ""
+  gatewayName: ""
+  gatewayNamespace: ""
+  # --- nodepool tiers -------------------------------------------------------
+  #
+  # A range picks a NODEPOOL by its measured memory and gets that node to
+  # itself. Empty prefix disables all of it and every worker keeps the single
+  # global node label, which is exactly the pre-tier behaviour.
+  #
+  # Cuts are node_usable/1.60, the p99 of run-to-run growth in the same range's
+  # peakAnonBytes (18,073 observations). Range 63080767 measured 13.75Gi, landed
+  # on 14.1Gi nodes at a 1.03x margin, and OOMKilled on both.
+  poolPrefix: ""
+  poolTiers: "0:subdwarf,0.79:dwarf,1.61:subgiant,3.87:giant,8.85:supergiant,18.38:hypergiant,:supernova"
+  # Rungs the cache bump may never take, "from->to" comma separated. Nothing
+  # else refuses a promotion, so a rung that should not be taken has to be
+  # named here -- see POOL_BLOCK_RUNGS in lib/config.py.
+  poolBlockRungs: "dwarf->subgiant,hypergiant->supernova"
+  poolCpu: "subdwarf:0.85,dwarf:0.85,subgiant:1.85,giant:1.85,supergiant:1.85,hypergiant:1.85,supernova:3.80,protostar:1.85,nebula:1.80"
+  poolMem: "subdwarf:1280Mi,dwarf:1280Mi,subgiant:2816Mi,giant:6656Mi,supergiant:14336Mi,hypergiant:29696Mi,supernova:60416Mi,protostar:29696Mi,nebula:9216Mi"
+  # Profiled run, range past the profile's top: newest ledgers, and the newest
+  # are the densest, so a rich pool rather than an average one.
+  poolUnprofiled: "protostar"
+  # No profile at all: nothing is known, so the biggest nodes and the configured
+  # defaults.
+  poolNoProfile: "nebula"
+  profileMargin: 1.15
+  # Ceiling for profile-derived memory, deliberately above the unprofiled
+  # limit: a range that needs more must be able to ask for it.
+  profileMaxMemory: "32Gi"
+  # The disk allowances, mirroring the memory ones above. See
+  # PROFILE_EPHEMERAL_HEADROOM in lib/config.py.
+  profileEphemeralHeadroom: "2Gi"
+  profileRuntimeEphemeralInsurance: "8Gi"
+  # Above the flat LIM_EPHEMERAL on purpose: that limit is what an UNMEASURED
+  # range gets, and capping a measured one at it would discard the measurement.
+  profileMaxEphemeral: "64Gi"
+  # Flat allowance added to a range's measured rss. Not zero: a multiplicative
+  # margin is meaningless at small rss -- see PROFILE_CACHE_HEADROOM in
+  # lib/config.py for the 90 OOMKills that established it.
+  profileCacheHeadroom: "512Mi"
+  # Extra memory allowance weighted by a range's runtime relative to the
+  # longest valid runtime in the profile. Long-running ranges need more slack
+  # for page cache and allocator growth. 0 disables.
+  profileRuntimeMemoryInsurance: "3Gi"
+  # Always, because runs name this image by a MUTABLE tag and IfNotPresent then
+  # pins a node to whatever it cached first -- run #183 shipped a 0-byte
+  # job_monitor.log from an image fixed hours earlier, off a node up since June.
+  # Kubernetes defaults :latest to Always for this reason.
+  imagePullPolicy: Always
+  mission: "HistoryPubnetParallelCatchup"
+  # Adds a `mission` label to worker pods, which kube-state-metrics exposes as
+  # label_mission for the Grafana container panels. Default OFF: those panels
+  # are per-pod, so 1024 workers would swamp any view with mission=$__all and
+  # slow the shared dashboard for everyone. Turn on per-run for a small run, or
+  # once the panels aggregate.
+  emitMissionLabel: false
+  loggingIntervalSeconds: 10
+  # Cosmetic stellar-core /info sampling. A fixed pool probes each Running pod
+  # about once per interval; three consecutive failures preserve the old
+  # approximately 90-second down threshold without coupling network I/O to the
+  # 10-second reconcile loop. Unprobed/intermediate workers report unknown.
+  livenessProbeTimeoutSeconds: 5
+  # One sweep per reconcile pass, and the reconcile loop waits for it -- so this
+  # is the most a fleet of unreachable workers can delay dispatch.
+  livenessSweepSeconds: 15
+  # Concurrent probes per sweep. At 2096 workers this is the throughput that has
+  # to fit inside livenessSweepSeconds: 32 slots x sub-second local responses
+  # clears the fleet, and a fleet that does not answer is bounded by the sweep.
+  livenessMaxConcurrency: 32
+  # Attempts each failure cause gets before the range is condemned. Every budget
+  # is spent by its own cause, and a cause that is not here is condemned the
+  # first time it happens -- a timeout, a real catchup failure, an exit 3 with
+  # nothing in its archive, and anything the monitor could not classify.
+  attemptBudgets:
+    # The cluster took the pod away mid-run, which proves the range was fine.
+    # Effectively unlimited: on spot a healthy range is evicted dozens of times.
+    disrupted: 100
+    # Refused by the kubelet before any container ran (attachment limits,
+    # admission churn). The range never started, so a retry masks nothing.
+    rejected: 100
+    # An exit 3 whose archive named a fetch fault: an unreachable history
+    # mirror is the cluster's problem, not the range's.
+    fetchFault: 20
+    # Each retry escalates the memory request one rung.
+    oom: 5
+    # Each retry escalates the disk limit one rung. Smallest, because an
+    # eviction repeats identically until the range gets more disk.
+    ephemeral: 4
+    # Destroyed before its container started, so the Job carries no exit code.
+    unknown: 2
+  memBumpFactor: 1.5
+  ephBumpFactor: 1.5
+  maxEphemeral: "200Gi"
+  maxMem: "48Gi"
+  graceSeconds: 100
+  # preStop stall before SIGTERM in seconds, 0 = off, sized against the
+  # collector CYCLE rather than collectorPollSeconds. It buys time to NOTICE the
+  # disruption, not to capture the metric -- a 60s hook with 10s polling still
+  # lost txApply where 1s polling with no hook caught it. Overshooting is dead
+  # time inside the ~120s spot reclaim budget; it must stay under graceSeconds.
+  prestopSleepSeconds: 5
+  # Per-attempt wall-clock cap in seconds, 0 = none, catching a range wedged in
+  # archive retries. A timeout is TERMINAL, so too low fails the mission; see
+  # ATTEMPT_DEADLINE_SECONDS in lib/config.py for why 12h and not 3h.
+  attemptDeadlineSeconds: 43200
+  jobTtlSeconds: 600
+  # Worker logs are pulled to the monitor's volume while each pod is still
+  # alive, then collected in one exec at teardown instead of ~1024.
+  logStorageClass: ""
+  logStorageSize: "100Gi"
+  saveSuccessLogs: true
+  collectorPollSeconds: 5
+  # Spot gives ~120s of notice; past roughly double that the drain was
+  # cancelled and the stream should go back to interval polling.
+  doomedFollowSeconds: 300
+  # Follow streams get their own budget so a mass reclaim cannot consume every
+  # poll slot and blackout the rest of the run. Condemned pods beyond this fall
+  # back to polling, which is the pre-existing behaviour.
+  maxDoomedFollows: 256
+  # Lifetime of each pod watch before the apiserver closes it and the collector
+  # reconnects from its last resourceVersion. The watch is what makes a
+  # condemnation visible immediately rather than on the next collectorPollSeconds
+  # sweep: measured at prestopSleepSeconds=5, the sweep alone caught that window
+  # about half the time and lost 32 of 52 mid-replay legs. 0 disables the watch
+  # and leaves detection to the sweep.
+  watchTimeoutSeconds: 600
+  watchRetrySeconds: 1
+  maxConcurrentPolls: 96
+  maxPollChars: 8388608
+  # Concurrent kubelet sweeps. One request per node, and a dead one costs the
+  # connect timeout, so this stays small next to the log-read budget.
+  maxConcurrentSamples: 16
+  # Longest one log read may stall before it is abandoned. A cycle reads every
+  # pod together, so a wedged read would hold up the whole pass.
+  readTimeoutSeconds: 60
+  # How far back the terminal read reaches past the resume point, so a medida
+  # block split across two reads is whole in one. The archive dedups the
+  # overlap, so this only widens what the scan sees.
+  terminalRereadSeconds: 30
+  # Poll cycles a stream gets to finalize after its pod leaves the pod list,
+  # before it is cancelled and its connection slot reclaimed.
+  # Where the monitor runs, from --job-monitor-node-labels and
+  # --job-monitor-tolerate-taints. Empty = anywhere untainted. Pinning it to a
+  # worker tier reserves that node: it holds the logs PVC for the whole run.
+  nodeSelector: {}
+  collectorResources:
+    requests: { cpu: "200m", memory: "512Mi" }
+    limits:   { cpu: "2",    memory: "2Gi" }
+  tolerateNodeTaints: []
+  resources:
+    requests: { cpu: "200m", memory: "512Mi" }
+    limits:   { cpu: "2",    memory: "2Gi" }
 
 service_account:
   annotations: []

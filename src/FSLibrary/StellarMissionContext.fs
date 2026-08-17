@@ -120,7 +120,20 @@ type MissionContext =
       pubnetParallelCatchupStartingLedger: int
       pubnetParallelCatchupEndLedger: int option
       pubnetParallelCatchupLedgersPerJob: int
+      pubnetParallelCatchupOverlapLedgers: int
       pubnetParallelCatchupNumWorkers: int
+      pubnetParallelCatchupStorageMode: string
+      pubnetParallelCatchupProfile: string
+      pubnetParallelCatchupRangeOrder: string
+      pubnetParallelCatchupPoolPrefix: string
+      jobMonitorImagePcV2: string
+      pubnetParallelCatchupCpuRequest: string
+      pubnetParallelCatchupMemRequest: string
+      pubnetParallelCatchupPoolCpu: string
+      pubnetParallelCatchupPoolMem: string
+      pubnetParallelCatchupCreateRbac: bool
+      jobMonitorNodeLabels: ((string * string option) list)
+      jobMonitorTolerateTaints: ((string * string option) list)
       genesisTestAccountCount: int option
 
       asanOptions: string option

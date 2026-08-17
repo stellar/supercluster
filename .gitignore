@@ -18,3 +18,11 @@
 .fake
 .ionide
 .idea
+
+# Python bytecode from the parallel-catchup monitor/collector tests
+__pycache__/
+*.pyc
+
+# pytest-cov artifacts from the MissionParallelCatchup suite
+.coverage
+**/__pycache__/

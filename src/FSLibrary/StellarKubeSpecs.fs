@@ -128,6 +128,13 @@ let SimulatePubnetTier1PerfCoreResourceRequirements : V1ResourceRequirements =
 let ParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
     // When doing parallel catchup, we give each container
     // 0.25 vCPUs, 8Gi RAM and 35 GB of disk bursting to 2vCPU, 28Gi (28672Mi) and 40 GB
+    //
+    // Shared with the V1 parallel catchup missions (pubnet and testnet), which run
+    // coreSets through RunParallelJobsInRandomOrder at parallelism 128 and 256.
+    // V2 does NOT take its cpu or memory from here -- it is a Job-per-range mission
+    // with a different packing model and sources those from the helm chart
+    // (worker.resources.requests in parallel_catchup_helm/values.yaml). It still
+    // reads the ephemeral-storage pair below for its ephemeral storage mode.
     makeResourceRequirementsWithStorageLimit 250 8192 35 2000 28672 40
 
 let NonParallelCatchupCoreResourceRequirements : V1ResourceRequirements =

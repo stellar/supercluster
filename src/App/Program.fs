@@ -116,7 +116,20 @@ type MissionOptions
         pubnetParallelCatchupStartingLedger: int,
         pubnetParallelCatchupEndLedger: int option,
         pubnetParallelCatchupLedgersPerJob: int,
+        pubnetParallelCatchupOverlapLedgers: int,
         pubnetParallelCatchupNumWorkers: int,
+        pubnetParallelCatchupStorageMode: string,
+        pubnetParallelCatchupProfile: string,
+        pubnetParallelCatchupRangeOrder: string,
+        pubnetParallelCatchupPoolPrefix: string,
+        jobMonitorImagePcV2: string,
+        pubnetParallelCatchupCpuRequest: string,
+        pubnetParallelCatchupMemRequest: string,
+        pubnetParallelCatchupPoolCpu: string,
+        pubnetParallelCatchupPoolMem: string,
+        pubnetParallelCatchupCreateRbac: bool,
+        jobMonitorNodeLabels: seq<string>,
+        jobMonitorTolerateTaints: seq<string>,
         tag: string option,
         numPregeneratedTxs: int option,
         genesisTestAccountCount: int option,
@@ -526,11 +539,87 @@ type MissionOptions
              Default = 16000)>]
     member self.PubnetParallelCatchupLedgersPerJob = pubnetParallelCatchupLedgersPerJob
 
+    [<Option("pubnet-parallel-catchup-overlap-ledgers",
+             HelpText = "ledgers each job replays before its own range, so a range is ledgersPerJob + this. Not a tuning knob: a profile measured at one overlap does not describe a run at another, and 0 measures a job that skips the buckets the next one needs (only supported for V2)",
+             Required = false,
+             Default = 320)>]
+    member self.PubnetParallelCatchupOverlapLedgers = pubnetParallelCatchupOverlapLedgers
+
     [<Option("pubnet-parallel-catchup-num-workers",
              HelpText = "number of workers to run parallel catchup with (only supported for V2)",
              Required = false,
              Default = 192)>]
     member self.PubnetParallelCatchupNumWorkers = pubnetParallelCatchupNumWorkers
+
+    [<Option("pubnet-parallel-catchup-storage-mode",
+             HelpText = "worker /data backing: 'pvc' keeps it across pods so an evicted range resumes at L+1 (needed for spot); 'ephemeral' puts it on the node disk where retries cannot resume (only supported for V2)",
+             Required = false,
+             Default = "pvc")>]
+    member self.PubnetParallelCatchupStorageMode : string = pubnetParallelCatchupStorageMode
+
+    [<Option("pubnet-parallel-catchup-profile",
+             HelpText = "range profile from an earlier run, used to tighten per-range requests: a local path or an https URL to the JSON artifact. Only tightens requests; limits are unchanged (only supported for V2)",
+             Required = false,
+             Default = "")>]
+    member self.PubnetParallelCatchupProfile : string = pubnetParallelCatchupProfile
+
+    [<Option("pubnet-parallel-catchup-range-order",
+             HelpText = "dispatch order: 'tip-first' (default) or 'oldest-first'. Generators emit tip-first, which front-loads the most expensive ranges; oldest-first profiles the cheap early ones first (only supported for V2)",
+             Required = false,
+             Default = "tip-first")>]
+    member self.PubnetParallelCatchupRangeOrder : string = pubnetParallelCatchupRangeOrder
+
+    [<Option("pubnet-parallel-catchup-pool-prefix",
+             HelpText = "route each range to a nodepool sized for its measured memory, e.g. 'catchup' selects catchup-dwarf, catchup-giant and so on. Each range gets its node to itself. Empty = one pool for every worker, the pre-tier behaviour (only supported for V2)",
+             Required = false,
+             Default = "")>]
+    member self.PubnetParallelCatchupPoolPrefix : string = pubnetParallelCatchupPoolPrefix
+
+    [<Option("job-monitor-image-pc-v2",
+             HelpText = "Container image for the ParallelCatchupV2 job monitor and log collector. Empty uses the chart default.",
+             Required = false,
+             Default = "")>]
+    member self.JobMonitorImagePcV2 : string = jobMonitorImagePcV2
+
+    [<Option("pubnet-parallel-catchup-cpu-request",
+             HelpText = "override the worker cpu request for an UNPOOLED run, e.g. 1000m or 500m. Ignored once --pubnet-parallel-catchup-pool-prefix is set: there the tier's own cut is the request, because a flat value shipped at a tier whose nodes are smaller leaves the pod permanently Pending. Empty = the chart default (only supported for V2)",
+             Required = false,
+             Default = "")>]
+    member self.PubnetParallelCatchupCpuRequest : string = pubnetParallelCatchupCpuRequest
+
+    [<Option("pubnet-parallel-catchup-mem-request",
+             HelpText = "override the worker memory request for an UNPOOLED run, e.g. 9Gi or 12Gi. Same scope as --pubnet-parallel-catchup-cpu-request: ignored under a pool prefix, where the tier's cut is the request. A range the profile has measured overrides it. Empty = the chart default, 9Gi (only supported for V2)",
+             Required = false,
+             Default = "")>]
+    member self.PubnetParallelCatchupMemRequest : string = pubnetParallelCatchupMemRequest
+
+    [<Option("pubnet-parallel-catchup-pool-cpu",
+             HelpText = "per-tier cpu claim, \"tier:cores\" comma separated, e.g. \"dwarf:0.85,giant:1.85\". The right map depends on the capacity the run targets: spot pools were doubled so a claim is half a node and two pods share it, on-demand pools were not, and there the same claim is the node's nameplate, which is not allocatable and schedules nothing. Empty uses the chart default (only supported for V2)",
+             Required = false,
+             Default = "")>]
+    member self.PubnetParallelCatchupPoolCpu : string = pubnetParallelCatchupPoolCpu
+
+    [<Option("pubnet-parallel-catchup-pool-mem",
+             HelpText = "per-tier memory claim, \"tier:quantity\" comma separated, e.g. \"dwarf:1280Mi,giant:6656Mi\". This is what isolates a pod on its node, so it is the dimension that sets pods-per-node. Same capacity caveat as --pubnet-parallel-catchup-pool-cpu. Empty uses the chart default (only supported for V2)",
+             Required = false,
+             Default = "")>]
+    member self.PubnetParallelCatchupPoolMem : string = pubnetParallelCatchupPoolMem
+
+    [<Option("pubnet-parallel-catchup-create-rbac",
+             HelpText = "have the chart create the monitor's Role, RoleBinding, ClusterRole and ClusterRoleBinding. Default false: on ssc-eks the namespace already provides them (a catchup-job-monitor RoleBinding covering system:serviceaccounts:stellar-supercluster), and creating them needs the installer to hold those rights. Set it on a cluster that has no such binding -- without it the monitor 403s on its first ConfigMap read and dispatches nothing (only supported for V2)",
+             Required = false,
+             Default = false)>]
+    member self.PubnetParallelCatchupCreateRbac : bool = pubnetParallelCatchupCreateRbac
+
+    [<Option("job-monitor-node-labels",
+             HelpText = "`key:value` labels the job monitor's node must carry, e.g. purpose:catchup-dwarf catchup-capacity:od. All of them must match. Empty puts it wherever it fits, which for a cluster whose catchup pools are tainted means the untainted shared nodes (only supported for V2)",
+             Required = false)>]
+    member self.JobMonitorNodeLabels = jobMonitorNodeLabels
+
+    [<Option("job-monitor-tolerate-taints",
+             HelpText = "taints the job monitor tolerates, `key` or `key:effect`, effect defaulting to NoSchedule. Needed to put it on a tainted pool -- --job-monitor-node-labels alone leaves it unschedulable there (only supported for V2)",
+             Required = false)>]
+    member self.JobMonitorTolerateTaints = jobMonitorTolerateTaints
 
     [<Option("tag", HelpText = "optional name to tag the run with", Required = false)>]
     member self.Tag = tag
@@ -807,7 +896,10 @@ let main argv =
                              DumpPodInfo kube mission.ApiRateLimit ns
                      with x -> LogError "Connection issue! Api call failed."
 
-                 let timer = new System.Threading.Timer(TimerCallback(podLogger), null, 1000, 300000)
+                 // Every 10 minutes, not 5: this lists every pod in the
+                 // namespace, and on a 1024-worker run that is a large response
+                 // fetched purely to print one summary line.
+                 let timer = new System.Threading.Timer(TimerCallback(podLogger), null, 1000, 600000)
 
                  for m in mission.Missions do
                      LogInfo "-----------------------------------"
@@ -916,7 +1008,21 @@ let main argv =
                                pubnetParallelCatchupStartingLedger = mission.PubnetParallelCatchupStartingLedger
                                pubnetParallelCatchupEndLedger = mission.PubnetParallelCatchupEndLedger
                                pubnetParallelCatchupLedgersPerJob = mission.PubnetParallelCatchupLedgersPerJob
+                               pubnetParallelCatchupOverlapLedgers = mission.PubnetParallelCatchupOverlapLedgers
                                pubnetParallelCatchupNumWorkers = mission.PubnetParallelCatchupNumWorkers
+                               pubnetParallelCatchupStorageMode = mission.PubnetParallelCatchupStorageMode
+                               pubnetParallelCatchupProfile = mission.PubnetParallelCatchupProfile
+                               pubnetParallelCatchupRangeOrder = mission.PubnetParallelCatchupRangeOrder
+                               pubnetParallelCatchupPoolPrefix = mission.PubnetParallelCatchupPoolPrefix
+                               jobMonitorImagePcV2 = mission.JobMonitorImagePcV2
+                               pubnetParallelCatchupCpuRequest = mission.PubnetParallelCatchupCpuRequest
+                               pubnetParallelCatchupMemRequest = mission.PubnetParallelCatchupMemRequest
+                               pubnetParallelCatchupPoolCpu = mission.PubnetParallelCatchupPoolCpu
+                               pubnetParallelCatchupPoolMem = mission.PubnetParallelCatchupPoolMem
+                               pubnetParallelCatchupCreateRbac = mission.PubnetParallelCatchupCreateRbac
+                               jobMonitorNodeLabels = List.map splitLabel (List.ofSeq mission.JobMonitorNodeLabels)
+                               jobMonitorTolerateTaints =
+                                   List.map splitLabel (List.ofSeq mission.JobMonitorTolerateTaints)
                                tag = mission.Tag
                                numPregeneratedTxs = mission.NumPregeneratedTxs
                                enableTailLogging = true
