@@ -191,7 +191,12 @@ let ConnectToCluster (cfgFile: string) (nsOpt: string option) : (Kubernetes * st
     let clientConfig = KubernetesClientConfiguration.BuildConfigFromConfigObject(kCfg)
     // Disable HTTP2 to avoid intermittent issues with the cluster
     clientConfig.DisableHttp2 <- true
-    let kube = new k8s.Kubernetes(clientConfig)
+    // Rides out apiserver 429s for every call this client makes, and must stay
+    // well under clientConfig.HttpClientTimeout (100s), which bounds the whole
+    // handler chain and surfaces as a TaskCanceledException that loses the 429.
+    let kube =
+        new k8s.Kubernetes(clientConfig, new ApiRateLimit.ThrottleRetryHandler(System.TimeSpan.FromSeconds 60.0))
+
     (kube, ns)
 
 // Prints the stellar-core StatefulSets and Pods on the provided cluster

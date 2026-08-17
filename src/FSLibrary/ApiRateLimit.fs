@@ -5,6 +5,10 @@
 module ApiRateLimit
 
 open Logging
+open System.Net
+open System.Net.Http
+open System.Threading
+open System.Threading.Tasks
 
 let mutable apiCallStopwatch = System.Diagnostics.Stopwatch.StartNew()
 let mutable lastApiCallTimeInMs : int64 = int64 (0)
@@ -29,3 +33,53 @@ let sleepUntilNextRateLimitedApiCallTime (callsPerSec: int) =
         System.Threading.Thread.Sleep(toSleep)
 
     lastApiCallTimeInMs <- apiCallStopwatch.ElapsedMilliseconds
+
+// Retries apiserver 429s so a single rejection cannot end a mission.
+type ThrottleRetryHandler(deadline: System.TimeSpan) =
+    inherit DelegatingHandler()
+
+    // F# cannot call `base` from inside a task expression, so the base send needs its own member.
+    member private this.Send(req: HttpRequestMessage, ct: CancellationToken) = base.SendAsync(req, ct)
+
+    override this.SendAsync(req: HttpRequestMessage, ct: CancellationToken) : Task<HttpResponseMessage> =
+        // Deletes are never retried, because every delete site in this library already
+        // swallows failure, so retrying buys fewer orphans at the price of multiplying a
+        // teardown that removes hundreds of objects in sequence.
+        if req.Method = HttpMethod.Delete then
+            this.Send(req, ct)
+        else
+            let sw = System.Diagnostics.Stopwatch.StartNew()
+
+            // Only 429 is retried, because it alone proves the request was rejected unapplied and is safe to re-send.
+            let rec attempt backoffMs =
+                task {
+                    let! r = this.Send(req, ct)
+
+                    if r.StatusCode <> HttpStatusCode.TooManyRequests || sw.Elapsed >= deadline then
+                        return r
+                    else
+                        // Retry-After is a floor, not a replacement, or a server repeating `Retry-After: 1` pins us at one attempt per second.
+                        let hint =
+                            match r.Headers.RetryAfter with
+                            | ra when not (isNull ra) && ra.Delta.HasValue -> int ra.Delta.Value.TotalMilliseconds
+                            | _ -> 0
+
+                        let waitMs = max backoffMs hint
+
+                        LogWarn
+                            "apiserver throttled %s %s (%O elapsed); retrying in %d ms"
+                            req.Method.Method
+                            req.RequestUri.PathAndQuery
+                            sw.Elapsed
+                            waitMs
+
+                        r.Dispose()
+                        do! Task.Delay(waitMs, ct)
+                        return! attempt (min (backoffMs * 2) 15000)
+                }
+
+            task {
+                // A request can only be sent once unless its body is buffered first.
+                if not (isNull req.Content) then do! req.Content.LoadIntoBufferAsync()
+                return! attempt 500
+            }

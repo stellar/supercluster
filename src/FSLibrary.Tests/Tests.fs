@@ -161,6 +161,7 @@ let ctx : MissionContext =
 let netdata =
     __SOURCE_DIRECTORY__
     + "/../../../data/public-network-data-2026-06-03-trimmed-located.json"
+
 let pubkeys = __SOURCE_DIRECTORY__ + "/../../../data/tier1keys.json"
 let pubnetctx = { ctx with pubnetData = Some netdata; tier1Keys = Some pubkeys }
 
@@ -704,3 +705,60 @@ type Tests(output: ITestOutputHelper) =
     [<Fact>]
     member __.``QuorumIntersectionChecker mission is registered``() =
         Assert.True(StellarMission.allMissions.ContainsKey "QuorumIntersectionChecker")
+
+// A stand-in for the apiserver: rejects the first `failures` requests with 429,
+// then succeeds, and counts how many times it was actually called.
+type private ThrottlingStub(failures: int) =
+    inherit System.Net.Http.HttpMessageHandler()
+    let mutable calls = 0
+    member __.Calls = calls
+
+    override __.SendAsync(_req, _ct) =
+        calls <- calls + 1
+
+        let code =
+            if calls <= failures then
+                System.Net.HttpStatusCode.TooManyRequests
+            else
+                System.Net.HttpStatusCode.OK
+
+        System.Threading.Tasks.Task.FromResult(new System.Net.Http.HttpResponseMessage(code))
+
+let private sendThrough
+    (handler: ApiRateLimit.ThrottleRetryHandler)
+    (stub: ThrottlingStub)
+    (verb: System.Net.Http.HttpMethod)
+    =
+    handler.InnerHandler <- stub
+    use invoker = new System.Net.Http.HttpMessageInvoker(handler)
+
+    let req =
+        new System.Net.Http.HttpRequestMessage(verb, "http://apiserver.invalid/api/v1/nodes")
+
+    invoker.SendAsync(req, System.Threading.CancellationToken.None).Result
+
+[<Fact>]
+let ``Throttle retry rides out 429s and returns the eventual success`` () =
+    let stub = ThrottlingStub(3)
+    let handler = new ApiRateLimit.ThrottleRetryHandler(System.TimeSpan.FromSeconds 30.0)
+    let resp = sendThrough handler stub System.Net.Http.HttpMethod.Get
+    Assert.Equal(System.Net.HttpStatusCode.OK, resp.StatusCode)
+    // Three rejections plus the attempt that succeeded.
+    Assert.Equal(4, stub.Calls)
+
+[<Fact>]
+let ``Throttle retry leaves DELETE alone so teardown stays bounded`` () =
+    let stub = ThrottlingStub(5)
+    let handler = new ApiRateLimit.ThrottleRetryHandler(System.TimeSpan.FromSeconds 30.0)
+    let resp = sendThrough handler stub System.Net.Http.HttpMethod.Delete
+    Assert.Equal(System.Net.HttpStatusCode.TooManyRequests, resp.StatusCode)
+    Assert.Equal(1, stub.Calls)
+
+[<Fact>]
+let ``Throttle retry gives up at the deadline and surfaces the 429`` () =
+    let stub = ThrottlingStub(1000)
+    let handler = new ApiRateLimit.ThrottleRetryHandler(System.TimeSpan.Zero)
+    let resp = sendThrough handler stub System.Net.Http.HttpMethod.Get
+    // The 429 must reach the caller rather than being swallowed or masked.
+    Assert.Equal(System.Net.HttpStatusCode.TooManyRequests, resp.StatusCode)
+    Assert.Equal(1, stub.Calls)
