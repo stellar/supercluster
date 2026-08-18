@@ -49,12 +49,6 @@ def is_done(end, attempt):
     return os.path.exists(done_path(end, attempt))
 
 
-def unclaimed(end, attempt):
-    """No .state, so the collector never opened this attempt and no .done is
-    coming. A pod deleted before its container started is never pollable."""
-    return not os.path.exists(state_path(end, attempt))
-
-
 def ran_nothing(end, attempt, metrics):
     """Opened, but it ingested no line and nothing was measured either.
 

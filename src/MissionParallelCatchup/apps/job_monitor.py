@@ -158,9 +158,6 @@ def observe(states):
         if st.status not in ('failed', 'completed'):
             continue
         st.done = record.is_done(st.end, st.attempt)
-        # Otherwise the slot is held for the rest of the run.
-        if not st.done and st.status == 'failed' and st.pod is None:
-            st.done = record.unclaimed(st.end, st.attempt)
         if not st.done:
             continue          # the collector is still writing this attempt
         if st.status == 'failed':

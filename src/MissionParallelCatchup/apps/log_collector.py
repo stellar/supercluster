@@ -78,6 +78,12 @@ async def main():
                 pods = await list_pods(session)
                 ranges = {p['metadata']['name']: _identify(p)
                           for p in pods if _identify(p)}
+                # Claimed while Pending too, so the sweep below can finish an
+                # attempt whose pod is deleted before it is ever pollable.
+                for end, attempt in ranges.values():
+                    if (end, attempt) not in _last_ts and not os.path.exists(
+                            records.done_path(end, attempt)):
+                        _write_state(end, attempt, '')
                 nodes = {p['status']['hostIP'] for p in pods
                          if p.get('status', {}).get('hostIP')
                          and p.get('status', {}).get('phase') == 'Running'}
@@ -137,8 +143,6 @@ async def service_pod(session, pod):
     if not terminal and _start_follow(session, name, end, attempt, pod):
         return                        # the follow owns this attempt's stream
     if (end, attempt) not in _last_ts:
-        # Empty state = "claimed, nothing durable yet": the monitor's backstop
-        # skips any range that has one, so this stops both of us writing the log.
         _write_state(end, attempt, '')
     since = _last_ts[(end, attempt)]
     # A terminal read reaches further back, so a medida block split across two
