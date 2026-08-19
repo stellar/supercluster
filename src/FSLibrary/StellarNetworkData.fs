@@ -367,7 +367,7 @@ let FullPubnetCoreSets (context: MissionContext) (manualclose: bool) (enforceMin
         [ for i in 1 .. context.tier1OrgsToAdd * tier1OrgSize ->
               PubnetNodeJSON.Parse(
                   sprintf
-                      """ [{ "publicKey": "%s", "radar_homeDomain": "home.domain.%d" }] """
+                      """ [{ "publicKey": "%s", "radar_homeDomain": "home-domain-%d" }] """
                       (KeyPair.Random().Address)
                       ((i - 1) / tier1OrgSize)
               ).[0]
