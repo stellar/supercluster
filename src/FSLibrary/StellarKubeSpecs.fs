@@ -14,6 +14,7 @@ open StellarNetworkDelays
 open System.Text.RegularExpressions
 open System.Collections.Generic
 open Logging
+open GatewayApiModels
 
 // Containers that run stellar-core may or may-not have a final '--conf'
 // argument appended to their command-line. The argument is specified one of 3
@@ -126,8 +127,8 @@ let SimulatePubnetTier1PerfCoreResourceRequirements : V1ResourceRequirements =
 
 let ParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
     // When doing parallel catchup, we give each container
-    // 0.25 vCPUs, 8GB RAM and 35 GB of disk bursting to 2vCPU, 16GB and 40 GB
-    makeResourceRequirementsWithStorageLimit 250 8192 35 2000 16384 40
+    // 0.25 vCPUs, 8Gi RAM and 35 GB of disk bursting to 2vCPU, 28Gi (28672Mi) and 40 GB
+    makeResourceRequirementsWithStorageLimit 250 8192 35 2000 28672 40
 
 let NonParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
     // When doing non-parallel catchup, we give each container
@@ -136,8 +137,8 @@ let NonParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
 
 let UpgradeCoreResourceRequirements : V1ResourceRequirements =
     // When doing upgrade tests, we give each container
-    // 256MB RAM and 1 vCPU, bursting to 4vCPU and 14GB
-    makeResourceRequirements 1000 256 4000 14000
+    // 6000MB RAM and 1 vCPU, bursting to 24000MB and 4 vCPUs
+    makeResourceRequirements 1000 6000 4000 24000
 
 let SmallTestCoreResourceRequirements : V1ResourceRequirements =
     // When running most missions, there are few core nodes, so each
@@ -391,15 +392,34 @@ let tolerateTaint ((key: string), (value: string option)) =
     | None -> V1Toleration(key = key, operatorProperty = "Exists")
     | Some v -> V1Toleration(key = key, operatorProperty = "Equal", value = v)
 
-let affinity (requirements: V1NodeSelectorRequirement list) : V1Affinity option =
+let nodeAffinity (requirements: V1NodeSelectorRequirement list) : V1NodeAffinity option =
     if List.isEmpty requirements then
         None
     else
-        // An affinity is satisfied if _all_ matchExpressions are satisfied.
+        // A node affinity is satisfied if _all_ matchExpressions are satisfied.
         let terms = [| V1NodeSelectorTerm(matchExpressions = Array.ofList requirements) |]
         let sel = V1NodeSelector(nodeSelectorTerms = terms)
-        let na = V1NodeAffinity(requiredDuringSchedulingIgnoredDuringExecution = sel)
-        Some(V1Affinity(nodeAffinity = na))
+        Some(V1NodeAffinity(requiredDuringSchedulingIgnoredDuringExecution = sel))
+
+// A required pod anti-affinity that repels every supercluster pod belonging to
+// a _different_ run, i.e. carrying a run-nonce label other than this run's.
+// Kubernetes evaluates required anti-affinity symmetrically, so a single term
+// on this run's pods gives us both directions of isolation:
+//   * this run's pods will not schedule onto a node already hosting another
+//     run's pods, and
+//   * no other run's pods will schedule onto a node hosting this run's pods for
+//     as long as this run's pods are alive (this holds even if the other run
+//     did not opt into isolation).
+let dedicatedNodeAntiAffinity (nonce: string) : V1PodAntiAffinity =
+    let matchExprs =
+        [| V1LabelSelectorRequirement(key = CfgVal.runNonceLabelKey, operatorProperty = "NotIn", values = [| nonce |]) |]
+
+    let selector = V1LabelSelector(matchLabels = CfgVal.labels, matchExpressions = matchExprs)
+
+    let term =
+        V1PodAffinityTerm(labelSelector = selector, topologyKey = "kubernetes.io/hostname")
+
+    V1PodAntiAffinity(requiredDuringSchedulingIgnoredDuringExecution = [| term |])
 
 
 // Apply the per-run anchor owner reference to `meta` if one has been set on
@@ -426,13 +446,25 @@ type NetworkCfg with
         V1ObjectMeta(name = name, labels = CfgVal.labels, namespaceProperty = self.NamespaceProperty)
         |> applyAnchorOwner self
 
-    member self.PodLabels() : Map<string, string> = Map.add "mission" self.missionContext.missionName CfgVal.labels
+    member self.PodLabels() : Map<string, string> =
+        CfgVal.labels
+        |> Map.add "mission" self.missionContext.missionName
+        |> Map.add CfgVal.runNonceLabelKey self.Nonce
 
     member self.Affinity() : V1Affinity option =
         let require = List.map requireNodeLabel self.missionContext.requireNodeLabels
         let avoid = List.map avoidNodeLabel self.missionContext.avoidNodeLabels
-        let both = List.append require avoid
-        affinity both
+        let na = nodeAffinity (List.append require avoid)
+
+        let paa =
+            if self.missionContext.dedicatedNodes then
+                Some(dedicatedNodeAntiAffinity self.Nonce)
+            else
+                None
+
+        match na, paa with
+        | None, None -> None
+        | _ -> Some(V1Affinity(?nodeAffinity = na, ?podAntiAffinity = paa))
 
     member self.TopologyConstraints() : V1TopologySpreadConstraint array =
         if self.missionContext.unevenSched then [||] else evenTopologyConstraints
@@ -468,6 +500,30 @@ type NetworkCfg with
         let filedata = (self.StellarCoreCfgForJob opts).ToString()
         V1ConfigMap(metadata = self.NamespacedMeta cfgmapname, data = Map.empty.Add(filename, filedata))
 
+    // Returns the per-peer ConfigMap for peer i of the given CoreSet,
+    // containing its stellar-core.cfg (and init cfg, and optionally the
+    // network-delay script), regenerated from the CoreSet's current options.
+    member self.PeerConfigMap(coreSet: CoreSet, i: int) : V1ConfigMap =
+        let cfgMapName = (self.PeerCfgMapName coreSet i)
+        let cfgFileData = (self.StellarCoreCfg(coreSet, i, MainCoreContainer)).ToString()
+        let cfgMap = Map.empty.Add(CfgVal.peerCfgFileName, cfgFileData)
+
+        let startupCfgFileData = (self.StellarCoreCfg(coreSet, i, InitCoreContainer)).ToString()
+        let cfgMap = cfgMap.Add(CfgVal.peerInitCfgFileName, startupCfgFileData)
+
+        let cfgMap =
+            if self.NeedNetworkDelayScript then
+                let delayFileData = (self.NetworkDelayScript coreSet i).ToString()
+
+                LogInfo "Adding NetworkDelayScript to cfgMap of %s-%d" (coreSet.name.StringName) i
+                |> ignore
+
+                cfgMap.Add(CfgVal.peerDelayCfgFileName, delayFileData)
+            else
+                cfgMap
+
+        V1ConfigMap(metadata = self.NamespacedMeta cfgMapName, data = cfgMap)
+
     // Returns an array of ConfigMaps, which is either a single Job ConfigMap if
     // running a job, or a set of per-peer ConfigMaps, each of which is a volume
     // named peer-0-cfg .. peer-N-cfg, to be mounted on /peer-0-cfg ..
@@ -483,28 +539,8 @@ type NetworkCfg with
     // possibly more -- see comments in ToPodTemplateSpec), and each must then
     // figure out its own name to pick the volume(s) that contain its config(s).
     member self.ToConfigMaps() : V1ConfigMap array =
-        let peerCfgMap (coreSet: CoreSet) (i: int) =
-            let cfgMapName = (self.PeerCfgMapName coreSet i)
-            let cfgFileData = (self.StellarCoreCfg(coreSet, i, MainCoreContainer)).ToString()
-            let cfgMap = Map.empty.Add(CfgVal.peerCfgFileName, cfgFileData)
-
-            let startupCfgFileData = (self.StellarCoreCfg(coreSet, i, InitCoreContainer)).ToString()
-            let cfgMap = cfgMap.Add(CfgVal.peerInitCfgFileName, startupCfgFileData)
-
-            let cfgMap =
-                if self.NeedNetworkDelayScript then
-                    let delayFileData = (self.NetworkDelayScript coreSet i).ToString()
-
-                    LogInfo "Adding NetworkDelayScript to cfgMap of %s-%d" (coreSet.name.StringName) i
-                    |> ignore
-
-                    cfgMap.Add(CfgVal.peerDelayCfgFileName, delayFileData)
-                else
-                    cfgMap
-
-            V1ConfigMap(metadata = self.NamespacedMeta cfgMapName, data = cfgMap)
-
-        let cfgs = Array.append (self.MapAllPeers peerCfgMap) [| self.HistoryConfigMap() |]
+        let cfgs =
+            Array.append (self.MapAllPeers(fun cs i -> self.PeerConfigMap(cs, i))) [| self.HistoryConfigMap() |]
 
         match self.jobCoreSetOptions with
         | None -> cfgs
@@ -854,85 +890,166 @@ type NetworkCfg with
         statefulSet
 
 
-    // Returns an array of "per-Pod" Service objects, each named according to
-    // the peer-N short names, and mapping (via a somewhat hacky misuse of the
-    // ExternalName Service type -- thanks internet!) to the _internal_ DNS
-    // names of each pod.
-    //
-    // This exists strictly to support the Ingress object below, that routes
-    // separate URL prefixes to separate Pods (which is somewhat the opposite of
-    // the load-balancing task Services, Pods, and Ingress systems typically
-    // do).
-    member self.ToPerPodServices() : V1Service array =
-        let perPodService (coreSet: CoreSet) i =
-            let name = self.PodName coreSet i
-            let dnsName = self.PeerDnsName coreSet i
+    // Metadata for a proxy object: run-scoped labels + the anchor owner ref so
+    // it is GC'd with the rest of the run.
+    member private self.HttpProxyMeta(name: string) : V1ObjectMeta =
+        V1ObjectMeta(name = name, namespaceProperty = self.NamespaceProperty, labels = self.HttpProxyLabels)
+        |> applyAnchorOwner self
 
-            let ports =
-                [| V1ServicePort(name = "core", port = CfgVal.httpPort)
-                   V1ServicePort(name = "history", port = 80) |]
+    // ConfigMap holding the nginx server config for the proxy. The pod's actual
+    // CoreDNS address is not known here, so we ship a template with a
+    // __RESOLVER__ placeholder that the container substitutes at startup from
+    // its own /etc/resolv.conf (see ToHttpProxyDeployment). Requests of the
+    // form /<pod>/core|history[/<rest>] are proxied to the pod's in-cluster DNS
+    // name; $is_args$args preserves the query string (the driver uses it, e.g.
+    // /<pod>/core/tx?blob=...).
+    member self.ToHttpProxyConfigMap() : V1ConfigMap =
+        let fqdn = sprintf "%s.%s.svc.cluster.local" self.ServiceName self.NamespaceProperty
 
-            let ports =
-                if self.missionContext.exportToPrometheus then
-                    Array.append ports [| V1ServicePort(name = "prom-exp", port = CfgVal.prometheusExporterPort) |]
-                else
-                    ports
+        let conf =
+            sprintf
+                """server {
+    listen 80 default_server;
+    server_name _;
+    resolver __RESOLVER__ ipv6=off valid=10s;
 
-            let spec =
-                V1ServiceSpec(``type`` = "ExternalName", ports = ports, externalName = dnsName.StringName)
+    location ~ ^/([^/]+)/core(?:/(.*))?$ {
+        proxy_pass http://$1.%s:%d/$2$is_args$args;
+    }
 
-            V1Service(metadata = self.NamespacedMeta name.StringName, spec = spec)
+    location ~ ^/([^/]+)/history(?:/(.*))?$ {
+        proxy_pass http://$1.%s:%d/$2$is_args$args;
+    }
+}
+"""
+                fqdn
+                CfgVal.httpPort
+                fqdn
+                CfgVal.historyPort
 
-        self.MapAllPeers perPodService
+        let data = Map.empty.Add(CfgVal.httpProxyConfigFileName, conf)
+        V1ConfigMap(metadata = self.HttpProxyMeta self.HttpProxyConfigMapName, data = data)
 
-    // Returns an Ingress object with rules that map URLs http://$ingressHost/peer-N/foo
-    // to the per-Pod Service within the current networkCfg named peer-N (which then, via
-    // DNS mapping, goes to the Pod itself). Exposing this to external traffic
-    // requires that you enable the nginx Ingress controller on your k8s
-    // cluster.
-    member self.ToIngress() : V1Ingress =
-        let coreBackend (pn: PodName) : V1IngressBackend =
-            let port = V1ServiceBackendPort(number = CfgVal.httpPort)
-            let service = V1IngressServiceBackend(pn.StringName, port = port)
-            V1IngressBackend(service = service)
+    // Scalable nginx Deployment fronting driver->pod routing. The startup shim
+    // reads the CoreDNS server from /etc/resolv.conf and templates it into the
+    // nginx config.
+    member self.ToHttpProxyDeployment() : V1Deployment =
+        let shim =
+            sprintf
+                "set -e; R=$(awk '/^nameserver/ {print $2; exit}' /etc/resolv.conf); [ -n \"$R\" ] || { echo 'http-proxy: no nameserver in /etc/resolv.conf' >&2; exit 1; }; sed \"s/__RESOLVER__/$R/\" %s/%s > /etc/nginx/conf.d/default.conf; exec nginx -g 'daemon off;'"
+                CfgVal.httpProxyConfigMountPath
+                CfgVal.httpProxyConfigFileName
 
-        let historyBackend (pn: PodName) : V1IngressBackend =
-            let port = V1ServiceBackendPort(number = 80)
-            let service = V1IngressServiceBackend(pn.StringName, port = port)
-            V1IngressBackend(service = service)
+        // Match the ingress-nginx private controller pods (ssc-eks) this proxy replaces.
+        let resources =
+            V1ResourceRequirements(
+                requests =
+                    dict [ ("cpu", ResourceQuantity("50m"))
+                           ("memory", ResourceQuantity("90Mi")) ],
+                limits =
+                    dict [ ("cpu", ResourceQuantity("250m"))
+                           ("memory", ResourceQuantity("768Mi")) ]
+            )
 
-        let corePath (coreSet: CoreSet) (i: int) : V1HTTPIngressPath =
-            let pn = self.PodName coreSet i
-            let ingressPath = V1HTTPIngressPath()
-            ingressPath.Backend <- coreBackend pn
-            ingressPath.Path <- sprintf "/%s/core(/|$)(.*)" pn.StringName
-            ingressPath.PathType <- "ImplementationSpecific"
-            ingressPath
+        let container =
+            V1Container(
+                name = CfgVal.httpProxyContainerName,
+                image = self.missionContext.nginxImage,
+                command = [| "/bin/sh" |],
+                args = [| "-c"; shim |],
+                ports = [| V1ContainerPort(containerPort = 80, name = "http") |],
+                resources = resources,
+                readinessProbe =
+                    V1Probe(
+                        tcpSocket = V1TCPSocketAction(port = IntstrIntOrString(value = "80")),
+                        initialDelaySeconds = System.Nullable<int>(1),
+                        periodSeconds = System.Nullable<int>(2)
+                    ),
+                volumeMounts =
+                    [| V1VolumeMount(
+                           name = CfgVal.httpProxyConfigVolumeName,
+                           mountPath = CfgVal.httpProxyConfigMountPath
+                       ) |]
+            )
 
-        let historyPath (coreSet: CoreSet) (i: int) : V1HTTPIngressPath =
-            let pn = self.PodName coreSet i
-            let ingressPath = V1HTTPIngressPath()
-            ingressPath.Backend <- historyBackend pn
-            ingressPath.Path <- sprintf "/%s/history(/|$)(.*)" pn.StringName
-            ingressPath.PathType <- "ImplementationSpecific"
-            ingressPath
+        let volume =
+            V1Volume(
+                name = CfgVal.httpProxyConfigVolumeName,
+                configMap = V1ConfigMapVolumeSource(name = self.HttpProxyConfigMapName)
+            )
 
-        let corePaths = self.MapAllPeers corePath
-        let historyPaths = self.MapAllPeers historyPath
+        // Mirror the core pods' node placement so the proxy schedules onto the
+        // same (often tainted/dedicated) node pool it fronts -- otherwise it is
+        // confined to untainted capacity and can stay Pending on a busy cluster.
+        let podSpec =
+            V1PodSpec(
+                containers = [| container |],
+                volumes = [| volume |],
+                ?affinity = self.Affinity(),
+                tolerations = self.Tolerations()
+            )
 
-        let rule = V1HTTPIngressRuleValue(paths = Array.concat [ corePaths; historyPaths ])
+        let podTemplate =
+            V1PodTemplateSpec(metadata = V1ObjectMeta(labels = self.HttpProxyLabels), spec = podSpec)
 
-        let host = self.IngressInternalHostName
-        let rules = [| V1IngressRule(host = host, http = rule) |]
-        let spec = V1IngressSpec(rules = rules)
+        // Replica count scales with node count at creation time: ceil(nodes/64),
+        // clamped to [1, cap] where cap is --http-proxy-replicas. One replica
+        // suffices for most missions. Not a live HPA -- the count is fixed for
+        // the run, which is fine since a mission's node count never changes.
+        let cap = max 1 self.missionContext.httpProxyReplicas
+        let nodesPerProxy = 64
 
-        let annotation =
-            Map.ofArray [| ("kubernetes.io/ingress.class", self.missionContext.ingressClass)
-                           ("nginx.ingress.kubernetes.io/use-regex", "true")
-                           ("nginx.ingress.kubernetes.io/rewrite-target", "/$2") |]
+        let replicas =
+            self.MaxPeerCount
+            |> fun n -> (n + nodesPerProxy - 1) / nodesPerProxy |> max 1 |> min cap
+
+        let spec =
+            V1DeploymentSpec(
+                replicas = System.Nullable<int>(replicas),
+                selector = V1LabelSelector(matchLabels = self.HttpProxyLabels),
+                template = podTemplate
+            )
+
+        V1Deployment(metadata = self.HttpProxyMeta self.HttpProxyName, spec = spec)
+
+    // ClusterIP Service selecting the proxy pods; the HTTPRoute's single
+    // backend.
+    member self.ToHttpProxyService() : V1Service =
+        let spec =
+            V1ServiceSpec(selector = self.HttpProxyLabels, ports = [| V1ServicePort(name = "http", port = 80) |])
+
+        V1Service(metadata = self.HttpProxyMeta self.HttpProxyName, spec = spec)
+
+    // Returns an HTTPRoute (gateway.networking.k8s.io/v1) attached to the shared
+    // private traefik gateway that sends all of http://$routeHost/* to the
+    // per-run nginx HTTP proxy Service. The proxy does the /<pod>/core|history
+    // demux internally.
+    member self.ToHttpRoute() : HTTPRoute =
+        let parentRef =
+            ParentReference(
+                Group = "gateway.networking.k8s.io",
+                Kind = "Gateway",
+                Namespace = self.missionContext.gatewayNamespace,
+                Name = self.missionContext.gatewayName
+            )
+
+        let rule =
+            HTTPRouteRule(
+                Matches =
+                    List<HTTPRouteMatch>([ HTTPRouteMatch(Path = HTTPPathMatch(Type = "PathPrefix", Value = "/")) ]),
+                BackendRefs =
+                    List<HTTPBackendRef>([ HTTPBackendRef(Name = self.HttpProxyName, Port = System.Nullable<int>(80)) ])
+            )
+
+        let spec =
+            HTTPRouteSpec(
+                ParentRefs = List<ParentReference>([ parentRef ]),
+                Hostnames = List<string>([ self.RouteInternalHostName ]),
+                Rules = List<HTTPRouteRule>([ rule ])
+            )
 
         let meta =
-            V1ObjectMeta(name = self.IngressName, namespaceProperty = self.NamespaceProperty, annotations = annotation)
+            V1ObjectMeta(name = self.HttpRouteName, namespaceProperty = self.NamespaceProperty)
             |> applyAnchorOwner self
 
-        V1Ingress(spec = spec, metadata = meta)
+        HTTPRoute(Metadata = meta, Spec = spec)

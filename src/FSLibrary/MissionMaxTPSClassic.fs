@@ -16,7 +16,10 @@ let maxTPSClassic (context: MissionContext) =
         { context with
               coreResources = SimulatePubnetTier1PerfResources
               installNetworkDelay = Some(context.installNetworkDelay |> Option.defaultValue true)
-              enableTailLogging = false }
+              enableTailLogging = false
+              // Isolate this perf run onto its own nodes so co-tenant pods from
+              // other supercluster runs cannot skew the measured TPS.
+              dedicatedNodes = true }
 
     let baseLoadGen =
         { LoadGen.GetDefault() with

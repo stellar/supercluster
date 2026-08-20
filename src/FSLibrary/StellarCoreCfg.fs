@@ -19,9 +19,14 @@ open StellarDotnetSdk.Accounts
 // paths, labels, etc.
 module CfgVal =
     let httpPort = 11626
+    let historyPort = 80
     let prometheusExporterPort = 9473
     let labels = Map.ofSeq [ "app", "stellar-core" ]
     let labelSelector = "app = stellar-core"
+    // Per-run label key. Its value is the run's network nonce, which lets us
+    // distinguish pods belonging to different supercluster runs sharing a
+    // namespace (used for scheduling isolation; see StellarKubeSpecs.Affinity).
+    let runNonceLabelKey = "run-nonce"
     let stellarCoreBinPath = "stellar-core"
     let allCoreContainerCmds = [| "new-hist"; "new-db"; "catchup"; "run"; "test" |]
 
@@ -43,6 +48,12 @@ module CfgVal =
     let peerCfgFileName = "stellar-core.cfg"
     let peerInitCfgFileName = "stellar-core-init.cfg"
     let peerDelayCfgFileName = "install-delays.sh"
+
+
+    let httpProxyContainerName = "http-proxy"
+    let httpProxyConfigVolumeName = "proxy-tmpl"
+    let httpProxyConfigMountPath = "/proxy-tmpl"
+    let httpProxyConfigFileName = "default.conf.template"
 
     let peerNameEnvCfgFileWord : ShWord =
         ShWord.ShPieces [| ShBare("/cfg-")
@@ -155,6 +166,7 @@ type StellarCoreCfg =
       automaticMaintenanceCount: int
       accelerateTime: bool
       generateLoad: bool
+      measureE2eLatency: bool
       updateSorobanCosts: bool option
       manualClose: bool
       invariantChecks: InvariantChecksSpec
@@ -169,7 +181,13 @@ type StellarCoreCfg =
       maxBatchWriteCount: int
       emitMeta: bool
       addArtificialDelayUsec: int option // optional delay for testing in microseconds
+      forceOldStyleTriggerTimer: bool option
+      clockOffsetMs: int option
       surveyPhaseDuration: int option
+      quorumIntersectionChecker: bool
+      useQuorumIntersectionCheckerV2: bool
+      quorumIntersectionCheckerTimeLimitMs: int64 option
+      quorumIntersectionCheckerMemoryLimitBytes: int64 option
       containerType: CoreContainerType
       skipHighCriticalValidatorChecks: bool }
 
@@ -272,6 +290,16 @@ type StellarCoreCfg =
         | None -> maybeAddGlobalDelay ()
         | Some sleep -> t.Add("ARTIFICIALLY_SLEEP_MAIN_THREAD_FOR_TESTING", sleep) |> ignore
 
+        match self.forceOldStyleTriggerTimer with
+        | Some v -> t.Add("FORCE_OLD_STYLE_PREPARE_START_TRIGGER_TIMER", v) |> ignore
+        | None -> ()
+
+        match self.clockOffsetMs with
+        | Some offset ->
+            t.Add("ARTIFICIALLY_SET_SYSTEM_CLOCK_OFFSET_FOR_TESTING", int64 offset)
+            |> ignore
+        | None -> ()
+
         match self.network.missionContext.flowControlSendMoreBatchSize with
         | None -> ()
         | Some batchSize -> t.Add("FLOW_CONTROL_SEND_MORE_BATCH_SIZE", batchSize) |> ignore
@@ -293,6 +321,9 @@ type StellarCoreCfg =
         t.Add("AUTOMATIC_MAINTENANCE_COUNT", self.automaticMaintenanceCount) |> ignore
         t.Add("ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING", self.accelerateTime) |> ignore
         t.Add("ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING", self.generateLoad) |> ignore
+
+        if self.measureE2eLatency && self.network.missionContext.measureE2eLatency then
+            t.Add("LOADGEN_MEASURE_TX_E2E_LATENCY_FOR_TESTING", true) |> ignore
 
         if self.updateSorobanCosts.IsSome then
             t.Add("UPDATE_SOROBAN_COSTS_DURING_PROTOCOL_UPGRADE_FOR_TESTING", self.updateSorobanCosts.Value)
@@ -342,7 +373,19 @@ type StellarCoreCfg =
         t.Add("MAX_ADDITIONAL_PEER_CONNECTIONS", self.targetPeerConnections * 3)
         |> ignore
 
-        t.Add("QUORUM_INTERSECTION_CHECKER", false) |> ignore
+        t.Add("QUORUM_INTERSECTION_CHECKER", self.quorumIntersectionChecker) |> ignore
+
+        if self.useQuorumIntersectionCheckerV2 then
+            t.Add("USE_QUORUM_INTERSECTION_CHECKER_V2", true) |> ignore
+
+        match self.quorumIntersectionCheckerTimeLimitMs with
+        | Some ms -> t.Add("QUORUM_INTERSECTION_CHECKER_TIME_LIMIT_MS", ms) |> ignore
+        | None -> ()
+
+        match self.quorumIntersectionCheckerMemoryLimitBytes with
+        | Some b -> t.Add("QUORUM_INTERSECTION_CHECKER_MEMORY_LIMIT_BYTES", b) |> ignore
+        | None -> ()
+
         t.Add("MANUAL_CLOSE", self.manualClose) |> ignore
 
         if self.forceOldStyleLeaderElection then
@@ -630,6 +673,7 @@ type NetworkCfg with
           automaticMaintenanceCount = if opts.performMaintenance then 50000 else 0
           accelerateTime = opts.accelerateTime
           generateLoad = true
+          measureE2eLatency = opts.generatesLoad
           updateSorobanCosts = opts.updateSorobanCosts
           manualClose = false
           invariantChecks = opts.invariantChecks
@@ -644,7 +688,15 @@ type NetworkCfg with
           maxBatchWriteCount = opts.maxBatchWriteCount
           emitMeta = opts.emitMeta
           addArtificialDelayUsec = opts.addArtificialDelayUsec
+          forceOldStyleTriggerTimer =
+              opts.forceOldStyleTriggerTimer
+              |> Option.orElse self.missionContext.forceOldStyleTriggerTimer
+          clockOffsetMs = None
           surveyPhaseDuration = opts.surveyPhaseDuration
+          quorumIntersectionChecker = opts.quorumIntersectionChecker
+          useQuorumIntersectionCheckerV2 = opts.useQuorumIntersectionCheckerV2
+          quorumIntersectionCheckerTimeLimitMs = opts.quorumIntersectionCheckerTimeLimitMs
+          quorumIntersectionCheckerMemoryLimitBytes = opts.quorumIntersectionCheckerMemoryLimitBytes
           containerType = MainCoreContainer
           skipHighCriticalValidatorChecks = opts.skipHighCriticalValidatorChecks }
 
@@ -671,6 +723,7 @@ type NetworkCfg with
           automaticMaintenanceCount = if c.options.performMaintenance then 50000 else 0
           accelerateTime = c.options.accelerateTime
           generateLoad = true
+          measureE2eLatency = c.options.generatesLoad
           updateSorobanCosts = c.options.updateSorobanCosts
           manualClose = false
           invariantChecks = c.options.invariantChecks
@@ -685,6 +738,30 @@ type NetworkCfg with
           maxBatchWriteCount = c.options.maxBatchWriteCount
           emitMeta = c.options.emitMeta
           addArtificialDelayUsec = c.options.addArtificialDelayUsec
+          // CoreSet-level setting wins; otherwise fall back to the
+          // mission-level --force-old-style-trigger-timer flag (unset by
+          // default, in which case the key is omitted from the config
+          // entirely and core selects the timer by protocol version).
+          forceOldStyleTriggerTimer =
+              c.options.forceOldStyleTriggerTimer
+              |> Option.orElse self.missionContext.forceOldStyleTriggerTimer
+          clockOffsetMs =
+              match c.options.clockOffsets with
+              | Some offsets ->
+                  if offsets.Length <> c.options.nodeCount then
+                      failwith (
+                          sprintf
+                              "clockOffsets length %d does not match nodeCount %d"
+                              offsets.Length
+                              c.options.nodeCount
+                      )
+
+                  Some offsets.[i]
+              | None -> None
           surveyPhaseDuration = c.options.surveyPhaseDuration
+          quorumIntersectionChecker = c.options.quorumIntersectionChecker
+          useQuorumIntersectionCheckerV2 = c.options.useQuorumIntersectionCheckerV2
+          quorumIntersectionCheckerTimeLimitMs = c.options.quorumIntersectionCheckerTimeLimitMs
+          quorumIntersectionCheckerMemoryLimitBytes = c.options.quorumIntersectionCheckerMemoryLimitBytes
           containerType = ctype
           skipHighCriticalValidatorChecks = c.options.skipHighCriticalValidatorChecks }

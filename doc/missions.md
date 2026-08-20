@@ -119,6 +119,10 @@ Simulate Public Network topology and throughput based on user-supplied distribut
 
 Stress test a network of simulated Tier1 topology with classic traffic and report maximum achieved throughput.
 
+### Parameters
+
+- `--force-old-style-trigger-timer=<true|false>`: Set `FORCE_OLD_STYLE_PREPARE_START_TRIGGER_TIMER` on all nodes, forcing the pre-protocol-28 prepare-start trigger timer. Unset by default, in which case core picks the timer by protocol version (the consensus-close-time timer from protocol 28 on).
+
 ## MissionSorobanLoadGeneration
 
 Test heavy Soroban load on a large network of nodes. This mission mostly focuses on high-bandwidth traffic, and its impact on SCP and overlay. Apply time is simulated to avoid noise from database backends.
@@ -151,6 +155,10 @@ Run a network with a mix of fast and slow nodes. This mission allows to test int
 
 Stress test a network of simulated Tier1 topology with a mix of classic and soroban traffic and report maximum achieved throughput.
 
+### Parameters
+
+- `--force-old-style-trigger-timer=<true|false>`: Set `FORCE_OLD_STYLE_PREPARE_START_TRIGGER_TIMER` on all nodes, forcing the pre-protocol-28 prepare-start trigger timer. Unset by default, in which case core picks the timer by protocol version (the consensus-close-time timer from protocol 28 on).
+
 ## MissionMinBlockTimeClassic
 
 Find the minimum ledger target close time a simulated Tier1 network can sustain at a fixed TPS while meeting a per-node `ledger.age.closed` latency SLA (P75 within ±20% of target, P99 ≤ 2×), driving classic-payment load. See [Running minimum block time test](measuring-minimum-block-time.md) for details.
@@ -158,6 +166,21 @@ Find the minimum ledger target close time a simulated Tier1 network can sustain 
 ## MissionMinBlockTimeMixed
 
 Same as `MissionMinBlockTimeClassic`, but drives an explicit `MIXED_PREGEN_*` overlay-only loadgen mode with pre-generated classic payments plus a selected synthetic Soroban transaction type.
+
+## MissionTriggerTimerMixConsensus
+
+Tests the protocol-28 consensus-close-time trigger timer on a simulated Public Network topology with a configurable mix of nodes running it versus nodes forced back onto the older prepare-start timer via `FORCE_OLD_STYLE_PREPARE_START_TRIGGER_TIMER`, under configurable clock-drift distributions. It drives the same `MIXED_PREGEN_*` (classic + synthetic Soroban) overlay-only load as `MissionMinBlockTimeMixed`, but instead of binary-searching for a minimum block time it runs a single load pass at a fixed ledger close time and verifies consensus stays healthy (no errors, pairwise-consistent, all nodes in sync). Requires a generated pubnet topology via `--pubnet-data`.
+
+### Parameters
+
+- `--force-old-style-trigger-timer-pct`: Percentage (0-100) of nodes with `FORCE_OLD_STYLE_PREPARE_START_TRIGGER_TIMER` set, i.e. forced onto the old prepare-start timer. The rest use the protocol default. Default 0. This mission rejects `--force-old-style-trigger-timer`; use this flag instead.
+- `--drift-pct`: Percentage (0-100) of nodes that receive clock drift. Default 0.
+- `--uniform-drift=lower,upper`: Uniform random clock drift, in signed ms, applied to each drifting node (e.g. `--uniform-drift=-2000,+2000`).
+- `--bimodal-drift=min1,max1,min2,max2`: Bimodal clock drift, in signed ms — the first half of the drifting nodes draw from `[min1,max1]`, the second half from `[min2,max2]` (e.g. `--bimodal-drift=-5000,-2000,+2000,+5000`).
+- `--ledger-close-time-ms`: Target ledger close time in ms, upgraded before load is applied. Default 5000.
+- `--min-block-time-mixed-mode`: The `MIXED_PREGEN_*` loadgen mode to drive. Default `mixed_pregen_sac_payment`.
+- `--classic-tx-rate`: Classic TPS. Defaults to half of `--tx-rate`.
+- `--soroban-tx-rate`: Soroban TPS. Defaults to half of `--tx-rate`.
 
 ## MissionMixedNominationLeaderElectionWithOldMajority
 
@@ -182,3 +205,11 @@ This mission simulates the full pubnet topology and tests how the network perfor
   - `--tx-size-bytes 120000 --tx-size-bytes-weights 1` - Generate only large transactions (~120KB)
   - `--tx-size-bytes 40000,120000 --tx-size-bytes-weights 1,1` - Generate a 50/50 mix of medium (~40KB) and large (~120KB) transactions
   - `--tx-size-bytes 20000,80000,120000 --tx-size-bytes-weights 3,2,1` - Weighted distribution: 50% small, 33% medium, 17% large
+
+## MissionQuorumIntersectionChecker
+
+Runs a 6-node network built around an intersection-critical "bridge" validator
+with stellar-core's V2 quorum intersection checker enabled, then restarts only
+the bridge with its quorum-set threshold relaxed from "both sides" to "either
+side", creating two disjoint quorums in configuration. Verifies that the
+self-sufficient side detects the split live.

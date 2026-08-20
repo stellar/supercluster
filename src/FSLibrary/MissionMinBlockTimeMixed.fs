@@ -34,6 +34,9 @@ let minBlockTimeMixed (baseContext: MissionContext) =
               coreResources = SimulatePubnetTier1PerfResources
               installNetworkDelay = Some(baseContext.installNetworkDelay |> Option.defaultValue true)
               enableTailLogging = false
+              // Isolate this perf run onto its own nodes so co-tenant pods from
+              // other supercluster runs cannot skew the measured block time.
+              dedicatedNodes = true
               txRate = classicTxRate + sorobanTxRate }
 
     let baseLoadGen =

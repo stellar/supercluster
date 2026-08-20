@@ -102,7 +102,19 @@ type NetworkCfg =
 
     member self.ServiceName : string = sprintf "%s-stellar-core" self.Nonce
 
-    member self.IngressName : string = sprintf "%s-stellar-core-ingress" self.Nonce
+    member self.HttpRouteName : string = sprintf "%s-stellar-core-http-route" self.Nonce
+
+    // The nginx HTTP proxy (Deployment + Service) that the HTTPRoute points at.
+    member self.HttpProxyName : string = sprintf "%s-http-proxy" self.Nonce
+
+    member self.HttpProxyConfigMapName : string = sprintf "%s-http-proxy-cfg" self.Nonce
+
+    // Labels scoping the proxy Deployment/Service to this run only (the shared
+    // namespace can hold other runs). Distinct from the core "app=stellar-core"
+    // labels so the proxy Service selects only proxy pods.
+    member self.HttpProxyLabels : Map<string, string> =
+        Map.ofSeq [ ("app", "stellar-core-http-proxy")
+                    ("ssc-nonce", self.Nonce) ]
 
     member self.JobName(i: int) : string = sprintf "%s-stellar-core-job-%d" self.Nonce i
 
@@ -120,16 +132,31 @@ type NetworkCfg =
 
         PeerDnsName s
 
-    member self.IngressInternalHostName : string = sprintf "%s.%s" self.Nonce self.missionContext.ingressInternalDomain
+    member self.RouteInternalHostName : string = sprintf "%s.%s" self.Nonce self.missionContext.routeInternalDomain
 
-    member self.IngressExternalHostName : string =
-        match self.missionContext.ingressExternalHost with
-        | None -> self.IngressInternalHostName
+    member self.RouteExternalHostName : string =
+        match self.missionContext.routeExternalHost with
+        | None -> self.RouteInternalHostName
         | Some h -> h
 
     member self.WithLive name (live: bool) =
         let coreSet = self.FindCoreSet(name).WithLive live
         { self with coreSets = self.coreSets.Add(name, coreSet) }
+
+    // Returns a NetworkCfg with the named CoreSet's options replaced, keeping
+    // its keys and liveness unchanged.
+    member self.WithCoreSetOptions (name: CoreSetName) (options: CoreSetOptions) : NetworkCfg =
+        let coreSet = self.FindCoreSet name
+
+        if options.nodeCount <> coreSet.options.nodeCount then
+            failwithf
+                "WithCoreSetOptions %s: cannot change nodeCount from %d to %d"
+                name.StringName
+                coreSet.options.nodeCount
+                options.nodeCount
+
+        { self with
+              coreSets = self.coreSets.Add(name, { coreSet with options = options }) }
 
     member self.IsJobMode : bool = if self.jobCoreSetOptions = None then false else true
 

@@ -45,11 +45,13 @@ open MissionMaxTPSMixed
 open MissionSimulatePubnetMixedLoad
 open MissionPubnetNetworkLimitsBench
 open MissionMixedNominationLeaderElection
+open MissionTriggerTimerMixConsensus
 open MissionUpgradeSCPSettings
 open MissionUpgradeTxClusters
 open MissionValidatorSetup
 open MissionMinBlockTimeClassic
 open MissionMinBlockTimeMixed
+open MissionQuorumIntersectionChecker
 
 type Mission = (MissionContext -> unit)
 
@@ -97,8 +99,10 @@ let allMissions : Map<string, Mission> =
                  ("PubnetNetworkLimitsBench", pubnetNetworkLimitsBench)
                  ("MixedNominationLeaderElectionWithOldMajority", mixedNominationLeaderElectionWithOldMajority)
                  ("MixedNominationLeaderElectionWithNewMajority", mixedNominationLeaderElectionWithNewMajority)
+                 ("TriggerTimerMixConsensus", triggerTimerMixConsensus)
                  ("UpgradeSCPSettings", upgradeSCPSettings)
                  ("UpgradeTxClusters", upgradeTxClusters)
                  ("ValidatorSetup", validatorSetup)
                  ("MinBlockTimeClassic", minBlockTimeClassic)
-                 ("MinBlockTimeMixed", minBlockTimeMixed) |]
+                 ("MinBlockTimeMixed", minBlockTimeMixed)
+                 ("QuorumIntersectionChecker", quorumIntersectionChecker) |]

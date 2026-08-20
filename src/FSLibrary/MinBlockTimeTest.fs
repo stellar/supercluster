@@ -39,7 +39,9 @@ let private maxTxSetSizeForTarget (kind: string) (targetMs: int) (txRate: int) =
 
     max (int txSetSize) 100
 
-let private classicMaxTxSetSizeForTarget (targetMs: int) (classicTxRate: int) =
+// Exposed for reuse by MissionTriggerTimerMixConsensus, which runs the same
+// MIXED_PREGEN_* load without the binary search.
+let classicMaxTxSetSizeForTarget (targetMs: int) (classicTxRate: int) =
     maxTxSetSizeForTarget "Classic" targetMs classicTxRate
 
 let private sorobanMaxTxSetSizeForTarget (targetMs: int) (sorobanTxRate: int) =
@@ -139,7 +141,8 @@ let private waitForMixedPregenSorobanLimits (peer: Peer) (limits: MixedPregenSor
             && info.Tx.MaxContractEventsSizeBytes = limits.txMaxContractEventsSizeBytes)
         (fun _ -> LogInfo "Waiting for MIXED_PREGEN_* Soroban limits on %s" peer.ShortName.StringName)
 
-let private upgradeMixedPregenSorobanLimits
+// Exposed for reuse by MissionTriggerTimerMixConsensus.
+let upgradeMixedPregenSorobanLimits
     (formation: StellarFormation)
     (coreSets: CoreSet list)
     (baseLoadGen: LoadGen)
@@ -227,7 +230,8 @@ let private toggleOverlayOnlyMode (formation: StellarFormation) (coreSets: CoreS
             let res = peer.ToggleOverlayOnlyMode()
             LogInfo "Toggled overlay-only mode on %s: %s" peer.ShortName.StringName res)
 
-let private withOverlayOnlyMode (formation: StellarFormation) (coreSets: CoreSet list) (f: unit -> unit) =
+// Exposed for reuse by MissionTriggerTimerMixConsensus.
+let withOverlayOnlyMode (formation: StellarFormation) (coreSets: CoreSet list) (f: unit -> unit) =
     LogInfo "Enabling overlay-only mode"
     toggleOverlayOnlyMode formation coreSets
 
@@ -250,6 +254,32 @@ let private collectLedgerAgePercentiles
     |> Async.Parallel
     |> Async.RunSynchronously
     |> Array.toList
+
+let private logE2eLatencyMetrics (formation: StellarFormation) (coreSets: CoreSet list) : unit =
+    let e2eLatencyMetrics : (string * (Metrics.Metrics -> Metrics.GenericCounter option)) list =
+        [ "min", (fun m -> m.LoadgenTxLatencyRunMinMs)
+          "mean", (fun m -> m.LoadgenTxLatencyRunMeanMs)
+          "p50", (fun m -> m.LoadgenTxLatencyRunP50Ms)
+          "p75", (fun m -> m.LoadgenTxLatencyRunP75Ms)
+          "p99", (fun m -> m.LoadgenTxLatencyRunP99Ms)
+          "max", (fun m -> m.LoadgenTxLatencyRunMaxMs) ]
+
+    for peer in formation.NetworkCfg.PeersInSets(List.toArray coreSets) do
+        let metrics = peer.GetMetrics()
+
+        let summary =
+            e2eLatencyMetrics
+            |> List.map
+                (fun (name, get) ->
+                    let value =
+                        get metrics
+                        |> Option.map (fun c -> string c.Count)
+                        |> Option.defaultValue "none"
+
+                    sprintf "%s=%s" name value)
+            |> String.concat " "
+
+        LogInfo "TX e2e latency: peer=%s loadgen-tx-latency-run-ms: %s" peer.ShortName.StringName summary
 
 // Returns true iff every peer's ledger.age.closed-histogram satisfies:
 //   P75 in [0.80*T, 1.20*T)
@@ -333,8 +363,13 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                       None }
 
     let tier1 = List.filter (fun (cs: CoreSet) -> cs.options.tier1 = Some true) allNodes
+    let loadGenNodes = List.filter (fun (cs: CoreSet) -> cs.options.generatesLoad) allNodes
 
-    let loadGenNodes = if List.length allNodes > smallNetworkSize then tier1 else allNodes
+    let loadGenNodes =
+        if List.isEmpty loadGenNodes then
+            if List.length allNodes > smallNetworkSize then tier1 else allNodes
+        else
+            loadGenNodes
 
     let isLoadGenNode cs = List.exists (fun (cs': CoreSet) -> cs' = cs) loadGenNodes
 
@@ -491,6 +526,9 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                 // Snapshot SLA metrics before consistency checks; those can take
                 // long enough to skew the ledger age percentiles.
                 let ledgerAgePercentiles = collectLedgerAgePercentiles formation allNodes
+
+                if context.measureE2eLatency then
+                    logE2eLatencyMetrics formation activeLoadGenNodes
 
                 formation.CheckNoErrorsAndPairwiseConsistency()
                 formation.EnsureAllNodesInSync allNodes

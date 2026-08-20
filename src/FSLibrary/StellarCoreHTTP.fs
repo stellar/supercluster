@@ -364,6 +364,59 @@ let MeterCountOr (def: int) (m: Option<Metrics.GenericMeter>) : int =
     | None -> def
 
 
+// Result of stellar-core's quorum intersection checker as reported by the
+// `transitive` object of the /quorum endpoint.
+type QuorumIntersectionInfo =
+    { intersection: bool
+      nodeCount: int
+      lastCheckLedger: int
+      // Intersection-critical node groups; populated only when intersecting.
+      criticalGroups: Set<string> list
+      // The two disjoint quorums found; populated only when not intersecting.
+      potentialSplit: (Set<string> * Set<string>) option }
+
+let ParseQuorumIntersectionInfo (json: string) : QuorumIntersectionInfo option =
+    let root = JsonValue.Parse json
+
+    match root.TryGetProperty "transitive" with
+    | None -> None
+    | Some t ->
+        match t.TryGetProperty "intersection" with
+        | None -> None
+        | Some intersection ->
+            let strkeySet (v: JsonValue) = v.AsArray() |> Array.map (fun s -> s.AsString()) |> Set.ofArray
+
+            let criticalGroups =
+                match t.TryGetProperty "critical" with
+                | Some (JsonValue.Array groups) -> groups |> Array.map strkeySet |> List.ofArray
+                | _ -> []
+
+            let potentialSplit =
+                match t.TryGetProperty "potential_split" with
+                | Some (JsonValue.Array [| a; b |]) -> Some(strkeySet a, strkeySet b)
+                | _ -> None
+
+            Some
+                { intersection = intersection.AsBoolean()
+                  nodeCount = (t.GetProperty "node_count").AsInteger()
+                  lastCheckLedger = (t.GetProperty "last_check_ledger").AsInteger()
+                  criticalGroups = criticalGroups
+                  potentialSplit = potentialSplit }
+
+// Reads a single metric's count out of a raw /metrics JSON response,
+// defaulting to 0 when the metric has not been registered (yet).
+let ParseMetricCount (rawMetricsJson: string) (metricName: string) : int =
+    match (JsonValue.Parse rawMetricsJson).TryGetProperty "metrics" with
+    | None -> 0
+    | Some ms ->
+        match ms.TryGetProperty metricName with
+        | None -> 0
+        | Some m ->
+            match m.TryGetProperty "count" with
+            | Some c -> c.AsInteger()
+            | None -> 0
+
+
 let ConsistencyCheckIterationCount : int = 5
 
 exception PeerRejectedUpgradesException of string
@@ -377,14 +430,14 @@ exception NodeLostSyncException of string
 type Peer with
 
     member self.Headers =
-        let host = self.networkCfg.IngressInternalHostName
+        let host = self.networkCfg.RouteInternalHostName
         [ HttpRequestHeaders.Host host ]
 
     member self.URL(path: string) : string =
         sprintf
             "http://%s:%d/%s/core/%s"
-            self.networkCfg.IngressExternalHostName
-            self.networkCfg.missionContext.ingressExternalPort
+            self.networkCfg.RouteExternalHostName
+            self.networkCfg.missionContext.routeExternalPort
             self.PodName.StringName
             path
 
@@ -402,6 +455,19 @@ type Peer with
         WebExceptionRetry DefaultRetry (fun _ -> Metrics.Parse(self.fetch "metrics").Metrics)
 
     member self.GetRawMetrics() = WebExceptionRetry DefaultRetry (fun _ -> self.fetch "metrics")
+
+    member self.TryGetQuorumIntersectionInfo() : QuorumIntersectionInfo option =
+        WebExceptionRetry DefaultRetry (fun _ -> ParseQuorumIntersectionInfo(self.fetch "quorum?fullkeys=true"))
+
+    member self.GetQuorumIntersectionInfo() : QuorumIntersectionInfo =
+        match self.TryGetQuorumIntersectionInfo() with
+        | Some qi -> qi
+        | None -> failwithf "No quorum intersection results on %s" self.ShortName.StringName
+
+    // Count of a quorum intersection checker (V2) metric, by short name,
+    // e.g. "successful-run" or "result-potential-split".
+    member self.GetQicMetricCount(shortName: string) : int =
+        ParseMetricCount(self.GetRawMetrics()) (sprintf "scp.qic.%s" shortName)
 
     member self.GetInfo() : Info.Info =
         WebExceptionRetry
@@ -792,7 +858,7 @@ type Peer with
                             (self.URL "tx"),
                             httpMethod = "GET",
                             query = [ "blob", b64 ],
-                            headers = [ "Host", self.networkCfg.IngressInternalHostName ]
+                            headers = [ "Host", self.networkCfg.RouteInternalHostName ]
                         )
 
                     use reader = new System.IO.StreamReader(response.ResponseStream)
@@ -901,6 +967,27 @@ type Peer with
         RetryUntilTrue
             (fun _ -> self.GetState() = "Synced!")
             (fun _ -> LogInfo "Waiting until %s is synced: %s" self.ShortName.StringName (self.GetStatusOrState()))
+
+    // A node that joined the network mid-run reports "Synced!" whenever a
+    // catchup round completes, even if the live network has since moved on
+    // and another round is needed. Wait until this node is within a few
+    // ledgers of the reference peer's latest, proving it is actually
+    // tracking the live network.
+    member self.WaitUntilCaughtUpWith(other: Peer) =
+        // self and other are read in two separate requests, so the network
+        // advances between them; the gap absorbs that timing skew (and the
+        // small steady lag of a watcher outside the quorum).
+        let maxLedgerGap = 10
+
+        RetryUntilTrue
+            (fun _ -> other.GetLedgerNum() - self.GetLedgerNum() <= maxLedgerGap)
+            (fun _ ->
+                LogInfo
+                    "Waiting until %s (ledger %d) catches up with %s (ledger %d)"
+                    self.ShortName.StringName
+                    (self.GetLedgerNum())
+                    other.ShortName.StringName
+                    (other.GetLedgerNum()))
 
     member self.WaitForAuthenticatedPeers(n: int) =
         RetryUntilTrue

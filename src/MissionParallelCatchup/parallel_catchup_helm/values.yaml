@@ -36,9 +36,10 @@ worker:
     "curl -sf http://history.stellar.org/prd/core-live/core_live_003/{0} -o {1}"
 
 monitor:
-  ingress_class_name: "ingress-private"
+  gateway_name: "traefik-gateway-private"
+  gateway_namespace: "traefik"
   hostname: "" # to be set by the mission
-  path: "/default/(.*)"
+  path_prefix: "/default"
   logging_interval_seconds: 300
   logging_level: "INFO" # 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'
   resources:

@@ -10,6 +10,7 @@ open k8s.Models
 
 open Logging
 open ScriptUtils
+open GatewayApiModels
 
 // Resources that look this old must belong to a failed prior run — no healthy
 // mission runs anywhere near this long, and the Jenkins lock serializes CI
@@ -28,7 +29,17 @@ let private sweepKind
     : unit =
     ApiRateLimit.sleepUntilNextRateLimitedApiCallTime apiRateLimit
 
-    for meta in list () do
+    // Guard the list() itself: on a cluster missing this kind's CRD (e.g. no
+    // gateway-api) it throws, and without this catch it would abort the whole
+    // sweep and skip the remaining kinds.
+    let items =
+        try
+            list ()
+        with ex ->
+            LogWarn "Orphan sweep: failed to list %s (skipping kind): %s" kind ex.Message
+            Seq.empty
+
+    for meta in items do
         if isOlderThan cutoff meta then
             try
                 LogInfo
@@ -130,6 +141,26 @@ let private sweepWithCutoff (cutoff: DateTime) (kube: Kubernetes) (ns: string) (
             |> Seq.map (fun i -> i.Metadata))
         (fun n ->
             kube.DeleteNamespacedIngress(namespaceParameter = ns, name = n, propagationPolicy = "Foreground")
+            |> ignore)
+        cutoff
+
+    sweepKind
+        apiRateLimit
+        "HTTPRoute"
+        (fun () ->
+            let gc = new GenericClient(kube, "gateway.networking.k8s.io", "v1", "httproutes")
+
+            gc.ListNamespacedAsync<HTTPRouteList>(ns).GetAwaiter().GetResult().Items
+            |> Seq.map (fun r -> r.Metadata))
+        (fun n ->
+            kube.DeleteNamespacedCustomObject(
+                group = "gateway.networking.k8s.io",
+                version = "v1",
+                namespaceParameter = ns,
+                plural = "httproutes",
+                name = n,
+                propagationPolicy = "Foreground"
+            )
             |> ignore)
         cutoff
 

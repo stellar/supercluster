@@ -42,10 +42,11 @@ type MissionOptions
         logDebugPartitions: seq<string>,
         logTracePartitions: seq<string>,
         namespaceProperty: string option,
-        ingressClass: string,
-        ingressInternalDomain: string,
-        ingressExternalHost: string option,
-        ingressExternalPort: int,
+        gatewayName: string,
+        gatewayNamespace: string,
+        routeInternalDomain: string,
+        routeExternalHost: string option,
+        routeExternalPort: int,
         exportToPrometheus: bool,
         probeTimeout: int,
         missions: string seq,
@@ -70,9 +71,12 @@ type MissionOptions
         avoidNodeLabels: seq<string>,
         tolerateNodeTaints: seq<string>,
         apiRateLimit: int,
+        httpProxyReplicas: int,
         pubnetData: string option,
+        measureE2eLatency: bool,
         flatQuorum: bool option,
         tier1Keys: string option,
+        loadgenKeys: string option,
         maxConnections: int option,
         fullyConnectTier1: bool,
         byteCountValues: seq<int>,
@@ -137,7 +141,13 @@ type MissionOptions
         maxBlockTimeMs: int,
         minBlockTimeMixedMode: string,
         minBlockTimeMixedClassicTxRate: int option,
-        minBlockTimeMixedSorobanTxRate: int option
+        minBlockTimeMixedSorobanTxRate: int option,
+        forceOldStyleTriggerTimerPct: int,
+        uniformDrift: seq<int>,
+        bimodalDrift: seq<int>,
+        driftPct: int,
+        ledgerCloseTimeMs: int option,
+        forceOldStyleTriggerTimer: bool option
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -155,28 +165,34 @@ type MissionOptions
     [<Option("namespace", HelpText = "Namespace to use, overriding kubeconfig.", Required = false)>]
     member self.NamespaceProperty = namespaceProperty
 
-    [<Option("ingress-class",
-             HelpText = "Value for kubernetes.io/ingress.class, on ingress",
+    [<Option("gateway-name",
+             HelpText = "Name of the Gateway (gateway.networking.k8s.io) the per-mission HTTPRoute attaches to",
              Required = false,
-             Default = "ingress-private")>]
-    member self.IngressClass = ingressClass
+             Default = "traefik-gateway-private")>]
+    member self.GatewayName = gatewayName
+
+    [<Option("gateway-namespace",
+             HelpText = "Namespace of the Gateway the per-mission HTTPRoute attaches to",
+             Required = false,
+             Default = "traefik")>]
+    member self.GatewayNamespace = gatewayNamespace
 
     [<Option("ingress-internal-domain",
-             HelpText = "Cluster-internal DNS domain in which to configure ingress",
+             HelpText = "Cluster-internal DNS domain used to form the per-mission Gateway API route hostname (flag name kept for compatibility)",
              Required = false,
              Default = "local")>]
-    member self.IngressInternalDomain = ingressInternalDomain
+    member self.RouteInternalDomain = routeInternalDomain
 
     [<Option("ingress-external-host",
-             HelpText = "Cluster-external hostname to connect to for access to ingress",
+             HelpText = "Cluster-external hostname the driver connects to for the gateway route; defaults to the route hostname (flag name kept for compatibility)",
              Required = false)>]
-    member self.IngressExternalHost = ingressExternalHost
+    member self.RouteExternalHost = routeExternalHost
 
     [<Option("ingress-external-port",
-             HelpText = "Cluster-external port to connect to for access to ingress",
+             HelpText = "Cluster-external port the driver connects to for the gateway route (flag name kept for compatibility)",
              Required = false,
              Default = 80)>]
-    member self.IngressExternalPort = ingressExternalPort
+    member self.RouteExternalPort = routeExternalPort
 
     [<Option("export-to-prometheus", HelpText = "Whether to export core metrics to prometheus")>]
     member self.ExportToPrometheus : bool = exportToPrometheus
@@ -295,14 +311,29 @@ type MissionOptions
              Default = 10)>]
     member self.ApiRateLimit = apiRateLimit
 
+    [<Option("http-proxy-replicas",
+             HelpText = "Max nginx HTTP proxy replicas per mission (cap); actual scales with node count, floor 1",
+             Required = false,
+             Default = 10)>]
+    member self.HttpProxyReplicas = httpProxyReplicas
+
     [<Option("pubnet-data", HelpText = "JSON file containing pubnet connectivity graph data", Required = false)>]
     member self.PubnetData = pubnetData
+
+    [<Option("measure-e2e-latency",
+             HelpText = "Set to enable the loadgen e2e metrics",
+             Required = false,
+             Default = false)>]
+    member self.MeasureE2eLatency = measureE2eLatency
 
     [<Option("flat-quorum", HelpText = "Use flat Tier1 quorum", Required = false)>]
     member self.FlatQuorum = flatQuorum
 
     [<Option("tier1-keys", HelpText = "JSON file containing list of 'tier-1' pubkeys from pubnet", Required = false)>]
     member self.Tier1Keys = tier1Keys
+
+    [<Option("loadgen-keys", HelpText = "JSON file containing list of pubkeys to generate load", Required = false)>]
+    member self.LoadgenKeys = loadgenKeys
 
     [<Option("max-connections",
              HelpText = "Maximum number of connections to allow any node in pubnet data to have. When enabled, this option will prune connections for any node with more than this number of connections. (default: no limit)",
@@ -631,6 +662,40 @@ type MissionOptions
              Required = false)>]
     member self.MinBlockTimeMixedSorobanTxRate = minBlockTimeMixedSorobanTxRate
 
+    [<Option("force-old-style-trigger-timer-pct",
+             HelpText = "Percentage (0-100) of nodes with FORCE_OLD_STYLE_PREPARE_START_TRIGGER_TIMER set, i.e. forced onto the pre-protocol-28 prepare-start trigger timer. The remaining nodes use the protocol default",
+             Required = false,
+             Default = 0)>]
+    member self.ForceOldStyleTriggerTimerPct = forceOldStyleTriggerTimerPct
+
+    [<Option("uniform-drift",
+             Separator = ',',
+             HelpText = "Uniform clock drift range in signed ms: --uniform-drift=lower,upper (e.g. --uniform-drift=-2000,+2000)",
+             Required = false)>]
+    member self.UniformDrift = uniformDrift
+
+    [<Option("bimodal-drift",
+             Separator = ',',
+             HelpText = "Bimodal clock drift ranges in signed ms: --bimodal-drift=min1,max1,min2,max2 (e.g. --bimodal-drift=-5000,-2000,+2000,+5000)",
+             Required = false)>]
+    member self.BimodalDrift = bimodalDrift
+
+    [<Option("drift-pct",
+             HelpText = "Percentage (0-100) of nodes that receive clock drift",
+             Required = false,
+             Default = 0)>]
+    member self.DriftPct = driftPct
+
+    [<Option("ledger-close-time-ms",
+             HelpText = "Target ledger close time (ms) upgraded before applying load in TriggerTimerMixConsensus (default 5000)",
+             Required = false)>]
+    member self.LedgerCloseTimeMs = ledgerCloseTimeMs
+
+    [<Option("force-old-style-trigger-timer",
+             HelpText = "Set FORCE_OLD_STYLE_PREPARE_START_TRIGGER_TIMER on all nodes (true/false), forcing the pre-protocol-28 prepare-start trigger timer. Unset by default, in which case core picks the timer by protocol version. Not supported by TriggerTimerMixConsensus, which uses --force-old-style-trigger-timer-pct instead",
+             Required = false)>]
+    member self.ForceOldStyleTriggerTimer = forceOldStyleTriggerTimer
+
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' |> Array.toList with
     | [ x ] -> x, None
@@ -689,6 +754,12 @@ let main argv =
             0
 
         | :? MissionOptions as mission ->
+            if mission.LoadgenKeys.IsSome && mission.PubnetData.IsNone then
+                failwith "Error: --loadgen-keys requires --pubnet-data to be set"
+
+            if mission.MeasureE2eLatency && mission.LoadgenKeys.IsNone then
+                failwith "Error: --measure-e2e-latency requires --loadgen-keys"
+
             let _ = logToConsoleAndFile (sprintf "%s/stellar-supercluster.log" mission.Destination)
 
             let ll =
@@ -775,22 +846,29 @@ let main argv =
                                numNodes = mission.NumNodes
                                namespaceProperty = ns
                                logLevels = ll
-                               ingressClass = mission.IngressClass
-                               ingressInternalDomain = mission.IngressInternalDomain
-                               ingressExternalHost = mission.IngressExternalHost
-                               ingressExternalPort = mission.IngressExternalPort
+                               gatewayName = mission.GatewayName
+                               gatewayNamespace = mission.GatewayNamespace
+                               routeInternalDomain = mission.RouteInternalDomain
+                               routeExternalHost = mission.RouteExternalHost
+                               routeExternalPort = mission.RouteExternalPort
                                exportToPrometheus = mission.ExportToPrometheus
                                probeTimeout = mission.ProbeTimeout
                                coreResources = SmallTestResources
                                keepData = mission.KeepData
                                unevenSched = mission.UnevenSched
+                               // Off by default; perf-sensitive missions (Max TPS, Min Block Time)
+                               // turn this on themselves via their MissionContext override.
+                               dedicatedNodes = false
                                requireNodeLabels = List.map splitLabel (List.ofSeq mission.RequireNodeLabels)
                                avoidNodeLabels = List.map splitLabel (List.ofSeq mission.AvoidNodeLabels)
                                tolerateNodeTaints = List.map splitLabel (List.ofSeq mission.TolerateNodeTaints)
                                apiRateLimit = mission.ApiRateLimit
+                               httpProxyReplicas = mission.HttpProxyReplicas
                                pubnetData = mission.PubnetData
+                               measureE2eLatency = mission.MeasureE2eLatency
                                flatQuorum = mission.FlatQuorum
                                tier1Keys = mission.Tier1Keys
+                               loadgenKeys = mission.LoadgenKeys
                                maxConnections = mission.MaxConnections
                                fullyConnectTier1 = mission.FullyConnectTier1
                                byteCountDistribution =
@@ -869,7 +947,13 @@ let main argv =
                                minBlockTimeMixedMode = mission.MinBlockTimeMixedMode
                                minBlockTimeMixedClassicTxRate = mission.MinBlockTimeMixedClassicTxRate
                                minBlockTimeMixedSorobanTxRate = mission.MinBlockTimeMixedSorobanTxRate
-                               runForMinBlockTime = false }
+                               runForMinBlockTime = false
+                               forceOldStyleTriggerTimerPct = mission.ForceOldStyleTriggerTimerPct
+                               uniformDrift = List.ofSeq mission.UniformDrift
+                               bimodalDrift = List.ofSeq mission.BimodalDrift
+                               driftPct = mission.DriftPct
+                               ledgerCloseTimeMs = mission.LedgerCloseTimeMs
+                               forceOldStyleTriggerTimer = mission.ForceOldStyleTriggerTimer }
 
                          allMissions.[m] missionContext
 

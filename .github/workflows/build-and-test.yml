@@ -12,17 +12,55 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v2
-    - name: Setup k3s
-      uses: debianmaster/actions-k3s@master
-      with:
-        version: 'v1.23.17-k3s1'
-    - name: Setup nginx-ingress
+    - uses: actions/checkout@v4
+    - name: Setup k3d cluster (k3s, bundled traefik disabled)
       run: |
-        kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.5.1/deploy/static/provider/cloud/deploy.yaml
-        kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=120s
+        set -euo pipefail
+        curl -s https://raw.githubusercontent.com/k3d-io/k3d/v5.9.0/install.sh | bash
+        # Disable k3s's bundled traefik; the gateway controller (envoy) is installed below.
+        # Map host :8081 -> the gateway LoadBalancer :80 so the mission driver can reach it.
+        k3d cluster create ssc \
+          --image rancher/k3s:v1.31.5-k3s1 \
+          --k3s-arg "--disable=traefik@server:*" \
+          -p "8081:80@loadbalancer" \
+          --wait
+        k3d kubeconfig get ssc > "$RUNNER_TEMP/kubeconfig"
+        echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+    - name: Setup Envoy Gateway + Gateway
+      run: |
+        set -euo pipefail
+        # Envoy Gateway ships its own matching gateway-api CRDs + controller.
+        helm install eg oci://docker.io/envoyproxy/gateway-helm --version v1.2.6 \
+          -n envoy-gateway-system --create-namespace --wait --timeout 4m
+        # GatewayClass + the Gateway the per-mission HTTPRoutes attach to.
+        # Missions target it via --gateway-name / --gateway-namespace.
+        kubectl create namespace gateway
+        kubectl apply -f - <<'YAML'
+        apiVersion: gateway.networking.k8s.io/v1
+        kind: GatewayClass
+        metadata:
+          name: eg
+        spec:
+          controllerName: gateway.envoyproxy.io/gatewayclass-controller
+        ---
+        apiVersion: gateway.networking.k8s.io/v1
+        kind: Gateway
+        metadata:
+          name: ssc-gateway
+          namespace: gateway
+        spec:
+          gatewayClassName: eg
+          listeners:
+          - name: http
+            port: 80
+            protocol: HTTP
+            allowedRoutes:
+              namespaces:
+                from: All
+        YAML
+        kubectl wait --namespace gateway --for=condition=Programmed gateway/ssc-gateway --timeout=180s
     - name: Setup .NET SDK 8
-      uses: actions/setup-dotnet@v1
+      uses: actions/setup-dotnet@v4
       with:
         dotnet-version: '8.0.x'
     - name: Install dependencies
@@ -36,7 +74,7 @@ jobs:
     - name: Test
       run: dotnet test --no-restore --verbosity normal
     - name: Run BootAndSync mission
-      run: dotnet run --project src/App/App.fsproj --configuration Release -- mission BootAndSync --image stellar/stellar-core:stable --kubeconfig $KUBECONFIG --namespace default --ingress-class nginx --ingress-internal-domain local --ingress-external-host localhost --uneven-sched
+      run: dotnet run --project src/App/App.fsproj --configuration Release -- mission BootAndSync --image stellar/stellar-core:stable --kubeconfig $KUBECONFIG --namespace default --gateway-name ssc-gateway --gateway-namespace gateway --ingress-internal-domain local --ingress-external-host localhost --ingress-external-port 8081 --uneven-sched
     - uses: actions/upload-artifact@v4
       with:
         name: destination

@@ -7,6 +7,7 @@ module StellarNamespaceContent
 open k8s
 open k8s.Models
 open Logging
+open GatewayApiModels
 
 type NamespaceContent(kube: Kubernetes, apiRateLimit: int, namespaceProperty: string) =
 
@@ -15,7 +16,7 @@ type NamespaceContent(kube: Kubernetes, apiRateLimit: int, namespaceProperty: st
     let services : Set<string> ref = ref Set.empty
     let configMaps : Set<string> ref = ref Set.empty
     let statefulSets : Set<string> ref = ref Set.empty
-    let ingresses : Set<string> ref = ref Set.empty
+    let httpRoutes : Set<string> ref = ref Set.empty
     let jobs : Set<string> ref = ref Set.empty
     let daemonSets : Set<string> ref = ref Set.empty
     let deployments : Set<string> ref = ref Set.empty
@@ -61,14 +62,17 @@ type NamespaceContent(kube: Kubernetes, apiRateLimit: int, namespaceProperty: st
                     propagationPolicy = "Foreground"
                 ))
 
-    let delIngress (name: string) =
-        LogInfo "Deleting Ingress %s" name
+    let delHttpRoute (name: string) =
+        LogInfo "Deleting HTTPRoute %s" name
         ApiRateLimit.sleepUntilNextRateLimitedApiCallTime (apiRateLimit)
 
         ignoreError
             (fun _ ->
-                kube.DeleteNamespacedIngress(
+                kube.DeleteNamespacedCustomObject(
+                    group = "gateway.networking.k8s.io",
+                    version = "v1",
                     namespaceParameter = namespaceProperty,
+                    plural = "httproutes",
                     name = name,
                     propagationPolicy = "Foreground"
                 ))
@@ -124,7 +128,7 @@ type NamespaceContent(kube: Kubernetes, apiRateLimit: int, namespaceProperty: st
         cleanSet delStatefulSet statefulSets
         cleanSet delDeployment deployments
         cleanSet delConfigMap configMaps
-        cleanSet delIngress ingresses
+        cleanSet delHttpRoute httpRoutes
         cleanSet delJob jobs
         cleanSet delDaemonSet daemonSets
 
@@ -134,7 +138,7 @@ type NamespaceContent(kube: Kubernetes, apiRateLimit: int, namespaceProperty: st
 
     member self.Add(statefulSet: V1StatefulSet) = addOne statefulSets statefulSet.Metadata.Name
 
-    member self.Add(ingress: V1Ingress) = addOne ingresses ingress.Metadata.Name
+    member self.Add(route: HTTPRoute) = addOne httpRoutes route.Metadata.Name
 
     member self.Add(job: V1Job) = addOne jobs job.Metadata.Name
 
@@ -148,7 +152,7 @@ type NamespaceContent(kube: Kubernetes, apiRateLimit: int, namespaceProperty: st
 
     member self.Del(statefulSet: V1StatefulSet) = delOne delStatefulSet statefulSets statefulSet.Metadata.Name
 
-    member self.Del(ingress: V1Ingress) = delOne delIngress ingresses ingress.Metadata.Name
+    member self.Del(route: HTTPRoute) = delOne delHttpRoute httpRoutes route.Metadata.Name
 
     member self.Del(job: V1Job) = delOne delJob jobs job.Metadata.Name
 

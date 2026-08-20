@@ -16,7 +16,8 @@ open StellarSupercluster
 let databaseInplaceUpgrade (context: MissionContext) =
     let context =
         { context.WithNominalLoad with
-              genesisTestAccountCount = Some context.WithNominalLoad.numAccounts }
+              genesisTestAccountCount = Some context.WithNominalLoad.numAccounts
+              coreResources = MediumTestResources }
 
     let newImage = context.image
     let oldImage = GetOrDefault context.oldImage context.image
@@ -79,6 +80,13 @@ let databaseInplaceUpgrade (context: MissionContext) =
 
             let afterUpgradeCoreSetLive = formation.NetworkCfg.FindCoreSet afterUpgradeCoreSet.name
             formation.WaitUntilSynced [ afterUpgradeCoreSetLive ]
+
+            // The upgraded node is a watcher outside the quorum, so it can
+            // report "Synced!" while still catching up to the validators,
+            // which would make loadgen time out against its stale local
+            // ledger. Wait until it actually tracks the network.
+            let upgradedPeer = formation.NetworkCfg.GetPeer afterUpgradeCoreSetLive 0
+            upgradedPeer.WaitUntilCaughtUpWith(formation.NetworkCfg.GetPeer coreSet 0)
 
             formation.RunLoadgen afterUpgradeCoreSet context.GeneratePaymentLoad
             formation.RunLoadgen coreSet context.GeneratePaymentLoad)

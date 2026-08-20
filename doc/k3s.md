@@ -32,5 +32,5 @@ net.ipv6.neigh.default.gc_thresh3 = 100000
 
   - Build supercluster normally (see [getting-started.md](getting-started.md))
 
-  - Run supercluster with these additional arguments: `--kubeconfig $KUBECONFIG --namespace default --ingress-class nginx --ingress-internal-domain local --ingress-external-host localhost --uneven-sched`
+  - Run supercluster with these additional arguments: `--kubeconfig $KUBECONFIG --namespace default --ingress-internal-domain local --ingress-external-host localhost --uneven-sched`
 
