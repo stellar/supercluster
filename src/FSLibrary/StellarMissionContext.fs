@@ -27,6 +27,7 @@ type CoreResources =
     | AcceptanceTestResources
     | SimulatePubnetResources
     | SimulatePubnetTier1PerfResources
+    | MaxTPSClassicResources
     | ParallelCatchupResources
     | NonParallelCatchupResources
     | UpgradeResources
