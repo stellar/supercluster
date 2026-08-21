@@ -125,6 +125,11 @@ let SimulatePubnetTier1PerfCoreResourceRequirements : V1ResourceRequirements =
     // and 128MB-2GB RAM.
     makeResourceRequirements 500 128 4000 6000
 
+let MaxTPSClassicCoreResourceRequirements : V1ResourceRequirements =
+    // Sized so one core pod plus the http-proxy fills a 2-vCPU node, since pod
+    // density dominates the reported max TPS.
+    makeResourceRequirements 1100 2560 4000 6000
+
 let ParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
     // When doing parallel catchup, we give each container
     // 0.25 vCPUs, 8Gi RAM and 35 GB of disk bursting to 2vCPU, 28Gi (28672Mi) and 40 GB
@@ -173,6 +178,7 @@ let GetCoreResourceRequirements (cr: CoreResources) : V1ResourceRequirements =
     | AcceptanceTestResources -> AcceptanceTestCoreResourceRequirements
     | SimulatePubnetResources -> SimulatePubnetResources
     | SimulatePubnetTier1PerfResources -> SimulatePubnetTier1PerfCoreResourceRequirements
+    | MaxTPSClassicResources -> MaxTPSClassicCoreResourceRequirements
     | ParallelCatchupResources -> ParallelCatchupCoreResourceRequirements
     | NonParallelCatchupResources -> NonParallelCatchupCoreResourceRequirements
     | UpgradeResources -> UpgradeCoreResourceRequirements
