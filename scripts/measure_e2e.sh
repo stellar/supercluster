@@ -3,20 +3,22 @@
 # SLP transaction end-to-end latency measurement wrapper.
 #
 # This script runs the MinBlockTimeMixed mission with stellar-core's loadgen
-# end-to-end latency metrics enabled, against the 2026-06-03 pubnet topology
-# scaled out to 1000 nodes. It answers "how long does a transaction take to go
-# from submission to application?" rather than "what is the minimum block time?"
+# end-to-end latency metrics enabled, against the trimmed 2026-06-03 pubnet
+# topology. It answers "how long does a transaction take to go from submission
+# to application?" rather than "what is the minimum block time?"
 #
 # It differs from scripts/slp_eval.sh in that it uses a much larger network, a
-# dedicated set of load-generating nodes, and exposes the knobs worth sweeping
-# for a latency study: tier1 org count, ledger close time, and the synthetic
-# apply budget.
+# dedicated set of load-generating nodes, and exposes the parameters for
+# evaluating O3.1.2 experiments: tier1 org count, ledger close time, and the
+# synthetic apply budget.
 #
 # The benchmark setup and how to read the result are documented in
 # scripts/base.sh, which holds the shared implementation.
 
 . "$(dirname "$0")/base.sh"
 
+# 1000 is somewhat arbitrary, but large enough to support scaling to many tier1
+# orgs without hitting the network size limit
 NETWORK_SIZE_LIMIT=1000
 PUBNET_DATA_FILE="public-network-data-2026-06-03-trimmed-located.json"
 LOADGEN_KEYS_FILE="public-network-data-2026-06-03-loadgenkeys.json"
