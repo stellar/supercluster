@@ -61,7 +61,7 @@ spec:
     spec:
       containers:
       - name: job-monitor
-        image: stellar/ssc-job-monitor:latest
+        image: {{ .Values.monitor.image }}
         imagePullPolicy: Always
         ports:
         - containerPort: 8080

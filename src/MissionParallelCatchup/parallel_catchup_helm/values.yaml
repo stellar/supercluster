@@ -36,6 +36,7 @@ worker:
     "curl -sf http://history.stellar.org/prd/core-live/core_live_003/{0} -o {1}"
 
 monitor:
+  image: "stellar/ssc-job-monitor:latest"
   gateway_name: "traefik-gateway-private"
   gateway_namespace: "traefik"
   hostname: "" # to be set by the mission
