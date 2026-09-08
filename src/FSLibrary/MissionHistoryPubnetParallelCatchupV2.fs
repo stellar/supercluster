@@ -432,9 +432,10 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
                     failwith "Catch up failed, check logs for more info"
 
                 // Detect if the mission is stuck from two signals: 1. job queue
-                // has in progress items but no live workers 2. the job monitor
-                // itself gets stuck unable to updating its internal metrics and
-                // status
+                // has in progress items but no live workers, which we fail the
+                // mission 2. the job monitor itself gets stuck unable to
+                // updating its internal metrics and status, we treat it as a
+                // warning only
                 let workersUp = status.Value<int>("workers_up")
                 let missionDuration = status.Value<float>("mission_duration")
                 let noLiveWorkers = JobsInProgress.Count > 0 && workersUp = 0
