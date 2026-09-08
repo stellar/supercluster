@@ -21,6 +21,11 @@ fi
 SLEEP_INTERVAL=10
 LOG_DIR="/data"
 
+# Claim a job and register its owner atomically
+CLAIM_SCRIPT='local job = redis.call("LMOVE", KEYS[1], KEYS[2], "LEFT", "LEFT")
+if job then redis.call("HSET", KEYS[3], job, ARGV[1]) end
+return job'
+
 while true; do
 # Stop claiming once the driver marks us, so it can remove us without interrupting a range.
 if [ "$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" SISMEMBER "$RELEASE_NAME-retiring" "$POD_NAME")" = "1" ]; then
@@ -29,20 +34,23 @@ if [ "$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" SISMEMBER "$RELEASE_NAME-ret
     continue
 fi
 
-# Fetch the next job key from the Redis queue.
-# Our ranges are generated in the order we want to run them from left to right, so we always pull from the left
-JOB_KEY=$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" LMOVE "$JOB_QUEUE" "$PROGRESS_QUEUE" LEFT LEFT)
-LMOVE_EXIT_CODE=$?
 
-# Only process a job if the command succeeded AND we got a non-empty job key
-if [ $LMOVE_EXIT_CODE -eq 0 ] && [ -n "$JOB_KEY" ]; then
-    # Register ownership so the monitor knows which worker owns this job
-    redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" HSET "$JOB_OWNERS" "$JOB_KEY" "$POD_NAME"
-    if [ $? -ne 0 ]; then
-        echo "Error: Failed to register job ownership for $JOB_KEY. Exiting."
-        exit 1
-    fi
+# Claim the next job: atomically move it from the job queue to the progress
+# queue and record this pod as its owner. Our ranges are generated in the order
+# we want to run them from left to right, so we always pull from the left
+JOB_KEY=$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" \
+    EVAL "$CLAIM_SCRIPT" 3 "$JOB_QUEUE" "$PROGRESS_QUEUE" "$JOB_OWNERS" "$POD_NAME")
+CLAIM_EXIT_CODE=$?
 
+# Validate the reply is a well-formed "<ledger>/<count>" job key
+case "$JOB_KEY" in
+    "" | *[!0-9/]* | */*/* | /* | */) CLAIM_VALID=false ;;
+    */*) CLAIM_VALID=true ;;
+    *) CLAIM_VALID=false ;;
+esac
+
+# Only process a job if the command succeeded AND the reply is a valid job key
+if [ $CLAIM_EXIT_CODE -eq 0 ] && [ "$CLAIM_VALID" = true ]; then
     # Start timer
     START_TIME=$(date +%s)
     echo "Processing job: $JOB_KEY"
@@ -61,26 +69,26 @@ if [ $LMOVE_EXIT_CODE -eq 0 ] && [ -n "$JOB_KEY" ]; then
     # Check if both commands succeeded
     if [ $STELLAR_CORE_EXIT_CODE -eq 0 ]; then
         echo "Successfully processed job: $JOB_KEY"
-        QUEUE_COMMAND="LPUSH $SUCCESS_QUEUE \"$JOB_KEY\""
+        QUEUE_COMMAND="SADD $SUCCESS_QUEUE \"$JOB_KEY\""
     else
         echo "Error processing job: $JOB_KEY (exit code: $STELLAR_CORE_EXIT_CODE)"
-        QUEUE_COMMAND="LPUSH $FAILED_QUEUE \"$JOB_KEY|$POD_NAME\""
+        QUEUE_COMMAND="SADD $FAILED_QUEUE \"$JOB_KEY|$POD_NAME\""
     fi
 
-    # Parse and extract the metrics from the log file
+    # Parse and extract the metrics from the log file.
     LOG_FILE=$(ls -t "$LOG_DIR"/stellar-core*.log 2>/dev/null | head -n 1)
     if [ -z "$LOG_FILE" ]; then
-        echo "No log file found in $LOG_DIR"
-        exit 1
-    fi
-
-    tx_apply_ms=$(tac "$LOG_FILE" | grep -m 1 -B 11 "metric 'ledger.transaction.apply':" | grep "sum =" | awk '{print $NF}')
-    echo "Log file: $LOG_FILE"
-    echo "ledger.transaction.apply sum: $tx_apply_ms"
-    # Validate metric was extracted successfully
-    if [ -z "$tx_apply_ms" ]; then
-        echo "Warning: Failed to extract metric 'ledger.transaction.apply' from log file"
+        echo "Warning: No log file found in $LOG_DIR"
         tx_apply_ms="N/A"
+    else
+        tx_apply_ms=$(tac "$LOG_FILE" | grep -m 1 -B 11 "metric 'ledger.transaction.apply':" | grep "sum =" | awk '{print $NF}')
+        echo "Log file: $LOG_FILE"
+        echo "ledger.transaction.apply sum: $tx_apply_ms"
+        # Validate metric was extracted successfully
+        if [ -z "$tx_apply_ms" ]; then
+            echo "Warning: Failed to extract metric 'ledger.transaction.apply' from log file"
+            tx_apply_ms="N/A"
+        fi
     fi
 
     # Push metrics to redis in a transaction to ensure data consistency. Retry for 5min on failures
@@ -116,10 +124,12 @@ EOF
     fi
 
 else
-    # Either Redis command failed OR queue is empty
-    if [ $LMOVE_EXIT_CODE -ne 0 ]; then
-        echo "Error: Failed to connect to Redis at $REDIS_HOST:$REDIS_PORT"
-        echo "Exit code=$LMOVE_EXIT_CODE, Output: $JOB_KEY"
+    # The claim failed, returned something unexpected, or the queue is empty.
+    if [ $CLAIM_EXIT_CODE -ne 0 ]; then
+        echo "Error: Failed to claim a job from Redis at $REDIS_HOST:$REDIS_PORT"
+        echo "Exit code=$CLAIM_EXIT_CODE, Output: $JOB_KEY"
+    elif [ -n "$JOB_KEY" ]; then
+        echo "Error: Unexpected claim reply, not a job key: $JOB_KEY"
     else
         echo "$(date) No more jobs in the queue."
     fi

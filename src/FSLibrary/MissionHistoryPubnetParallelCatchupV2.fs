@@ -41,6 +41,10 @@ let jobMonitorLoggingIntervalSecs = 30 // frequency of job monitor's internal in
 let jobMonitorStatusCheckIntervalSecs = 60 // frequency of us querying job monitor's `/status` end point
 let jobMonitorMetricsCheckIntervalSecs = 60 // frequency of us querying job monitor's `/metrics` end point
 let jobMonitorStatusCheckTimeOutSecs = 600
+// Fail the mission if jobs are claimed but no worker is demonstrably alive, or if the
+// monitor's own status stops advancing
+let jobMonitorStallTimeOutSecs = 1800
+
 let mutable toPerformCleanup = true
 let failedJobLogFileLineCount = 10000
 let failedJobLogStreamLineCount = 1000
@@ -458,6 +462,8 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
     let mutable marked : Set<string> = Set.empty
     let mutable timeoutLeft = jobMonitorStatusCheckTimeOutSecs
     let mutable timeBeforeNextMetricsCheck = jobMonitorMetricsCheckIntervalSecs
+    let mutable stalledForSecs = 0
+    let mutable lastMissionDuration = -1.0
     let jobMonitorPath = "/" + context.namespaceProperty + "/" + helmReleaseName
 
     while not allJobsFinished do
@@ -535,6 +541,33 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
                     if not toMark.IsEmpty then
                         LogInfo "Marked %d retiring (%d ready, %d outstanding)" toMark.Length ready.Count outstanding
                 with ex -> LogWarn "Worker scale-down skipped this pass: %s" ex.Message
+                // Detect if the mission is stuck from two signals: 1. job queue
+                // has in progress items but no live workers 2. the job monitor
+                // itself gets stuck unable to updating its internal metrics and
+                // status
+                let workersUp = status.Value<int>("workers_up")
+                let missionDuration = status.Value<float>("mission_duration")
+                let noLiveWorkers = JobsInProgress.Count > 0 && workersUp = 0
+                let monitorNotAdvancing = missionDuration = lastMissionDuration
+                lastMissionDuration <- missionDuration
+
+                if noLiveWorkers || monitorNotAdvancing then
+                    stalledForSecs <- stalledForSecs + jobMonitorStatusCheckIntervalSecs
+
+                    if stalledForSecs >= jobMonitorStallTimeOutSecs then
+                        LogError
+                            "Mission stalled for %d seconds: in_progress=%d, workers_up=%d, mission_duration=%f"
+                            stalledForSecs
+                            JobsInProgress.Count
+                            workersUp
+                            missionDuration
+
+                        for job in JobsInProgress do
+                            LogError "Stuck job: %s" (job.ToString())
+
+                        failwith "Catch up stalled, no progress and no live workers"
+                else
+                    stalledForSecs <- 0
 
                 if remainSize = 0 && JobsInProgress.Count = 0 then
                     // All jobs completed — perform a final query on the metrics
