@@ -27,6 +27,14 @@ if job then redis.call("HSET", KEYS[3], job, ARGV[1]) end
 return job'
 
 while true; do
+# Stop claiming once the driver marks us, so it can remove us without interrupting a range.
+if [ "$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" SISMEMBER "$RELEASE_NAME-retiring" "$POD_NAME")" = "1" ]; then
+    echo "$(date) $POD_NAME is retiring; not claiming."
+    sleep $SLEEP_INTERVAL
+    continue
+fi
+
+
 # Claim the next job: atomically move it from the job queue to the progress
 # queue and record this pod as its owner. Our ranges are generated in the order
 # we want to run them from left to right, so we always pull from the left
@@ -84,8 +92,7 @@ if [ $CLAIM_EXIT_CODE -eq 0 ] && [ "$CLAIM_VALID" = true ]; then
     fi
 
     # Push metrics to redis in a transaction to ensure data consistency. Retry for 5min on failures
-    # Extract the pod ordinal (last hyphen-separated segment) from pod name like "release-name-stellar-core-0"
-    core_id=$(echo "$POD_NAME" | awk -F'-' '{print $NF}')
+    core_id="$WORKER_INDEX"
     # Validate core_id was extracted successfully
     if [ -z "$core_id" ]; then
         echo "Error: Failed to extract core_id from POD_NAME: $POD_NAME"

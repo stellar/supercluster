@@ -72,20 +72,20 @@ let private sweepWithCutoff (cutoff: DateTime) (kube: Kubernetes) (ns: string) (
 
     let stsItems = kube.ListNamespacedStatefulSet(namespaceParameter = ns).Items
 
-    for sts in stsItems do
-        if isOlderThan cutoff sts.Metadata then
-            let name = sts.Metadata.Name
+    for release in stsItems
+                   |> Seq.filter (fun sts -> isOlderThan cutoff sts.Metadata)
+                   |> Seq.map (fun sts -> sts.Metadata.Name)
+                   |> Seq.filter (fun name -> name.StartsWith("parallel-catchup-") && name.Contains("-stellar-core"))
+                   |> Seq.map (fun name -> name.Substring(0, name.LastIndexOf("-stellar-core")))
+                   |> Set.ofSeq do
+        LogInfo "Orphan sweep: helm uninstall %s" release
 
-            if name.StartsWith("parallel-catchup-") && name.EndsWith("-stellar-core") then
-                let release = name.Substring(0, name.Length - "-stellar-core".Length)
-                LogInfo "Orphan sweep: helm uninstall %s" release
-
-                RunShellCommand [| "helm"
-                                   "uninstall"
-                                   release
-                                   "-n"
-                                   ns |]
-                |> ignore
+        RunShellCommand [| "helm"
+                           "uninstall"
+                           release
+                           "-n"
+                           ns |]
+        |> ignore
 
     // 2. Delete the same resource type set the retired `clean` verb targeted.
     //    The order matches the old NamespaceContent.Cleanup so dependent

@@ -21,39 +21,43 @@ metadata:
     {{- end }}
   {{- end }}
 ---
+{{- range $i := until (int $.Values.worker.replicas) }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: {{ .Release.Name }}-stellar-core
+  name: {{ $.Release.Name }}-stellar-core-{{ $i }}
   labels:
-    app: {{ .Release.Name }}-stellar-core
+    app: {{ $.Release.Name }}-stellar-core
+    worker-index: {{ $i | quote }}
 spec:
-  serviceName: "{{ .Release.Name }}-stellar-core"
+  serviceName: "{{ $.Release.Name }}-stellar-core"
   podManagementPolicy: Parallel
-  replicas: {{ .Values.worker.replicas }}
+  replicas: 1
   selector:
     matchLabels:
-      app: {{ .Release.Name }}-stellar-core
+      app: {{ $.Release.Name }}-stellar-core
+      worker-index: {{ $i | quote }}
   template:
     metadata:
       labels:
-        app: {{ .Release.Name }}-stellar-core
+        app: {{ $.Release.Name }}-stellar-core
+        worker-index: {{ $i | quote }}
     spec:
-      serviceAccountName: stellar-supercluster-{{ .Release.Name }}
-      {{- if or .Values.worker.requireNodeLabels .Values.worker.avoidNodeLabels }}
+      serviceAccountName: stellar-supercluster-{{ $.Release.Name }}
+      {{- if or $.Values.worker.requireNodeLabels $.Values.worker.avoidNodeLabels }}
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
             - matchExpressions:
-              {{- range .Values.worker.requireNodeLabels }}
+              {{- range $.Values.worker.requireNodeLabels }}
               - key: {{ .key }}
                 operator: {{ .operator }}
                 {{- with .values }}
                 values: {{ toJson . }}
                 {{- end }}
               {{- end }}
-              {{- range .Values.worker.avoidNodeLabels }}
+              {{- range $.Values.worker.avoidNodeLabels }}
               - key: {{ .key }}
                 operator: {{ .operator }}
                 {{- with .values }}
@@ -61,26 +65,26 @@ spec:
                 {{- end }}
               {{- end }}
       {{- end }}
-      {{- if .Values.worker.tolerateNodeTaints }}
+      {{- if $.Values.worker.tolerateNodeTaints }}
       tolerations:
-      {{- range .Values.worker.tolerateNodeTaints }}
+      {{- range $.Values.worker.tolerateNodeTaints }}
       - key: {{ .key }}
         effect: {{ .effect }}
       {{- end }}
       {{- end }}
       containers:
       - name: stellar-core
-        image: {{ .Values.worker.stellar_core_image }}
+        image: {{ $.Values.worker.stellar_core_image }}
         imagePullPolicy: Always
         resources:
           requests:
-            cpu: "{{ .Values.worker.resources.requests.cpu}}"
-            memory: "{{ .Values.worker.resources.requests.memory}}"
-            ephemeral-storage: "{{ .Values.worker.resources.requests.ephemeral_storage}}"
+            cpu: "{{ $.Values.worker.resources.requests.cpu}}"
+            memory: "{{ $.Values.worker.resources.requests.memory}}"
+            ephemeral-storage: "{{ $.Values.worker.resources.requests.ephemeral_storage}}"
           limits:
-            cpu: "{{ .Values.worker.resources.limits.cpu}}"
-            memory: "{{ .Values.worker.resources.limits.memory}}"
-            ephemeral-storage: "{{ .Values.worker.resources.limits.ephemeral_storage}}"
+            cpu: "{{ $.Values.worker.resources.limits.cpu}}"
+            memory: "{{ $.Values.worker.resources.limits.memory}}"
+            ephemeral-storage: "{{ $.Values.worker.resources.limits.ephemeral_storage}}"
         command: ["/bin/sh", "/scripts/worker.sh"]
         ports:
         - containerPort: 11626
@@ -90,10 +94,12 @@ spec:
             fieldRef:
               fieldPath: metadata.name
         - name: ASAN_OPTIONS
-          value: {{ .Values.worker.asanOptions | quote }}
+          value: {{ $.Values.worker.asanOptions | quote }}
+        - name: WORKER_INDEX
+          value: {{ $i | quote }}
         envFrom:
         - configMapRef:
-            name: {{ .Release.Name }}-worker-config
+            name: {{ $.Release.Name }}-worker-config
         volumeMounts:
         - name: config
           mountPath: /config
@@ -104,23 +110,25 @@ spec:
       volumes:
       - name: config
         configMap:
-          name: {{ .Release.Name }}-stellar-core-config
+          name: {{ $.Release.Name }}-stellar-core-config
       - name: script
         configMap:
-          name: {{ .Release.Name }}-worker-script
+          name: {{ $.Release.Name }}-worker-script
       - emptyDir: {}
         name: data-volume
-      {{- if not .Values.worker.unevenSched }}
+      {{- if not $.Values.worker.unevenSched }}
       topologySpreadConstraints:
       - labelSelector:
           matchLabels:
-            app: {{ .Release.Name }}-stellar-core
+            app: {{ $.Release.Name }}-stellar-core
         # Note: maxSkew affects dynamic node scheduling with karpenter
         # See https://github.com/stellar/supercluster/issues/330
         maxSkew: 2
         topologyKey: kubernetes.io/hostname
         whenUnsatisfiable: DoNotSchedule
       {{- end }}
+---
+{{- end }}
 ---
 apiVersion: v1
 kind: ConfigMap
