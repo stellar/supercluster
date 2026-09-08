@@ -251,11 +251,7 @@ let installProject (context: MissionContext) =
     | Some valuesOutput -> LogInfo "%s" valuesOutput
     | _ -> ()
 
-// Collect log files from all parallel catchup worker pods
-// This function:
-// 1. Automatically determines worker pod names from context.pubnetParallelCatchupNumWorkers
-// 2. For each pod, finds all files matching "stellar-core-*.log" in /data
-// 3. Creates a tar.gz archive and copies it to context.destination directory
+// Collect log files from the given parallel catchup worker pods.
 // Returns the pods whose collection raised; an empty archive is success.
 let collectLogsFromPods (context: MissionContext) (podNames: string list) : string list =
     let mutable failed = []
