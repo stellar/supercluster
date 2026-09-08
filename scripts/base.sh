@@ -26,9 +26,6 @@
 #   TPS for that run, so total TPS is CLASSIC_TX_RATE + selected Soroban TPS.
 # - The mission uses MinBlockTimeMixed's MIXED_PREGEN_* overlay-only loadgen
 #   mode, simulated pubnet network delay, with NETWORK_SIZE_LIMIT nodes.
-# - Validators are configured with automatic quorum sets
-#   (--enable-relaxed-auto-qset-config), which needs a stellar-core build that
-#   supports SKIP_HIGH_CRITICAL_VALIDATOR_CHECKS_FOR_TESTING.
 # - The block-time search range is intentionally narrow: the mission searches
 #   [BLOCK_TIME_MS - BLOCK_TIME_BAND_MS, BLOCK_TIME_MS + BLOCK_TIME_BAND_MS],
 #   and because the band matches the mission's binary-search threshold that
@@ -340,7 +337,6 @@ run_min_block_time_mixed() {
 		--ingress-internal-domain="$INGRESS_INTERNAL_DOMAIN" \
 		--avoid-node-labels="$AVOID_NODE_LABELS" \
 		--export-to-prometheus \
-		--enable-relaxed-auto-qset-config \
 		--classic-tx-rate="$CLASSIC_TX_RATE" \
 		--soroban-tx-rate="$soroban_tx_rate" \
 		--min-block-time-mixed-mode="$min_block_time_mixed_mode" \
