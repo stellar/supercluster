@@ -282,7 +282,8 @@ let collectLogsFromPods (context: MissionContext) (podNames: string list) : unit
             else
                 LogWarn "No logs found or empty archive for pod %s" podName
 
-        with ex -> LogWarn "Could not collect logs from pod %s: %s" podName ex.Message
+        with ex ->
+            LogWarn "Could not collect logs from pod %s (this is expected if pod doesn't exist): %s" podName ex.Message
 
 // Cleanup on exit. `signalTriggered` indicates we're running under a hard
 // deadline (Jenkins' SoftKillWaitSeconds, ~5s by default, before SIGKILL).

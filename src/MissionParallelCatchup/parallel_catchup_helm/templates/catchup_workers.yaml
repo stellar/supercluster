@@ -163,3 +163,4 @@ data:
   PROGRESS_QUEUE: "{{ .Values.redis.progress_queue }}"
   METRICS: "{{ .Values.redis.metrics }}"
   JOB_OWNERS: "{{ .Values.redis.job_owners }}"
+  RELEASE_NAME: "{{ .Release.Name }}"

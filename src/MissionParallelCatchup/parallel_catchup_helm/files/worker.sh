@@ -9,6 +9,7 @@ if [ -z "$FAILED_QUEUE" ]; then echo "FAILED_QUEUE not set"; exit 1; fi
 if [ -z "$SUCCESS_QUEUE" ]; then echo "SUCCESS_QUEUE not set"; exit 1; fi
 if [ -z "$METRICS" ]; then echo "METRICS not set"; exit 1; fi
 if [ -z "$JOB_OWNERS" ]; then echo "JOB_OWNERS not set"; exit 1; fi
+if [ -z "$RELEASE_NAME" ]; then echo "RELEASE_NAME not set"; exit 1; fi
 if [ -z "$POD_NAME" ]; then echo "POD_NAME not set"; exit 1; fi
 
 # ensure redis-cli is available
