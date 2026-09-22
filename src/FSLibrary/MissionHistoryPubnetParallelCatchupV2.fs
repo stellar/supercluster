@@ -56,9 +56,6 @@ let mutable livePods : Set<string> = Set.empty
 // Log collection is serial and runs inside the poll loop, so bound what one pass can block on.
 let maxRetiredPerPass = 64
 
-// A job the monitor requeues needs a worker still willing to claim it.
-let minUnmarkedWorkers = 3
-
 let jobMonitorHostName (context: MissionContext) =
     match context.jobMonitorExternalHost with
     | Some host -> host
@@ -251,11 +248,8 @@ let installProject (context: MissionContext) =
     | Some valuesOutput -> LogInfo "%s" valuesOutput
     | _ -> ()
 
-// Collect log files from the given parallel catchup worker pods.
-// Returns the pods whose collection raised; an empty archive is success.
-let collectLogsFromPods (context: MissionContext) (podNames: string list) : string list =
-    let mutable failed = []
-
+// Collect log files from the given worker pods; a pod whose collection fails is skipped.
+let collectLogsFromPods (context: MissionContext) (podNames: string list) : unit =
     LogInfo "Collecting logs from %d worker pods to directory: %s" (List.length podNames) context.destination.Path
 
     for podName in podNames do
@@ -288,50 +282,7 @@ let collectLogsFromPods (context: MissionContext) (podNames: string list) : stri
             else
                 LogWarn "No logs found or empty archive for pod %s" podName
 
-        with ex ->
-            LogWarn "Could not collect logs from pod %s (this is expected if pod doesn't exist): %s" podName ex.Message
-            failed <- podName :: failed
-
-    failed
-
-// Running pods only, since a Pending pod reads as idle capacity it cannot supply.
-let readyPods (context: MissionContext) : Set<string> =
-    let selector = "app=" + helmReleaseName + "-stellar-core"
-
-    let pods =
-        context.kube.ListNamespacedPod(context.namespaceProperty, labelSelector = selector)
-
-    pods.Items
-    |> Seq.filter (fun pod -> pod.Status.Phase = "Running" && isNull (box pod.Metadata.DeletionTimestamp))
-    |> Seq.map (fun pod -> pod.Metadata.Name)
-    |> Set.ofSeq
-
-// Runs redis-cli in a ready worker and returns its output lines, or none if there is no host.
-let redisIn (context: MissionContext) (ready: Set<string>) (args: string) : string list =
-    match Seq.tryHead ready with
-    | None -> []
-    | Some host ->
-        let outFile = Path.Combine(Path.GetTempPath(), helmReleaseName + "-redis.txt")
-        let sh = sprintf "redis-cli -h \"$REDIS_HOST\" -p \"$REDIS_PORT\" %s" args
-        let cmd = [| "sh"; "-c"; sh |]
-
-        // A failed exec would otherwise return no lines, which reads as "no worker
-        // is busy" and makes every worker look retirable.
-        let rc =
-            RemoteCommandRunner.RunRemoteCommandAndCaptureOutput(
-                context.kube,
-                context.namespaceProperty,
-                host,
-                "stellar-core",
-                cmd,
-                outFile
-            )
-
-        if rc <> 0 then failwithf "redis-cli in %s exited %d" host rc
-
-        File.ReadAllLines outFile
-        |> Array.toList
-        |> List.filter (fun l -> l.Trim() <> "")
+        with ex -> LogWarn "Could not collect logs from pod %s: %s" podName ex.Message
 
 // Cleanup on exit. `signalTriggered` indicates we're running under a hard
 // deadline (Jenkins' SoftKillWaitSeconds, ~5s by default, before SIGKILL).
@@ -366,7 +317,7 @@ let cleanup (signalTriggered: bool) (context: MissionContext) =
             try
                 LogInfo "Attempting to collect worker logs before cleanup..."
                 let stopwatch = Stopwatch.StartNew()
-                collectLogsFromPods context (List.ofSeq livePods) |> ignore
+                collectLogsFromPods context (List.ofSeq livePods)
                 stopwatch.Stop()
                 LogInfo "Log collection completed in %.2f seconds" stopwatch.Elapsed.TotalSeconds
             with ex -> LogWarn "Failed to collect some or all worker logs: %s" ex.Message
@@ -453,9 +404,8 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
 
     livePods <-
         Set.ofList [ for i in 0 .. context.pubnetParallelCatchupNumWorkers - 1 ->
-                         sprintf "%s-stellar-core-%d-0" helmReleaseName i ]
-    // Marks from earlier passes only, so nothing is removed in the pass that marked it.
-    let mutable marked : Set<string> = Set.empty
+                         sprintf "%s-stellar-core-%d" helmReleaseName i ]
+
     let mutable timeoutLeft = jobMonitorStatusCheckTimeOutSecs
     let mutable timeBeforeNextMetricsCheck = jobMonitorMetricsCheckIntervalSecs
     let mutable stalledForSecs = 0
@@ -490,52 +440,31 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
                 // `queue_remain_count`, not `num_remain`, which is 1 as a pre-first-poll sentinel.
                 let outstanding = status.Value<int>("queue_remain_count") + JobsInProgress.Count
 
+                // The job monitor owns the marking decision; we only collect logs and delete.
                 try
-                    // Each read costs an apiserver call or a pod exec, so skip both when nothing is marked and the queue still outruns the fleet.
-                    let doReads = not marked.IsEmpty || outstanding < livePods.Count
-                    let mutable ready = if doReads then readyPods context else Set.empty
-                    // Read job_owners directly so it is current, not as old as the status snapshot.
-                    let busy = redisIn context ready "HVALS \"$JOB_OWNERS\"" |> Set.ofList
+                    let retirable = status.["retirable"] :?> JArray
 
-                    let idle p = ready.Contains p && not (busy.Contains p)
-                    let removable = marked |> Seq.filter idle |> Seq.truncate maxRetiredPerPass |> Set.ofSeq
+                    // Already-deleted names stay in the monitor's set, so filter by what is still live.
+                    let toRetire =
+                        retirable
+                        |> Seq.map (fun name -> name.ToString())
+                        |> Seq.filter livePods.Contains
+                        |> Seq.truncate maxRetiredPerPass
+                        |> List.ofSeq
 
-                    if not removable.IsEmpty then
-                        // /data is emptyDir, so a pod removed before its logs are read loses them.
-                        match collectLogsFromPods context (List.ofSeq removable) with
-                        | [] ->
-                            for pod in removable do
-                                let sts = pod.Substring(0, pod.Length - 2)
+                    if not toRetire.IsEmpty then
+                        // /data is emptyDir, so collect before deleting or the logs are lost.
+                        collectLogsFromPods context toRetire
 
-                                context.kube.DeleteNamespacedStatefulSet(sts, context.namespaceProperty)
-                                |> ignore
+                        for pod in toRetire do
+                            try
+                                context.kube.DeleteNamespacedPod(pod, context.namespaceProperty) |> ignore
+                            with :? k8s.Autorest.HttpOperationException as ex when
+                                ex.Response.StatusCode = Net.HttpStatusCode.NotFound ->
+                                LogInfo "Pod %s already gone" pod
 
-                            marked <- Set.difference marked removable
-                            livePods <- Set.difference livePods removable
-                            ready <- Set.difference ready removable
-                            LogInfo "Retired %d workers (%d outstanding)" removable.Count outstanding
-                        | failed -> LogWarn "Not retiring: log collection failed for %d workers" failed.Length
-
-                    // Counted against unmarked workers, not `ready`: marked pods linger until
-                    // they are deleted, and counting them erodes the reserve to nothing.
-                    let unmarked = ready |> Seq.filter (fun p -> not (marked.Contains p)) |> List.ofSeq
-
-                    let toMark =
-                        unmarked
-                        |> List.filter (fun p -> not (busy.Contains p))
-                        |> List.truncate (max 0 (unmarked.Length - max outstanding minUnmarkedWorkers))
-
-                    // Chunked because RunRemoteCommand rejects a command of 4096 bytes or more.
-                    for chunk in List.chunkBySize 30 toMark do
-                        let names = chunk |> List.map (sprintf "'%s'") |> String.concat " "
-
-                        redisIn context ready (sprintf "SADD \"%s-retiring\" %s" helmReleaseName names)
-                        |> ignore
-
-                        marked <- Set.union marked (Set.ofList chunk)
-
-                    if not toMark.IsEmpty then
-                        LogInfo "Marked %d retiring (%d ready, %d outstanding)" toMark.Length ready.Count outstanding
+                        livePods <- Set.difference livePods (Set.ofList toRetire)
+                        LogInfo "Retired %d workers (%d outstanding)" toRetire.Length outstanding
                 with ex -> LogWarn "Worker scale-down skipped this pass: %s" ex.Message
                 // Detect if the mission is stuck from two signals: 1. job queue
                 // has in progress items but no live workers 2. the job monitor

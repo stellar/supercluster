@@ -9,7 +9,6 @@ if [ -z "$FAILED_QUEUE" ]; then echo "FAILED_QUEUE not set"; exit 1; fi
 if [ -z "$SUCCESS_QUEUE" ]; then echo "SUCCESS_QUEUE not set"; exit 1; fi
 if [ -z "$METRICS" ]; then echo "METRICS not set"; exit 1; fi
 if [ -z "$JOB_OWNERS" ]; then echo "JOB_OWNERS not set"; exit 1; fi
-if [ -z "$RELEASE_NAME" ]; then echo "RELEASE_NAME not set"; exit 1; fi
 if [ -z "$POD_NAME" ]; then echo "POD_NAME not set"; exit 1; fi
 
 # ensure redis-cli is available
@@ -27,8 +26,8 @@ if job then redis.call("HSET", KEYS[3], job, ARGV[1]) end
 return job'
 
 while true; do
-# Stop claiming once the driver marks us, so it can remove us without interrupting a range.
-if [ "$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" SISMEMBER "$RELEASE_NAME-retiring" "$POD_NAME")" = "1" ]; then
+# Stop claiming once the job monitor marks us, so the driver can remove us without interrupting a range.
+if [ "$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" SISMEMBER "retiring" "$POD_NAME")" = "1" ]; then
     echo "$(date) $POD_NAME is retiring; not claiming."
     sleep $SLEEP_INTERVAL
     continue
