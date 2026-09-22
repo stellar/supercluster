@@ -30,7 +30,7 @@ type PollOptions(kubeConfig: string, namespaceProperty: string option) =
     inherit KubeOption(kubeConfig, namespaceProperty)
 
 [<Verb("force-clean-namespace",
-       HelpText = "Delete every Service/ConfigMap/StatefulSet/Ingress/Job/DaemonSet/Deployment in the namespace and helm-uninstall any parallel-catchup-* releases. Destructive: meant for explicit recovery of a shared namespace, not for routine use.")>]
+       HelpText = "Delete every Service/ConfigMap/StatefulSet/Ingress/Job/DaemonSet/Deployment and ownerless Pod in the namespace and helm-uninstall any parallel-catchup-* releases. Destructive: meant for explicit recovery of a shared namespace, not for routine use.")>]
 type ForceCleanNamespaceOptions(kubeConfig: string, namespaceProperty: string option) =
     inherit KubeOption(kubeConfig, namespaceProperty)
 

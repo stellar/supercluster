@@ -54,9 +54,9 @@ let private sweepKind
 
 // Delete resources older than `cutoff` in the given namespace. Targets the same
 // resource type set the retired `clean` verb did (Service, ConfigMap,
-// StatefulSet, Ingress, Job, DaemonSet, Deployment) and also helm-uninstalls
-// any `parallel-catchup-*` releases (PCv2) so helm's release secrets get
-// tidied along with the workloads.
+// StatefulSet, Ingress, Job, DaemonSet, Deployment) plus ownerless Pods, and
+// also helm-uninstalls any `parallel-catchup-*` releases (PCv2) so helm's
+// release secrets get tidied along with the workloads.
 //
 // Used by both the automatic on-startup orphan sweep (cutoff = now - 2 days)
 // and the explicit `force-clean-namespace` verb (cutoff = DateTime.MaxValue,
