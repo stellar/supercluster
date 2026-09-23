@@ -22,9 +22,40 @@ open StellarSupercluster
 
 let private smallNetworkSize = 10
 
-let private searchThresholdMs = 100
+// Candidate close times are always whole seconds: sub-second values hit a
+// known rounding issue in close-time handling, so the search must never
+// propose one. The candidates are the whole seconds in [minMs, maxMs], bounds
+// included, so the default [4000, 5000] range evaluates 4000 and, only if that
+// fails, 5000. Exposed for unit tests.
+let wholeSecondCandidates (minMs: int) (maxMs: int) : int list =
+    let first = max 1000 (((minMs + 999) / 1000) * 1000)
+    let last = (maxMs / 1000) * 1000
+    [ first .. 1000 .. last ]
+
+// Binary search over ascending candidates for the smallest one that passes,
+// assuming every candidate above a passing one passes too. Returns None when
+// none passes. Exposed for unit tests.
+let searchMinPassing (candidates: int list) (passes: int -> bool) : int option =
+    let arr = Array.ofList candidates
+    let mutable failIdx = -1
+    let mutable passIdx = arr.Length
+
+    while passIdx - failIdx > 1 do
+        let mid = (failIdx + passIdx) / 2
+
+        if passes arr.[mid] then passIdx <- mid else failIdx <- mid
+
+    if passIdx < arr.Length then Some arr.[passIdx] else None
 
 // For the purposes of min block test, use high value to avoid noise from SCP timeouts
+// Flat SCP ballot/nomination timeout for the search.
+//
+// Reference measurements, 30 nodes at 500 SAC TPS (2026-07-27, image 3453):
+//   timeout=2000: externalize p75 2447ms, ledger-age p75 4592ms at T=3000 (+53%, fail)
+//   timeout=500:  externalize p75  331ms, ledger-age p75 3028ms at T=3000 (+0.9%)
+// The gap was stalled ballot rounds costing a full timeout before
+// retransmission. Kept at 2000 so that a build claiming to fix the stalls at
+// their source is tested without the shorter timeout masking the effect.
 let private timeout = 2000
 
 let private txSetSizeBufferMultiplier = 2
@@ -540,11 +571,20 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                     context.minBlockTimeMs
                     context.maxBlockTimeMs
 
-            let mutable lo = context.minBlockTimeMs
-            let mutable hi = context.maxBlockTimeMs
-            let mutable bestPassing = None
+            let candidates = wholeSecondCandidates context.minBlockTimeMs context.maxBlockTimeMs
 
-            LogInfo "Starting min block time search: T in [%d, %d] ms, fixed TPS = %d" lo hi fixedTxRate
+            if List.isEmpty candidates then
+                failwithf
+                    "No whole-second close time in [%d, %d] ms: --min-block-time-ms and --max-block-time-ms must include at least one whole second"
+                    context.minBlockTimeMs
+                    context.maxBlockTimeMs
+
+            LogInfo
+                "Starting min block time search: T in [%d, %d] ms (whole-second candidates: %s), fixed TPS = %d"
+                context.minBlockTimeMs
+                context.maxBlockTimeMs
+                (candidates |> List.map string |> String.concat ", ")
+                fixedTxRate
 
             // Restart-or-sleep between iterations. Pre-generated modes require
             // a full restart because the pregenerated txs have baked-in
@@ -572,22 +612,23 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                     System.Threading.Thread.Sleep(5 * 60 * 1000)
                     formation.EnsureAllNodesInSync allNodes
 
-            let mutable needsRecovery = false
+            let needsRecovery = ref false
 
-            while hi - lo > searchThresholdMs do
-                if needsRecovery then restartCoreSetsOrWait ()
+            // One search step: recover from the previous candidate if needed,
+            // then evaluate T.
+            let evaluateCandidate (t: int) : bool =
+                if needsRecovery.Value then restartCoreSetsOrWait ()
 
-                let mid = lo + (hi - lo) / 2
-
-                if evaluateAt mid then
-                    LogInfo "SLA met at T=%dms; lowering upper bound" mid
-                    hi <- mid
-                    bestPassing <- Some mid
-                    needsRecovery <- false
+                if evaluateAt t then
+                    LogInfo "SLA met at T=%dms; lowering upper bound" t
+                    needsRecovery.Value <- false
+                    true
                 else
-                    LogInfo "SLA not met at T=%dms; raising lower bound" mid
-                    lo <- mid
-                    needsRecovery <- true
+                    LogInfo "SLA not met at T=%dms; raising lower bound" t
+                    needsRecovery.Value <- true
+                    false
+
+            let bestPassing = searchMinPassing candidates evaluateCandidate
 
             match bestPassing with
             | Some t ->

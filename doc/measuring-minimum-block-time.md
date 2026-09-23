@@ -7,7 +7,7 @@ Supercluster provides two missions that measure the minimum ledger target close 
 
 Other than the type of load generated, these two missions are identical. They both spin up a configurable network of stellar-core nodes, then search for the smallest `ledgerTargetCloseTimeMilliseconds` value that the network can sustain, using a binary search over the range `[--min-block-time-ms, --max-block-time-ms]`. For each candidate close time `T`, the missions upgrade the network's SCP timing settings to `T` (with proportionally scaled ballot and nomination timeouts), run ~5 minutes of load at the fixed transaction rate, then check the `ledger.age.closed-histogram` metric on every node against the SLA. If the SLA is met, the missions try again with a smaller `T`; otherwise, they try with a larger `T`.
 
-The missions perform the binary search to find the minimum sustainable block time. Upon completion, the missions emit a log line of the form `Minimum sustainable block time: 4500 ms (fixed TPS 1000, image ...)`.
+The missions perform the binary search to find the minimum sustainable block time. Upon completion, the missions emit a log line of the form `Minimum sustainable block time: 4000 ms (fixed TPS 1000, image ...)`.
 
 ## SLA: pass/fail criteria
 
@@ -20,7 +20,7 @@ A candidate close time `T` is considered a **pass** if and only if, **on every n
 
 If any node violates any of these bounds, `T` is considered a **fail** and the binary search raises its lower bound. The same is true if the load run itself errors (e.g., stellar-core's internal `loadgen-run-failed` counter increments, nodes fall out of sync, or peers report inconsistent ledger hashes) — in that case the mission treats the iteration as a fail and the search continues upward.
 
-The search terminates when the upper and lower bounds are within 100 ms of each other. If no candidate in the range satisfied the SLA, the mission fails with `"No block time in [lo, hi] ms satisfied the SLA at TPS N"`.
+Candidate close times are always whole seconds: the search runs over the whole seconds in `[--min-block-time-ms, --max-block-time-ms]`, bounds included, so the default range evaluates `4000` ms and, only if that fails, `5000` ms. If no candidate in the range satisfied the SLA, the mission fails with `"No block time in [lo, hi] ms satisfied the SLA at TPS N"`.
 
 ## Docker images with performance tests enabled
 

@@ -1235,3 +1235,43 @@ let ``core container env is unchanged when no extra variables are given`` () =
         [ "STELLAR_CORE_PEER_SHORT_NAME"; "ASAN_OPTIONS" ],
         c.Env |> Seq.map (fun e -> e.Name) |> List.ofSeq
     )
+
+[<Fact>]
+let ``Min block time candidates are the whole seconds in the range, bounds included`` () =
+    Assert.Equal<int list>([ 4000; 5000 ], MinBlockTimeTest.wholeSecondCandidates 4000 5000)
+    Assert.Equal<int list>([ 2000; 3000; 4000 ], MinBlockTimeTest.wholeSecondCandidates 1500 4999)
+    Assert.Equal<int list>([ 1000 ], MinBlockTimeTest.wholeSecondCandidates 0 1000)
+    Assert.Empty(MinBlockTimeTest.wholeSecondCandidates 1100 1900)
+
+[<Fact>]
+let ``Min block time search finds the smallest passing candidate`` () =
+    let candidates = [ 1000 .. 1000 .. 5000 ]
+
+    for threshold in candidates do
+        let evaluated = System.Collections.Generic.List<int>()
+
+        let result =
+            MinBlockTimeTest.searchMinPassing
+                candidates
+                (fun t ->
+                    evaluated.Add t
+                    t >= threshold)
+
+        Assert.Equal(Some threshold, result)
+        Assert.InRange(evaluated.Count, 1, 3)
+
+    Assert.Equal(None, MinBlockTimeTest.searchMinPassing candidates (fun _ -> false))
+    Assert.Equal(None, MinBlockTimeTest.searchMinPassing [] (fun _ -> true))
+
+    // The default [4000, 5000] range evaluates 4000 first, then 5000 only if 4000 fails.
+    let evaluated = System.Collections.Generic.List<int>()
+
+    let result =
+        MinBlockTimeTest.searchMinPassing
+            [ 4000; 5000 ]
+            (fun t ->
+                evaluated.Add t
+                t >= 5000)
+
+    Assert.Equal(Some 5000, result)
+    Assert.Equal<int list>([ 4000; 5000 ], List.ofSeq evaluated)
