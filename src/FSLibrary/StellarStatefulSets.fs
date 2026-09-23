@@ -70,6 +70,214 @@ let private getAveragePeerCount (topology: Map<string, string array>) : float =
     let nodeCount = Map.count topology
     if nodeCount > 0 then float total / float nodeCount else 0.0
 
+// Pure check of an observed stellar-core pod -> worker-node mapping for
+// --one-stellar-core-per-host: every pod in mustBeScheduled is listed exactly
+// once and on a node, and no two scheduled pods share a node. Pods not yet
+// scheduled that are not in mustBeScheduled (other core sets still starting)
+// are ignored. Returns the distinct nodes. Exposed for unit tests.
+let validateOnePerHost (mustBeScheduled: string list) (observed: (string * string) list) : Result<string list, string> =
+    let names = List.map fst observed
+    let isScheduled (node: string) = not (String.IsNullOrWhiteSpace node)
+
+    let missing =
+        mustBeScheduled
+        |> List.filter (fun pod -> not (List.contains pod names))
+        |> List.sort
+
+    let duplicates =
+        names
+        |> List.countBy id
+        |> List.filter (fun (_, c) -> c > 1)
+        |> List.map fst
+        |> List.sort
+
+    let unscheduled =
+        observed
+        |> List.filter (fun (pod, node) -> List.contains pod mustBeScheduled && not (isScheduled node))
+        |> List.map fst
+        |> List.sort
+
+    let scheduled = observed |> List.filter (fun (_, node) -> isScheduled node)
+
+    if List.isEmpty mustBeScheduled then
+        Error "no stellar-core pods to check (empty core sets)"
+    elif not (List.isEmpty missing) then
+        Error(
+            sprintf
+                "missing stellar-core pods (%d of %d): %s"
+                missing.Length
+                mustBeScheduled.Length
+                (String.concat " " missing)
+        )
+    elif not (List.isEmpty duplicates) then
+        Error(sprintf "duplicate stellar-core pod names: %s" (String.concat " " duplicates))
+    elif not (List.isEmpty unscheduled) then
+        Error(sprintf "stellar-core pods without a worker node (unscheduled): %s" (String.concat " " unscheduled))
+    else
+        let hosts = scheduled |> List.map snd |> List.distinct
+
+        if hosts.Length < scheduled.Length then
+            let shared =
+                scheduled
+                |> List.groupBy snd
+                |> List.filter (fun (_, ps) -> ps.Length > 1)
+                |> List.map (fun (h, ps) -> sprintf "%s: %s" h (String.concat " " (List.map fst ps)))
+
+            Error(
+                sprintf
+                    "stellar-core pods share worker nodes (%d pods on %d nodes): %s"
+                    scheduled.Length
+                    hosts.Length
+                    (String.concat "; " shared)
+            )
+        else
+            Ok hosts
+
+// With --one-stellar-core-per-host a stellar-core pod stays unschedulable until an
+// eligible worker node is free for it. On an autoscaling cluster that is
+// normal for about a minute while nodes are provisioned; past these bounds
+// the run is not going to get its nodes, so it fails instead of waiting for
+// replicas that can never become ready.
+let unschedulableGraceSec = 180
+
+let unschedulableAutoscaledGraceSec = 600
+let autoscalerFailureConfirmSec = 60
+
+// Last scheduling check per run (nonce). Restarts wait for every StatefulSet in
+// parallel; sharing the 15 s throttle keeps that to one check per run.
+let private lastSchedulingChecks = System.Collections.Concurrent.ConcurrentDictionary<string, DateTime>()
+
+// When the scheduler marked this pod Unschedulable, and its explanation (e.g.
+// "0/16 nodes are available: 13 node(s) had untolerated taint(s), 3 node(s)
+// didn't match pod anti-affinity rules"). None once it is scheduled or before
+// the scheduler has looked at it. Exposed for unit tests.
+let unschedulableSince (pod: V1Pod) : (DateTime * string) option =
+    if isNull pod.Status || isNull pod.Status.Conditions then
+        None
+    else
+        pod.Status.Conditions
+        |> Seq.tryFind (fun c -> c.Type = "PodScheduled" && c.Status = "False" && c.Reason = "Unschedulable")
+        |> Option.map
+            (fun c ->
+                let since =
+                    if c.LastTransitionTime.HasValue then
+                        c.LastTransitionTime.Value.ToUniversalTime()
+                    else
+                        DateTime.UtcNow
+
+                since, (if isNull c.Message then "" else c.Message))
+
+let private reportedByKarpenter (ev: Corev1Event) : bool =
+    (not (isNull ev.ReportingComponent) && ev.ReportingComponent.Contains "karpenter")
+    || (not (isNull ev.Source)
+        && not (isNull ev.Source.Component)
+        && ev.Source.Component.Contains "karpenter")
+
+// Autoscaler reports on a pending pod: Karpenter's Nominated and
+// cluster-autoscaler's TriggeredScaleUp mean a node is on its way; Karpenter's
+// FailedScheduling and cluster-autoscaler's NotTriggerScaleUp mean no node
+// pool can provide one. Exposed for unit tests.
+let autoscalerProvisioning (ev: Corev1Event) : bool =
+    ev.Reason = "TriggeredScaleUp"
+    || (ev.Reason = "Nominated" && reportedByKarpenter ev)
+
+let autoscalerCannotProvision (ev: Corev1Event) : bool =
+    ev.Reason = "NotTriggerScaleUp"
+    || (ev.Reason = "FailedScheduling" && reportedByKarpenter ev)
+
+let private eventTime (ev: Corev1Event) : DateTime =
+    if ev.LastTimestamp.HasValue then ev.LastTimestamp.Value
+    elif ev.EventTime.HasValue then ev.EventTime.Value
+    else DateTime.MinValue
+
+// The failure to report when the run cannot schedule its stellar-core pods, if it
+// cannot: the longest-stalled pod that the autoscaler says it cannot provision
+// a node for (once that has held for autoscalerFailureConfirmSec) or that has
+// been unschedulable past the grace period (longer while an autoscaler is
+// provisioning for this run). Each stalled entry is (pod, unschedulable since,
+// scheduler message, autoscaler failure). Exposed for unit tests.
+let schedulingStallVerdict
+    (now: DateTime)
+    (autoscalerActive: bool)
+    (podCount: int)
+    (stalled: (string * DateTime * string * string option) list)
+    : string option =
+    let grace =
+        if autoscalerActive then
+            unschedulableAutoscaledGraceSec
+        else
+            unschedulableGraceSec
+
+    let fix =
+        sprintf
+            "--one-stellar-core-per-host needs a separate eligible worker node for each of the %d stellar-core pods: make that many nodes available to this run (node pool size or limits, labels matching --require-node-labels and --avoid-node-labels, taints covered by --tolerate-node-taints), run a smaller topology, or drop --one-stellar-core-per-host"
+            podCount
+
+    stalled
+    |> List.sortBy (fun (_, since, _, _) -> since)
+    |> List.tryPick
+        (fun (pod, since, schedulerMessage, autoscalerFailure) ->
+            let waited = int (now - since).TotalSeconds
+
+            match autoscalerFailure with
+            | Some failure when waited >= autoscalerFailureConfirmSec ->
+                Some(
+                    sprintf
+                        "Stellar-core pod %s cannot be scheduled and the cluster autoscaler cannot provision a node for it: %s. %s."
+                        pod
+                        failure
+                        fix
+                )
+            | _ when waited >= grace ->
+                Some(
+                    sprintf
+                        "Stellar-core pod %s has been unschedulable for %d s (%s): %s. %s."
+                        pod
+                        waited
+                        (if autoscalerActive then
+                             "while the autoscaler was provisioning nodes"
+                         else
+                             "no autoscaler is provisioning nodes for this run")
+                        schedulerMessage
+                        fix
+                )
+            | _ -> None)
+
+// What the autoscaler says about the stalled stellar-core pods: whether it is
+// provisioning nodes for this run at all, and for each stalled pod its latest
+// report that it cannot provision one (unless a nomination came after it).
+// Events outlive their pods and StatefulSet pods reuse names across restarts,
+// so only events for the current pods' UIDs count. stalled holds (pod,
+// unschedulable since, scheduler message). Exposed for unit tests.
+let autoscalerView
+    (podUids: Set<string>)
+    (events: Corev1Event list)
+    (stalled: (string * DateTime * string) list)
+    : bool * (string * DateTime * string * string option) list =
+    let current =
+        events
+        |> List.filter (fun ev -> not (isNull ev.InvolvedObject) && podUids.Contains ev.InvolvedObject.Uid)
+
+    let latest (pred: Corev1Event -> bool) (pod: string) =
+        current
+        |> List.filter (fun ev -> ev.InvolvedObject.Name = pod && pred ev)
+        |> List.sortBy eventTime
+        |> List.tryLast
+
+    let withFailures =
+        stalled
+        |> List.map
+            (fun (pod, since, msg) ->
+                let failure =
+                    match latest autoscalerCannotProvision pod, latest autoscalerProvisioning pod with
+                    | Some f, Some n when eventTime n > eventTime f -> None
+                    | Some f, _ -> Some f.Message
+                    | None, _ -> None
+
+                pod, since, msg, failure)
+
+    (current |> List.exists autoscalerProvisioning), withFailures
+
 type StellarFormation with
 
     member self.GetCoreSetForStatefulSet(ss: V1StatefulSet) =
@@ -102,6 +310,22 @@ type StellarFormation with
                 match forbiddenEvent with
                 | Some (ev) -> ()
                 | None ->
+                    if self.NetworkCfg.missionContext.oneStellarCorePerHost then
+                        let now = DateTime.UtcNow
+                        let run = self.NetworkCfg.Nonce
+                        let last = lastSchedulingChecks.GetOrAdd(run, DateTime.MinValue)
+
+                        if
+                            (now - last).TotalSeconds >= 15.0
+                            && lastSchedulingChecks.TryUpdate
+                                (
+                                    run,
+                                    now,
+                                    last
+                                )
+                        then
+                            self.FailIfCorePodsUnschedulable()
+
                     self.sleepUntilNextRateLimitedApiCallTime ()
 
                     let s =
@@ -127,9 +351,15 @@ type StellarFormation with
         | None -> ()
         | Some (ev) -> failwith (sprintf "Statefulset %s pod creation forbidden: %s" name ev.Message)
 
-        self.LaunchLogTailingTasksForCoreSet(self.GetCoreSetForStatefulSet ss)
+        let coreSet = self.GetCoreSetForStatefulSet ss
+        self.LaunchLogTailingTasksForCoreSet coreSet
 
         LogInfo "All replicas on %s/%s ready" ns name
+
+        // Every time a core set's pods come up, at formation creation and on
+        // every restart, whatever the mission.
+        if self.NetworkCfg.missionContext.oneStellarCorePerHost && coreSet.CurrentCount > 0 then
+            self.CheckCorePlacement [ coreSet ]
 
     // Watches the provided StatefulSet until the count of ready replicas equals the
     // count of configured replicas. This normally represents "successful startup".
@@ -141,6 +371,107 @@ type StellarFormation with
                 self.WaitForAllReplicasReady ss
 
             LogInfo "All replicas on %s ready" (self.ToString())
+
+    // This run's stellar-core StatefulSet pods, selected by the label that
+    // --one-stellar-core-per-host puts on them.
+    member self.ListCorePods() : V1Pod list =
+        let cfg = self.NetworkCfg
+
+        let selector =
+            sprintf
+                "app=stellar-core,%s=%s,%s=%s"
+                StellarCoreCfg.CfgVal.onePerHostLabelKey
+                StellarCoreCfg.CfgVal.onePerHostLabelValue
+                StellarCoreCfg.CfgVal.runNonceLabelKey
+                cfg.Nonce
+
+        self.sleepUntilNextRateLimitedApiCallTime ()
+
+        self
+            .Kube
+            .ListNamespacedPod(
+                namespaceParameter = cfg.NamespaceProperty,
+                labelSelector = selector
+            )
+            .Items
+        |> List.ofSeq
+
+    // --one-stellar-core-per-host: logs where the given core sets' pods landed
+    // and fails unless each is scheduled and no two of this run's stellar-core
+    // pods share a worker node (see validateOnePerHost); pods on their way out
+    // are left out. WaitForAllReplicasReady runs it whenever a core set's pods
+    // have come up, so formation creation and every restart, in every
+    // mission, are checked. The mapping is otherwise invisible in run logs,
+    // and a packed placement silently changes what a benchmark measures.
+    member self.CheckCorePlacement(coreSets: CoreSet list) =
+        let cfg = self.NetworkCfg
+
+        let mustBeScheduled =
+            [ for cs in coreSets do
+                  for i in 0 .. cs.CurrentCount - 1 do
+                      yield (cfg.PodName cs i).StringName ]
+
+        let observed =
+            self.ListCorePods()
+            |> List.filter (fun p -> not p.Metadata.DeletionTimestamp.HasValue)
+            |> List.map (fun p -> p.Metadata.Name, (if isNull p.Spec.NodeName then "" else p.Spec.NodeName))
+
+        for pod, node in observed |> List.filter (fun (pod, _) -> List.contains pod mustBeScheduled) do
+            LogInfo "Placement: %s on %s" pod (if node = "" then "<unscheduled>" else node)
+
+        match validateOnePerHost mustBeScheduled observed with
+        | Ok hosts ->
+            LogInfo "Placement check passed: %d stellar-core pods of this run, one per worker node" hosts.Length
+        | Error msg -> failwithf "Placement check failed (--one-stellar-core-per-host): %s" msg
+
+    // With --one-stellar-core-per-host, fail with an actionable message as soon
+    // as stellar-core pods clearly cannot be scheduled (see autoscalerView and
+    // schedulingStallVerdict), instead of waiting for replicas that can never
+    // become ready. Uses only namespaced pod and event reads.
+    member self.FailIfCorePodsUnschedulable() =
+        let pods = self.ListCorePods()
+
+        let stalled =
+            pods
+            |> List.choose
+                (fun p ->
+                    unschedulableSince p
+                    |> Option.map (fun (since, msg) -> p.Metadata.Name, since, msg))
+
+        if not (List.isEmpty stalled) then
+            let podEvents (reason: string) =
+                self.sleepUntilNextRateLimitedApiCallTime ()
+
+                self
+                    .Kube
+                    .ListNamespacedEvent(
+                        namespaceParameter = self.NetworkCfg.NamespaceProperty,
+                        fieldSelector = sprintf "involvedObject.kind=Pod,reason=%s" reason
+                    )
+                    .Items
+                |> List.ofSeq
+
+            let events =
+                [ "Nominated"; "TriggeredScaleUp"; "FailedScheduling"; "NotTriggerScaleUp" ]
+                |> List.collect podEvents
+
+            let podUids = pods |> List.map (fun p -> p.Metadata.Uid) |> Set.ofList
+            let autoscalerActive, withAutoscaler = autoscalerView podUids events stalled
+            let now = DateTime.UtcNow
+            let _, oldest, oldestMessage, _ = withAutoscaler |> List.minBy (fun (_, since, _, _) -> since)
+
+            LogInfo
+                "%d stellar-core pod(s) unschedulable, longest for %d s (autoscaler %s): %s"
+                stalled.Length
+                (int (now - oldest).TotalSeconds)
+                (if autoscalerActive then "provisioning" else "not seen")
+                oldestMessage
+
+            let podCount = self.NetworkCfg.CoreSetList |> List.sumBy (fun cs -> cs.CurrentCount)
+
+            match schedulingStallVerdict now autoscalerActive podCount withAutoscaler with
+            | Some failure -> failwith failure
+            | None -> ()
 
     member self.WithLive name (live: bool) =
         // Serialize the shared-state mutation and the StatefulSet replace:

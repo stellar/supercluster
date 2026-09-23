@@ -67,6 +67,7 @@ type MissionOptions
         numInstances: int option,
         keepData: bool,
         unevenSched: bool,
+        oneStellarCorePerHost: bool,
         requireNodeLabels: seq<string>,
         avoidNodeLabels: seq<string>,
         tolerateNodeTaints: seq<string>,
@@ -296,6 +297,12 @@ type MissionOptions
              Required = false,
              Default = false)>]
     member self.UnevenSched = unevenSched
+
+    [<Option("one-stellar-core-per-host",
+             HelpText = "Place this run's stellar-core pods (validators and watchers) one per worker node, with a hard pod anti-affinity, and have each request its limits so an autoscaler provisions a node sized to what the pod may use. The placement is checked whenever pods start (creation and every restart), and the run fails with the scheduler's reason if pods cannot be scheduled: once the cluster autoscaler reports it cannot provision a node, or after 3 minutes unschedulable (10 while an autoscaler is provisioning nodes). For identical nodes across runs, also pin the instance type, e.g. --require-node-labels node.kubernetes.io/instance-type:c5.4xlarge.",
+             Required = false,
+             Default = false)>]
+    member self.OneStellarCorePerHost = oneStellarCorePerHost
 
     [<Option("require-node-labels", HelpText = "Only run on nodes with matching `key:value` labels", Required = false)>]
     member self.RequireNodeLabels = requireNodeLabels
@@ -865,6 +872,7 @@ let main argv =
                                coreResources = SmallTestResources
                                keepData = mission.KeepData
                                unevenSched = mission.UnevenSched
+                               oneStellarCorePerHost = mission.OneStellarCorePerHost
                                // Off by default; perf-sensitive missions (Max TPS, Min Block Time)
                                // turn this on themselves via their MissionContext override.
                                dedicatedNodes = false
