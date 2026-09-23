@@ -121,6 +121,7 @@ type MissionOptions
         numPregeneratedTxs: int option,
         genesisTestAccountCount: int option,
         asanOptions: string option,
+        coreEnv: seq<string>,
         catchupSkipKnownResultsForTesting: bool option,
         checkEventsAreConsistentWithEntryDiffs: bool option,
         enableRelaxedAutoQsetConfig: bool,
@@ -548,6 +549,11 @@ type MissionOptions
     [<Option("asan-options", HelpText = "Value for ASAN_OPTIONS environment variable", Required = false)>]
     member self.asanOptions = asanOptions
 
+    [<Option("core-env",
+             HelpText = "Extra NAME=VALUE environment variables for every stellar-core container, in StatefulSet and job pods alike (the overlay process inherits them). Pass several after one flag, as --core-env A=1 B=2: repeating the flag is an error, and a quoted \"A=1 B=2\" sets only A (to \"1 B=2\"). NAME must be an environment variable name; STELLAR_CORE_PEER_SHORT_NAME and ASAN_OPTIONS are set by the harness and cannot be overridden (use --asan-options).",
+             Required = false)>]
+    member self.CoreEnv = coreEnv
+
     [<Option("catchup-skip-known-results-for-testing",
              HelpText = "when this flag is provided, pubnet parallel catchup workers will run with CATCHUP_SKIP_KNOWN_RESULTS_FOR_TESTING = true, resulting in skipping application of failed transaction and signature verification",
              Required = false)>]
@@ -822,6 +828,9 @@ let main argv =
                          | true, false -> failwith "Error: --benchmark-only requires --benchmark-infra to be set"
                          | _ -> ()
 
+                         let coreEnv = MissionContext.parseCoreEnv mission.CoreEnv
+                         StellarKubeSpecs.rejectReservedCoreEnv coreEnv
+
                          let missionContext =
                              { MissionContext.kube = kube
                                kubeCfg = mission.KubeConfig
@@ -925,6 +934,7 @@ let main argv =
                                updateSorobanCosts = None
                                genesisTestAccountCount = mission.GenesisTestAccountCount
                                asanOptions = mission.asanOptions
+                               coreEnv = coreEnv
                                enableRelaxedAutoQsetConfig = mission.EnableRelaxedAutoQsetConfig
                                jobMonitorExternalHost = mission.JobMonitorExternalHost
                                txBatchMaxSize = mission.TxBatchMaxSize

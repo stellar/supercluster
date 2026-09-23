@@ -131,6 +131,7 @@ let ctx : MissionContext =
       updateSorobanCosts = None
       genesisTestAccountCount = None
       asanOptions = None
+      coreEnv = []
       enableRelaxedAutoQsetConfig = false
       jobMonitorExternalHost = None
       txBatchMaxSize = None
@@ -776,3 +777,113 @@ let ``Throttle retry never starts an attempt the budget cannot pay for`` () =
     Assert.Equal(2, stub.Calls)
     // Stopping early is the point: it must not have slept out the full budget.
     Assert.True(sw.Elapsed < System.TimeSpan.FromMilliseconds 750.0, sprintf "took %O" sw.Elapsed)
+
+[<Fact>]
+let ``core-env parser accepts NAME=VALUE pairs and preserves values with '='`` () =
+    let parsed =
+        MissionContext.parseCoreEnv [ "STELLAR_OVERLAY_UDP_RECEIVE_BUFFER_BYTES=4194304"
+                                      "STELLAR_OVERLAY_UDP_RECEIVE_BUFFER_FORCE=1"
+                                      "STELLAR_OVERLAY_TRACE_TIMINGS=1"
+                                      "RUST_LOG=info,stellar_overlay::timing=debug"
+                                      "FOO=a=b" ]
+
+    Assert.Equal<(string * string) list>(
+        [ ("STELLAR_OVERLAY_UDP_RECEIVE_BUFFER_BYTES", "4194304")
+          ("STELLAR_OVERLAY_UDP_RECEIVE_BUFFER_FORCE", "1")
+          ("STELLAR_OVERLAY_TRACE_TIMINGS", "1")
+          ("RUST_LOG", "info,stellar_overlay::timing=debug")
+          ("FOO", "a=b") ],
+        parsed
+    )
+
+    Assert.Empty(MissionContext.parseCoreEnv [])
+
+[<Fact>]
+let ``core-env parser rejects malformed and duplicate entries`` () =
+    Assert.ThrowsAny<System.Exception>(fun () -> MissionContext.parseCoreEnv [ "NOEQUALS" ] |> ignore)
+    |> ignore
+
+    Assert.ThrowsAny<System.Exception>(fun () -> MissionContext.parseCoreEnv [ "=novalue-name" ] |> ignore)
+    |> ignore
+
+    Assert.ThrowsAny<System.Exception>
+        (fun () ->
+            MissionContext.parseCoreEnv [ "A=1"
+                                          "A=2" ]
+            |> ignore)
+    |> ignore
+
+    // Blank entries and names that are not environment variable names are
+    // malformed too, not silently dropped or passed on to Kubernetes.
+    // A trailing newline in the name must not pass either ('$' would allow it).
+    for bad in [ ""
+                 "   "
+                 "FOO-BAR=1"
+                 "A B=1"
+                 "1A=2"
+                 " RUST_LOG=info"
+                 "foo\n=3"
+                 "FOO\r\n=1" ] do
+        Assert.ThrowsAny<System.Exception>(fun () -> MissionContext.parseCoreEnv [ bad ] |> ignore)
+        |> ignore
+
+[<Fact>]
+let ``core-env cannot override the variables the harness sets`` () =
+    for reserved in [ "STELLAR_CORE_PEER_SHORT_NAME"; "ASAN_OPTIONS" ] do
+        Assert.ThrowsAny<System.Exception>(fun () -> rejectReservedCoreEnv [ (reserved, "x") ] |> ignore)
+        |> ignore
+
+        Assert.ThrowsAny<System.Exception>
+            (fun () ->
+                CoreContainerForCommand
+                    "img"
+                    NoConfigFile
+                    None
+                    [ (reserved, "x") ]
+                    SmallTestResources
+                    [| "run" |]
+                    [||]
+                    [| "core-0" |]
+                |> ignore)
+        |> ignore
+
+    // Other names pass.
+    rejectReservedCoreEnv [ ("RUST_LOG", "info") ]
+
+[<Fact>]
+let ``core container env carries opt-in extra variables after the fixed ones`` () =
+    let c =
+        CoreContainerForCommand
+            "img"
+            NoConfigFile
+            None
+            [ ("STELLAR_OVERLAY_UDP_RECEIVE_BUFFER_BYTES", "4194304") ]
+            SmallTestResources
+            [| "run" |]
+            [||]
+            [| "core-0" |]
+
+    let names = c.Env |> Seq.map (fun e -> e.Name) |> List.ofSeq
+
+    Assert.Equal<string list>(
+        [ "STELLAR_CORE_PEER_SHORT_NAME"
+          "ASAN_OPTIONS"
+          "STELLAR_OVERLAY_UDP_RECEIVE_BUFFER_BYTES" ],
+        names
+    )
+
+    Assert.Equal(
+        "4194304",
+        (c.Env |> Seq.find (fun e -> e.Name = "STELLAR_OVERLAY_UDP_RECEIVE_BUFFER_BYTES"))
+            .Value
+    )
+
+[<Fact>]
+let ``core container env is unchanged when no extra variables are given`` () =
+    let c =
+        CoreContainerForCommand "img" NoConfigFile None [] SmallTestResources [| "run" |] [||] [| "core-0" |]
+
+    Assert.Equal<string list>(
+        [ "STELLAR_CORE_PEER_SHORT_NAME"; "ASAN_OPTIONS" ],
+        c.Env |> Seq.map (fun e -> e.Name) |> List.ofSeq
+    )

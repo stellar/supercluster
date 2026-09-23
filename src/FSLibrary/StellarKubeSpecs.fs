@@ -284,10 +284,25 @@ let emptyDirDataVolumeSpec (c: CoreSetOptions option) : V1Volume =
 
     V1Volume(name = CfgVal.dataVolumeName, emptyDir = src)
 
+// The harness sets these on every stellar-core container itself (the peer name
+// selects the pod's config), so --core-env may not override them.
+let reservedCoreEnvNames =
+    set [ CfgVal.peerNameEnvVarName
+          CfgVal.asanOptionsEnvVarName ]
+
+let rejectReservedCoreEnv (env: (string * string) list) : unit =
+    match env |> List.tryFind (fun (name, _) -> reservedCoreEnvNames.Contains name) with
+    | Some (name, _) ->
+        failwithf
+            "--core-env cannot set %s: the harness sets it on every stellar-core container (use --asan-options for ASAN_OPTIONS)"
+            name
+    | None -> ()
+
 let CoreContainerForCommand
     (imageName: string)
     (configOpt: ConfigOption)
     (asanOptions: string option)
+    (extraEnv: (string * string) list)
     (cr: CoreResources)
     (command: string array)
     (initCommands: ShCmd array)
@@ -336,13 +351,19 @@ let CoreContainerForCommand
                  exit |]
 
     let res = GetCoreResourceRequirements cr
+    rejectReservedCoreEnv extraEnv
 
     V1Container(
         name = containerName,
         image = imageName,
         command = [| "/bin/sh" |],
         args = [| "-x"; "-c"; allCmdsAndCleanup.ToString() |],
-        env = [| peerNameEnvVar; asanOptionsEnvVar |],
+        env =
+            Array.append
+                [| peerNameEnvVar; asanOptionsEnvVar |]
+                (extraEnv
+                 |> List.map (fun (n, v) -> V1EnvVar(name = n, value = v))
+                 |> Array.ofList),
         resources = res,
         securityContext = V1SecurityContext(capabilities = V1Capabilities(add = [| "NET_ADMIN" |])),
         volumeMounts = CoreContainerVolumeMounts peerOrJobNames configOpt
@@ -721,10 +742,21 @@ type NetworkCfg with
 
         let containers =
             match self.jobCoreSetOptions with
-            | None -> [| CoreContainerForCommand image cfgOpt asan res command [||] [| jobName |] |]
+            | None ->
+                [| CoreContainerForCommand image cfgOpt asan self.missionContext.coreEnv res command [||] [| jobName |] |]
             | Some (opts) ->
                 let initCmds = self.getInitCommands cfgOpt opts
-                let coreContainer = CoreContainerForCommand image cfgOpt asan res command initCmds [| jobName |]
+
+                let coreContainer =
+                    CoreContainerForCommand
+                        image
+                        cfgOpt
+                        asan
+                        self.missionContext.coreEnv
+                        res
+                        command
+                        initCmds
+                        [| jobName |]
 
                 match opts.dbType with
                 | Postgres -> [| coreContainer; PostgresContainer self.missionContext.postgresImage |]
@@ -823,7 +855,15 @@ type NetworkCfg with
 
         let containers =
             [| WithProbes
-                (CoreContainerForCommand imageName cfgOpt asan res runCmd initCommands peerNames)
+                (CoreContainerForCommand
+                    imageName
+                    cfgOpt
+                    asan
+                    self.missionContext.coreEnv
+                    res
+                    runCmd
+                    initCommands
+                    peerNames)
                 self.missionContext.probeTimeout
                HistoryContainer self.missionContext.nginxImage |]
 

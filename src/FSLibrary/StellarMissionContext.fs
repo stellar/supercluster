@@ -126,6 +126,10 @@ type MissionContext =
 
       asanOptions: string option
 
+      // Extra environment for every stellar-core container (and the overlay
+      // process it spawns), as (NAME, VALUE) pairs from --core-env.
+      coreEnv: (string * string) list
+
       // Tail logging can cause the pubnet simulation missions like SorobanLoadGeneration
       // and SimulatePubnet to fail on the heartbeat handler due to what looks like a
       // server disconnection. Our solution for now is to just disable tail logging on
@@ -160,3 +164,31 @@ type MissionContext =
       driftPct: int
       ledgerCloseTimeMs: int option
       forceOldStyleTriggerTimer: bool option }
+
+module MissionContext =
+    /// Parse repeatable --core-env NAME=VALUE entries. Rejects blank or malformed entries, names that are not
+    /// environment variable names, and duplicate names, so a typo cannot silently drop a setting.
+    let parseCoreEnv (entries: seq<string>) : (string * string) list =
+        let parsed =
+            entries
+            |> Seq.map
+                (fun e ->
+                    match e.IndexOf('=') with
+                    | i when
+                        i > 0
+                        && System.Text.RegularExpressions.Regex.IsMatch(
+                            e.Substring(0, i),
+                            @"\A[A-Za-z_][A-Za-z0-9_]*\z"
+                        ) -> (e.Substring(0, i), e.Substring(i + 1))
+                    | _ ->
+                        failwithf
+                            "--core-env expects NAME=VALUE with NAME made of letters, digits and underscores, not starting with a digit; got '%s'"
+                            e)
+            |> List.ofSeq
+
+        let names = parsed |> List.map fst
+
+        if List.length names <> (names |> List.distinct |> List.length) then
+            failwithf "--core-env has duplicate names: %A" names
+
+        parsed
