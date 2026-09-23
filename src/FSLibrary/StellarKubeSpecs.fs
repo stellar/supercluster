@@ -103,6 +103,24 @@ let makeResourceRequirementsWithStorageLimit
     : V1ResourceRequirements =
     makeResourceRequirementsCommon cpuReqMili memReqMebi cpuLimMili memLimMebi storageReqGibi storageLimGibi true
 
+// Requests raised to the limits, for pods placed one per worker node: an
+// autoscaler provisions a host for a pod's requests, so reserving the limits
+// sizes each host to what its pod may use rather than to its much smaller
+// request. A resource without a limit keeps its request. Exposed for unit
+// tests.
+let reserveLimits (r: V1ResourceRequirements) : V1ResourceRequirements =
+    let requests =
+        if isNull r.Requests then
+            Dictionary<string, ResourceQuantity>()
+        else
+            Dictionary<string, ResourceQuantity>(r.Requests)
+
+    if not (isNull r.Limits) then
+        for KeyValue (name, limit) in r.Limits do
+            requests.[name] <- limit
+
+    V1ResourceRequirements(requests = requests, limits = r.Limits)
+
 let PgResourceRequirements : V1ResourceRequirements =
     // Postgres needs 1 vCPU and 1GB RAM.
     makeResourceRequirements 1000 1024 1000 1024
@@ -448,6 +466,25 @@ let dedicatedNodeAntiAffinity (nonce: string) : V1PodAntiAffinity =
 
     V1PodAntiAffinity(requiredDuringSchedulingIgnoredDuringExecution = [| term |])
 
+// A required pod anti-affinity term among *this* run's stellar-core StatefulSet
+// pods (validators and watchers): no two of them may share a worker node.
+// Scoped by the one-per-host label so job pods and the HTTP proxy, which also
+// carry the app and run-nonce labels, are neither repelled nor repelling. Complements dedicatedNodeAntiAffinity, which
+// only separates this run from other runs.
+let onePerHostTerm (nonce: string) : V1PodAffinityTerm =
+    let selector =
+        V1LabelSelector(
+            matchLabels = (CfgVal.labels |> Map.add CfgVal.onePerHostLabelKey CfgVal.onePerHostLabelValue),
+            matchExpressions =
+                [| V1LabelSelectorRequirement(
+                       key = CfgVal.runNonceLabelKey,
+                       operatorProperty = "In",
+                       values = [| nonce |]
+                   ) |]
+        )
+
+    V1PodAffinityTerm(labelSelector = selector, topologyKey = "kubernetes.io/hostname")
+
 
 // Apply the per-run anchor owner reference to `meta` if one has been set on
 // `nCfg`. Pre-anchor (e.g. the anchor itself), this is a no-op. Once the
@@ -492,6 +529,52 @@ type NetworkCfg with
         match na, paa with
         | None, None -> None
         | _ -> Some(V1Affinity(?nodeAffinity = na, ?podAntiAffinity = paa))
+
+    // Labels for the stellar-core StatefulSet pods only: the shared pod labels,
+    // plus the one-per-host marker when something selects on it (the
+    // --one-stellar-core-per-host anti-affinity and the placement check).
+    member self.CorePodLabels() : Map<string, string> =
+        if self.missionContext.oneStellarCorePerHost then
+            self.PodLabels()
+            |> Map.add CfgVal.onePerHostLabelKey CfgVal.onePerHostLabelValue
+        else
+            self.PodLabels()
+
+    // Affinity for the stellar-core StatefulSet pods: exactly self.Affinity() (node-label
+    // filters and other-run isolation untouched) plus, when the run opted in,
+    // the one-stellar-core-per-host self anti-affinity term appended to the
+    // required pod anti-affinity terms. Job pods and the HTTP proxy keep
+    // self.Affinity().
+    member self.CorePodAffinity() : V1Affinity option =
+        let base' = self.Affinity()
+
+        if not self.missionContext.oneStellarCorePerHost then
+            base'
+        else
+            let selfTerm = onePerHostTerm self.Nonce
+
+            match base' with
+            | None ->
+                Some(
+                    V1Affinity(
+                        podAntiAffinity =
+                            V1PodAntiAffinity(requiredDuringSchedulingIgnoredDuringExecution = [| selfTerm |])
+                    )
+                )
+            | Some a ->
+                let existing =
+                    if isNull a.PodAntiAffinity
+                       || isNull a.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution then
+                        []
+                    else
+                        List.ofSeq a.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+
+                a.PodAntiAffinity <-
+                    V1PodAntiAffinity(
+                        requiredDuringSchedulingIgnoredDuringExecution = Array.ofList (existing @ [ selfTerm ])
+                    )
+
+                Some a
 
     member self.TopologyConstraints() : V1TopologySpreadConstraint array =
         if self.missionContext.unevenSched then [||] else evenTopologyConstraints
@@ -853,18 +936,16 @@ type NetworkCfg with
         let res = self.missionContext.coreResources
         let asan = self.missionContext.asanOptions
 
+        let coreContainer =
+            CoreContainerForCommand imageName cfgOpt asan self.missionContext.coreEnv res runCmd initCommands peerNames
+
+        // One stellar-core pod per worker node: reserve its limits, so the
+        // host an autoscaler provisions for it fits what it may use.
+        if self.missionContext.oneStellarCorePerHost then
+            coreContainer.Resources <- reserveLimits coreContainer.Resources
+
         let containers =
-            [| WithProbes
-                (CoreContainerForCommand
-                    imageName
-                    cfgOpt
-                    asan
-                    self.missionContext.coreEnv
-                    res
-                    runCmd
-                    initCommands
-                    peerNames)
-                self.missionContext.probeTimeout
+            [| WithProbes coreContainer self.missionContext.probeTimeout
                HistoryContainer self.missionContext.nginxImage |]
 
         let containers =
@@ -887,7 +968,7 @@ type NetworkCfg with
         let podSpec =
             V1PodSpec(
                 containers = containers,
-                ?affinity = self.Affinity(),
+                ?affinity = self.CorePodAffinity(),
                 tolerations = self.Tolerations(),
                 topologySpreadConstraints = self.TopologyConstraints(),
                 volumes = volumes
@@ -897,7 +978,7 @@ type NetworkCfg with
             spec = podSpec,
             metadata =
                 V1ObjectMeta(
-                    labels = self.PodLabels(),
+                    labels = self.CorePodLabels(),
                     annotations = annotations,
                     namespaceProperty = self.NamespaceProperty
                 )

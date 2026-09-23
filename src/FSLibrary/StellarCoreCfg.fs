@@ -27,6 +27,13 @@ module CfgVal =
     // distinguish pods belonging to different supercluster runs sharing a
     // namespace (used for scheduling isolation; see StellarKubeSpecs.Affinity).
     let runNonceLabelKey = "run-nonce"
+    // Marks the stellar-core StatefulSet pods (validators and watchers alike)
+    // as opposed to job pods and the HTTP proxy, which share the `app` label,
+    // when --one-stellar-core-per-host places them one per worker node. Used to
+    // scope its anti-affinity (see StellarKubeSpecs) and to select the pods for
+    // its placement and scheduling checks.
+    let onePerHostLabelKey = "stellar-core-placement"
+    let onePerHostLabelValue = "one-per-host"
     let stellarCoreBinPath = "stellar-core"
     let allCoreContainerCmds = [| "new-hist"; "new-db"; "catchup"; "run"; "test" |]
 

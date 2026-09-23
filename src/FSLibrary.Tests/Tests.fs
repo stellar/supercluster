@@ -66,6 +66,7 @@ let ctx : MissionContext =
       coreResources = SmallTestResources
       keepData = true
       unevenSched = false
+      oneStellarCorePerHost = false
       dedicatedNodes = false
       requireNodeLabels = []
       avoidNodeLabels = []
@@ -366,6 +367,353 @@ type Tests(output: ITestOutputHelper) =
         Assert.Equal(CfgVal.runNonceLabelKey, expr.Key)
         Assert.Equal("NotIn", expr.OperatorProperty)
         Assert.Equal(nCfgDedicated.Nonce, Seq.exactlyOne expr.Values)
+
+    [<Fact>]
+    member __.``One-stellar-core-per-host adds a required self anti-affinity scoped to stellar-core pods``() =
+        let nCfg =
+            MakeNetworkCfg
+                { ctx with
+                      dedicatedNodes = true
+                      oneStellarCorePerHost = true
+                      installNetworkDelay = Some false }
+                [ coreSet ]
+                passOpt
+
+        let tmpl = nCfg.ToPodTemplateSpec coreSet
+
+        // Stellar-core pods carry the one-per-host label the self term selects on.
+        Assert.Equal(CfgVal.onePerHostLabelValue, tmpl.Metadata.Labels.[CfgVal.onePerHostLabelKey])
+
+        let terms =
+            tmpl.Spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+
+        Assert.Equal(2, terms.Count)
+
+        // The existing isolation from other runs is preserved (run-nonce NotIn).
+        let otherRuns =
+            terms
+            |> Seq.find (fun t -> (Seq.exactlyOne t.LabelSelector.MatchExpressions).OperatorProperty = "NotIn")
+
+        Assert.Equal("kubernetes.io/hostname", otherRuns.TopologyKey)
+        Assert.Equal(nCfg.Nonce, Seq.exactlyOne (Seq.exactlyOne otherRuns.LabelSelector.MatchExpressions).Values)
+
+        // The new term: this run's stellar-core pods repel each other per hostname.
+        let selfTerm =
+            terms
+            |> Seq.find (fun t -> (Seq.exactlyOne t.LabelSelector.MatchExpressions).OperatorProperty = "In")
+
+        Assert.Equal("kubernetes.io/hostname", selfTerm.TopologyKey)
+        Assert.Equal("stellar-core", selfTerm.LabelSelector.MatchLabels.["app"])
+        Assert.Equal(CfgVal.onePerHostLabelValue, selfTerm.LabelSelector.MatchLabels.[CfgVal.onePerHostLabelKey])
+        let expr = Seq.exactlyOne selfTerm.LabelSelector.MatchExpressions
+        Assert.Equal(CfgVal.runNonceLabelKey, expr.Key)
+        Assert.Equal(nCfg.Nonce, Seq.exactlyOne expr.Values)
+
+        // The HTTP proxy is not a stellar-core pod: it keeps only the other-runs
+        // term and does not carry the label, so it is neither repelled nor repelling.
+        let proxy = nCfg.ToHttpProxyDeployment().Spec.Template
+        Assert.False(proxy.Metadata.Labels.ContainsKey CfgVal.onePerHostLabelKey)
+
+        let proxyTerms =
+            proxy.Spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+
+        Assert.Equal(1, proxyTerms.Count)
+        Assert.Equal("NotIn", (Seq.exactlyOne proxyTerms.[0].LabelSelector.MatchExpressions).OperatorProperty)
+
+    [<Fact>]
+    member __.``One-stellar-core-per-host keeps node-label filters and works without dedicated nodes``() =
+        // Node-label filters (require + avoid) must survive unchanged next to
+        // the self term, and the self term must not depend on dedicatedNodes.
+        let nCfg =
+            MakeNetworkCfg
+                { ctx with
+                      oneStellarCorePerHost = true
+                      requireNodeLabels = [ ("purpose", Some "largetests") ]
+                      avoidNodeLabels = [ ("spot", None) ]
+                      installNetworkDelay = Some false }
+                [ coreSet ]
+                passOpt
+
+        let spec = (nCfg.ToPodTemplateSpec coreSet).Spec
+
+        let nodeTerm =
+            Seq.exactlyOne spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+
+        let exprs =
+            nodeTerm.MatchExpressions
+            |> Seq.map (fun e -> e.Key, e.OperatorProperty)
+            |> Set.ofSeq
+
+        Assert.Equal<Set<string * string>>(
+            Set.ofList [ ("purpose", "In")
+                         ("spot", "DoesNotExist") ],
+            exprs
+        )
+
+        let terms = spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+        Assert.Equal(1, terms.Count)
+        Assert.Equal("In", (Seq.exactlyOne terms.[0].LabelSelector.MatchExpressions).OperatorProperty)
+        Assert.Equal(CfgVal.onePerHostLabelValue, terms.[0].LabelSelector.MatchLabels.[CfgVal.onePerHostLabelKey])
+
+        // Job pods keep the plain mission affinity: node filters, no pod anti-affinity.
+        let proxy = nCfg.ToHttpProxyDeployment().Spec.Template.Spec
+        Assert.NotNull(proxy.Affinity.NodeAffinity)
+        Assert.Null(proxy.Affinity.PodAntiAffinity)
+
+    [<Fact>]
+    member __.``One-stellar-core-per-host is off by default``() =
+        let nCfg =
+            MakeNetworkCfg { ctx with dedicatedNodes = true; installNetworkDelay = Some false } [ coreSet ] passOpt
+
+        let tmpl = nCfg.ToPodTemplateSpec coreSet
+        // Neither the label nor the self term, as upstream.
+        Assert.False(tmpl.Metadata.Labels.ContainsKey CfgVal.onePerHostLabelKey)
+
+        let terms =
+            tmpl.Spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+
+        Assert.Equal(1, terms.Count)
+        Assert.Equal("NotIn", (Seq.exactlyOne terms.[0].LabelSelector.MatchExpressions).OperatorProperty)
+
+    [<Fact>]
+    member __.``One-per-host placement accepts scheduled pods on distinct nodes``() =
+        let mustBeScheduled = [ "sts-a-0"; "sts-a-1"; "sts-b-0" ]
+        let ok = [ ("sts-a-0", "node-1"); ("sts-a-1", "node-2"); ("sts-b-0", "node-3") ]
+
+        match StellarStatefulSets.validateOnePerHost mustBeScheduled ok with
+        | Ok hosts -> Assert.Equal<string list>([ "node-1"; "node-2"; "node-3" ], hosts)
+        | Error e -> failwithf "expected Ok, got Error %s" e
+
+        // Another core set whose pods are still starting does not fail the check.
+        let othersStarting = ok @ [ ("sts-c-0", ""); ("sts-c-1", "node-4") ]
+
+        match StellarStatefulSets.validateOnePerHost mustBeScheduled othersStarting with
+        | Ok hosts -> Assert.Equal(4, hosts.Length)
+        | Error e -> failwithf "expected Ok, got Error %s" e
+
+    [<Fact>]
+    member __.``One-per-host placement rejects incomplete or shared mappings``() =
+        let mustBeScheduled = [ "sts-a-0"; "sts-a-1"; "sts-b-0" ]
+
+        let expectError (needle: string) (observed: (string * string) list) =
+            match StellarStatefulSets.validateOnePerHost mustBeScheduled observed with
+            | Ok _ -> failwithf "expected an error mentioning %s" needle
+            | Error e -> Assert.Contains(needle, e)
+
+        // Empty listing: nothing observed at all.
+        expectError "missing" []
+        // Truncated listing: one pod absent.
+        expectError "missing" [ ("sts-a-0", "node-1"); ("sts-a-1", "node-2") ]
+        // Duplicate pod names.
+        expectError
+            "duplicate"
+            [ ("sts-a-0", "node-1")
+              ("sts-a-0", "node-2")
+              ("sts-a-1", "node-3")
+              ("sts-b-0", "node-4") ]
+        // Unscheduled placeholders: empty and whitespace node names, even with otherwise distinct hosts.
+        expectError "unscheduled" [ ("sts-a-0", "node-1"); ("sts-a-1", ""); ("sts-b-0", "node-3") ]
+        expectError "unscheduled" [ ("sts-a-0", "node-1"); ("sts-a-1", "node-2"); ("sts-b-0", "  ") ]
+        // Shared host, within the checked pods or with another core set's pod.
+        expectError "share worker nodes" [ ("sts-a-0", "node-1"); ("sts-a-1", "node-1"); ("sts-b-0", "node-3") ]
+
+        expectError
+            "share worker nodes"
+            [ ("sts-a-0", "node-1")
+              ("sts-a-1", "node-2")
+              ("sts-b-0", "node-3")
+              ("sts-c-0", "node-2") ]
+        // Nothing to check is itself an error (never vacuously pass).
+        match StellarStatefulSets.validateOnePerHost [] [] with
+        | Ok _ -> failwith "expected an error for an empty set"
+        | Error e -> Assert.Contains("no stellar-core pods to check", e)
+
+    [<Fact>]
+    member __.``One-stellar-core-per-host covers watchers and reserves each core container's limits``() =
+        let watcherSet = MakeLiveCoreSet "watcher" { coreSetOptions with validate = false }
+
+        let core (c: MissionContext) (cs: CoreSet) =
+            let nCfg = MakeNetworkCfg { c with installNetworkDelay = Some false } [ cs ] passOpt
+            let tmpl = nCfg.ToPodTemplateSpec cs
+
+            tmpl,
+            tmpl.Spec.Containers
+            |> Seq.find (fun k -> k.Name = CfgVal.stellarCoreContainerName "run")
+
+        let onePerHost = { ctx with oneStellarCorePerHost = true }
+
+        // Watchers are stellar-core pods too: one per host like validators.
+        let watcherTmpl, _ = core onePerHost watcherSet
+        Assert.Equal(CfgVal.onePerHostLabelValue, watcherTmpl.Metadata.Labels.[CfgVal.onePerHostLabelKey])
+
+        // Each core container requests its limits, so the node an autoscaler
+        // provisions for it fits what it may use; other containers keep theirs.
+        let tmpl, coreContainer = core onePerHost coreSet
+
+        for KeyValue (name, limit) in coreContainer.Resources.Limits do
+            Assert.Equal(limit, coreContainer.Resources.Requests.[name])
+
+        let plainTmpl, plainCore = core ctx coreSet
+        Assert.NotEqual(plainCore.Resources.Limits.["cpu"], plainCore.Resources.Requests.["cpu"])
+
+        let history (t: k8s.Models.V1PodTemplateSpec) =
+            (t.Spec.Containers |> Seq.find (fun k -> k.Name = "history")).Resources.Requests.["cpu"]
+
+        Assert.Equal(history plainTmpl, history tmpl)
+
+    [<Fact>]
+    member __.``Reserving limits raises requests to the limits and keeps unlimited requests``() =
+        let r = makeResourceRequirements 500 128 4000 6000
+        let reserved = reserveLimits r
+        Assert.Equal(k8s.Models.ResourceQuantity("4000m"), reserved.Requests.["cpu"])
+        Assert.Equal(k8s.Models.ResourceQuantity("6000Mi"), reserved.Requests.["memory"])
+        // The input is not modified (the requirement values are shared).
+        Assert.Equal(k8s.Models.ResourceQuantity("500m"), r.Requests.["cpu"])
+
+        let requests = System.Collections.Generic.Dictionary<string, k8s.Models.ResourceQuantity>()
+        requests.["cpu"] <- k8s.Models.ResourceQuantity("8000m")
+        let limits = System.Collections.Generic.Dictionary<string, k8s.Models.ResourceQuantity>()
+        limits.["memory"] <- k8s.Models.ResourceQuantity("16Gi")
+
+        let noCpuLimit =
+            reserveLimits (k8s.Models.V1ResourceRequirements(requests = requests, limits = limits))
+
+        Assert.Equal(k8s.Models.ResourceQuantity("8000m"), noCpuLimit.Requests.["cpu"])
+        Assert.Equal(k8s.Models.ResourceQuantity("16Gi"), noCpuLimit.Requests.["memory"])
+
+    [<Fact>]
+    member __.``Unschedulable stellar-core pods are read from their scheduling condition``() =
+        let t0 = System.DateTime(2026, 9, 23, 12, 0, 0, System.DateTimeKind.Utc)
+
+        let msg = "0/3 nodes are available: 3 node(s) didn't match pod anti-affinity rules."
+
+        let pod (conditions: k8s.Models.V1PodCondition list) =
+            k8s.Models.V1Pod(
+                Metadata = k8s.Models.V1ObjectMeta(Name = "sts-a-0"),
+                Status = k8s.Models.V1PodStatus(Conditions = ResizeArray(conditions))
+            )
+
+        let stuck =
+            pod [ k8s.Models.V1PodCondition(
+                      Type = "PodScheduled",
+                      Status = "False",
+                      Reason = "Unschedulable",
+                      Message = msg,
+                      LastTransitionTime = System.Nullable t0
+                  ) ]
+
+        Assert.Equal(Some(t0, msg), StellarStatefulSets.unschedulableSince stuck)
+
+        Assert.Equal(
+            None,
+            StellarStatefulSets.unschedulableSince (
+                pod [ k8s.Models.V1PodCondition(Type = "PodScheduled", Status = "True") ]
+            )
+        )
+
+        Assert.Equal(
+            None,
+            StellarStatefulSets.unschedulableSince (
+                k8s.Models.V1Pod(Metadata = k8s.Models.V1ObjectMeta(Name = "sts-a-1"))
+            )
+        )
+
+    [<Fact>]
+    member __.``Autoscaler events are told apart from the default scheduler``() =
+        let ev reason comp = k8s.Models.Corev1Event(Reason = reason, ReportingComponent = comp)
+
+        Assert.True(StellarStatefulSets.autoscalerProvisioning (ev "Nominated" "karpenter"))
+        Assert.True(StellarStatefulSets.autoscalerProvisioning (ev "TriggeredScaleUp" "cluster-autoscaler"))
+        Assert.False(StellarStatefulSets.autoscalerProvisioning (ev "FailedScheduling" "default-scheduler"))
+        Assert.True(StellarStatefulSets.autoscalerCannotProvision (ev "FailedScheduling" "karpenter"))
+        Assert.True(StellarStatefulSets.autoscalerCannotProvision (ev "NotTriggerScaleUp" "cluster-autoscaler"))
+        Assert.False(StellarStatefulSets.autoscalerCannotProvision (ev "FailedScheduling" "default-scheduler"))
+
+    [<Fact>]
+    member __.``Stellar-core pod scheduling stalls fail fast with an actionable message``() =
+        let t0 = System.DateTime(2026, 9, 23, 12, 0, 0, System.DateTimeKind.Utc)
+        let at (s: int) = t0.AddSeconds(float s)
+
+        let msg =
+            "0/16 nodes are available: 13 node(s) had untolerated taint(s), 3 node(s) didn't match pod anti-affinity rules."
+
+        let verdict = StellarStatefulSets.schedulingStallVerdict
+        let stalled = [ ("sts-a-0", t0, msg, None) ]
+
+        // Normal provisioning waits (under a minute on Karpenter) never fail.
+        Assert.Equal(None, verdict (at 60) true 30 stalled)
+        Assert.Equal(None, verdict (at 179) false 30 stalled)
+
+        // With no autoscaler provisioning, 3 minutes unschedulable fails with
+        // the scheduler's reason and what to change.
+        match verdict (at 180) false 30 stalled with
+        | Some e ->
+            Assert.Contains("sts-a-0", e)
+            Assert.Contains(msg, e)
+            Assert.Contains("each of the 30 stellar-core pods", e)
+            Assert.Contains("--tolerate-node-taints", e)
+        | None -> failwith "expected a stall verdict"
+
+        // While an autoscaler provisions nodes, the bound is 10 minutes.
+        Assert.Equal(None, verdict (at 599) true 30 stalled)
+        Assert.True((verdict (at 600) true 30 stalled).IsSome)
+
+        // The autoscaler's own "cannot provision" report fails after a short confirmation.
+        let refused =
+            [ ("sts-a-1", t0, msg, Some "all available instance types exceed limits for nodepool") ]
+
+        Assert.Equal(None, verdict (at 59) true 30 refused)
+
+        match verdict (at 60) true 30 refused with
+        | Some e -> Assert.Contains("exceed limits for nodepool", e)
+        | None -> failwith "expected an autoscaler verdict"
+
+        Assert.Equal(None, verdict (at 100000) false 30 [])
+
+    [<Fact>]
+    member __.``Only events of the current stellar-core pods count toward the autoscaler verdict``() =
+        let t0 = System.DateTime(2026, 9, 23, 12, 0, 0, System.DateTimeKind.Utc)
+
+        let ev reason uid (at: int) =
+            k8s.Models.Corev1Event(
+                Reason = reason,
+                ReportingComponent = "karpenter",
+                Message = reason + " message",
+                InvolvedObject = k8s.Models.V1ObjectReference(Kind = "Pod", Name = "sts-a-0", Uid = uid),
+                LastTimestamp = System.Nullable(t0.AddSeconds(float at))
+            )
+
+        let stalled = [ ("sts-a-0", t0, "0/3 nodes are available") ]
+
+        let failureOf (view: (string * System.DateTime * string * string option) list) =
+            let _, _, _, failure = view.Head
+            failure
+
+        // Reports about an earlier pod with the same name are ignored.
+        let active, stale =
+            StellarStatefulSets.autoscalerView
+                (set [ "new-uid" ])
+                [ ev "FailedScheduling" "old-uid" 0; ev "Nominated" "old-uid" 5 ]
+                stalled
+
+        Assert.False(active)
+        Assert.Equal(None, failureOf stale)
+
+        // For the current pod a cannot-provision report counts, unless a
+        // nomination came after it.
+        let _, refused =
+            StellarStatefulSets.autoscalerView (set [ "new-uid" ]) [ ev "FailedScheduling" "new-uid" 10 ] stalled
+
+        Assert.Equal(Some "FailedScheduling message", failureOf refused)
+
+        let active, renominated =
+            StellarStatefulSets.autoscalerView
+                (set [ "new-uid" ])
+                [ ev "FailedScheduling" "new-uid" 10; ev "Nominated" "new-uid" 20 ]
+                stalled
+
+        Assert.True(active)
+        Assert.Equal(None, failureOf renominated)
 
     [<Fact>]
     member __.``Non-dedicated mission has no affinity``() =

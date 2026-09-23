@@ -66,6 +66,14 @@ type MissionContext =
       coreResources: CoreResources
       keepData: bool
       unevenSched: bool
+      // --one-stellar-core-per-host: this run's stellar-core StatefulSet pods
+      // (validators and watchers) carry a *required* pod anti-affinity against
+      // each other on kubernetes.io/hostname and request their limits, so each
+      // gets a worker node sized to what it may use. The placement is checked
+      // whenever pods start, and the run fails fast if they cannot be scheduled.
+      // The soft topology spread alone lets the scheduler pack them when few
+      // nodes are available.
+      oneStellarCorePerHost: bool
       // When set, this run requires exclusive use of its nodes: its pods will
       // not be scheduled onto a node hosting another run's stellar-core pods,
       // and no other run's stellar-core pods will be scheduled onto its nodes
