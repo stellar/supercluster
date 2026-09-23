@@ -565,15 +565,24 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                 formation.EnsureAllNodesInSync allNodes
                 checkLedgerAgeSLA ledgerAgePercentiles targetMs
 
-            if context.minBlockTimeMs >= context.maxBlockTimeMs then
+            // An explicit single-candidate target: --min-block-time-ms ==
+            // --max-block-time-ms == T evaluates exactly that T once, in
+            // milliseconds, with no whole-second rounding and no search (upstream
+            // rejects min == max). The whole-second search below is unchanged for
+            // min < max. Everything downstream (capacity, ledger target close
+            // time, SCP timeouts, verdict and the final "No block time" failure)
+            // is the same code path evaluateAt already uses.
+            let singleCandidate = context.minBlockTimeMs = context.maxBlockTimeMs
+
+            if context.minBlockTimeMs > context.maxBlockTimeMs then
                 failwithf
-                    "--min-block-time-ms=%d must be strictly less than --max-block-time-ms=%d"
+                    "--min-block-time-ms=%d must not exceed --max-block-time-ms=%d"
                     context.minBlockTimeMs
                     context.maxBlockTimeMs
 
             let candidates = wholeSecondCandidates context.minBlockTimeMs context.maxBlockTimeMs
 
-            if List.isEmpty candidates then
+            if not singleCandidate && List.isEmpty candidates then
                 failwithf
                     "No whole-second close time in [%d, %d] ms: --min-block-time-ms and --max-block-time-ms must include at least one whole second"
                     context.minBlockTimeMs
@@ -628,7 +637,19 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                     needsRecovery.Value <- true
                     false
 
-            let bestPassing = searchMinPassing candidates evaluateCandidate
+            let bestPassing =
+                if singleCandidate then
+                    let t = context.minBlockTimeMs
+                    LogInfo "Explicit single-candidate target T=%dms (no whole-second rounding, no search)" t
+
+                    if evaluateAt t then
+                        LogInfo "SLA met at T=%dms (single candidate)" t
+                        Some t
+                    else
+                        LogInfo "SLA not met at T=%dms (single candidate)" t
+                        None
+                else
+                    searchMinPassing candidates evaluateCandidate
 
             match bestPassing with
             | Some t ->

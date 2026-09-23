@@ -20,7 +20,7 @@ A candidate close time `T` is considered a **pass** if and only if, **on every n
 
 If any node violates any of these bounds, `T` is considered a **fail** and the binary search raises its lower bound. The same is true if the load run itself errors (e.g., stellar-core's internal `loadgen-run-failed` counter increments, nodes fall out of sync, or peers report inconsistent ledger hashes) — in that case the mission treats the iteration as a fail and the search continues upward.
 
-Candidate close times are always whole seconds: the search runs over the whole seconds in `[--min-block-time-ms, --max-block-time-ms]`, bounds included, so the default range evaluates `4000` ms and, only if that fails, `5000` ms. If no candidate in the range satisfied the SLA, the mission fails with `"No block time in [lo, hi] ms satisfied the SLA at TPS N"`.
+Candidate close times are always whole seconds: the search runs over the whole seconds in `[--min-block-time-ms, --max-block-time-ms]`, bounds included, so the default range evaluates `4000` ms and, only if that fails, `5000` ms. Equal bounds evaluate exactly that close time once, without rounding. If no candidate in the range satisfied the SLA, the mission fails with `"No block time in [lo, hi] ms satisfied the SLA at TPS N"`.
 
 ## Docker images with performance tests enabled
 
@@ -38,7 +38,7 @@ These parameters affect both `MinBlockTimeClassic` and `MinBlockTimeMixed` missi
 
 * `--tx-rate`: The fixed transaction rate (TPS) used for every iteration of the search. For `MinBlockTimeMixed`, this is used only when neither `--classic-tx-rate` nor `--soroban-tx-rate` is set, in which case the mission splits it evenly between classic and Soroban streams. The mission answers the question "what is the smallest block time the network can sustain at this TPS?" so choosing a TPS the network clearly cannot sustain (e.g., above the network's max TPS at default block time) will result in the mission failing with no block time satisfying the SLA.
 * `--min-block-time-ms`: Binary search lower bound, in milliseconds. Defaults to `4000`.
-* `--max-block-time-ms`: Binary search upper bound, in milliseconds. Defaults to `5000`, which is also the protocol's maximum allowed ledger target close time — setting this higher will cause the mission to fail at startup, since validators reject upgrades above the protocol cap. Must be strictly greater than `--min-block-time-ms`.
+* `--max-block-time-ms`: Binary search upper bound, in milliseconds. Defaults to `5000`, which is also the protocol's maximum allowed ledger target close time — setting this higher will cause the mission to fail at startup, since validators reject upgrades above the protocol cap. Must not be less than `--min-block-time-ms`; when the two are equal the mission evaluates exactly that close time once, with no search.
 * `--num-pregenerated-txs`: Number of pre-generated signed classic transactions to create per loadgen node. `MinBlockTimeClassic` uses these on small networks (≤30 nodes) when it automatically switches classic payment load to `PayPregenerated`; `MinBlockTimeMixed` always uses them for the classic stream in its `MIXED_PREGEN_*` mode. Defaults to `2500000`
 * `--pubnet-data`: Network topology to use. Defaults to a topology of tier 1 validators. See [Specifying network topologies](#specifying-network-topologies) for details on how to specify a custom topology.
 * `--netdelay-image`: Helper image providing simulated network delay for latency simulation. SDF provides a public image on dockerhub at `stellar/sdf-netdelay`.
