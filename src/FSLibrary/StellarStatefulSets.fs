@@ -143,23 +143,36 @@ type StellarFormation with
             LogInfo "All replicas on %s ready" (self.ToString())
 
     member self.WithLive name (live: bool) =
-        self.SetNetworkCfg(self.NetworkCfg.WithLive name live)
-        let coreSet = self.NetworkCfg.FindCoreSet name
-        let stsName = self.NetworkCfg.StatefulSetName coreSet
-        self.sleepUntilNextRateLimitedApiCallTime ()
-
+        // Serialize the shared-state mutation and the StatefulSet replace:
+        // missions start and stop core sets concurrently, and an unsynchronized
+        // read-modify-write of networkCfg/statefulSets here would lose a
+        // node's live update and leave its StatefulSet scaled to 0 replicas
+        // (wedging the network, which then waits forever for the missing peer
+        // connections). The slow readiness wait stays outside the lock so
+        // nodes still come up in parallel.
         let ss =
-            self.Kube.ReplaceNamespacedStatefulSet(
-                body = self.NetworkCfg.ToStatefulSet coreSet,
-                name = stsName.StringName,
-                namespaceParameter = self.NetworkCfg.NamespaceProperty
-            )
+            lock
+                self.StateLock
+                (fun () ->
+                    self.SetNetworkCfg(self.NetworkCfg.WithLive name live)
+                    let coreSet = self.NetworkCfg.FindCoreSet name
+                    let stsName = self.NetworkCfg.StatefulSetName coreSet
+                    self.sleepUntilNextRateLimitedApiCallTime ()
 
-        let newSets =
-            self.StatefulSets
-            |> List.filter (fun x -> x.Metadata.Name <> stsName.StringName)
+                    let ss =
+                        self.Kube.ReplaceNamespacedStatefulSet(
+                            body = self.NetworkCfg.ToStatefulSet coreSet,
+                            name = stsName.StringName,
+                            namespaceParameter = self.NetworkCfg.NamespaceProperty
+                        )
 
-        self.SetStatefulSets(ss :: newSets)
+                    let newSets =
+                        self.StatefulSets
+                        |> List.filter (fun x -> x.Metadata.Name <> stsName.StringName)
+
+                    self.SetStatefulSets(ss :: newSets)
+                    ss)
+
         self.WaitForAllReplicasReady ss
 
     member self.Start name = self.WithLive name true
