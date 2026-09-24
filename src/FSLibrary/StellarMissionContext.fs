@@ -27,6 +27,10 @@ type CoreResources =
     | AcceptanceTestResources
     | SimulatePubnetResources
     | SimulatePubnetTier1PerfResources
+    // Validators of the 8-vCPU perf benchmarks (MinBlockTimeClassic/Mixed,
+    // MaxTPSClassic/Mixed) under --overlay-v2-optimized: no CFS CPU quota; see
+    // StellarKubeSpecs.PerfBenchmarkCoreResourceRequirements.
+    | PerfBenchmarkResources
     | MaxTPSClassicResources
     | ParallelCatchupResources
     | NonParallelCatchupResources
@@ -64,6 +68,11 @@ type MissionContext =
       exportToPrometheus: bool
       probeTimeout: int
       coreResources: CoreResources
+      // --overlay-v2-optimized: defaults tuned for the experimental Rust-overlay
+      // (v2) stellar-core image. Every setting it changes is listed in
+      // MissionContext.describeOverlayV2; without it, missions keep upstream's
+      // configs, resources and limits.
+      overlayV2Optimized: bool
       keepData: bool
       unevenSched: bool
       // --one-stellar-core-per-host: this run's stellar-core StatefulSet pods
@@ -114,6 +123,9 @@ type MissionContext =
       enableBackgroundSigValidation: bool
       enableParallelApply: bool
       enableInMemoryBuckets: bool
+      // Emit DISABLE_TX_META_FOR_TESTING = true; set by the --overlay-v2-optimized
+      // perf-mission defaults.
+      disableTxMetaForTesting: bool
       peerFloodCapacity: int option
       peerFloodCapacityBytes: int option
       sleepMainThread: int option
@@ -208,3 +220,43 @@ module MissionContext =
             failwithf "--core-env has duplicate names: %A" names
 
         parsed
+
+    /// The single decision for BUCKETLIST_DB_INDEX_PAGE_SIZE_EXPONENT=0 (in-memory BucketListDB), so the key is
+    /// emitted at most once: --in-memory-buckets or an --overlay-v2-optimized perf mission's default (both set
+    /// enableInMemoryBuckets), or --run-for-max-tps, whose high-throughput config has always included it.
+    let inMemoryBuckets (ctx: MissionContext) : bool = ctx.enableInMemoryBuckets || ctx.runForMaxTps.IsSome
+
+    /// What --overlay-v2-optimized sets on the perf-sensitive benchmark missions (MinBlockTimeClassic/Mixed
+    /// and MaxTPSClassic/Mixed), applied on top of the command-line context like their dedicatedNodes = true:
+    /// in-memory BucketListDB, no test-only tx meta and one stellar-core pod per worker node (as --one-stellar-core-per-host).
+    /// Without the flag the context is returned unchanged.
+    let withOverlayV2PerfDefaults (ctx: MissionContext) : MissionContext =
+        if not ctx.overlayV2Optimized then
+            ctx
+        else
+            { ctx with
+                  enableInMemoryBuckets = true
+                  disableTxMetaForTesting = true
+                  oneStellarCorePerHost = true }
+
+    /// Validator resources of the perf missions (MinBlockTimeClassic/Mixed, MaxTPSClassic/Mixed): PerfBenchmarkResources
+    /// under --overlay-v2-optimized, otherwise the mission's own upstream resources.
+    let perfMissionCoreResources (ctx: MissionContext) (upstream: CoreResources) : CoreResources =
+        if ctx.overlayV2Optimized then PerfBenchmarkResources else upstream
+
+    /// The settings --overlay-v2-optimized resolves for this run, one line each, for the run log. Empty without it.
+    let describeOverlayV2 (ctx: MissionContext) : string list =
+        if not ctx.overlayV2Optimized then
+            []
+        else
+            let userEnv = ctx.coreEnv |> List.map fst |> Set.ofList
+
+            [ "BucketListDB: in-memory (perf missions)"
+              "test tx meta: disabled (perf missions)"
+              "placement: one stellar-core pod per worker node, enforced (perf missions)"
+              "perf validators: 8 vCPU request, no CPU limit, 16Gi memory"
+              (if userEnv.Contains "TOKIO_WORKER_THREADS" then
+                   "TOKIO_WORKER_THREADS: from --core-env"
+               else
+                   "TOKIO_WORKER_THREADS: 8 (perf validators)")
+              "Soroban limits: 8 dependent-tx clusters" ]

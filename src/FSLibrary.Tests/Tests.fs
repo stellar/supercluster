@@ -64,6 +64,7 @@ let ctx : MissionContext =
       exportToPrometheus = false
       probeTimeout = 10
       coreResources = SmallTestResources
+      overlayV2Optimized = false
       keepData = true
       unevenSched = false
       oneStellarCorePerHost = false
@@ -85,6 +86,7 @@ let ctx : MissionContext =
       enableBackgroundSigValidation = false
       enableParallelApply = false
       enableInMemoryBuckets = false
+      disableTxMetaForTesting = false
       peerFloodCapacityBytes = None
       outboundByteLimit = None
       sleepMainThread = None
@@ -1395,6 +1397,164 @@ let ``Submission accounting includes all started validators and preserves legacy
     let legacy = StellarStatefulSets.LoadgenPeerIndices false sets
     Assert.Equal(19, legacy.Length)
     Assert.All(legacy, (fun (_, i) -> Assert.Equal(0, i)))
+
+let private tomlKeyCount (key: string) (toml: string) =
+    let pattern = sprintf "^%s = " (Regex.Escape key)
+    Regex.Matches(toml, pattern, RegexOptions.Multiline).Count
+
+let private validatorToml (c: MissionContext) =
+    let cfg = MakeNetworkCfg c [ coreSet ] passOpt
+    cfg.StellarCoreCfg(coreSet, 0, MainCoreContainer).ToString()
+
+let private bucketIndexKey = "BUCKETLIST_DB_INDEX_PAGE_SIZE_EXPONENT"
+
+let private v2ctx = { ctx with overlayV2Optimized = true }
+
+[<Fact>]
+let ``Overlay v2 perf missions default to in-memory BucketListDB and emit the key exactly once`` () =
+    let perf = MissionContext.withOverlayV2PerfDefaults v2ctx
+    Assert.True(perf.enableInMemoryBuckets)
+    let toml = validatorToml perf
+    Assert.Equal(1, tomlKeyCount bucketIndexKey toml)
+    Assert.Contains(bucketIndexKey + " = 0", toml)
+    // --run-for-max-tps used to add the key in its own branch as well; with the
+    // perf default on, it must still appear only once.
+    Assert.Equal(1, tomlKeyCount bucketIndexKey (validatorToml { perf with runForMaxTps = Some "classic" }))
+    Assert.Equal(1, tomlKeyCount bucketIndexKey (validatorToml { perf with runForMaxTps = Some "soroban" }))
+    // --in-memory-buckets on a perf mission is the same setting, still once.
+    let forced =
+        MissionContext.withOverlayV2PerfDefaults { v2ctx with enableInMemoryBuckets = true }
+
+    Assert.Equal(1, tomlKeyCount bucketIndexKey (validatorToml forced))
+
+[<Fact>]
+let ``Without --overlay-v2-optimized perf missions get the command-line context unchanged`` () =
+    let plain = MissionContext.withOverlayV2PerfDefaults ctx
+    Assert.Equal(ctx, plain)
+    Assert.Equal(0, tomlKeyCount bucketIndexKey (validatorToml plain))
+    Assert.Equal(0, tomlKeyCount "DISABLE_TX_META_FOR_TESTING" (validatorToml plain))
+
+    Assert.Equal(
+        SimulatePubnetTier1PerfResources,
+        MissionContext.perfMissionCoreResources ctx SimulatePubnetTier1PerfResources
+    )
+
+    Assert.Equal(MaxTPSClassicResources, MissionContext.perfMissionCoreResources ctx MaxTPSClassicResources)
+    Assert.Equal(PerfBenchmarkResources, MissionContext.perfMissionCoreResources v2ctx SimulatePubnetTier1PerfResources)
+    Assert.Equal(PerfBenchmarkResources, MissionContext.perfMissionCoreResources v2ctx MaxTPSClassicResources)
+
+[<Fact>]
+let ``Overlay v2 perf missions run one stellar-core pod per host`` () =
+    Assert.True((MissionContext.withOverlayV2PerfDefaults v2ctx).oneStellarCorePerHost)
+    Assert.False((MissionContext.withOverlayV2PerfDefaults ctx).oneStellarCorePerHost)
+
+[<Fact>]
+let ``Non-perf missions keep disk-backed BucketListDB unless --in-memory-buckets or --run-for-max-tps`` () =
+    Assert.Equal(0, tomlKeyCount bucketIndexKey (validatorToml ctx))
+    Assert.Equal(1, tomlKeyCount bucketIndexKey (validatorToml { ctx with enableInMemoryBuckets = true }))
+    // The long-standing --run-for-max-tps behaviour is unchanged, alone or
+    // combined with --in-memory-buckets.
+    Assert.Equal(1, tomlKeyCount bucketIndexKey (validatorToml { ctx with runForMaxTps = Some "classic" }))
+
+    let both = { ctx with enableInMemoryBuckets = true; runForMaxTps = Some "classic" }
+    Assert.Equal(1, tomlKeyCount bucketIndexKey (validatorToml both))
+
+let private cpuOf (r: k8s.Models.V1ResourceRequirements) = r.Limits.["cpu"].ToDecimal()
+let private gib = 1024M * 1024M * 1024M
+
+[<Fact>]
+let ``Perf benchmark validators have no CPU limit and keep their reservation`` () =
+    let res = GetCoreResourceRequirements PerfBenchmarkResources
+    Assert.False(res.Limits.ContainsKey "cpu")
+    Assert.Equal(8M, res.Requests.["cpu"].ToDecimal())
+    Assert.Equal(16M * gib, res.Requests.["memory"].ToDecimal())
+    Assert.Equal(16M * gib, res.Limits.["memory"].ToDecimal())
+
+    // Missions outside the perf set, and perf missions without
+    // --overlay-v2-optimized (upstream's Tier1 perf resources), keep their CPU limits.
+    Assert.Equal(4M, cpuOf (GetCoreResourceRequirements SimulatePubnetTier1PerfResources))
+    Assert.Equal(4M, cpuOf (GetCoreResourceRequirements MaxTPSClassicResources))
+
+[<Fact>]
+let ``Perf benchmark pods drop only the core container CPU limit`` () =
+    let nCfgPerf =
+        MakeNetworkCfg
+            { ctx with
+                  coreResources = PerfBenchmarkResources
+                  installNetworkDelay = Some false }
+            [ coreSet ]
+            passOpt
+
+    let containers = (nCfgPerf.ToPodTemplateSpec coreSet).Spec.Containers
+    let core = containers |> Seq.find (fun c -> c.Name = CfgVal.stellarCoreContainerName "run")
+    Assert.False(core.Resources.Limits.ContainsKey "cpu")
+    Assert.Equal(8M, core.Resources.Requests.["cpu"].ToDecimal())
+    let sidecars = containers |> Seq.filter (fun c -> c.Name <> core.Name) |> List.ofSeq
+    Assert.NotEmpty(sidecars)
+    // The history sidecar keeps HistoryResourceRequirements (50m CPU limit).
+    let history = sidecars |> List.find (fun c -> c.Name = "history")
+    Assert.Equal(0.05M, cpuOf history.Resources)
+    Assert.All(sidecars, (fun c -> Assert.True(c.Resources.Limits.ContainsKey "cpu")))
+
+[<Fact>]
+let ``Perf benchmark core containers default TOKIO_WORKER_THREADS unless --core-env sets it`` () =
+    let envOf (extra: (string * string) list) (cr: CoreResources) =
+        let c =
+            CoreContainerForCommand "img" NoConfigFile None extra cr [| "run" |] [||] [| "core-0" |]
+
+        c.Env |> Seq.map (fun e -> e.Name, e.Value) |> List.ofSeq
+
+    let tokio env = env |> List.filter (fun (n, _) -> n = "TOKIO_WORKER_THREADS")
+
+    let perf = PerfBenchmarkResources
+    Assert.Equal<(string * string) list>([ ("TOKIO_WORKER_THREADS", "8") ], tokio (envOf [] perf))
+    // A --core-env value wins and is not duplicated.
+    Assert.Equal<(string * string) list>(
+        [ ("TOKIO_WORKER_THREADS", "4") ],
+        tokio (envOf [ ("TOKIO_WORKER_THREADS", "4") ] perf)
+    )
+    // Other --core-env entries keep their place ahead of the default.
+    Assert.Equal<string list>(
+        [ "STELLAR_CORE_PEER_SHORT_NAME"
+          "ASAN_OPTIONS"
+          "RUST_LOG"
+          "TOKIO_WORKER_THREADS" ],
+        envOf [ ("RUST_LOG", "info") ] perf |> List.map fst
+    )
+    // Other resource classes get no default.
+    Assert.Empty(tokio (envOf [] SimulatePubnetTier1PerfResources))
+    Assert.Empty(tokio (envOf [] MaxTPSClassicResources))
+
+let private txMetaKey = "DISABLE_TX_META_FOR_TESTING"
+
+[<Fact>]
+let ``Overlay v2 perf missions disable test-only tx meta and emit the key exactly once`` () =
+    let perf = MissionContext.withOverlayV2PerfDefaults v2ctx
+    Assert.True(perf.disableTxMetaForTesting)
+    let toml = validatorToml perf
+    Assert.Equal(1, tomlKeyCount txMetaKey toml)
+    Assert.Contains(txMetaKey + " = true", toml)
+    // Still once alongside the other perf and max-TPS settings.
+    Assert.Equal(1, tomlKeyCount txMetaKey (validatorToml { perf with runForMaxTps = Some "classic" }))
+    Assert.Equal(1, tomlKeyCount txMetaKey (validatorToml { perf with runForMinBlockTime = true }))
+
+    // The init container's config (new-db / new-hist) gets it too.
+    let initToml =
+        (MakeNetworkCfg perf [ coreSet ] passOpt)
+            .StellarCoreCfg(coreSet, 0, InitCoreContainer)
+            .ToString()
+
+    Assert.Equal(1, tomlKeyCount txMetaKey initToml)
+
+[<Fact>]
+let ``Non-perf missions never disable tx meta`` () =
+    Assert.Equal(0, tomlKeyCount txMetaKey (validatorToml ctx))
+    Assert.Equal(0, tomlKeyCount txMetaKey (validatorToml { ctx with runForMaxTps = Some "classic" }))
+
+[<Fact>]
+let ``--overlay-v2-optimized lists its settings in the run log only when set`` () =
+    Assert.Empty(MissionContext.describeOverlayV2 ctx)
+    Assert.NotEmpty(MissionContext.describeOverlayV2 v2ctx)
 
 [<Fact>]
 let ``Tier1 topology keeps its 10 organizations unless --tier1-org-count adds diverse ones`` () =

@@ -150,6 +150,7 @@ type MissionOptions
         driftPct: int,
         ledgerCloseTimeMs: int option,
         forceOldStyleTriggerTimer: bool option,
+        overlayV2Optimized: bool,
         tier1OrgCount: int option
     ) =
 
@@ -458,7 +459,7 @@ type MissionOptions
     member self.EnableParallelApply : bool = enableParallelApply
 
     [<Option("in-memory-buckets",
-             HelpText = "Enable in-memory buckets by setting BUCKETLIST_DB_INDEX_PAGE_SIZE_EXPONENT=0",
+             HelpText = "Enable in-memory buckets by setting BUCKETLIST_DB_INDEX_PAGE_SIZE_EXPONENT=0 on any mission. With --overlay-v2-optimized, perf missions already default to it.",
              Required = false,
              Default = false)>]
     member self.EnableInMemoryBuckets : bool = enableInMemoryBuckets
@@ -710,6 +711,12 @@ type MissionOptions
              Required = false)>]
     member self.ForceOldStyleTriggerTimer = forceOldStyleTriggerTimer
 
+    [<Option("overlay-v2-optimized",
+             HelpText = "Settings tuned for the experimental Rust-overlay (v2) stellar-core image, in one flag; without it missions keep upstream's configs, resources and limits. It sets: for perf missions in-memory BucketListDB, no test tx meta, one stellar-core pod per host and 8 vCPU / no CPU limit / 16Gi validators with TOKIO_WORKER_THREADS=8 (--core-env can override it); and 8 dependent-tx Soroban clusters. The run log lists what it sets.",
+             Required = false,
+             Default = false)>]
+    member self.OverlayV2Optimized : bool = overlayV2Optimized
+
     [<Option("tier1-org-count",
              HelpText = "Organizations (3 validators each) in the synthetic Tier1 topology of the MinBlockTime* and MaxTPS* missions: 10 (default) to 40; beyond 10, synthetic organizations spread over further regions (North America, Europe, Asia, South America, Oceania, Africa, Middle East) are added in a fixed order.",
              Required = false)>]
@@ -886,6 +893,7 @@ let main argv =
                                exportToPrometheus = mission.ExportToPrometheus
                                probeTimeout = mission.ProbeTimeout
                                coreResources = SmallTestResources
+                               overlayV2Optimized = mission.OverlayV2Optimized
                                keepData = mission.KeepData
                                unevenSched = mission.UnevenSched
                                oneStellarCorePerHost = mission.OneStellarCorePerHost
@@ -936,6 +944,9 @@ let main argv =
                                enableBackgroundSigValidation = mission.EnableBackgroundSigValidation
                                enableParallelApply = mission.EnableParallelApply
                                enableInMemoryBuckets = mission.EnableInMemoryBuckets
+                               // Off by default; --overlay-v2-optimized perf missions turn it on
+                               // via MissionContext.withOverlayV2PerfDefaults.
+                               disableTxMetaForTesting = false
                                peerFloodCapacity = mission.PeerFloodCapacity
                                peerFloodCapacityBytes = mission.PeerFloodCapacityBytes
                                outboundByteLimit = mission.OutboundByteLimit
@@ -990,6 +1001,9 @@ let main argv =
                                driftPct = mission.DriftPct
                                ledgerCloseTimeMs = mission.LedgerCloseTimeMs
                                forceOldStyleTriggerTimer = mission.ForceOldStyleTriggerTimer }
+
+                         for line in MissionContext.describeOverlayV2 missionContext do
+                             LogInfo "--overlay-v2-optimized: %s" line
 
                          allMissions.[m] missionContext
 

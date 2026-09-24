@@ -82,6 +82,11 @@ let private limitMultiplier = 5 * 2
 
 let private smallNetworkSize = 10
 
+// Parallel Soroban apply is only as parallel as the dependent-tx-cluster
+// limit allows; the protocol default of 1 serializes execution.
+// --overlay-v2-optimized raises it to this.
+let sorobanDependentTxClusters = 8
+
 let upgradeSorobanLedgerLimits
     (context: MissionContext)
     (formation: StellarFormation)
@@ -117,11 +122,18 @@ let upgradeSorobanLedgerLimits
               ledgerMaxTxCount = Some multiplier
               ledgerMaxReadLedgerEntries = entries
               ledgerMaxWriteLedgerEntries = entries
-              ledgerMaxTransactionsSizeBytes = maxOption txSizeBytes wasmBytes }
+              ledgerMaxTransactionsSizeBytes = maxOption txSizeBytes wasmBytes
+              // The network default is a single dependent-tx cluster, which
+              // serializes Soroban apply no matter how many cores the pod has.
+              ledgerMaxDependentTxClusters =
+                  if context.overlayV2Optimized then Some sorobanDependentTxClusters else None }
         (System.DateTime.UtcNow)
 
     let peer = formation.NetworkCfg.GetPeer coreSetList.Head 0
     peer.WaitForLedgerMaxTxCount multiplier
+
+    if context.overlayV2Optimized then
+        peer.WaitForMaxDependentTxClusters sorobanDependentTxClusters
 
 
 let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadGen option) =

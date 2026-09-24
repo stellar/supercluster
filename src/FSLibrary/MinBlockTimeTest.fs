@@ -172,12 +172,12 @@ let private waitForMixedPregenSorobanLimits (peer: Peer) (limits: MixedPregenSor
             && info.Tx.MaxContractEventsSizeBytes = limits.txMaxContractEventsSizeBytes)
         (fun _ -> LogInfo "Waiting for MIXED_PREGEN_* Soroban limits on %s" peer.ShortName.StringName)
 
-// Exposed for reuse by MissionTriggerTimerMixConsensus.
-let upgradeMixedPregenSorobanLimits
+let upgradeMixedPregenSorobanLimitsWith
     (formation: StellarFormation)
     (coreSets: CoreSet list)
     (baseLoadGen: LoadGen)
     (targetMs: int)
+    (dependentTxClusters: int option)
     =
     let sorobanTxRate = baseLoadGen.sorobanTxRate |> Option.defaultValue 0
 
@@ -249,10 +249,27 @@ let upgradeMixedPregenSorobanLimits
                   txMaxWriteLedgerEntries = Some limits.txMaxWriteEntries
                   txMaxFootprintSize = limits.txMaxFootprintSize
                   txMaxSizeBytes = Some limits.txMaxSizeBytes
-                  txMaxContractEventsSizeBytes = Some limits.txMaxContractEventsSizeBytes }
+                  txMaxContractEventsSizeBytes = Some limits.txMaxContractEventsSizeBytes
+                  // The network default is a single dependent-tx cluster, which
+                  // serializes Soroban execution and holds a ledger to one
+                  // cluster's instructions; --overlay-v2-optimized allows 8.
+                  ledgerMaxDependentTxClusters = dependentTxClusters }
             (System.TimeSpan.FromSeconds(20.0))
 
         waitForMixedPregenSorobanLimits peer limits
+
+        match dependentTxClusters with
+        | Some n -> peer.WaitForMaxDependentTxClusters n
+        | None -> ()
+
+// Exposed for reuse by MissionTriggerTimerMixConsensus.
+let upgradeMixedPregenSorobanLimits
+    (formation: StellarFormation)
+    (coreSets: CoreSet list)
+    (baseLoadGen: LoadGen)
+    (targetMs: int)
+    =
+    upgradeMixedPregenSorobanLimitsWith formation coreSets baseLoadGen targetMs None
 
 let private toggleOverlayOnlyMode (formation: StellarFormation) (coreSets: CoreSet list) =
     formation.NetworkCfg.EachPeerInSets
@@ -444,6 +461,9 @@ let activeLoadGenCoreSets (everyValidator: bool) (requestedTps: int) (loadGenNod
     List.truncate (max 1 fitting) loadGenNodes
 
 let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadGen option) =
+    // --overlay-v2-optimized: see MissionContext.describeOverlayV2.
+    let v2 = context.overlayV2Optimized
+
     let allNodes =
         if context.pubnetData.IsSome then
             FullPubnetCoreSets context true false
@@ -616,7 +636,12 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
 
             let upgradeSorobanMaxTxSetSize (targetMs: int) =
                 if isMixedPregenMode baseLoadGen.mode then
-                    upgradeMixedPregenSorobanLimits formation allNodes baseLoadGen targetMs
+                    upgradeMixedPregenSorobanLimitsWith
+                        formation
+                        allNodes
+                        baseLoadGen
+                        targetMs
+                        (if v2 then Some MaxTPSTest.sorobanDependentTxClusters else None)
 
             let evaluateAt (targetMs: int) : bool =
                 let loadGen =

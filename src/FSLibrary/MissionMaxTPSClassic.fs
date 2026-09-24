@@ -13,8 +13,8 @@ open StellarCoreHTTP
 
 let maxTPSClassic (context: MissionContext) =
     let context =
-        { context with
-              coreResources = MaxTPSClassicResources
+        { MissionContext.withOverlayV2PerfDefaults context with
+              coreResources = MissionContext.perfMissionCoreResources context MaxTPSClassicResources
               installNetworkDelay = Some(context.installNetworkDelay |> Option.defaultValue true)
               enableTailLogging = false
               // Isolate this perf run onto its own nodes so co-tenant pods from

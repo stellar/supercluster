@@ -46,6 +46,13 @@ These parameters affect both `MinBlockTimeClassic` and `MinBlockTimeMixed` missi
 * `--tier1-org-count`: Organizations (three validators each) in that default tier 1 topology, from `10` (the default) to `40`. Beyond 10, synthetic organizations are added in a fixed order (`x01`, `x02`, ...), spread over further cloud regions in North America, Europe, Asia, South America, Oceania, Africa and the Middle East; the simulated network delay between two validators grows with their distance, so larger counts also raise the network's latency floor.
 * `--netdelay-image`: Helper image providing simulated network delay for latency simulation. SDF provides a public image on dockerhub at `stellar/sdf-netdelay`.
 
+### Tuned defaults for the Rust-overlay (v2) image
+
+`--overlay-v2-optimized` applies, in one flag, the settings that benchmarks of the experimental Rust-overlay stellar-core image use. Without it missions keep their standard configs, resources and limits, so runs against the stellar-core master image need nothing. The run log lists what it sets (`--overlay-v2-optimized: ...` lines). It sets:
+
+* for the perf missions (`MinBlockTimeClassic`/`Mixed`, `MaxTPSClassic`/`Mixed`): in-memory BucketListDB, one stellar-core pod per worker node (as `--one-stellar-core-per-host`), no test-only tx meta (images older than v27.0.0 reject that key, so the flag needs a newer image), and validators with an 8 vCPU request, no CPU limit and 16 GiB memory, whose containers get `TOKIO_WORKER_THREADS=8` unless `--core-env` sets it;
+* 8 dependent-tx clusters in the Soroban limit upgrades.
+
 ### Additional options for mixed pre-generated classic and synthetic Soroban traffic
 
 In addition to the parameters in the previous section, `MinBlockTimeMixed` supports:
@@ -92,6 +99,12 @@ To run a mission that searches for the minimum block time at 1000 TPS, with the 
 
 ```bash
 dotnet run --project src/App/App.fsproj --configuration Release -- mission MinBlockTimeClassic --image=stellar/unsafe-stellar-core:<stellar-core-perftest-build> --netdelay-image=stellar/sdf-netdelay:latest --tx-rate=1000 --min-block-time-ms=4000 --max-block-time-ms=5000
+```
+
+To benchmark the Rust-overlay image at a single 1 s close time and 5000 SAC TPS on a 57-validator (19-organization) topology:
+
+```bash
+dotnet run --project src/App/App.fsproj --configuration Release -- mission MinBlockTimeMixed --image=<rust-overlay-perftest-image> --netdelay-image=stellar/sdf-netdelay:latest --overlay-v2-optimized --tier1-org-count=19 --min-block-time-mixed-mode=mixed_pregen_sac_payment --classic-tx-rate=0 --soroban-tx-rate=5000 --min-block-time-ms=1000 --max-block-time-ms=1000 --num-pregenerated-txs=10000
 ```
 
 To run the mixed overlay-only mode at 600 total TPS with Soroswap synthetic Soroban swaps:

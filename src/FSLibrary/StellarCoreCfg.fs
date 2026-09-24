@@ -229,6 +229,13 @@ type StellarCoreCfg =
 
         t.Add("METADATA_DEBUG_LEDGERS", 0) |> ignore
 
+        // Test builds otherwise keep tx meta for every ledger, deep-copying
+        // the tx set into LedgerCloseMeta twice per ledger on the apply path.
+        // Set by the --overlay-v2-optimized perf-mission defaults; emitted
+        // only here.
+        if self.network.missionContext.disableTxMetaForTesting then
+            t.Add("DISABLE_TX_META_FOR_TESTING", true) |> ignore
+
         if self.network.missionContext.enableParallelApply then
             t.Add("EXPERIMENTAL_PARALLEL_LEDGER_APPLY", true) |> ignore
 
@@ -400,8 +407,8 @@ type StellarCoreCfg =
 
         match self.network.missionContext.runForMaxTps with
         | Some mode ->
-            if not self.network.missionContext.enableInMemoryBuckets then
-                t.Add("BUCKETLIST_DB_INDEX_PAGE_SIZE_EXPONENT", 0) |> ignore
+            // BUCKETLIST_DB_INDEX_PAGE_SIZE_EXPONENT is decided once below
+            // (MissionContext.inMemoryBuckets), which covers this mode too.
 
             if not self.network.missionContext.enableParallelApply then
                 t.Add("EXPERIMENTAL_PARALLEL_LEDGER_APPLY", true) |> ignore
@@ -437,7 +444,7 @@ type StellarCoreCfg =
         | Some batchSize -> t.Add("EXPERIMENTAL_TX_BATCH_MAX_SIZE", batchSize) |> ignore
         | None -> ()
 
-        if self.network.missionContext.enableInMemoryBuckets then
+        if StellarMissionContext.MissionContext.inMemoryBuckets self.network.missionContext then
             t.Add("BUCKETLIST_DB_INDEX_PAGE_SIZE_EXPONENT", 0) |> ignore
 
         match self.surveyPhaseDuration with

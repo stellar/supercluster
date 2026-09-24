@@ -85,7 +85,7 @@ let CoreContainerVolumeMounts (peerOrJobNames: string array) (configOpt: ConfigO
 let makeResourceRequirementsCommon
     (cpuReqMili: int)
     (memReqMebi: int)
-    (cpuLimMili: int)
+    (cpuLimMili: int option)
     (memLimMebi: int)
     (storageReqGibi: int)
     (storageLimGibi: int)
@@ -96,7 +96,12 @@ let makeResourceRequirementsCommon
     requests.Add("memory", ResourceQuantity(sprintf "%dMi" memReqMebi))
 
     let limits = new Dictionary<string, ResourceQuantity>()
-    limits.Add("cpu", ResourceQuantity(sprintf "%dm" cpuLimMili))
+
+    // No CPU limit at all means no CFS quota for the container.
+    match cpuLimMili with
+    | Some cpuLim -> limits.Add("cpu", ResourceQuantity(sprintf "%dm" cpuLim))
+    | None -> ()
+
     limits.Add("memory", ResourceQuantity(sprintf "%dMi" memLimMebi))
 
     if hasStorageLimit then
@@ -111,7 +116,7 @@ let makeResourceRequirements
     (cpuLimMili: int)
     (memLimMebi: int)
     : V1ResourceRequirements =
-    makeResourceRequirementsCommon cpuReqMili memReqMebi cpuLimMili memLimMebi 0 0 false
+    makeResourceRequirementsCommon cpuReqMili memReqMebi (Some cpuLimMili) memLimMebi 0 0 false
 
 // Creates resource requirements with storage limits.
 // Parameters are ordered as: all requirements first (cpu, memory, storage), then all limits (cpu, memory, storage).
@@ -123,7 +128,7 @@ let makeResourceRequirementsWithStorageLimit
     (memLimMebi: int)
     (storageLimGibi: int)
     : V1ResourceRequirements =
-    makeResourceRequirementsCommon cpuReqMili memReqMebi cpuLimMili memLimMebi storageReqGibi storageLimGibi true
+    makeResourceRequirementsCommon cpuReqMili memReqMebi (Some cpuLimMili) memLimMebi storageReqGibi storageLimGibi true
 
 // Requests raised to the limits, for pods placed one per worker node: an
 // autoscaler provisions a host for a pod's requests, so reserving the limits
@@ -164,6 +169,15 @@ let SimulatePubnetTier1PerfCoreResourceRequirements : V1ResourceRequirements =
     // which means configuring the nodes like a real operator would: 1-4 vCPU
     // and 128MB-2GB RAM.
     makeResourceRequirements 500 128 4000 6000
+
+let PerfBenchmarkCoreResourceRequirements : V1ResourceRequirements =
+    // The 8-vCPU perf benchmarks reserve 8 vCPU and 16 GiB per validator
+    // (memory request == limit) but set NO CPU limit. Pods see the node's 16
+    // logical CPUs, and bursts from core's 7 batch-validation workers, main
+    // and apply threads plus the overlay child's 8-thread tokio runtime
+    // exceeded an 8-CPU CFS quota: thousands of throttling events per run,
+    // each freezing both processes for ~40-58 ms.
+    makeResourceRequirementsCommon 8000 16384 None 16384 0 0 false
 
 let MaxTPSClassicCoreResourceRequirements : V1ResourceRequirements =
     // Sized so one core pod plus the http-proxy fills a 2-vCPU node, since pod
@@ -218,10 +232,21 @@ let GetCoreResourceRequirements (cr: CoreResources) : V1ResourceRequirements =
     | AcceptanceTestResources -> AcceptanceTestCoreResourceRequirements
     | SimulatePubnetResources -> SimulatePubnetResources
     | SimulatePubnetTier1PerfResources -> SimulatePubnetTier1PerfCoreResourceRequirements
+    | PerfBenchmarkResources -> PerfBenchmarkCoreResourceRequirements
     | MaxTPSClassicResources -> MaxTPSClassicCoreResourceRequirements
     | ParallelCatchupResources -> ParallelCatchupCoreResourceRequirements
     | NonParallelCatchupResources -> NonParallelCatchupCoreResourceRequirements
     | UpgradeResources -> UpgradeCoreResourceRequirements
+
+// Environment a resource class adds to its stellar-core containers unless
+// --core-env sets the same name. Without a CFS quota tokio sizes its runtime to
+// every logical CPU on the node rather than the 8 reserved (with a quota it
+// follows the quota); the overlay is a child of stellar-core and inherits its
+// environment.
+let CoreResourceDefaultEnv (cr: CoreResources) : (string * string) list =
+    match cr with
+    | PerfBenchmarkResources -> [ ("TOKIO_WORKER_THREADS", "8") ]
+    | _ -> []
 
 let PgContainerVolumeMounts : V1VolumeMount array =
     [| V1VolumeMount(name = CfgVal.dataVolumeName, mountPath = CfgVal.dataVolumePath) |]
@@ -392,6 +417,13 @@ let CoreContainerForCommand
 
     let res = GetCoreResourceRequirements cr
     rejectReservedCoreEnv extraEnv
+
+    let userEnvNames = extraEnv |> List.map fst |> Set.ofList
+
+    let extraEnv =
+        extraEnv
+        @ (CoreResourceDefaultEnv cr
+           |> List.filter (fun (n, _) -> not (userEnvNames.Contains n)))
 
     V1Container(
         name = containerName,
