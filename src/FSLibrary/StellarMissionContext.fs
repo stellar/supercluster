@@ -326,4 +326,5 @@ module MissionContext =
                else
                    "TOKIO_WORKER_THREADS: 8 (perf validators)")
               "Soroban limits: 8 dependent-tx clusters"
+              "overlay mesh: bounded wait whenever a mission waits for connections, restarting all nodes to redraw a wedged mesh"
               "e2e latency: measured on the MinBlockTime* load generators (as --measure-e2e-latency)" ]

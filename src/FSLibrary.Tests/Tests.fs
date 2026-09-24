@@ -1791,6 +1791,65 @@ let ``DATABASE, the postgres sidecar and the pod's postgres setup agree`` () =
     Assert.Equal<bool list>([ true; true; true ], postgresEverywhere ctx pgSet)
     Assert.Equal<bool list>([ false; false; false ], postgresEverywhere ctx coreSet)
 
+// Steps the bounded mesh wait over samples taken every poll, indexed by seconds
+// into an attempt; returns the verdict and when it came.
+let private simulateMeshWait
+    (sampleAt: int -> StellarStatefulSets.MeshSample)
+    : StellarStatefulSets.MeshWaitVerdict * int =
+    let bounds = StellarStatefulSets.meshWaitBounds
+
+    let rec go (s: StellarStatefulSets.MeshWaitState) (t: int) =
+        match StellarStatefulSets.stepMeshWait bounds s t (sampleAt t) with
+        | StellarStatefulSets.KeepWaiting, next when t < 3600 -> go next (t + bounds.pollSec)
+        | verdict, _ -> verdict, t
+
+    go StellarStatefulSets.initialMeshWaitState 0
+
+let private meshSample (silent: string list) (full: int) (connections: int) : StellarStatefulSets.MeshSample =
+    { StellarStatefulSets.MeshSample.silent = silent
+      fullyConnected = full
+      total = 4
+      connections = connections }
+
+[<Fact>]
+let ``The bounded mesh wait returns as soon as the mesh is complete`` () =
+    let verdict, at =
+        simulateMeshWait (fun t -> if t < 40 then meshSample [] 2 8 else meshSample [] 4 12)
+
+    Assert.Equal(StellarStatefulSets.Meshed, verdict)
+    Assert.Equal(40, at)
+
+[<Fact>]
+let ``The bounded mesh wait fails a node that never answers without redrawing`` () =
+    let verdict, at = simulateMeshWait (fun _ -> meshSample [ "n3" ] 0 0)
+    Assert.Equal(StellarStatefulSets.BootTimedOut, verdict)
+    Assert.Equal(StellarStatefulSets.meshWaitBounds.bootTimeoutSec, at)
+
+[<Fact>]
+let ``The bounded mesh wait redraws a mesh that stops growing`` () =
+    // Connections grow until 20 s, then stall short of a full mesh.
+    let verdict, at = simulateMeshWait (fun t -> meshSample [] 2 (6 + min t 20 / 5))
+
+    Assert.Equal(StellarStatefulSets.Wedged, verdict)
+    Assert.Equal(20 + StellarStatefulSets.meshWaitBounds.stallSec, at)
+
+[<Fact>]
+let ``The bounded mesh wait redraws a mesh still incomplete after its budget`` () =
+    // Nodes answer from 30 s on; connections keep growing but never fill the mesh.
+    let verdict, at =
+        simulateMeshWait (fun t -> if t < 30 then meshSample [ "n0" ] 0 0 else meshSample [] 3 t)
+
+    Assert.Equal(StellarStatefulSets.Wedged, verdict)
+    Assert.Equal(30 + StellarStatefulSets.meshWaitBounds.meshTimeoutSec, at)
+
+[<Fact>]
+let ``Once every node has answered, a missed probe does not fail the boot bound`` () =
+    let verdict, at =
+        simulateMeshWait (fun t -> if t = 0 then meshSample [] 2 5 else meshSample [ "n1" ] 1 3)
+
+    Assert.Equal(StellarStatefulSets.Wedged, verdict)
+    Assert.Equal(StellarStatefulSets.meshWaitBounds.stallSec, at)
+
 [<Fact>]
 let ``MIXED_PREGEN runs use at most one generator per requested TPS`` () =
     let sets = StableApproximateTier1CoreSets "img" false
