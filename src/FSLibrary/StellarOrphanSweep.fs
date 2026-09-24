@@ -54,9 +54,9 @@ let private sweepKind
 
 // Delete resources older than `cutoff` in the given namespace. Targets the same
 // resource type set the retired `clean` verb did (Service, ConfigMap,
-// StatefulSet, Ingress, Job, DaemonSet, Deployment) and also helm-uninstalls
-// any `parallel-catchup-*` releases (PCv2) so helm's release secrets get
-// tidied along with the workloads.
+// StatefulSet, Ingress, Job, DaemonSet, Deployment) plus ownerless Pods, and
+// also helm-uninstalls any `parallel-catchup-*` releases (PCv2) so helm's
+// release secrets get tidied along with the workloads.
 //
 // Used by both the automatic on-startup orphan sweep (cutoff = now - 2 days)
 // and the explicit `force-clean-namespace` verb (cutoff = DateTime.MaxValue,
@@ -64,28 +64,29 @@ let private sweepKind
 let private sweepWithCutoff (cutoff: DateTime) (kube: Kubernetes) (ns: string) (apiRateLimit: int) : unit =
     LogInfo "Orphan sweep starting: namespace=%s cutoff=%s" ns (cutoff.ToString("o"))
 
-    // 1. helm-uninstall PCv2 releases whose StatefulSet is older than the cutoff.
+    // 1. helm-uninstall PCv2 releases whose worker pod is older than the cutoff.
     //    Done before the kubectl-style deletes so helm's release secrets get
     //    cleaned up properly, rather than left dangling pointing at deleted
     //    resources.
     ApiRateLimit.sleepUntilNextRateLimitedApiCallTime apiRateLimit
 
     let stsItems = kube.ListNamespacedStatefulSet(namespaceParameter = ns).Items
+    let podItems = kube.ListNamespacedPod(namespaceParameter = ns).Items
 
-    for sts in stsItems do
-        if isOlderThan cutoff sts.Metadata then
-            let name = sts.Metadata.Name
+    for release in podItems
+                   |> Seq.filter (fun pod -> isOlderThan cutoff pod.Metadata)
+                   |> Seq.map (fun pod -> pod.Metadata.Name)
+                   |> Seq.filter (fun name -> name.StartsWith("parallel-catchup-") && name.Contains("-stellar-core"))
+                   |> Seq.map (fun name -> name.Substring(0, name.LastIndexOf("-stellar-core")))
+                   |> Set.ofSeq do
+        LogInfo "Orphan sweep: helm uninstall %s" release
 
-            if name.StartsWith("parallel-catchup-") && name.EndsWith("-stellar-core") then
-                let release = name.Substring(0, name.Length - "-stellar-core".Length)
-                LogInfo "Orphan sweep: helm uninstall %s" release
-
-                RunShellCommand [| "helm"
-                                   "uninstall"
-                                   release
-                                   "-n"
-                                   ns |]
-                |> ignore
+        RunShellCommand [| "helm"
+                           "uninstall"
+                           release
+                           "-n"
+                           ns |]
+        |> ignore
 
     // 2. Delete the same resource type set the retired `clean` verb targeted.
     //    The order matches the old NamespaceContent.Cleanup so dependent
@@ -108,6 +109,20 @@ let private sweepWithCutoff (cutoff: DateTime) (kube: Kubernetes) (ns: string) (
         (fun () -> stsItems |> Seq.map (fun s -> s.Metadata))
         (fun n ->
             kube.DeleteNamespacedStatefulSet(namespaceParameter = ns, name = n, propagationPolicy = "Foreground")
+            |> ignore)
+        cutoff
+
+    // PCv2 workers are bare pods, so nothing else in this sweep would reap them.
+    // Restricted to ownerless pods: everything else goes away with its controller.
+    sweepKind
+        apiRateLimit
+        "Pod"
+        (fun () ->
+            podItems
+            |> Seq.filter (fun p -> isNull p.Metadata.OwnerReferences || p.Metadata.OwnerReferences.Count = 0)
+            |> Seq.map (fun p -> p.Metadata))
+        (fun n ->
+            kube.DeleteNamespacedPod(namespaceParameter = ns, name = n, propagationPolicy = "Foreground")
             |> ignore)
         cutoff
 
