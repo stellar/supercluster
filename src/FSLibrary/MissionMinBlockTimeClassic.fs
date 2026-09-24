@@ -16,8 +16,8 @@ open StellarCoreHTTP
 
 let minBlockTimeClassic (context: MissionContext) =
     let context =
-        { context with
-              coreResources = SimulatePubnetTier1PerfResources
+        { MissionContext.withOverlayV2PerfDefaults context with
+              coreResources = MissionContext.perfMissionCoreResources context SimulatePubnetTier1PerfResources
               installNetworkDelay = Some(context.installNetworkDelay |> Option.defaultValue true)
               enableTailLogging = false
               // Isolate this perf run onto its own nodes so co-tenant pods from
