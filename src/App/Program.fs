@@ -331,7 +331,7 @@ type MissionOptions
     member self.PubnetData = pubnetData
 
     [<Option("measure-e2e-latency",
-             HelpText = "Set to enable the loadgen e2e metrics",
+             HelpText = "Set to enable the loadgen e2e metrics (needs --loadgen-keys, except for MinBlockTime* missions)",
              Required = false,
              Default = false)>]
     member self.MeasureE2eLatency = measureE2eLatency
@@ -712,7 +712,7 @@ type MissionOptions
     member self.ForceOldStyleTriggerTimer = forceOldStyleTriggerTimer
 
     [<Option("overlay-v2-optimized",
-             HelpText = "Settings tuned for the experimental Rust-overlay (v2) stellar-core image, in one flag; without it missions keep upstream's configs, resources and limits. It sets: MinBlockTime* tx-set limits at 125% of the offered txs per ledger (instead of 2x) and 960 s of load per candidate (instead of 300 s); MinBlockTime* tx-set byte allowances that split 10 MiB by the offered classic/Soroban bytes, at least 1 MiB each (instead of core's 5 MiB each); for perf missions in-memory BucketListDB, no test tx meta, one stellar-core pod per host and 8 vCPU / no CPU limit / 16Gi validators with TOKIO_WORKER_THREADS=8 (--core-env can override it); and 8 dependent-tx Soroban clusters. The run log lists what it sets.",
+             HelpText = "Settings tuned for the experimental Rust-overlay (v2) stellar-core image, in one flag; without it missions keep upstream's configs, resources and limits. It sets: MinBlockTime* tx-set limits at 125% of the offered txs per ledger (instead of 2x) and 960 s of load per candidate (instead of 300 s); MinBlockTime* tx-set byte allowances that split 10 MiB by the offered classic/Soroban bytes, at least 1 MiB each (instead of core's 5 MiB each); for perf missions in-memory BucketListDB, no test tx meta, one stellar-core pod per host and 8 vCPU / no CPU limit / 16Gi validators with TOKIO_WORKER_THREADS=8 (--core-env can override it); 8 dependent-tx Soroban clusters; and e2e latency measured on the MinBlockTime* load generators (as --measure-e2e-latency). The run log lists what it sets.",
              Required = false,
              Default = false)>]
     member self.OverlayV2Optimized : bool = overlayV2Optimized
@@ -783,8 +783,10 @@ let main argv =
             if mission.LoadgenKeys.IsSome && mission.PubnetData.IsNone then
                 failwith "Error: --loadgen-keys requires --pubnet-data to be set"
 
-            if mission.MeasureE2eLatency && mission.LoadgenKeys.IsNone then
-                failwith "Error: --measure-e2e-latency requires --loadgen-keys"
+            if mission.MeasureE2eLatency
+               && mission.LoadgenKeys.IsNone
+               && MissionContext.e2eLatencyNeedsLoadgenKeys mission.Missions then
+                failwith "Error: --measure-e2e-latency requires --loadgen-keys (except for MinBlockTime* missions)"
 
             match mission.Tier1OrgCount with
             | Some n when

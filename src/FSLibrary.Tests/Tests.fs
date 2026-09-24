@@ -1707,6 +1707,51 @@ let ``Tier1 topology keeps its 10 organizations unless --tier1-org-count adds di
     |> ignore
 
 [<Fact>]
+let ``MinBlockTime marks only its active load generators, matching by name`` () =
+    let a = MakeLiveCoreSet "a" coreSetOptions
+    let b = MakeLiveCoreSet "b" coreSetOptions
+    // The formation's copy of a set can carry other option changes (pregenerated-tx slices).
+    let aChanged = { a with options = { a.options with nodeCount = 5 } }
+    let sets = [ aChanged; b ]
+    let marked = MinBlockTimeTest.markLoadGenerators [ a ] sets
+
+    Assert.Equal<bool list>([ true; false ], marked |> List.map (fun cs -> cs.options.generatesLoad))
+    Assert.Equal(5, marked.Head.options.nodeCount)
+
+[<Fact>]
+let ``The e2e latency metric goes on core sets that generate load, only when measuring`` () =
+    let toml (c: MissionContext) (cs: CoreSet) =
+        (MakeNetworkCfg c [ cs ] passOpt)
+            .StellarCoreCfg(cs, 0, MainCoreContainer)
+            .ToString()
+
+    let key = "LOADGEN_MEASURE_TX_E2E_LATENCY_FOR_TESTING"
+    let only = [ coreSet ]
+    let generator = MinBlockTimeTest.markLoadGenerators only only |> List.head
+
+    let measuring = { ctx with runForMinBlockTime = true; measureE2eLatency = true }
+    Assert.Equal(1, tomlKeyCount key (toml measuring generator))
+    Assert.Equal(0, tomlKeyCount key (toml measuring coreSet))
+    Assert.Equal(0, tomlKeyCount key (toml { measuring with measureE2eLatency = false } generator))
+    // --overlay-v2-optimized adds no metric of its own, and no tx batching or
+    // parallel-apply keys: the Rust-overlay core ignores the first and has
+    // deprecated the second.
+    let v2 = { measuring with overlayV2Optimized = true }
+    Assert.Equal(0, tomlKeyCount key (toml v2 coreSet))
+    Assert.Equal(0, tomlKeyCount "EXPERIMENTAL_TX_BATCH_MAX_SIZE" (toml v2 generator))
+    Assert.Equal(0, tomlKeyCount "EXPERIMENTAL_PARALLEL_LEDGER_APPLY" (toml v2 generator))
+
+[<Fact>]
+let ``--measure-e2e-latency needs --loadgen-keys except for MinBlockTime missions`` () =
+    let needsKeys = MissionContext.e2eLatencyNeedsLoadgenKeys
+    let minBlockTimeOnly = [ "MinBlockTimeClassic"; "MinBlockTimeMixed" ]
+    let withOther = [ "MinBlockTimeMixed"; "SimulatePubnet" ]
+    Assert.False(needsKeys [ "MinBlockTimeMixed" ])
+    Assert.False(needsKeys minBlockTimeOnly)
+    Assert.True(needsKeys [ "MaxTPSMixed" ])
+    Assert.True(needsKeys withOther)
+
+[<Fact>]
 let ``MIXED_PREGEN runs use at most one generator per requested TPS`` () =
     let sets = StableApproximateTier1CoreSets "img" false
     let count everyValidator tps = (MinBlockTimeTest.activeLoadGenCoreSets everyValidator tps sets).Length

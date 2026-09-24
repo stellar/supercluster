@@ -292,6 +292,11 @@ module MissionContext =
     /// MinBlockTime* load per candidate, in seconds: upstream's 300, or 960 under --overlay-v2-optimized.
     let minBlockTimeLoadDurationSec (ctx: MissionContext) : int = if ctx.overlayV2Optimized then 960 else 300
 
+    /// Whether --measure-e2e-latency needs --loadgen-keys to find the load-generating nodes: MinBlockTime* missions
+    /// mark their own (MinBlockTimeTest.markLoadGenerators); other missions only have the keys.
+    let e2eLatencyNeedsLoadgenKeys (missions: string seq) : bool =
+        missions |> Seq.exists (fun m -> not (m.StartsWith "MinBlockTime"))
+
     /// The settings --overlay-v2-optimized resolves for this run, one line each, for the run log. Empty without it.
     let describeOverlayV2 (ctx: MissionContext) : string list =
         if not ctx.overlayV2Optimized then
@@ -314,4 +319,5 @@ module MissionContext =
                    "TOKIO_WORKER_THREADS: from --core-env"
                else
                    "TOKIO_WORKER_THREADS: 8 (perf validators)")
-              "Soroban limits: 8 dependent-tx clusters" ]
+              "Soroban limits: 8 dependent-tx clusters"
+              "e2e latency: measured on the MinBlockTime* load generators (as --measure-e2e-latency)" ]

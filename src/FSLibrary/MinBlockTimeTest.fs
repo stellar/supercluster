@@ -474,6 +474,21 @@ let activeLoadGenCoreSets (everyValidator: bool) (requestedTps: int) (loadGenNod
 
     List.truncate (max 1 fitting) loadGenNodes
 
+// Marks the core sets in `active` as generating load, as --loadgen-keys does
+// for pubnet topologies, so per-node settings keyed on it (the e2e latency
+// metric of --measure-e2e-latency) land on the nodes that submit. Matches by
+// name, since `sets` may carry other option changes. Exposed for unit tests.
+let markLoadGenerators (active: CoreSet list) (sets: CoreSet list) : CoreSet list =
+    let names = active |> List.map (fun cs -> cs.name) |> Set.ofList
+
+    sets
+    |> List.map
+        (fun (cs: CoreSet) ->
+            if names.Contains cs.name then
+                { cs with options = { cs.options with generatesLoad = true } }
+            else
+                cs)
+
 let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadGen option) =
     // --overlay-v2-optimized: see MissionContext.describeOverlayV2.
     let v2 = context.overlayV2Optimized
@@ -521,6 +536,8 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
               runForMinBlockTime = true
               genesisTestAccountCount = Some(context.genesisTestAccountCount |> Option.defaultValue 100000)
               offeredTxBytesPerSec = Some offeredTxBytesPerSec
+              // --overlay-v2-optimized always measures e2e latency.
+              measureE2eLatency = context.measureE2eLatency || v2
               numPregeneratedTxs =
                   if usesPregeneratedTxs baseLoadGen.mode then
                       Some(context.numPregeneratedTxs |> Option.defaultValue 2500000)
@@ -607,6 +624,8 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                                     initialization = { cs.options.initialization with pregenerateTxs = pregenerateTxs } } })
                 allNodes
         | _ -> allNodes
+
+    let allNodes = markLoadGenerators activeLoadGenNodes allNodes
 
     context.ExecuteWithOptionalConsistencyCheck
         allNodes
