@@ -276,6 +276,60 @@ let private readLedgerAgePercentiles (peer: Peer) : Peer * float * float =
     let h = peer.GetMetrics().LedgerAgeClosedHistogram
     peer, float h.``75``, float h.``99``
 
+// Transactions included in closed ledgers since the candidate cleared the
+// metrics. ledger.transaction.count is Updated by LedgerManagerImpl even in
+// overlay-only mode (it is marked before the apply-skip branch), so its sum
+// counts every transaction that made it into a tx set with apply disabled.
+let private readLedgerTxsIncluded (peer: Peer) : Peer * float =
+    peer, float (peer.GetMetrics().LedgerTransactionCount.Sum)
+
+let private collectLedgerTxsIncluded (formation: StellarFormation) (coreSets: CoreSet list) : (Peer * float) list =
+    formation.NetworkCfg.PeersInSets(List.toArray coreSets)
+    |> List.map (fun peer -> async { return readLedgerTxsIncluded peer })
+    |> Async.Parallel
+    |> Async.RunSynchronously
+    |> Array.toList
+
+// Fraction of the offered transactions that must reach ledgers for an
+// overlay-only candidate to count. Comparing totals over the window, rather
+// than txs per ledger against TPS x T, is not skewed by the idle ledgers
+// around the load or by long ledgers carrying more.
+let private minInclusionFraction = 0.95
+
+// Cross-check for overlay-only candidates. Loadgen completes only once every
+// transaction its node submitted has been included in a closed ledger, so a
+// completed run includes essentially everything; this confirms it from the
+// ledgers' own transaction counts, which checkLedgerAgeSLA does not look at
+// (closing near-empty ledgers on schedule passes it trivially).
+let private checkInclusionSLA (included: (Peer * float) list) (targetMs: int) (offered: int) : bool =
+    if List.isEmpty included || offered <= 0 then
+        true
+    else
+        let floorTxs = float offered * minInclusionFraction
+        let observed = included |> List.averageBy snd
+        let worstPeer, worstTxs = included |> List.minBy snd
+        let ok = observed >= floorTxs
+
+        LogInfo
+            "Inclusion at T=%dms: %.0f of %d offered transactions reached ledgers (%.1f%%), worst peer=%s %.0f -> %s"
+            targetMs
+            observed
+            offered
+            (100.0 * observed / float offered)
+            worstPeer.ShortName.StringName
+            worstTxs
+            (if ok then "PASS" else "FAIL")
+
+        if not ok then
+            LogError
+                "Only %.1f%% of the %d offered transactions reached ledgers at T=%dms (need >= %.0f%%). The network paced ledgers but was not carrying the load, so the close-time result is meaningless."
+                (100.0 * observed / float offered)
+                offered
+                targetMs
+                (100.0 * minInclusionFraction)
+
+        ok
+
 let private collectLedgerAgePercentiles
     (formation: StellarFormation)
     (coreSets: CoreSet list)
@@ -329,6 +383,13 @@ let private checkLedgerAgeSLA (percentiles: (Peer * float * float) list) (target
     let tHi = tf * 1.20
     let p99Max = tf * 2.0
     let mutable ok = true
+
+    LogInfo
+        "SLA thresholds at T=%dms: every peer's ledger.age.closed-histogram P75 in [%.0f, %.0f) ms and P99 <= %.0f ms (the P75 band is the temporarily widened +/-20%%; the target is a close-time target, not a P99 guarantee)"
+        targetMs
+        tLo
+        tHi
+        p99Max
 
     let formatDeviation value =
         let deviation = (value - tf) / tf * 100.0
@@ -572,30 +633,114 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                 upgradeSorobanMaxTxSetSize targetMs
                 formation.clearMetrics allNodes
 
-                // A loadgen failure is not an SLA signal — it usually means the
-                // requested TPS is too high for the network, or that loadgen
-                // itself lost a tx in the pipeline. Treating it as "SLA missed"
-                // would mislead the binary search, so fail the mission loudly.
-                try
-                    if isMixedPregenMode baseLoadGen.mode then
-                        withOverlayOnlyMode
-                            formation
-                            allNodes
-                            (fun () -> formation.RunMultiLoadgen activeLoadGenNodes loadGen)
+                // Per doc/measuring-minimum-block-time.md, a loadgen failure
+                // (application lagging the offered load, a node dropping out
+                // mid-window, etc.) counts as a failed iteration: the search
+                // raises its lower bound and continues. Killing the mission
+                // here would let one bad window discard the whole search.
+                if isMixedPregenMode baseLoadGen.mode then
+                    // Overlay-only path. Core skips apply by design, but loadgen
+                    // still completes only once every transaction its node
+                    // submitted has been included in a closed ledger (core
+                    // counts inclusion in this mode), so a loadgen failure,
+                    // such as load left out of ledgers, fails the candidate.
+                    // Everything else is measured while apply is still
+                    // disabled, describing the state we measured:
+                    //   * percentiles, the inclusion cross-check and the
+                    //     pairwise consistency and sync checks;
+                    //   * apply is never re-enabled, and the between-iteration
+                    //     restart discards whatever is left in the nodes'
+                    //     queues rather than making the network apply it at
+                    //     once, which previously pushed nodes out of sync
+                    //     minutes after the window.
+                    toggleOverlayOnlyMode formation allNodes
+
+                    let mutable failureReason =
+                        try
+                            formation.RunMultiLoadgen activeLoadGenNodes loadGen
+                            None
+                        with e ->
+                            LogError "Load generation FAILED at T=%dms: %s" targetMs e.Message
+                            Some(sprintf "load generation failed: %s" e.Message)
+
+                    let percentiles = collectLedgerAgePercentiles formation allNodes
+
+                    // Read in-mode for the same reason as the percentiles: the
+                    // between-iteration restart resets these counters.
+                    let included = collectLedgerTxsIncluded formation allNodes
+
+                    if not (checkInclusionSLA included targetMs loadGen.txs) && failureReason.IsNone then
+                        failureReason <- Some "under 95% of the offered transactions reached ledgers"
+
+                    if context.measureE2eLatency then
+                        logE2eLatencyMetrics formation activeLoadGenNodes
+
+                    // Consistency AND in-sync are both still enforced, here,
+                    // while apply is still disabled: a node out of sync at this
+                    // point is a real problem with the run we just measured.
+                    try
+                        formation.CheckNoErrorsAndPairwiseConsistency()
+                        formation.EnsureAllNodesInSync allNodes
+                    with e ->
+                        LogWarn
+                            "Health check failed at T=%dms in overlay-only mode: %s — iteration counts as a fail"
+                            targetMs
+                            e.Message
+
+                        if failureReason.IsNone then
+                            failureReason <- Some(sprintf "health check: %s" e.Message)
+
+                    let slaOk = failureReason.IsNone && checkLedgerAgeSLA percentiles targetMs
+
+                    LogInfo
+                        "Candidate T=%dms at %d TPS: %s%s"
+                        targetMs
+                        fixedTxRate
+                        (if slaOk then "PASS" else "FAIL")
+                        (match failureReason with
+                         | _ when slaOk -> ""
+                         | Some reason -> sprintf " (%s)" reason
+                         | None -> " (close-time SLA not met)")
+
+                    slaOk
+                else
+                    let loadgenOk =
+                        try
+                            formation.RunMultiLoadgen activeLoadGenNodes loadGen
+                            true
+                        with e ->
+                            LogWarn "Loadgen failed at T=%dms (%s); treating iteration as SLA fail" targetMs e.Message
+
+                            (try
+                                let pct = collectLedgerAgePercentiles formation allNodes
+
+                                if not (List.isEmpty pct) then
+                                    let avgP75 = pct |> List.averageBy (fun (_, p75, _) -> p75)
+                                    let avgP99 = pct |> List.averageBy (fun (_, _, p99) -> p99)
+
+                                    LogInfo
+                                        "Post-failure ledger age at T=%dms: avg-p75=%.0f (%+.1f%% vs target) avg-p99=%.0f"
+                                        targetMs
+                                        avgP75
+                                        (100.0 * (avgP75 - float targetMs) / float targetMs)
+                                        avgP99
+                             with e2 -> LogWarn "Could not collect post-failure percentiles: %s" e2.Message)
+
+                            false
+
+                    if not loadgenOk then
+                        false
                     else
-                        formation.RunMultiLoadgen activeLoadGenNodes loadGen
-                with e -> failwithf "Loadgen failed at T=%dms; TPS might be too high (%s)" targetMs e.Message
+                        // Snapshot SLA metrics before consistency checks; those can take
+                        // long enough to skew the ledger age percentiles.
+                        let ledgerAgePercentiles = collectLedgerAgePercentiles formation allNodes
 
-                // Snapshot SLA metrics before consistency checks; those can take
-                // long enough to skew the ledger age percentiles.
-                let ledgerAgePercentiles = collectLedgerAgePercentiles formation allNodes
+                        if context.measureE2eLatency then
+                            logE2eLatencyMetrics formation activeLoadGenNodes
 
-                if context.measureE2eLatency then
-                    logE2eLatencyMetrics formation activeLoadGenNodes
-
-                formation.CheckNoErrorsAndPairwiseConsistency()
-                formation.EnsureAllNodesInSync allNodes
-                checkLedgerAgeSLA ledgerAgePercentiles targetMs
+                        formation.CheckNoErrorsAndPairwiseConsistency()
+                        formation.EnsureAllNodesInSync allNodes
+                        checkLedgerAgeSLA ledgerAgePercentiles targetMs
 
             // An explicit single-candidate target: --min-block-time-ms ==
             // --max-block-time-ms == T evaluates exactly that T once, in
@@ -662,7 +807,12 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
 
                 if evaluateAt t then
                     LogInfo "SLA met at T=%dms; lowering upper bound" t
-                    needsRecovery.Value <- false
+                    // Overlay-only runs never apply their transactions, so the
+                    // nodes' state and queues are not fit for the next
+                    // iteration: leftovers starve its upgrade-contract loadgen,
+                    // which then fails hard. Restart after a pass as well, not
+                    // just after a failure.
+                    needsRecovery.Value <- isMixedPregenMode baseLoadGen.mode
                     true
                 else
                     LogInfo "SLA not met at T=%dms; raising lower bound" t
