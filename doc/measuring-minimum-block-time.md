@@ -53,7 +53,8 @@ These parameters affect both `MinBlockTimeClassic` and `MinBlockTimeMixed` missi
 * for `MinBlockTime*`: tx-set limits at 125% of the offered txs per ledger instead of 2x (every tx-set build on the Rust-overlay core pulls twice these limits from the mempool over IPC), 960 s of load per candidate instead of 300 s, and e2e latency measured on the load-generating nodes, as with `--measure-e2e-latency`;
 * for `MinBlockTime*`: core's 10 MiB tx-set byte budget (`TESTING_MAX_CLASSIC_BYTE_ALLOWANCE` + `TESTING_MAX_SOROBAN_BYTE_ALLOWANCE`) split in proportion to the classic and Soroban bytes the run offers, at least 1 MiB each, instead of core's 5 MiB each (5 MiB caps a Soroban phase at about 6900 SAC payments). A Soroban-only run gets 9 MiB for Soroban and a classic-only run 9 MiB for classic; the max-TPS missions keep their own splits;
 * for the perf missions (`MinBlockTimeClassic`/`Mixed`, `MaxTPSClassic`/`Mixed`): in-memory BucketListDB, one stellar-core pod per worker node (as `--one-stellar-core-per-host`), no test-only tx meta (images older than v27.0.0 reject that key, so the flag needs a newer image), and validators with an 8 vCPU request, no CPU limit and 16 GiB memory, whose containers get `TOKIO_WORKER_THREADS=8` unless `--core-env` sets it;
-* 8 dependent-tx clusters in the Soroban limit upgrades.
+* 8 dependent-tx clusters in the Soroban limit upgrades;
+* bounded overlay-mesh waits wherever a mission waits for the overlay to connect: nodes must answer within 5 minutes of starting, and a mesh that stops growing for 60 s (or is still incomplete after 2 minutes) is redrawn by restarting all nodes, up to 3 attempts, so a wedged mesh fails the run in about 20 minutes at worst instead of hanging it.
 
 ### Additional options for mixed pre-generated classic and synthetic Soroban traffic
 
