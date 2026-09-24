@@ -165,6 +165,9 @@ type MissionContext =
       minBlockTimeMixedMode: string
       minBlockTimeMixedClassicTxRate: int option
       minBlockTimeMixedSorobanTxRate: int option
+      // --tier1-org-count: organizations in StableApproximateTier1CoreSets
+      // (None = its 10; up to 40 adds StellarNetworkData.tier1ExtraOrgs).
+      tier1OrgCount: int option
       runForMinBlockTime: bool
       forceOldStyleTriggerTimerPct: int
       uniformDrift: int list
