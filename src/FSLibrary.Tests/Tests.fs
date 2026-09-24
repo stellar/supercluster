@@ -153,6 +153,7 @@ let ctx : MissionContext =
       minBlockTimeMixedClassicTxRate = None
       minBlockTimeMixedSorobanTxRate = None
       tier1OrgCount = None
+      pregenerateTxsPerValidator = false
       runForMinBlockTime = false
       forceOldStyleTriggerTimerPct = 0
       uniformDrift = []
@@ -1277,6 +1278,124 @@ let ``Min block time search finds the smallest passing candidate`` () =
     Assert.Equal(Some 5000, result)
     Assert.Equal<int list>([ 4000; 5000 ], List.ofSeq evaluated)
 
+[<Theory>]
+[<InlineData(1000)>]
+[<InlineData(2000)>]
+[<InlineData(3000)>]
+[<InlineData(5000)>]
+let ``All validator partitions preserve rate duration and disjoint account slices`` (rate: int) =
+    let full =
+        { LoadGen.GetDefault() with
+              mode = MixedPregenSACPayment
+              accounts = 1200000
+              txrate = rate
+              txs = rate * 960
+              classicTxRate = Some 0
+              sorobanTxRate = Some rate }
+
+    let shares = StellarStatefulSets.PartitionValidatorLoad 57 true full
+    Assert.Equal(57, shares.Length)
+    Assert.Equal(rate, shares |> List.sumBy (fun s -> s.txrate))
+    Assert.Equal(rate * 960, shares |> List.sumBy (fun s -> s.txs))
+    Assert.Equal(1199964, shares |> List.sumBy (fun s -> s.accounts))
+    let rates = shares |> List.map (fun s -> s.txrate)
+    Assert.True(List.max rates - List.min rates <= 1)
+
+    shares
+    |> List.iteri
+        (fun i s ->
+            Assert.Equal(21052, s.accounts)
+            Assert.Equal(i * 21052, s.offset)
+            Assert.Equal(s.txrate * 960, s.txs)
+            Assert.Equal(Some s.txrate, s.sorobanTxRate)
+            Assert.Equal(Some 0, s.classicTxRate)
+            Assert.True(s.offset + s.accounts <= full.accounts))
+
+    for a, b in List.pairwise shares do
+        Assert.True(a.offset + a.accounts <= b.offset)
+
+[<Fact>]
+let ``57 validator topology and initialization match every generator partition`` () =
+    let sets = StableApproximateTier1CoreSetsWithOrgCount "frozen-image" false (Some 19)
+    Assert.Equal(19, sets.Length)
+    Assert.Equal(57, sets |> List.sumBy (fun s -> s.options.nodeCount))
+
+    let full =
+        { LoadGen.GetDefault() with
+              mode = MixedPregenSACPayment
+              accounts = 1200000
+              txrate = 5000
+              txs = 4800000
+              classicTxRate = Some 0
+              sorobanTxRate = Some 5000 }
+
+    let shares = StellarStatefulSets.PartitionValidatorLoad 57 true full
+    let keys = sets |> List.collect (fun s -> s.keys |> Array.toList)
+    Assert.Equal(57, keys |> List.map (fun k -> k.AccountId) |> Set.ofList |> Set.count)
+
+    sets
+    |> List.iteri
+        (fun orgIndex cs ->
+            Assert.Equal(Some true, cs.options.tier1)
+            Assert.Equal(3, cs.options.nodeCount)
+            Assert.Equal(57, cs.options.preferredPeersMap.Value.Count)
+
+            for peers in cs.options.preferredPeersMap.Value.Values do
+                Assert.Equal(56, peers.Length)
+
+            match cs.options.quorumSet with
+            | ExplicitQuorum q ->
+                Assert.Equal(Some 67, q.thresholdPercent)
+                Assert.Equal(19, q.innerQuorumSets.Length)
+
+                for inner in q.innerQuorumSets do
+                    Assert.Equal(Some 51, inner.thresholdPercent)
+                    Assert.Equal(3, inner.validators.Count)
+            | _ -> failwith "Expected explicit organization quorum"
+
+            let options =
+                { cs.options with
+                      initialization =
+                          { cs.options.initialization with
+                                pregenerateTxs = Some(10000, 21052, orgIndex * 3 * 21052) } }
+
+            for i in 0 .. 2 do
+                let actual = PregenerationOptionsForPeer options i
+                let share = shares.[orgIndex * 3 + i]
+                Assert.Equal(Some(10000, share.accounts, share.offset), actual.initialization.pregenerateTxs))
+
+[<Fact>]
+let ``Fixed duration partition rejects a partial second transaction budget`` () =
+    let full = { LoadGen.GetDefault() with accounts = 1200000; txrate = 5000; txs = 4800001 }
+
+    Assert.Throws<System.ArgumentException>(fun () -> StellarStatefulSets.PartitionValidatorLoad 57 true full |> ignore)
+    |> ignore
+
+[<Fact>]
+let ``Submission accounting includes all started validators and preserves legacy selection`` () =
+    let sets = StableApproximateTier1CoreSetsWithOrgCount "frozen-image" false (Some 19)
+    let selected = StellarStatefulSets.LoadgenPeerIndices true sets
+    Assert.Equal(57, selected.Length)
+
+    Assert.Equal(
+        57,
+        selected
+        |> List.map (fun (cs, i) -> cs.keys.[i].AccountId)
+        |> Set.ofList
+        |> Set.count
+    )
+
+    Assert.Equal<int list>(
+        [ 19; 19; 19 ],
+        [ for i in 0 .. 2 -> selected |> List.filter (fun (_, j) -> i = j) |> List.length ]
+    )
+    // A one-peer-per-organization tally would incorrectly report only one third.
+    let submitted = selected |> List.sumBy (fun (_, i) -> if i = 0 then 34000 else 33000)
+    Assert.Equal(1900000, submitted)
+    let legacy = StellarStatefulSets.LoadgenPeerIndices false sets
+    Assert.Equal(19, legacy.Length)
+    Assert.All(legacy, (fun (_, i) -> Assert.Equal(0, i)))
+
 [<Fact>]
 let ``Tier1 topology keeps its 10 organizations unless --tier1-org-count adds diverse ones`` () =
     let orgs (sets: CoreSet list) = sets |> List.map (fun cs -> cs.name.StringName) |> List.sort
@@ -1334,3 +1453,68 @@ let ``Tier1 topology keeps its 10 organizations unless --tier1-org-count adds di
     Assert.ThrowsAny<System.Exception>
         (fun () -> StableApproximateTier1CoreSetsWithOrgCount "img" false (Some 41) |> ignore)
     |> ignore
+
+[<Fact>]
+let ``MIXED_PREGEN runs use at most one generator per requested TPS`` () =
+    let sets = StableApproximateTier1CoreSets "img" false
+    let count everyValidator tps = (MinBlockTimeTest.activeLoadGenCoreSets everyValidator tps sets).Length
+    // With load on every validator each organization brings its 3 validators.
+    Assert.Equal(10, count true 5000)
+    Assert.Equal(10, count true 30)
+    Assert.Equal(3, count true 10)
+    Assert.Equal(1, count true 2)
+    Assert.Equal(1, count true 0)
+    // One generator per organization otherwise, as upstream.
+    Assert.Equal(5, count false 5)
+    Assert.Equal(10, count false 5000)
+
+[<Fact>]
+let ``MIXED_PREGEN load runs on every validator in MinBlockTime runs`` () =
+    let minBlock = { ctx with runForMinBlockTime = true }
+    Assert.True(LoadOnEveryValidator minBlock MixedPregenSACPayment)
+    Assert.False(LoadOnEveryValidator minBlock GeneratePaymentLoad)
+    Assert.False(LoadOnEveryValidator ctx MixedPregenSACPayment)
+
+    // Upstream's per-node split: equal accounts and txs, offsets by slice.
+    let full =
+        { LoadGen.GetDefault() with
+              accounts = 1000
+              txrate = 100
+              txs = 30000
+              spikesize = 10 }
+
+    let shares = StellarStatefulSets.PartitionValidatorLoad 3 false full
+    Assert.Equal<int list>([ 333; 333; 333 ], shares |> List.map (fun s -> s.accounts))
+    Assert.Equal<int list>([ 0; 333; 666 ], shares |> List.map (fun s -> s.offset))
+    Assert.Equal<int list>([ 10000; 10000; 10000 ], shares |> List.map (fun s -> s.txs))
+    Assert.Equal<int list>([ 34; 33; 33 ], shares |> List.map (fun s -> s.txrate))
+
+[<Fact>]
+let ``Validators pregenerate their own account slices only when the MinBlockTime load runs on every validator`` () =
+    let pregenOpts =
+        { coreSetOptions with
+              nodeCount = 3
+              initialization = { coreSetOptions.initialization with pregenerateTxs = Some(1000, 100, 0) } }
+
+    let pregenSet = MakeLiveCoreSet "pregen" pregenOpts
+
+    let script (c: MissionContext) =
+        let pod =
+            (MakeNetworkCfg { c with installNetworkDelay = Some false } [ pregenSet ] passOpt)
+                .ToPodTemplateSpec pregenSet
+
+        let core =
+            pod.Spec.Containers
+            |> Seq.find (fun k -> k.Name = CfgVal.stellarCoreContainerName "run")
+
+        String.concat " " core.Args
+
+    // A MinBlockTime context whose mixed mode is only the option default (e.g.
+    // MinBlockTimeClassic) keeps one shared pregeneration command.
+    let shared = script { ctx with runForMinBlockTime = true }
+    Assert.Contains("'--offset 0'", shared)
+    Assert.DoesNotContain("'--offset 100'", shared)
+    let perValidator = script { ctx with runForMinBlockTime = true; pregenerateTxsPerValidator = true }
+
+    for offset in [ 0; 100; 200 ] do
+        Assert.Contains(sprintf "'--offset %d'" offset, perValidator)

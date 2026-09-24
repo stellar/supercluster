@@ -70,6 +70,49 @@ let private getAveragePeerCount (topology: Map<string, string array>) : float =
     let nodeCount = Map.count topology
     if nodeCount > 0 then float total / float nodeCount else 0.0
 
+// Divide aggregate rate, account space and duration across actual generators.
+// In fixed-duration mode (LoadOnEveryValidator runs), derive each transaction
+// budget from its assigned rate; equal transaction budgets would make
+// remainder-rate peers finish early. Otherwise this is upstream's even split.
+let PartitionValidatorLoad (n: int) (fixedDuration: bool) (full: LoadGen) =
+    if n <= 0 then invalidArg "n" "Need at least one generator"
+
+    if fixedDuration && full.accounts < n then
+        invalidArg "n" "Need accounts for every generator"
+
+    if fixedDuration && (full.txrate <= 0 || full.txs % full.txrate <> 0) then
+        invalidArg "full" "Fixed-duration load must have an integral duration"
+
+    let fraction value i = value / n + (if i < value % n then 1 else 0)
+
+    [ for i in 0 .. n - 1 do
+          let classic = full.classicTxRate |> Option.map (fun v -> fraction v i)
+          let soroban = full.sorobanTxRate |> Option.map (fun v -> fraction v i)
+
+          let rate =
+              match classic, soroban with
+              | Some c, Some s -> c + s
+              | Some c, None -> c
+              | None, Some s -> s
+              | None, None -> fraction full.txrate i
+
+          yield
+              { full with
+                    accounts = full.accounts / n
+                    offset = (full.accounts / n) * i
+                    txs = if fixedDuration then rate * (full.txs / full.txrate) else full.txs / n
+                    spikesize = fraction full.spikesize i
+                    txrate = rate
+                    classicTxRate = classic
+                    sorobanTxRate = soroban } ]
+
+// A single generator selection is shared by launch and final submission
+// accounting: every validator of each core set when everyValidator
+// (StellarKubeSpecs.LoadOnEveryValidator), else node 0 of each, as upstream.
+let LoadgenPeerIndices (everyValidator: bool) (coreSets: CoreSet list) =
+    coreSets
+    |> List.collect (fun cs -> [ for i in 0 .. (if everyValidator then cs.options.nodeCount - 1 else 0) -> cs, i ])
+
 // Pure check of an observed stellar-core pod -> worker-node mapping for
 // --one-stellar-core-per-host: every pod in mustBeScheduled is listed exactly
 // once and on a node, and no two scheduled pods share a node. Pods not yet
@@ -279,6 +322,10 @@ let autoscalerView
     (current |> List.exists autoscalerProvisioning), withFailures
 
 type StellarFormation with
+
+    member self.LoadGenPeers (coreSets: CoreSet list) (loadGen: LoadGen) =
+        LoadgenPeerIndices(LoadOnEveryValidator self.NetworkCfg.missionContext loadGen.mode) coreSets
+        |> List.map (fun (cs, i) -> self.NetworkCfg.GetPeer cs i)
 
     member self.GetCoreSetForStatefulSet(ss: V1StatefulSet) =
         List.find (fun cs -> (self.NetworkCfg.StatefulSetName cs).StringName = ss.Name()) self.NetworkCfg.CoreSetList
@@ -782,40 +829,12 @@ type StellarFormation with
         |> ignore
 
     // This is similar to RunLoadgen but runs a 1/N fractional portion of a
-    // given LoadGen on node 0 of each of N CoreSets.
+    // given LoadGen on each of N generators (LoadGenPeers: node 0 of each
+    // CoreSet, or every validator of each for LoadOnEveryValidator runs).
     member self.RunMultiLoadgen (coreSets: CoreSet list) (fullLoadGen: LoadGen) =
-        let n = List.length coreSets
-
-        let fractionalLoadGen (i: int) : LoadGen =
-            // Spread remainder across the first r nodes instead of dumping it
-            // entirely on the last one, so per-node load stays even.
-            let getFraction attr =
-                let q = attr / n
-                let r = attr % n
-                if i < r then q + 1 else q
-
-            let getOptionalFraction attr = Option.map getFraction attr
-
-            let classicShare = getOptionalFraction fullLoadGen.classicTxRate
-            let sorobanShare = getOptionalFraction fullLoadGen.sorobanTxRate
-
-            // In mixed mode derive txrate from the component rates so that
-            // txrate, classicTxRate, and sorobanTxRate stay consistent on
-            // every peer (independent splits would diverge by 1 per slice).
-            let txrateShare =
-                match classicShare, sorobanShare with
-                | Some c, Some s -> c + s
-                | Some c, None -> c
-                | None, Some s -> s
-                | None, None -> getFraction fullLoadGen.txrate
-
-            { fullLoadGen with
-                  accounts = fullLoadGen.accounts / n
-                  txs = fullLoadGen.txs / n
-                  spikesize = getFraction fullLoadGen.spikesize
-                  txrate = txrateShare
-                  classicTxRate = classicShare
-                  sorobanTxRate = sorobanShare }
+        let everyValidator = LoadOnEveryValidator self.NetworkCfg.missionContext fullLoadGen.mode
+        let loadGenPeers = self.LoadGenPeers coreSets fullLoadGen
+        let shares = PartitionValidatorLoad loadGenPeers.Length everyValidator fullLoadGen
 
         let hasNonZeroRate (loadGen: LoadGen) =
             match loadGen.classicTxRate, loadGen.sorobanTxRate with
@@ -824,22 +843,23 @@ type StellarFormation with
             | None, Some sorobanRate -> sorobanRate <> 0
             | None, None -> true
 
-        let loadGenPeers = List.map (fun cs -> self.NetworkCfg.GetPeer cs 0) coreSets
-
         let peerLoadGens =
-            loadGenPeers
-            |> List.indexed
-            |> List.map
-                (fun (i, peer) ->
-                    let loadGen = fractionalLoadGen i
-                    let offset = loadGen.accounts * i
-                    (peer, { loadGen with offset = offset }, offset))
+            List.zip loadGenPeers shares
+            |> List.map (fun (peer, loadGen) -> peer, loadGen, loadGen.offset)
             |> List.filter (fun (_, loadGen, _) -> hasNonZeroRate loadGen)
 
         if List.isEmpty peerLoadGens then
             failwith "Loadgen failed: no peer has a non-zero tx rate"
 
         for (peer, peerSpecificLoadgen, offset) in peerLoadGens do
+            LogInfo
+                "LOAD_SHARE peer=%s rate=%d txs=%d accounts=%d offset=%d"
+                peer.ShortName.StringName
+                peerSpecificLoadgen.txrate
+                peerSpecificLoadgen.txs
+                peerSpecificLoadgen.accounts
+                offset
+
             LogInfo "Loadgen: %s with offset %d" (peer.GenerateLoad peerSpecificLoadgen) offset
 
         while List.exists

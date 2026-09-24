@@ -982,6 +982,7 @@ let main argv =
                                minBlockTimeMixedClassicTxRate = mission.MinBlockTimeMixedClassicTxRate
                                minBlockTimeMixedSorobanTxRate = mission.MinBlockTimeMixedSorobanTxRate
                                tier1OrgCount = mission.Tier1OrgCount
+                               pregenerateTxsPerValidator = false
                                runForMinBlockTime = false
                                forceOldStyleTriggerTimerPct = mission.ForceOldStyleTriggerTimerPct
                                uniformDrift = List.ofSeq mission.UniformDrift

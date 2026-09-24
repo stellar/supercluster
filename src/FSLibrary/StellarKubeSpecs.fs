@@ -5,6 +5,7 @@
 module StellarKubeSpecs
 
 open StellarCoreCfg
+open StellarCoreHTTP
 open k8s.Models
 open StellarMissionContext
 open StellarNetworkCfg
@@ -33,6 +34,27 @@ type ConfigOption =
     // STELLAR_CORE_PEER_SHORT_NAME set to self.PeerShortName so that the
     // container picks up a peer-specific config.
     | PeerSpecificConfigFile
+
+// MinBlockTimeMixed's MIXED_PREGEN_* load runs on every validator rather than
+// one node per load-generating core set, each with its own account slice (see
+// PregenerationOptionsForPeer and StellarStatefulSets.LoadgenPeerIndices).
+let LoadOnEveryValidator (ctx: MissionContext) (mode: LoadGenMode) : bool =
+    ctx.runForMinBlockTime && isMixedPregenMode mode
+
+// For LoadOnEveryValidator runs (MissionContext.pregenerateTxsPerValidator):
+// the organization's options store its first account offset; each validator
+// gets the following disjoint slice.
+let PregenerationOptionsForPeer (opts: CoreSetOptions) (index: int) =
+    if index < 0 || index >= opts.nodeCount then
+        invalidArg "index" "Invalid validator index"
+
+    let init = opts.initialization
+
+    let perNode =
+        init.pregenerateTxs
+        |> Option.map (fun (txs, accounts, offset) -> txs, accounts, offset + accounts * index)
+
+    { opts with initialization = { init with pregenerateTxs = perNode } }
 
 let CoreContainerVolumeMounts (peerOrJobNames: string array) (configOpt: ConfigOption) : V1VolumeMount array =
     let arr =
@@ -920,7 +942,22 @@ type NetworkCfg with
         let cfgOpt = PeerSpecificConfigFile
         let volumes = Array.append peerCfgVolumes [| dataVol; historyCfgVolume |]
 
-        let initCommands = self.getInitCommands cfgOpt coreSet.options
+        let initCommands =
+            if self.missionContext.pregenerateTxsPerValidator then
+                peerNames
+                |> Array.mapi
+                    (fun i name ->
+                        let commands = self.getInitCommands cfgOpt (PregenerationOptionsForPeer coreSet.options i)
+
+                        let test =
+                            ShCmd [| ShWord.OfStr "test"
+                                     ShWord.Var CfgVal.peerNameEnvVarName
+                                     ShWord.OfStr "="
+                                     ShWord.OfStr name |]
+
+                        ShCmd.ShIf(test, ShCmd.ShSeq commands, [||], None))
+            else
+                self.getInitCommands cfgOpt coreSet.options
 
         let runCmd = [| "run" |]
 
