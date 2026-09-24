@@ -52,6 +52,8 @@ In addition to the parameters in the previous section, `MinBlockTimeMixed` suppo
 * `--classic-tx-rate`: Classic payment TPS for the pre-generated classic stream.
 * `--soroban-tx-rate`: Soroban TPS for the selected synthetic Soroban stream.
 
+The load runs on every validator of the load-generating organizations, each with its own slice of the genesis accounts, at an equal share of the offered rate for the whole load window.
+
 If neither stream-specific TPS is set, `--tx-rate` is split evenly between classic and Soroban traffic. If either stream-specific TPS is set, any omitted stream defaults to `0`, and the fixed TPS for the mission is the sum of `--classic-tx-rate` and `--soroban-tx-rate`.
 
 Before enabling overlay-only mode, the mission upgrades classic max tx set size from `--classic-tx-rate * 15`, and Soroban network limits from the selected transaction type's per-transaction resources multiplied by `--soroban-tx-rate * 15` (~15 seconds of throughput as leeway).

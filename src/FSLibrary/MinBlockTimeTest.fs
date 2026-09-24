@@ -365,6 +365,23 @@ let private checkLedgerAgeSLA (percentiles: (Peer * float * float) list) (target
 
     ok
 
+// The load-generating core sets a MIXED_PREGEN_* run uses: at most one
+// generator per requested TPS, so every generator gets a non-zero share, and
+// always at least one set. With load on every validator
+// (StellarKubeSpecs.LoadOnEveryValidator) a core set brings all of its
+// validators as generators. Exposed for unit tests.
+let activeLoadGenCoreSets (everyValidator: bool) (requestedTps: int) (loadGenNodes: CoreSet list) : CoreSet list =
+    let generators (cs: CoreSet) = if everyValidator then cs.options.nodeCount else 1
+
+    let fitting =
+        loadGenNodes
+        |> List.scan (fun total cs -> total + generators cs) 0
+        |> List.tail
+        |> List.takeWhile (fun total -> total <= max 1 requestedTps)
+        |> List.length
+
+    List.truncate (max 1 fitting) loadGenNodes
+
 let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadGen option) =
     let allNodes =
         if context.pubnetData.IsSome then
@@ -405,6 +422,10 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
 
     let isLoadGenNode cs = List.exists (fun (cs': CoreSet) -> cs' = cs) loadGenNodes
 
+    // MIXED_PREGEN_* load runs on every validator of the active core sets,
+    // each with its own account slice.
+    let everyValidator = StellarKubeSpecs.LoadOnEveryValidator context baseLoadGen.mode
+
     let activeLoadGenNodes =
         if isMixedPregenMode baseLoadGen.mode then
             let requestedCount =
@@ -412,21 +433,28 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                     (baseLoadGen.classicTxRate |> Option.defaultValue 0)
                     (baseLoadGen.sorobanTxRate |> Option.defaultValue 0)
 
-            loadGenNodes
-            |> List.truncate (min (List.length loadGenNodes) (max 1 requestedCount))
+            activeLoadGenCoreSets everyValidator requestedCount loadGenNodes
         else
             loadGenNodes
 
+    let isActiveLoadGenNode cs = List.exists (fun (cs': CoreSet) -> cs' = cs) activeLoadGenNodes
+
+    let context = { context with pregenerateTxsPerValidator = everyValidator }
+
     // For pre-generated modes, partition genesis accounts evenly across
     // loadgen nodes and assign offsets so each active node signs txs against
-    // its own slice. Mixed pregen keeps every tier1 core set initialized, but
-    // partitions accounts by the active loadgen count so low-TPS runs still
-    // have enough local accounts on the node that generates load.
+    // its own slice. Mixed pregen partitions accounts over the active loadgen
+    // nodes only, so low-TPS runs still have enough local accounts on the
+    // nodes that generate load; the other core sets pregenerate nothing. With load
+    // on every validator, each core set's slice covers all of its validators
+    // (StellarKubeSpecs.PregenerationOptionsForPeer splits it per pod).
     let allNodes =
         match context.numPregeneratedTxs, context.genesisTestAccountCount, baseLoadGen.mode with
         | Some txs, Some accounts, mode when usesPregeneratedTxs mode ->
             let partitionCount =
-                if isMixedPregenMode mode then
+                if isMixedPregenMode mode && everyValidator then
+                    List.sumBy (fun (cs: CoreSet) -> cs.options.nodeCount) activeLoadGenNodes
+                elif isMixedPregenMode mode then
                     List.length activeLoadGenNodes
                 else
                     List.length loadGenNodes
@@ -437,10 +465,13 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
             List.map
                 (fun (cs: CoreSet) ->
                     let pregenerateTxs =
-                        if isLoadGenNode cs then
-                            let i = if isMixedPregenMode mode then j % partitionCount else j
+                        if isLoadGenNode cs && (not (isMixedPregenMode mode) || isActiveLoadGenNode cs) then
+                            let i = j
 
-                            j <- j + 1
+                            j <-
+                                j
+                                + (if isMixedPregenMode mode && everyValidator then cs.options.nodeCount else 1)
+
                             Some(txs, accountsPerNode, accountsPerNode * i)
                         else
                             Some(0, 1, 0)

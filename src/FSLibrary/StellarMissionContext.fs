@@ -168,6 +168,11 @@ type MissionContext =
       // --tier1-org-count: organizations in StableApproximateTier1CoreSets
       // (None = its 10; up to 40 adds StellarNetworkData.tier1ExtraOrgs).
       tier1OrgCount: int option
+      // Set by MinBlockTimeTest when its load runs on every validator
+      // (StellarKubeSpecs.LoadOnEveryValidator for the mission's actual load
+      // mode): each validator then pregenerates transactions for its own
+      // account slice (StellarKubeSpecs.PregenerationOptionsForPeer).
+      pregenerateTxsPerValidator: bool
       runForMinBlockTime: bool
       forceOldStyleTriggerTimerPct: int
       uniformDrift: int list
