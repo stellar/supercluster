@@ -149,7 +149,8 @@ type MissionOptions
         bimodalDrift: seq<int>,
         driftPct: int,
         ledgerCloseTimeMs: int option,
-        forceOldStyleTriggerTimer: bool option
+        forceOldStyleTriggerTimer: bool option,
+        tier1OrgCount: int option
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -709,6 +710,11 @@ type MissionOptions
              Required = false)>]
     member self.ForceOldStyleTriggerTimer = forceOldStyleTriggerTimer
 
+    [<Option("tier1-org-count",
+             HelpText = "Organizations (3 validators each) in the synthetic Tier1 topology of the MinBlockTime* and MaxTPS* missions: 10 (default) to 40; beyond 10, synthetic organizations spread over further regions (North America, Europe, Asia, South America, Oceania, Africa, Middle East) are added in a fixed order.",
+             Required = false)>]
+    member self.Tier1OrgCount = tier1OrgCount
+
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' |> Array.toList with
     | [ x ] -> x, None
@@ -772,6 +778,16 @@ let main argv =
 
             if mission.MeasureE2eLatency && mission.LoadgenKeys.IsNone then
                 failwith "Error: --measure-e2e-latency requires --loadgen-keys"
+
+            match mission.Tier1OrgCount with
+            | Some n when
+                n < StellarNetworkData.tier1BaseOrgCount
+                || n > StellarNetworkData.tier1MaxOrgCount ->
+                failwithf
+                    "Error: --tier1-org-count must be between %d and %d"
+                    StellarNetworkData.tier1BaseOrgCount
+                    StellarNetworkData.tier1MaxOrgCount
+            | _ -> ()
 
             let _ = logToConsoleAndFile (sprintf "%s/stellar-supercluster.log" mission.Destination)
 
@@ -965,6 +981,7 @@ let main argv =
                                minBlockTimeMixedMode = mission.MinBlockTimeMixedMode
                                minBlockTimeMixedClassicTxRate = mission.MinBlockTimeMixedClassicTxRate
                                minBlockTimeMixedSorobanTxRate = mission.MinBlockTimeMixedSorobanTxRate
+                               tier1OrgCount = mission.Tier1OrgCount
                                runForMinBlockTime = false
                                forceOldStyleTriggerTimerPct = mission.ForceOldStyleTriggerTimerPct
                                uniformDrift = List.ofSeq mission.UniformDrift
