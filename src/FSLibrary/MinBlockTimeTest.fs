@@ -60,23 +60,32 @@ let private timeout = 2000
 
 let private txSetSizeBufferMultiplier = 2
 
-let private maxTxSetSizeForTarget (kind: string) (targetMs: int) (txRate: int) =
-    let scaled = int64 targetMs * int64 txRate * int64 txSetSizeBufferMultiplier
+// Buffer as a percentage of the offered txs per ledger (200 = the historical
+// 2x). Core pulls 2x the sum of the classic and Soroban limits from the
+// mempool on every nomination, so this also sizes the IPC reply.
+let private maxTxSetSizeForTargetPct (kind: string) (targetMs: int) (txRate: int) (bufferPct: int) =
+    let scaled = int64 targetMs * int64 txRate * int64 bufferPct
 
-    let txSetSize = (scaled + 999L) / 1000L
+    let txSetSize = (scaled + 99_999L) / 100_000L
 
     if txSetSize > int64 System.Int32.MaxValue then
         failwithf "%s MaxTxSetSize %d exceeds supported int range" kind txSetSize
 
     max (int txSetSize) 100
 
+let private maxTxSetSizeForTarget (kind: string) (targetMs: int) (txRate: int) =
+    maxTxSetSizeForTargetPct kind targetMs txRate (txSetSizeBufferMultiplier * 100)
+
 // Exposed for reuse by MissionTriggerTimerMixConsensus, which runs the same
 // MIXED_PREGEN_* load without the binary search.
 let classicMaxTxSetSizeForTarget (targetMs: int) (classicTxRate: int) =
     maxTxSetSizeForTarget "Classic" targetMs classicTxRate
 
-let private sorobanMaxTxSetSizeForTarget (targetMs: int) (sorobanTxRate: int) =
-    maxTxSetSizeForTarget "Soroban" targetMs sorobanTxRate
+let classicMaxTxSetSizeForTargetPct (targetMs: int) (classicTxRate: int) (bufferPct: int) =
+    maxTxSetSizeForTargetPct "Classic" targetMs classicTxRate bufferPct
+
+let private sorobanMaxTxSetSizeForTargetPct (targetMs: int) (sorobanTxRate: int) (bufferPct: int) =
+    maxTxSetSizeForTargetPct "Soroban" targetMs sorobanTxRate bufferPct
 
 type private MixedPregenSorobanResources =
     { instructions: int64
@@ -88,6 +97,10 @@ type private MixedPregenSorobanResources =
       contractEventBytes: int }
 
 let private usesPregeneratedTxs (mode: LoadGenMode) = mode = PayPregenerated || isMixedPregenMode mode
+
+// Approximate size of a classic payment: envelope, one payment operation and
+// one signature (about 196 bytes of XDR).
+let private classicPaymentTxBytes = 200L
 
 let private mixedPregenSorobanResources (mode: LoadGenMode) =
     match mode with
@@ -177,6 +190,7 @@ let upgradeMixedPregenSorobanLimitsWith
     (coreSets: CoreSet list)
     (baseLoadGen: LoadGen)
     (targetMs: int)
+    (bufferPct: int)
     (dependentTxClusters: int option)
     =
     let sorobanTxRate = baseLoadGen.sorobanTxRate |> Option.defaultValue 0
@@ -184,15 +198,15 @@ let upgradeMixedPregenSorobanLimitsWith
     if sorobanTxRate > 0 then
         let resources = mixedPregenSorobanResources baseLoadGen.mode
         let footprintEntries = resources.readOnlyEntries + resources.readWriteEntries
-        let targetMaxTxSetSize = sorobanMaxTxSetSizeForTarget targetMs sorobanTxRate
+        let targetMaxTxSetSize = sorobanMaxTxSetSizeForTargetPct targetMs sorobanTxRate bufferPct
 
         LogInfo
-            "Upgrading MIXED_PREGEN_* Soroban limits for %s: Soroban MaxTxSetSize=%d for T=%dms, soroban TPS=%d, buffer=%dx"
+            "Upgrading MIXED_PREGEN_* Soroban limits for %s: Soroban MaxTxSetSize=%d for T=%dms, soroban TPS=%d, buffer=%d%%"
             (baseLoadGen.mode.ToString())
             targetMaxTxSetSize
             targetMs
             sorobanTxRate
-            txSetSizeBufferMultiplier
+            bufferPct
 
         formation.UpgradeSorobanMaxTxSetSize coreSets targetMaxTxSetSize
         formation.SetupUpgradeContract coreSets.Head
@@ -262,14 +276,14 @@ let upgradeMixedPregenSorobanLimitsWith
         | Some n -> peer.WaitForMaxDependentTxClusters n
         | None -> ()
 
-// Exposed for reuse by MissionTriggerTimerMixConsensus.
+// Exposed for reuse by MissionTriggerTimerMixConsensus (historical 2x buffer).
 let upgradeMixedPregenSorobanLimits
     (formation: StellarFormation)
     (coreSets: CoreSet list)
     (baseLoadGen: LoadGen)
     (targetMs: int)
     =
-    upgradeMixedPregenSorobanLimitsWith formation coreSets baseLoadGen targetMs None
+    upgradeMixedPregenSorobanLimitsWith formation coreSets baseLoadGen targetMs (txSetSizeBufferMultiplier * 100) None
 
 let private toggleOverlayOnlyMode (formation: StellarFormation) (coreSets: CoreSet list) =
     formation.NetworkCfg.EachPeerInSets
@@ -482,15 +496,45 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
         else
             baseLoadGen
 
+    // Classic and Soroban transaction bytes offered per second, by which
+    // --overlay-v2-optimized splits the tx-set byte allowance. Only the ratio
+    // matters: both phases grow alike with the close time.
+    let offeredTxBytesPerSec =
+        if isMixedPregenMode baseLoadGen.mode then
+            let classicTps =
+                match baseLoadGen.classicTxRate, context.minBlockTimeMixedClassicTxRate with
+                | Some rate, _ -> rate
+                | None, Some rate -> rate
+                | None, None -> context.txRate
+
+            let sorobanTps = baseLoadGen.sorobanTxRate |> Option.defaultValue 0
+            let sorobanTxBytes = int64 (mixedPregenSorobanResources baseLoadGen.mode).txSizeBytes
+            int64 classicTps * classicPaymentTxBytes, int64 sorobanTps * sorobanTxBytes
+        elif baseLoadGen.mode = GeneratePaymentLoad || baseLoadGen.mode = PayPregenerated then
+            int64 context.txRate * classicPaymentTxBytes, 0L
+        else
+            // The other modes offer Soroban load only.
+            0L, int64 context.txRate
+
     let context =
         { context with
               runForMinBlockTime = true
               genesisTestAccountCount = Some(context.genesisTestAccountCount |> Option.defaultValue 100000)
+              offeredTxBytesPerSec = Some offeredTxBytesPerSec
               numPregeneratedTxs =
                   if usesPregeneratedTxs baseLoadGen.mode then
                       Some(context.numPregeneratedTxs |> Option.defaultValue 2500000)
                   else
                       None }
+
+    match MissionContext.txSetByteAllowances context with
+    | Some allowances when context.overlayV2Optimized ->
+        LogInfo
+            "Tx-set byte allowances: %s, split by the offered bytes (classic %d B/s, Soroban %d B/s)"
+            (MissionContext.describeTxSetByteAllowances allowances)
+            (fst offeredTxBytesPerSec)
+            (snd offeredTxBytesPerSec)
+    | _ -> ()
 
     let tier1 = List.filter (fun (cs: CoreSet) -> cs.options.tier1 = Some true) allNodes
     let loadGenNodes = List.filter (fun (cs: CoreSet) -> cs.options.generatesLoad) allNodes
@@ -572,6 +616,8 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
 
             let numAccounts = context.genesisTestAccountCount.Value
             let fixedTxRate = context.txRate
+            let bufferPct = MissionContext.txSetSizeBufferPct context
+            let loadDurationSec = MissionContext.minBlockTimeLoadDurationSec context
 
             let classicTxRateForLimits =
                 match baseLoadGen.classicTxRate, context.minBlockTimeMixedClassicTxRate with
@@ -623,14 +669,14 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                 peer.WaitForScpLedgerCloseTime targetMs |> ignore
 
             let upgradeClassicMaxTxSetSize (targetMs: int) =
-                let maxTxSetSize = classicMaxTxSetSizeForTarget targetMs classicTxRateForLimits
+                let maxTxSetSize = classicMaxTxSetSizeForTargetPct targetMs classicTxRateForLimits bufferPct
 
                 LogInfo
-                    "Upgrading classic MaxTxSetSize to %d for T=%dms, classic TPS=%d, buffer=%dx"
+                    "Upgrading classic MaxTxSetSize to %d for T=%dms, classic TPS=%d, buffer=%d%%"
                     maxTxSetSize
                     targetMs
                     classicTxRateForLimits
-                    txSetSizeBufferMultiplier
+                    bufferPct
 
                 formation.UpgradeMaxTxSetSize allNodes maxTxSetSize
 
@@ -641,16 +687,17 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                         allNodes
                         baseLoadGen
                         targetMs
+                        bufferPct
                         (if v2 then Some MaxTPSTest.sorobanDependentTxClusters else None)
 
             let evaluateAt (targetMs: int) : bool =
                 let loadGen =
                     { baseLoadGen with
                           accounts = numAccounts
-                          // ~5 min measurement window at fixed TPS. Enough for a
-                          // stable read of the SLA metric without draining the
-                          // tx source.
-                          txs = fixedTxRate * 300
+                          // Measurement window at fixed TPS: ~5 min, enough for a
+                          // stable read of the SLA metric without draining the tx
+                          // source, or longer under --overlay-v2-optimized.
+                          txs = fixedTxRate * loadDurationSec
                           txrate = fixedTxRate }
 
                 applySCPUpgrade targetMs

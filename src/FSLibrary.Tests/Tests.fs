@@ -87,6 +87,7 @@ let ctx : MissionContext =
       enableParallelApply = false
       enableInMemoryBuckets = false
       disableTxMetaForTesting = false
+      offeredTxBytesPerSec = None
       peerFloodCapacityBytes = None
       outboundByteLimit = None
       sleepMainThread = None
@@ -1555,6 +1556,97 @@ let ``Non-perf missions never disable tx meta`` () =
 let ``--overlay-v2-optimized lists its settings in the run log only when set`` () =
     Assert.Empty(MissionContext.describeOverlayV2 ctx)
     Assert.NotEmpty(MissionContext.describeOverlayV2 v2ctx)
+
+[<Fact>]
+let ``--overlay-v2-optimized tunes MinBlockTime tx-set limits, load window and tx-set byte allowances`` () =
+    Assert.Equal(200, MissionContext.txSetSizeBufferPct ctx)
+    Assert.Equal(125, MissionContext.txSetSizeBufferPct v2ctx)
+    Assert.Equal(300, MissionContext.minBlockTimeLoadDurationSec ctx)
+    Assert.Equal(960, MissionContext.minBlockTimeLoadDurationSec v2ctx)
+
+    let mib = 1024 * 1024
+    let allowances = MissionContext.txSetByteAllowances
+    let offering classic soroban = Some(classic, soroban)
+    Assert.Equal(None, allowances ctx)
+    // Under the flag only a mission that declares its offered load gets a split.
+    Assert.Equal(None, allowances v2ctx)
+    Assert.Equal(Some(1 * mib, 9 * mib), allowances { v2ctx with offeredTxBytesPerSec = offering 0L 5_000_000L })
+    Assert.Equal(None, allowances { ctx with offeredTxBytesPerSec = offering 0L 5_000_000L })
+    // The max-TPS modes keep their own splits, with or without the flag.
+    Assert.Equal(Some(9 * mib, 1 * mib), allowances { v2ctx with runForMaxTps = Some "classic" })
+    Assert.Equal(Some(1 * mib, 9 * mib), allowances { ctx with runForMaxTps = Some "soroban" })
+    Assert.Equal(None, allowances { v2ctx with runForMaxTps = Some "classic-prev-version" })
+    // The run log reports what the configs get.
+    let logged (c: MissionContext) =
+        MissionContext.describeOverlayV2 c
+        |> List.find (fun l -> l.StartsWith "tx-set byte allowances")
+
+    Assert.StartsWith("tx-set byte allowances: MinBlockTime* splits 10 MiB", logged v2ctx)
+
+    Assert.Equal(
+        "tx-set byte allowances: classic 1.0 MiB, Soroban 9.0 MiB",
+        logged { v2ctx with offeredTxBytesPerSec = offering 0L 5_000_000L }
+    )
+
+    Assert.Equal(
+        "tx-set byte allowances: classic 9.0 MiB, Soroban 1.0 MiB",
+        logged { v2ctx with runForMaxTps = Some "classic" }
+    )
+
+[<Fact>]
+let ``MinBlockTime tx-set limits scale with the buffer percentage`` () =
+    // 1000 TPS at T=2000ms is 2000 txs per ledger.
+    Assert.Equal(4000, MinBlockTimeTest.classicMaxTxSetSizeForTargetPct 2000 1000 200)
+    Assert.Equal(2500, MinBlockTimeTest.classicMaxTxSetSizeForTargetPct 2000 1000 125)
+    Assert.Equal(8750, MinBlockTimeTest.classicMaxTxSetSizeForTargetPct 1000 7000 125)
+    // The historical 2x is the 200% case; tiny limits are floored at 100.
+    Assert.Equal(
+        MinBlockTimeTest.classicMaxTxSetSizeForTarget 3000 1234,
+        MinBlockTimeTest.classicMaxTxSetSizeForTargetPct 3000 1234 200
+    )
+
+    Assert.Equal(100, MinBlockTimeTest.classicMaxTxSetSizeForTargetPct 1000 3 125)
+
+[<Fact>]
+let ``The tx-set byte allowance splits 10 MiB by the offered load, at least 1 MiB each`` () =
+    let mib = 1024 * 1024
+    let split = MissionContext.splitTxSetByteAllowance
+    // Soroban-only (E0) and classic-only runs.
+    Assert.Equal((1 * mib, 9 * mib), split 0L 5_000_000L)
+    Assert.Equal((9 * mib, 1 * mib), split 600_000L 0L)
+    // Nothing offered: core's even split.
+    Assert.Equal((5 * mib, 5 * mib), split 0L 0L)
+    // Proportional: 1:4 gives 2 MiB and 8 MiB.
+    Assert.Equal((2 * mib, 8 * mib), split 200_000L 800_000L)
+    // The smaller phase keeps 1 MiB.
+    Assert.Equal((1 * mib, 9 * mib), split 1L 5_000_000L)
+
+    // Whenever the offered bytes per ledger fit in 10 MiB, each phase gets at
+    // least its share: 3000 classic TPS (200 B) and 1000 SAC TPS (1000 B) at
+    // T = 2 s and 125% offer 1.5 MB and 2.5 MB per ledger.
+    let classic, soroban = split (3000L * 200L) (1000L * 1000L)
+    Assert.True(int64 classic >= 3000L * 200L * 5L / 2L)
+    Assert.True(int64 soroban >= 1000L * 1000L * 5L / 2L)
+    Assert.Equal(10 * mib, classic + soroban)
+
+[<Fact>]
+let ``The tx-set byte allowances reach the node configs`` () =
+    let mib = 1024 * 1024
+    let plain = validatorToml ctx
+    Assert.DoesNotContain("TESTING_MAX_SOROBAN_BYTE_ALLOWANCE", plain)
+    Assert.DoesNotContain("TESTING_MAX_CLASSIC_BYTE_ALLOWANCE", plain)
+
+    // Under the flag without a declared load, core's defaults.
+    Assert.DoesNotContain("TESTING_MAX_SOROBAN_BYTE_ALLOWANCE", validatorToml v2ctx)
+
+    let classicOnly = validatorToml { v2ctx with offeredTxBytesPerSec = Some(600_000L, 0L) }
+    Assert.Contains(sprintf "TESTING_MAX_CLASSIC_BYTE_ALLOWANCE = %d" (9 * mib), classicOnly)
+    Assert.Contains(sprintf "TESTING_MAX_SOROBAN_BYTE_ALLOWANCE = %d" (1 * mib), classicOnly)
+
+    // --run-for-max-tps keeps its own split.
+    let maxTps = validatorToml { v2ctx with runForMaxTps = Some "classic" }
+    Assert.Contains(sprintf "TESTING_MAX_CLASSIC_BYTE_ALLOWANCE = %d" (9 * mib), maxTps)
+    Assert.Contains(sprintf "TESTING_MAX_SOROBAN_BYTE_ALLOWANCE = %d" (1 * mib), maxTps)
 
 [<Fact>]
 let ``Tier1 topology keeps its 10 organizations unless --tier1-org-count adds diverse ones`` () =

@@ -262,15 +262,13 @@ type StellarCoreCfg =
             t.Add("TESTING_IGNORE_LEDGER_TIME_UPGRADE_BOUNDS", true) |> ignore
             t.Add("FLOOD_DEMAND_BACKOFF_DELAY_MS", 1000) |> ignore
 
-        match self.network.missionContext.runForMaxTps with
-        | Some "classic" ->
-            t.Add("TESTING_MAX_CLASSIC_BYTE_ALLOWANCE", 1024 * 1024 * 9) |> ignore
-            t.Add("TESTING_MAX_SOROBAN_BYTE_ALLOWANCE", 1024 * 1024 * 1) |> ignore
-        | Some "soroban" ->
-            t.Add("TESTING_MAX_CLASSIC_BYTE_ALLOWANCE", 1024 * 1024 * 1) |> ignore
-            t.Add("TESTING_MAX_SOROBAN_BYTE_ALLOWANCE", 1024 * 1024 * 9) |> ignore
-        | Some "classic-prev-version" -> ()
-        | Some _ -> failwith "run-for-max-tps must be either classic, classic-prev-version, or soroban"
+        // Core caps each tx-set phase at its byte allowance (5 MiB by default,
+        // NetworkConstants.h) unless these test knobs are set, whatever the
+        // network limits say.
+        match StellarMissionContext.MissionContext.txSetByteAllowances self.network.missionContext with
+        | Some (classic, soroban) ->
+            t.Add("TESTING_MAX_CLASSIC_BYTE_ALLOWANCE", classic) |> ignore
+            t.Add("TESTING_MAX_SOROBAN_BYTE_ALLOWANCE", soroban) |> ignore
         | None -> ()
 
         if self.skipHighCriticalValidatorChecks

@@ -126,6 +126,10 @@ type MissionContext =
       // Emit DISABLE_TX_META_FOR_TESTING = true; set by the --overlay-v2-optimized
       // perf-mission defaults.
       disableTxMetaForTesting: bool
+      // (classic, Soroban) transaction bytes the mission offers per second,
+      // set by MinBlockTime* so --overlay-v2-optimized can split the tx-set
+      // byte allowance by the offered load (MissionContext.txSetByteAllowances).
+      offeredTxBytesPerSec: (int64 * int64) option
       peerFloodCapacity: int option
       peerFloodCapacityBytes: int option
       sleepMainThread: int option
@@ -244,6 +248,50 @@ module MissionContext =
     let perfMissionCoreResources (ctx: MissionContext) (upstream: CoreResources) : CoreResources =
         if ctx.overlayV2Optimized then PerfBenchmarkResources else upstream
 
+    /// MinBlockTime* tx-set limits as a percentage of the offered txs per ledger: upstream's 2x, or 125% under
+    /// --overlay-v2-optimized. Every tx-set build on the Rust-overlay core pulls twice these limits from the
+    /// mempool, so the smaller buffer cuts that pull while a slow ledger's backlog can still drain.
+    let txSetSizeBufferPct (ctx: MissionContext) : int = if ctx.overlayV2Optimized then 125 else 200
+
+    let private mib = 1024 * 1024
+
+    /// Splits core's 10 MiB tx-set byte budget (MAX_TX_SET_ALLOWANCE, which the two allowances together must not
+    /// exceed) between the classic and Soroban phases in proportion to the bytes each is offered, with at least
+    /// 1 MiB each for setup transactions, as (classic, soroban) bytes. Whenever the offered bytes per ledger fit
+    /// in 10 MiB, each phase gets at least what it is offered. Exposed for unit tests.
+    let splitTxSetByteAllowance (classicBytes: int64) (sorobanBytes: int64) : int * int =
+        let total = int64 (10 * mib)
+        let atLeast = int64 mib
+        let offered = max 0L classicBytes + max 0L sorobanBytes
+
+        let proportional = if offered = 0L then total / 2L else total * max 0L sorobanBytes / offered
+
+        let soroban = proportional |> max atLeast |> min (total - atLeast)
+
+        int (total - soroban), int soroban
+
+    /// TESTING_MAX_{CLASSIC,SOROBAN}_BYTE_ALLOWANCE in bytes, as (classic, soroban), or None for core's defaults
+    /// (5 MiB each; 5 MiB caps a Soroban phase at about 6900 SAC payments). The max-TPS modes keep their own
+    /// splits; under --overlay-v2-optimized, a mission that declares its offered load (MinBlockTime*) gets
+    /// splitTxSetByteAllowance of it. The one source for the node configs and the run log.
+    let txSetByteAllowances (ctx: MissionContext) : (int * int) option =
+        match ctx.runForMaxTps with
+        | Some "classic" -> Some(9 * mib, 1 * mib)
+        | Some "soroban" -> Some(1 * mib, 9 * mib)
+        | Some "classic-prev-version" -> None
+        | Some _ -> failwith "run-for-max-tps must be either classic, classic-prev-version, or soroban"
+        | None when ctx.overlayV2Optimized ->
+            ctx.offeredTxBytesPerSec
+            |> Option.map (fun (classic, soroban) -> splitTxSetByteAllowance classic soroban)
+        | None -> None
+
+    /// A (classic, soroban) byte allowance pair for the run log.
+    let describeTxSetByteAllowances (classic: int, soroban: int) : string =
+        sprintf "classic %.1f MiB, Soroban %.1f MiB" (float classic / float mib) (float soroban / float mib)
+
+    /// MinBlockTime* load per candidate, in seconds: upstream's 300, or 960 under --overlay-v2-optimized.
+    let minBlockTimeLoadDurationSec (ctx: MissionContext) : int = if ctx.overlayV2Optimized then 960 else 300
+
     /// The settings --overlay-v2-optimized resolves for this run, one line each, for the run log. Empty without it.
     let describeOverlayV2 (ctx: MissionContext) : string list =
         if not ctx.overlayV2Optimized then
@@ -251,7 +299,14 @@ module MissionContext =
         else
             let userEnv = ctx.coreEnv |> List.map fst |> Set.ofList
 
-            [ "BucketListDB: in-memory (perf missions)"
+            [ sprintf "MinBlockTime* tx-set limits: %d%% of the offered txs per ledger" (txSetSizeBufferPct ctx)
+              sprintf "MinBlockTime* load window: %d s per candidate" (minBlockTimeLoadDurationSec ctx)
+              (match txSetByteAllowances ctx with
+               | Some allowances -> "tx-set byte allowances: " + describeTxSetByteAllowances allowances
+               | None when ctx.runForMaxTps.IsNone ->
+                   "tx-set byte allowances: MinBlockTime* splits 10 MiB by its offered classic/Soroban bytes (at least 1 MiB each); others keep core's 5 MiB each"
+               | None -> "tx-set byte allowances: core's defaults (5 MiB each)")
+              "BucketListDB: in-memory (perf missions)"
               "test tx meta: disabled (perf missions)"
               "placement: one stellar-core pod per worker node, enforced (perf missions)"
               "perf validators: 8 vCPU request, no CPU limit, 16Gi memory"
