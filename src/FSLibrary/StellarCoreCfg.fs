@@ -220,12 +220,8 @@ type StellarCoreCfg =
         let logLevelCommands = List.append debugLevelCommands traceLevelCommands
         let preferredPeers = List.map (fun (x: PeerDnsName) -> x.StringName) self.preferredPeers
 
-        match self.network.missionContext.runForMaxTps with
-        | Some _ ->
-            // parallel apply feature is only supported on Postgres (for now)
-            let url = PostgreSQL(CfgVal.pgDb, CfgVal.pgUser, CfgVal.pgPassword, CfgVal.pgHost)
-            t.Add("DATABASE", url.ToString()) |> ignore
-        | None -> t.Add("DATABASE", self.database.ToString()) |> ignore
+        // Postgres whenever MissionContext.usesPostgres (see getDbUrl).
+        t.Add("DATABASE", self.database.ToString()) |> ignore
 
         t.Add("METADATA_DEBUG_LEDGERS", 0) |> ignore
 
@@ -663,10 +659,13 @@ type NetworkCfg with
         | None -> failwith "Unable to create preferredPeers without preferredPeersMap"
 
     member self.getDbUrl(o: CoreSetOptions) : DatabaseURL =
-        match o.dbType with
-        | Postgres -> PostgreSQL(CfgVal.pgDb, CfgVal.pgUser, CfgVal.pgPassword, CfgVal.pgHost)
-        | Sqlite -> SQLite3File CfgVal.databasePath
-        | SqliteMemory -> SQLite3Memory
+        if StellarMissionContext.MissionContext.usesPostgres self.missionContext o.dbType then
+            PostgreSQL(CfgVal.pgDb, CfgVal.pgUser, CfgVal.pgPassword, CfgVal.pgHost)
+        else
+            match o.dbType with
+            | Sqlite -> SQLite3File CfgVal.databasePath
+            | SqliteMemory -> SQLite3Memory
+            | Postgres -> failwith "unreachable: usesPostgres covers the Postgres dbType"
 
     member self.StellarCoreCfgForJob(opts: CoreSetOptions) : StellarCoreCfg =
         { network = self
