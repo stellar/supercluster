@@ -935,24 +935,39 @@ type Peer with
 
         if self.IsLoadGenComplete() <> Success then failwith "Loadgen failed!"
 
+    // Number of overlay connections this node should establish, per its
+    // preferredPeersMap. Determines when a node is considered fully connected.
+    member self.DesiredNumberOfConnections =
+        match self.coreSet.options.preferredPeersMap with
+        | None -> failwith "preferredPeersMap is needed to determine # of desired connections"
+        | Some map ->
+            let preferredPeers = Map.find (self.coreSet.keys.[self.peerNum].PublicKey) map
+            List.length preferredPeers
+
+    // This node's authenticated overlay connections right now, in a single
+    // /metrics fetch: None on any HTTP error or while core is booting.
+    // GetMetrics() by contrast retries for ~200s per call, which makes it
+    // unusable inside bounded polling loops: a single unresponsive node (e.g.
+    // one still pregenerating transactions) would stall the whole poll. Read
+    // from /metrics rather than /info: with the Rust overlay, core refreshes
+    // the peer counts /info reports only when /metrics is requested, so /info
+    // can read 0 while the overlay is connected.
+    member self.TryGetAuthenticatedCount() : int option =
+        try
+            Some(ParseMetricCount(self.fetch "metrics") "overlay.connection.authenticated")
+        with _ -> None
+
     // WaitUntilConnected waits until every node is connected to all the nodes in
     // its preferredPeersMap. This ensures that the simulation is deterministic.
     member self.WaitUntilConnected =
-        let desiredNumberOfConnection =
-            match self.coreSet.options.preferredPeersMap with
-            | None -> failwith "preferredPeersMap is needed to determine # of desired connections"
-            | Some map ->
-                let preferredPeers = Map.find (self.coreSet.keys.[self.peerNum].PublicKey) map
-                List.length preferredPeers
-
         RetryUntilTrue
-            (fun _ -> self.GetInfo().Peers.AuthenticatedCount >= desiredNumberOfConnection)
+            (fun _ -> self.GetInfo().Peers.AuthenticatedCount >= self.DesiredNumberOfConnections)
             (fun _ ->
                 LogInfo
                     "Waiting until %s is connected: currently %d connections, want at least %d connections"
                     self.ShortName.StringName
                     (self.GetInfo().Peers.AuthenticatedCount)
-                    desiredNumberOfConnection)
+                    self.DesiredNumberOfConnections)
 
     member self.EnsureInSync =
         if self.GetState() <> "Synced!" then

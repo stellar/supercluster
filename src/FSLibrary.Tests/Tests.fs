@@ -64,6 +64,7 @@ let ctx : MissionContext =
       exportToPrometheus = false
       probeTimeout = 10
       coreResources = SmallTestResources
+      overlayV2Optimized = false
       keepData = true
       unevenSched = false
       oneStellarCorePerHost = false
@@ -85,6 +86,8 @@ let ctx : MissionContext =
       enableBackgroundSigValidation = false
       enableParallelApply = false
       enableInMemoryBuckets = false
+      disableTxMetaForTesting = false
+      offeredTxBytesPerSec = None
       peerFloodCapacityBytes = None
       outboundByteLimit = None
       sleepMainThread = None
@@ -1396,6 +1399,255 @@ let ``Submission accounting includes all started validators and preserves legacy
     Assert.Equal(19, legacy.Length)
     Assert.All(legacy, (fun (_, i) -> Assert.Equal(0, i)))
 
+let private tomlKeyCount (key: string) (toml: string) =
+    let pattern = sprintf "^%s = " (Regex.Escape key)
+    Regex.Matches(toml, pattern, RegexOptions.Multiline).Count
+
+let private validatorToml (c: MissionContext) =
+    let cfg = MakeNetworkCfg c [ coreSet ] passOpt
+    cfg.StellarCoreCfg(coreSet, 0, MainCoreContainer).ToString()
+
+let private bucketIndexKey = "BUCKETLIST_DB_INDEX_PAGE_SIZE_EXPONENT"
+
+let private v2ctx = { ctx with overlayV2Optimized = true }
+
+[<Fact>]
+let ``Overlay v2 perf missions default to in-memory BucketListDB and emit the key exactly once`` () =
+    let perf = MissionContext.withOverlayV2PerfDefaults v2ctx
+    Assert.True(perf.enableInMemoryBuckets)
+    let toml = validatorToml perf
+    Assert.Equal(1, tomlKeyCount bucketIndexKey toml)
+    Assert.Contains(bucketIndexKey + " = 0", toml)
+    // --run-for-max-tps used to add the key in its own branch as well; with the
+    // perf default on, it must still appear only once.
+    Assert.Equal(1, tomlKeyCount bucketIndexKey (validatorToml { perf with runForMaxTps = Some "classic" }))
+    Assert.Equal(1, tomlKeyCount bucketIndexKey (validatorToml { perf with runForMaxTps = Some "soroban" }))
+    // --in-memory-buckets on a perf mission is the same setting, still once.
+    let forced =
+        MissionContext.withOverlayV2PerfDefaults { v2ctx with enableInMemoryBuckets = true }
+
+    Assert.Equal(1, tomlKeyCount bucketIndexKey (validatorToml forced))
+
+[<Fact>]
+let ``Without --overlay-v2-optimized perf missions get the command-line context unchanged`` () =
+    let plain = MissionContext.withOverlayV2PerfDefaults ctx
+    Assert.Equal(ctx, plain)
+    Assert.Equal(0, tomlKeyCount bucketIndexKey (validatorToml plain))
+    Assert.Equal(0, tomlKeyCount "DISABLE_TX_META_FOR_TESTING" (validatorToml plain))
+
+    Assert.Equal(
+        SimulatePubnetTier1PerfResources,
+        MissionContext.perfMissionCoreResources ctx SimulatePubnetTier1PerfResources
+    )
+
+    Assert.Equal(MaxTPSClassicResources, MissionContext.perfMissionCoreResources ctx MaxTPSClassicResources)
+    Assert.Equal(PerfBenchmarkResources, MissionContext.perfMissionCoreResources v2ctx SimulatePubnetTier1PerfResources)
+    Assert.Equal(PerfBenchmarkResources, MissionContext.perfMissionCoreResources v2ctx MaxTPSClassicResources)
+
+[<Fact>]
+let ``Overlay v2 perf missions run one stellar-core pod per host`` () =
+    Assert.True((MissionContext.withOverlayV2PerfDefaults v2ctx).oneStellarCorePerHost)
+    Assert.False((MissionContext.withOverlayV2PerfDefaults ctx).oneStellarCorePerHost)
+
+[<Fact>]
+let ``Non-perf missions keep disk-backed BucketListDB unless --in-memory-buckets or --run-for-max-tps`` () =
+    Assert.Equal(0, tomlKeyCount bucketIndexKey (validatorToml ctx))
+    Assert.Equal(1, tomlKeyCount bucketIndexKey (validatorToml { ctx with enableInMemoryBuckets = true }))
+    // The long-standing --run-for-max-tps behaviour is unchanged, alone or
+    // combined with --in-memory-buckets.
+    Assert.Equal(1, tomlKeyCount bucketIndexKey (validatorToml { ctx with runForMaxTps = Some "classic" }))
+
+    let both = { ctx with enableInMemoryBuckets = true; runForMaxTps = Some "classic" }
+    Assert.Equal(1, tomlKeyCount bucketIndexKey (validatorToml both))
+
+let private cpuOf (r: k8s.Models.V1ResourceRequirements) = r.Limits.["cpu"].ToDecimal()
+let private gib = 1024M * 1024M * 1024M
+
+[<Fact>]
+let ``Perf benchmark validators have no CPU limit and keep their reservation`` () =
+    let res = GetCoreResourceRequirements PerfBenchmarkResources
+    Assert.False(res.Limits.ContainsKey "cpu")
+    Assert.Equal(8M, res.Requests.["cpu"].ToDecimal())
+    Assert.Equal(16M * gib, res.Requests.["memory"].ToDecimal())
+    Assert.Equal(16M * gib, res.Limits.["memory"].ToDecimal())
+
+    // Missions outside the perf set, and perf missions without
+    // --overlay-v2-optimized (upstream's Tier1 perf resources), keep their CPU limits.
+    Assert.Equal(4M, cpuOf (GetCoreResourceRequirements SimulatePubnetTier1PerfResources))
+    Assert.Equal(4M, cpuOf (GetCoreResourceRequirements MaxTPSClassicResources))
+
+[<Fact>]
+let ``Perf benchmark pods drop only the core container CPU limit`` () =
+    let nCfgPerf =
+        MakeNetworkCfg
+            { ctx with
+                  coreResources = PerfBenchmarkResources
+                  installNetworkDelay = Some false }
+            [ coreSet ]
+            passOpt
+
+    let containers = (nCfgPerf.ToPodTemplateSpec coreSet).Spec.Containers
+    let core = containers |> Seq.find (fun c -> c.Name = CfgVal.stellarCoreContainerName "run")
+    Assert.False(core.Resources.Limits.ContainsKey "cpu")
+    Assert.Equal(8M, core.Resources.Requests.["cpu"].ToDecimal())
+    let sidecars = containers |> Seq.filter (fun c -> c.Name <> core.Name) |> List.ofSeq
+    Assert.NotEmpty(sidecars)
+    // The history sidecar keeps HistoryResourceRequirements (50m CPU limit).
+    let history = sidecars |> List.find (fun c -> c.Name = "history")
+    Assert.Equal(0.05M, cpuOf history.Resources)
+    Assert.All(sidecars, (fun c -> Assert.True(c.Resources.Limits.ContainsKey "cpu")))
+
+[<Fact>]
+let ``Perf benchmark core containers default TOKIO_WORKER_THREADS unless --core-env sets it`` () =
+    let envOf (extra: (string * string) list) (cr: CoreResources) =
+        let c =
+            CoreContainerForCommand "img" NoConfigFile None extra cr [| "run" |] [||] [| "core-0" |]
+
+        c.Env |> Seq.map (fun e -> e.Name, e.Value) |> List.ofSeq
+
+    let tokio env = env |> List.filter (fun (n, _) -> n = "TOKIO_WORKER_THREADS")
+
+    let perf = PerfBenchmarkResources
+    Assert.Equal<(string * string) list>([ ("TOKIO_WORKER_THREADS", "8") ], tokio (envOf [] perf))
+    // A --core-env value wins and is not duplicated.
+    Assert.Equal<(string * string) list>(
+        [ ("TOKIO_WORKER_THREADS", "4") ],
+        tokio (envOf [ ("TOKIO_WORKER_THREADS", "4") ] perf)
+    )
+    // Other --core-env entries keep their place ahead of the default.
+    Assert.Equal<string list>(
+        [ "STELLAR_CORE_PEER_SHORT_NAME"
+          "ASAN_OPTIONS"
+          "RUST_LOG"
+          "TOKIO_WORKER_THREADS" ],
+        envOf [ ("RUST_LOG", "info") ] perf |> List.map fst
+    )
+    // Other resource classes get no default.
+    Assert.Empty(tokio (envOf [] SimulatePubnetTier1PerfResources))
+    Assert.Empty(tokio (envOf [] MaxTPSClassicResources))
+
+let private txMetaKey = "DISABLE_TX_META_FOR_TESTING"
+
+[<Fact>]
+let ``Overlay v2 perf missions disable test-only tx meta and emit the key exactly once`` () =
+    let perf = MissionContext.withOverlayV2PerfDefaults v2ctx
+    Assert.True(perf.disableTxMetaForTesting)
+    let toml = validatorToml perf
+    Assert.Equal(1, tomlKeyCount txMetaKey toml)
+    Assert.Contains(txMetaKey + " = true", toml)
+    // Still once alongside the other perf and max-TPS settings.
+    Assert.Equal(1, tomlKeyCount txMetaKey (validatorToml { perf with runForMaxTps = Some "classic" }))
+    Assert.Equal(1, tomlKeyCount txMetaKey (validatorToml { perf with runForMinBlockTime = true }))
+
+    // The init container's config (new-db / new-hist) gets it too.
+    let initToml =
+        (MakeNetworkCfg perf [ coreSet ] passOpt)
+            .StellarCoreCfg(coreSet, 0, InitCoreContainer)
+            .ToString()
+
+    Assert.Equal(1, tomlKeyCount txMetaKey initToml)
+
+[<Fact>]
+let ``Non-perf missions never disable tx meta`` () =
+    Assert.Equal(0, tomlKeyCount txMetaKey (validatorToml ctx))
+    Assert.Equal(0, tomlKeyCount txMetaKey (validatorToml { ctx with runForMaxTps = Some "classic" }))
+
+[<Fact>]
+let ``--overlay-v2-optimized lists its settings in the run log only when set`` () =
+    Assert.Empty(MissionContext.describeOverlayV2 ctx)
+    Assert.NotEmpty(MissionContext.describeOverlayV2 v2ctx)
+
+[<Fact>]
+let ``--overlay-v2-optimized tunes MinBlockTime tx-set limits, load window and tx-set byte allowances`` () =
+    Assert.Equal(200, MissionContext.txSetSizeBufferPct ctx)
+    Assert.Equal(125, MissionContext.txSetSizeBufferPct v2ctx)
+    Assert.Equal(300, MissionContext.minBlockTimeLoadDurationSec ctx)
+    Assert.Equal(960, MissionContext.minBlockTimeLoadDurationSec v2ctx)
+
+    let mib = 1024 * 1024
+    let allowances = MissionContext.txSetByteAllowances
+    let offering classic soroban = Some(classic, soroban)
+    Assert.Equal(None, allowances ctx)
+    // Under the flag only a mission that declares its offered load gets a split.
+    Assert.Equal(None, allowances v2ctx)
+    Assert.Equal(Some(1 * mib, 9 * mib), allowances { v2ctx with offeredTxBytesPerSec = offering 0L 5_000_000L })
+    Assert.Equal(None, allowances { ctx with offeredTxBytesPerSec = offering 0L 5_000_000L })
+    // The max-TPS modes keep their own splits, with or without the flag.
+    Assert.Equal(Some(9 * mib, 1 * mib), allowances { v2ctx with runForMaxTps = Some "classic" })
+    Assert.Equal(Some(1 * mib, 9 * mib), allowances { ctx with runForMaxTps = Some "soroban" })
+    Assert.Equal(None, allowances { v2ctx with runForMaxTps = Some "classic-prev-version" })
+    // The run log reports what the configs get.
+    let logged (c: MissionContext) =
+        MissionContext.describeOverlayV2 c
+        |> List.find (fun l -> l.StartsWith "tx-set byte allowances")
+
+    Assert.StartsWith("tx-set byte allowances: MinBlockTime* splits 10 MiB", logged v2ctx)
+
+    Assert.Equal(
+        "tx-set byte allowances: classic 1.0 MiB, Soroban 9.0 MiB",
+        logged { v2ctx with offeredTxBytesPerSec = offering 0L 5_000_000L }
+    )
+
+    Assert.Equal(
+        "tx-set byte allowances: classic 9.0 MiB, Soroban 1.0 MiB",
+        logged { v2ctx with runForMaxTps = Some "classic" }
+    )
+
+[<Fact>]
+let ``MinBlockTime tx-set limits scale with the buffer percentage`` () =
+    // 1000 TPS at T=2000ms is 2000 txs per ledger.
+    Assert.Equal(4000, MinBlockTimeTest.classicMaxTxSetSizeForTargetPct 2000 1000 200)
+    Assert.Equal(2500, MinBlockTimeTest.classicMaxTxSetSizeForTargetPct 2000 1000 125)
+    Assert.Equal(8750, MinBlockTimeTest.classicMaxTxSetSizeForTargetPct 1000 7000 125)
+    // The historical 2x is the 200% case; tiny limits are floored at 100.
+    Assert.Equal(
+        MinBlockTimeTest.classicMaxTxSetSizeForTarget 3000 1234,
+        MinBlockTimeTest.classicMaxTxSetSizeForTargetPct 3000 1234 200
+    )
+
+    Assert.Equal(100, MinBlockTimeTest.classicMaxTxSetSizeForTargetPct 1000 3 125)
+
+[<Fact>]
+let ``The tx-set byte allowance splits 10 MiB by the offered load, at least 1 MiB each`` () =
+    let mib = 1024 * 1024
+    let split = MissionContext.splitTxSetByteAllowance
+    // Soroban-only (E0) and classic-only runs.
+    Assert.Equal((1 * mib, 9 * mib), split 0L 5_000_000L)
+    Assert.Equal((9 * mib, 1 * mib), split 600_000L 0L)
+    // Nothing offered: core's even split.
+    Assert.Equal((5 * mib, 5 * mib), split 0L 0L)
+    // Proportional: 1:4 gives 2 MiB and 8 MiB.
+    Assert.Equal((2 * mib, 8 * mib), split 200_000L 800_000L)
+    // The smaller phase keeps 1 MiB.
+    Assert.Equal((1 * mib, 9 * mib), split 1L 5_000_000L)
+
+    // Whenever the offered bytes per ledger fit in 10 MiB, each phase gets at
+    // least its share: 3000 classic TPS (200 B) and 1000 SAC TPS (1000 B) at
+    // T = 2 s and 125% offer 1.5 MB and 2.5 MB per ledger.
+    let classic, soroban = split (3000L * 200L) (1000L * 1000L)
+    Assert.True(int64 classic >= 3000L * 200L * 5L / 2L)
+    Assert.True(int64 soroban >= 1000L * 1000L * 5L / 2L)
+    Assert.Equal(10 * mib, classic + soroban)
+
+[<Fact>]
+let ``The tx-set byte allowances reach the node configs`` () =
+    let mib = 1024 * 1024
+    let plain = validatorToml ctx
+    Assert.DoesNotContain("TESTING_MAX_SOROBAN_BYTE_ALLOWANCE", plain)
+    Assert.DoesNotContain("TESTING_MAX_CLASSIC_BYTE_ALLOWANCE", plain)
+
+    // Under the flag without a declared load, core's defaults.
+    Assert.DoesNotContain("TESTING_MAX_SOROBAN_BYTE_ALLOWANCE", validatorToml v2ctx)
+
+    let classicOnly = validatorToml { v2ctx with offeredTxBytesPerSec = Some(600_000L, 0L) }
+    Assert.Contains(sprintf "TESTING_MAX_CLASSIC_BYTE_ALLOWANCE = %d" (9 * mib), classicOnly)
+    Assert.Contains(sprintf "TESTING_MAX_SOROBAN_BYTE_ALLOWANCE = %d" (1 * mib), classicOnly)
+
+    // --run-for-max-tps keeps its own split.
+    let maxTps = validatorToml { v2ctx with runForMaxTps = Some "classic" }
+    Assert.Contains(sprintf "TESTING_MAX_CLASSIC_BYTE_ALLOWANCE = %d" (9 * mib), maxTps)
+    Assert.Contains(sprintf "TESTING_MAX_SOROBAN_BYTE_ALLOWANCE = %d" (1 * mib), maxTps)
+
 [<Fact>]
 let ``Tier1 topology keeps its 10 organizations unless --tier1-org-count adds diverse ones`` () =
     let orgs (sets: CoreSet list) = sets |> List.map (fun cs -> cs.name.StringName) |> List.sort
@@ -1453,6 +1705,195 @@ let ``Tier1 topology keeps its 10 organizations unless --tier1-org-count adds di
     Assert.ThrowsAny<System.Exception>
         (fun () -> StableApproximateTier1CoreSetsWithOrgCount "img" false (Some 41) |> ignore)
     |> ignore
+
+[<Fact>]
+let ``MinBlockTime marks only its active load generators, matching by name`` () =
+    let a = MakeLiveCoreSet "a" coreSetOptions
+    let b = MakeLiveCoreSet "b" coreSetOptions
+    // The formation's copy of a set can carry other option changes (pregenerated-tx slices).
+    let aChanged = { a with options = { a.options with nodeCount = 5 } }
+    let sets = [ aChanged; b ]
+    let marked = MinBlockTimeTest.markLoadGenerators [ a ] sets
+
+    Assert.Equal<bool list>([ true; false ], marked |> List.map (fun cs -> cs.options.generatesLoad))
+    Assert.Equal(5, marked.Head.options.nodeCount)
+
+[<Fact>]
+let ``The e2e latency metric goes on core sets that generate load, only when measuring`` () =
+    let toml (c: MissionContext) (cs: CoreSet) =
+        (MakeNetworkCfg c [ cs ] passOpt)
+            .StellarCoreCfg(cs, 0, MainCoreContainer)
+            .ToString()
+
+    let key = "LOADGEN_MEASURE_TX_E2E_LATENCY_FOR_TESTING"
+    let only = [ coreSet ]
+    let generator = MinBlockTimeTest.markLoadGenerators only only |> List.head
+
+    let measuring = { ctx with runForMinBlockTime = true; measureE2eLatency = true }
+    Assert.Equal(1, tomlKeyCount key (toml measuring generator))
+    Assert.Equal(0, tomlKeyCount key (toml measuring coreSet))
+    Assert.Equal(0, tomlKeyCount key (toml { measuring with measureE2eLatency = false } generator))
+    // --overlay-v2-optimized adds no metric of its own, and no tx batching or
+    // parallel-apply keys: the Rust-overlay core ignores the first and has
+    // deprecated the second.
+    let v2 = { measuring with overlayV2Optimized = true }
+    Assert.Equal(0, tomlKeyCount key (toml v2 coreSet))
+    Assert.Equal(0, tomlKeyCount "EXPERIMENTAL_TX_BATCH_MAX_SIZE" (toml v2 generator))
+    Assert.Equal(0, tomlKeyCount "EXPERIMENTAL_PARALLEL_LEDGER_APPLY" (toml v2 generator))
+
+[<Fact>]
+let ``--measure-e2e-latency needs --loadgen-keys except for MinBlockTime missions`` () =
+    let needsKeys = MissionContext.e2eLatencyNeedsLoadgenKeys
+    let minBlockTimeOnly = [ "MinBlockTimeClassic"; "MinBlockTimeMixed" ]
+    let withOther = [ "MinBlockTimeMixed"; "SimulatePubnet" ]
+    Assert.False(needsKeys [ "MinBlockTimeMixed" ])
+    Assert.False(needsKeys minBlockTimeOnly)
+    Assert.True(needsKeys [ "MaxTPSMixed" ])
+    Assert.True(needsKeys withOther)
+
+[<Fact>]
+let ``DATABASE, the postgres sidecar and the pod's postgres setup agree`` () =
+    // DATABASE is postgres, the pod has the postgres sidecar, and the core
+    // container waits for it; for every node, or for none.
+    let postgresEverywhere (c: MissionContext) (cs: CoreSet) =
+        let cfg = MakeNetworkCfg { c with installNetworkDelay = Some false } [ cs ] passOpt
+        let toml = cfg.StellarCoreCfg(cs, 0, MainCoreContainer).ToString()
+        let containers = (cfg.ToPodTemplateSpec cs).Spec.Containers
+        let core = containers |> Seq.find (fun k -> k.Name = CfgVal.stellarCoreContainerName "run")
+
+        let waits =
+            (String.concat " " core.Command + String.concat " " core.Args)
+                .Contains "pg_isready"
+
+        [ toml.Contains "DATABASE = \"postgresql://"
+          containers |> Seq.exists (fun k -> k.Name = "postgres")
+          waits ]
+
+    // Job pods decide it the same way.
+    let jobPostgres (c: MissionContext) (opts: CoreSetOptions) =
+        let cfg = { MakeNetworkCfg c [ coreSet ] passOpt with jobCoreSetOptions = Some opts }
+        let containers = (cfg.GetJobPodTemplateSpec "job" [| "run" |] "img" false).Spec.Containers
+        let core = containers |> Seq.head
+
+        let waits =
+            (String.concat " " core.Command + String.concat " " core.Args)
+                .Contains "pg_isready"
+
+        [ containers |> Seq.exists (fun k -> k.Name = "postgres"); waits ]
+
+    let pgSet = { coreSet with options = { coreSet.options with dbType = Postgres } }
+    let maxTps = { ctx with runForMaxTps = Some "soroban" }
+    Assert.Equal<bool list>([ true; true ], jobPostgres maxTps coreSetOptions)
+    Assert.Equal<bool list>([ true; true ], jobPostgres ctx pgSet.options)
+    Assert.Equal<bool list>([ false; false ], jobPostgres ctx coreSetOptions)
+    // The core set's dbType is the default Sqlite; max-TPS still runs on postgres.
+    Assert.Equal<bool list>([ true; true; true ], postgresEverywhere maxTps coreSet)
+    Assert.Equal<bool list>([ true; true; true ], postgresEverywhere ctx pgSet)
+    Assert.Equal<bool list>([ false; false; false ], postgresEverywhere ctx coreSet)
+
+// Steps the bounded mesh wait over samples taken every poll, indexed by seconds
+// into an attempt; returns the verdict and when it came.
+let private simulateMeshWait
+    (sampleAt: int -> StellarStatefulSets.MeshSample)
+    : StellarStatefulSets.MeshWaitVerdict * int =
+    let bounds = StellarStatefulSets.meshWaitBounds
+
+    let rec go (s: StellarStatefulSets.MeshWaitState) (t: int) =
+        match StellarStatefulSets.stepMeshWait bounds s t (sampleAt t) with
+        | StellarStatefulSets.KeepWaiting, next when t < 3600 -> go next (t + bounds.pollSec)
+        | verdict, _ -> verdict, t
+
+    go StellarStatefulSets.initialMeshWaitState 0
+
+let private meshSample (silent: string list) (full: int) (connections: int) : StellarStatefulSets.MeshSample =
+    { StellarStatefulSets.MeshSample.silent = silent
+      fullyConnected = full
+      total = 4
+      connections = connections }
+
+[<Fact>]
+let ``The bounded mesh wait returns as soon as the mesh is complete`` () =
+    let verdict, at =
+        simulateMeshWait (fun t -> if t < 40 then meshSample [] 2 8 else meshSample [] 4 12)
+
+    Assert.Equal(StellarStatefulSets.Meshed, verdict)
+    Assert.Equal(40, at)
+
+[<Fact>]
+let ``The bounded mesh wait fails a node that never answers without redrawing`` () =
+    let verdict, at = simulateMeshWait (fun _ -> meshSample [ "n3" ] 0 0)
+    Assert.Equal(StellarStatefulSets.BootTimedOut, verdict)
+    Assert.Equal(StellarStatefulSets.meshWaitBounds.bootTimeoutSec, at)
+
+[<Fact>]
+let ``The bounded mesh wait redraws a mesh that stops growing`` () =
+    // Connections grow until 20 s, then stall short of a full mesh.
+    let verdict, at = simulateMeshWait (fun t -> meshSample [] 2 (6 + min t 20 / 5))
+
+    Assert.Equal(StellarStatefulSets.Wedged, verdict)
+    Assert.Equal(20 + StellarStatefulSets.meshWaitBounds.stallSec, at)
+
+[<Fact>]
+let ``The bounded mesh wait redraws a mesh still incomplete after its budget`` () =
+    // Nodes answer from 30 s on; connections keep growing but never fill the mesh.
+    let verdict, at =
+        simulateMeshWait (fun t -> if t < 30 then meshSample [ "n0" ] 0 0 else meshSample [] 3 t)
+
+    Assert.Equal(StellarStatefulSets.Wedged, verdict)
+    Assert.Equal(30 + StellarStatefulSets.meshWaitBounds.meshTimeoutSec, at)
+
+[<Fact>]
+let ``Once every node has answered, a missed probe does not fail the boot bound`` () =
+    let verdict, at =
+        simulateMeshWait (fun t -> if t = 0 then meshSample [] 2 5 else meshSample [ "n1" ] 1 3)
+
+    Assert.Equal(StellarStatefulSets.Wedged, verdict)
+    Assert.Equal(StellarStatefulSets.meshWaitBounds.stallSec, at)
+
+[<Fact>]
+let ``Close times are judged in 5-minute windows ending with the load, after a warm-up`` () =
+    Assert.Equal<int list>([ 300 ], MinBlockTimeTest.ledgerAgeReadSchedule 300)
+    // --overlay-v2-optimized: a 60 s warm-up, then three windows covering the rest.
+    Assert.Equal<int list>([ 360; 660; 960 ], MinBlockTimeTest.ledgerAgeReadSchedule 960)
+    Assert.Equal<int list>([ 300; 600 ], MinBlockTimeTest.ledgerAgeReadSchedule 600)
+    // Shorter than a window: one read at the planned end.
+    Assert.Equal<int list>([ 300 ], MinBlockTimeTest.ledgerAgeReadSchedule 120)
+
+// Runs runWithPeriodicReads with reads due at 200 and 400 ms, then every
+// 200 ms, and a 100 ms minimum gap before the final read; returns when each
+// read began, in ms.
+let private periodicReadTimes (loadMs: int) =
+    let result, reads =
+        MinBlockTimeTest.runWithPeriodicReads
+            [ 200L; 400L ]
+            200L
+            100L
+            (fun () -> ())
+            (fun () ->
+                System.Threading.Thread.Sleep loadMs
+                "done")
+
+    Assert.Equal("done", result)
+    reads |> List.map fst
+
+[<Fact>]
+let ``Periodic reads follow the schedule, continue while the load runs on, and read at its end`` () =
+    // 1000 ms: 200, 400, then 600 and 800 past the schedule, and a final read
+    // at the end, 200 ms after the last.
+    let times = periodicReadTimes 1000
+    Assert.Equal(5, times.Length)
+    Assert.All(List.pairwise times, (fun (a, b) -> Assert.True(b > a)))
+    Assert.InRange(times.Head, 190L, 350L)
+    Assert.InRange(List.last times, 990L, 1300L)
+
+[<Fact>]
+let ``Periodic reads skip the final read right after a scheduled one, and read a load shorter than the schedule`` () =
+    // Ends 50 ms after the read due at 800 ms: no final read.
+    Assert.Equal(4, (periodicReadTimes 850).Length)
+    // Ends before the first read is due: only the final read.
+    let times = periodicReadTimes 50
+    Assert.Equal(1, times.Length)
+    Assert.InRange(times.Head, 40L, 190L)
 
 [<Fact>]
 let ``MIXED_PREGEN runs use at most one generator per requested TPS`` () =

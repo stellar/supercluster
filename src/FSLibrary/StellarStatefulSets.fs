@@ -321,6 +321,84 @@ let autoscalerView
 
     (current |> List.exists autoscalerProvisioning), withFailures
 
+// Bounded overlay-mesh wait (--overlay-v2-optimized). A libp2p
+// simultaneous-dial collision can leave one peer edge missing after a boot or
+// a mass restart. It never heals, so WaitUntilConnected would wait forever.
+// Instead, wait (bounded) for every node to answer, then for a full mesh, and
+// restart all nodes to redraw a mesh that stops growing.
+type MeshWaitBounds =
+    { pollSec: int
+      // Every node must answer within this of a (re)start. The core
+      // container's liveness probe restarts a core that is still not
+      // answering about 3 min after it starts, so a node silent this long is
+      // crash-looping, and a redraw would not help.
+      bootTimeoutSec: int
+      // Once every node has answered, an incomplete mesh whose connection
+      // count has not grown for this long has wedged: two ticks of the
+      // overlay's 30 s safety-net reconnect ...
+      stallSec: int
+      // ... and one still incomplete this long is redrawn anyway.
+      meshTimeoutSec: int
+      maxAttempts: int }
+
+let meshWaitBounds =
+    { pollSec = 5
+      bootTimeoutSec = 300
+      stallSec = 60
+      meshTimeoutSec = 120
+      maxAttempts = 3 }
+
+// One probe of the mesh: the nodes that did not answer, the nodes
+// connected to all of their preferred peers, all nodes, and the authenticated
+// connections summed over the nodes that answered.
+type MeshSample = { silent: string list; fullyConnected: int; total: int; connections: int }
+
+type MeshWaitVerdict =
+    | Meshed
+    | KeepWaiting
+    | BootTimedOut
+    | Wedged
+
+// When the mesh phase of an attempt started (every node had answered), when
+// the connection count last grew, and its high-water mark.
+type MeshWaitState = { meshStartSec: int option; lastProgressSec: int; bestConnections: int }
+
+let initialMeshWaitState = { meshStartSec = None; lastProgressSec = 0; bestConnections = 0 }
+
+// Judges a sample taken `nowSec` (wall clock) into an attempt, returning the
+// verdict and the state for the next sample. Until every node has answered a
+// probe only the boot bound applies; from then on a node missing a probe just
+// adds no connections. Exposed for unit tests.
+let stepMeshWait
+    (b: MeshWaitBounds)
+    (s: MeshWaitState)
+    (nowSec: int)
+    (m: MeshSample)
+    : MeshWaitVerdict * MeshWaitState =
+    if m.total > 0 && m.fullyConnected = m.total then
+        Meshed, s
+    elif s.meshStartSec.IsNone && not (List.isEmpty m.silent) then
+        (if nowSec >= b.bootTimeoutSec then BootTimedOut else KeepWaiting), s
+    else
+        let meshStart = defaultArg s.meshStartSec nowSec
+
+        let lastProgress =
+            if s.meshStartSec.IsNone || m.connections > s.bestConnections then
+                nowSec
+            else
+                s.lastProgressSec
+
+        let verdict =
+            if nowSec - lastProgress >= b.stallSec || nowSec - meshStart >= b.meshTimeoutSec then
+                Wedged
+            else
+                KeepWaiting
+
+        verdict,
+        { meshStartSec = Some meshStart
+          lastProgressSec = lastProgress
+          bestConnections = max s.bestConnections m.connections }
+
 type StellarFormation with
 
     member self.LoadGenPeers (coreSets: CoreSet list) (loadGen: LoadGen) =
@@ -593,8 +671,124 @@ type StellarFormation with
 
         self.NetworkCfg.EachPeerInSets(coreSetList |> Array.ofList) (fun p -> p.WaitUntilSynced())
 
+    // Waits until every node is connected to all of its preferred peers. Under
+    // --overlay-v2-optimized that is the bounded mesh wait, which returns only
+    // once every node is fully connected and redraws a wedged mesh instead of
+    // waiting forever (EnsureMeshedOrRedraw); otherwise the unbounded per-node
+    // wait.
     member self.WaitUntilConnected(coreSetList: CoreSet list) =
-        self.NetworkCfg.EachPeerInSets(coreSetList |> Array.ofList) (fun p -> p.WaitUntilConnected)
+        if self.NetworkCfg.missionContext.overlayV2Optimized then
+            self.EnsureMeshedOrRedraw coreSetList
+        else
+            self.NetworkCfg.EachPeerInSets(coreSetList |> Array.ofList) (fun p -> p.WaitUntilConnected)
+
+    // Probes every node once, in parallel and without retries, for the bounded
+    // mesh wait.
+    member self.MeshProgress(coreSetList: CoreSet list) : MeshSample =
+        let peers = self.NetworkCfg.PeersInSets(coreSetList |> Array.ofList)
+
+        let counts =
+            peers
+            |> List.map (fun p -> async { return p, p.TryGetAuthenticatedCount() })
+            |> Async.Parallel
+            |> Async.RunSynchronously
+            |> List.ofArray
+
+        { silent =
+              counts
+              |> List.filter (fun (_, c) -> c.IsNone)
+              |> List.map (fun (p, _) -> p.ShortName.StringName)
+          fullyConnected =
+              counts
+              |> List.filter
+                  (fun (p, c) ->
+                      match c with
+                      | Some n -> n >= p.DesiredNumberOfConnections
+                      | None -> false)
+              |> List.length
+          total = List.length peers
+          connections = counts |> List.sumBy (fun (_, c) -> defaultArg c 0) }
+
+    // --overlay-v2-optimized: waits for the overlay mesh of `coreSetList` to
+    // complete, within meshWaitBounds, restarting all of its nodes to redraw a
+    // wedged mesh. Fails if a node never answers or the mesh never forms.
+    member self.EnsureMeshedOrRedraw(coreSetList: CoreSet list) =
+        let b = meshWaitBounds
+
+        let restartAll () =
+            coreSetList
+            |> List.map (fun cs -> async { self.Stop cs.name })
+            |> Async.Parallel
+            |> Async.RunSynchronously
+            |> ignore
+
+            coreSetList
+            |> List.map (fun cs -> async { self.Start cs.name })
+            |> Async.Parallel
+            |> Async.RunSynchronously
+            |> ignore
+
+        let waitOnce (attempt: int) : MeshWaitVerdict * MeshSample =
+            let clock = System.Diagnostics.Stopwatch.StartNew()
+            let mutable state = initialMeshWaitState
+            let mutable nextLogSec = 30
+            let mutable result = None
+
+            while result.IsNone do
+                let m = self.MeshProgress coreSetList
+                let nowSec = int clock.Elapsed.TotalSeconds
+
+                match stepMeshWait b state nowSec m with
+                | KeepWaiting, next ->
+                    if nowSec >= nextLogSec then
+                        nextLogSec <- nowSec + 30
+
+                        LogInfo
+                            "Overlay mesh: %d/%d nodes answering, %d fully connected, %d connections (attempt %d/%d, %ds)"
+                            (m.total - List.length m.silent)
+                            m.total
+                            m.fullyConnected
+                            m.connections
+                            attempt
+                            b.maxAttempts
+                            nowSec
+
+                    state <- next
+                    System.Threading.Thread.Sleep(b.pollSec * 1000)
+                | verdict, _ -> result <- Some(verdict, m)
+
+            result.Value
+
+        let rec attempt (n: int) =
+            match waitOnce n with
+            | Meshed, m -> LogInfo "Overlay mesh complete: %d/%d nodes fully connected (attempt %d)" m.total m.total n
+            | BootTimedOut, m ->
+                failwithf
+                    "Overlay mesh: %d of %d nodes did not answer within %d s of starting: %s"
+                    (List.length m.silent)
+                    m.total
+                    b.bootTimeoutSec
+                    (String.concat ", " m.silent)
+            | _, m when n < b.maxAttempts ->
+                LogWarn
+                    "Overlay mesh wedged at %d/%d fully connected nodes, %d connections; restarting all nodes to redraw it (attempt %d/%d)"
+                    m.fullyConnected
+                    m.total
+                    m.connections
+                    (n + 1)
+                    b.maxAttempts
+
+                restartAll ()
+                attempt (n + 1)
+            | _, m ->
+                failwithf
+                    "Overlay mesh failed to form after %d attempts: %d/%d nodes fully connected, %d connections"
+                    b.maxAttempts
+                    m.fullyConnected
+                    m.total
+                    m.connections
+
+        attempt 1
 
     member self.EnsureAllNodesInSync(coreSetList: CoreSet list) =
         self.NetworkCfg.EachPeerInSets(coreSetList |> Array.ofList) (fun p -> p.EnsureInSync)

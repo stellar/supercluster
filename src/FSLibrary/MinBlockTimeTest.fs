@@ -60,23 +60,32 @@ let private timeout = 2000
 
 let private txSetSizeBufferMultiplier = 2
 
-let private maxTxSetSizeForTarget (kind: string) (targetMs: int) (txRate: int) =
-    let scaled = int64 targetMs * int64 txRate * int64 txSetSizeBufferMultiplier
+// Buffer as a percentage of the offered txs per ledger (200 = the historical
+// 2x). Core pulls 2x the sum of the classic and Soroban limits from the
+// mempool on every nomination, so this also sizes the IPC reply.
+let private maxTxSetSizeForTargetPct (kind: string) (targetMs: int) (txRate: int) (bufferPct: int) =
+    let scaled = int64 targetMs * int64 txRate * int64 bufferPct
 
-    let txSetSize = (scaled + 999L) / 1000L
+    let txSetSize = (scaled + 99_999L) / 100_000L
 
     if txSetSize > int64 System.Int32.MaxValue then
         failwithf "%s MaxTxSetSize %d exceeds supported int range" kind txSetSize
 
     max (int txSetSize) 100
 
+let private maxTxSetSizeForTarget (kind: string) (targetMs: int) (txRate: int) =
+    maxTxSetSizeForTargetPct kind targetMs txRate (txSetSizeBufferMultiplier * 100)
+
 // Exposed for reuse by MissionTriggerTimerMixConsensus, which runs the same
 // MIXED_PREGEN_* load without the binary search.
 let classicMaxTxSetSizeForTarget (targetMs: int) (classicTxRate: int) =
     maxTxSetSizeForTarget "Classic" targetMs classicTxRate
 
-let private sorobanMaxTxSetSizeForTarget (targetMs: int) (sorobanTxRate: int) =
-    maxTxSetSizeForTarget "Soroban" targetMs sorobanTxRate
+let classicMaxTxSetSizeForTargetPct (targetMs: int) (classicTxRate: int) (bufferPct: int) =
+    maxTxSetSizeForTargetPct "Classic" targetMs classicTxRate bufferPct
+
+let private sorobanMaxTxSetSizeForTargetPct (targetMs: int) (sorobanTxRate: int) (bufferPct: int) =
+    maxTxSetSizeForTargetPct "Soroban" targetMs sorobanTxRate bufferPct
 
 type private MixedPregenSorobanResources =
     { instructions: int64
@@ -88,6 +97,10 @@ type private MixedPregenSorobanResources =
       contractEventBytes: int }
 
 let private usesPregeneratedTxs (mode: LoadGenMode) = mode = PayPregenerated || isMixedPregenMode mode
+
+// Approximate size of a classic payment: envelope, one payment operation and
+// one signature (about 196 bytes of XDR).
+let private classicPaymentTxBytes = 200L
 
 let private mixedPregenSorobanResources (mode: LoadGenMode) =
     match mode with
@@ -172,27 +185,28 @@ let private waitForMixedPregenSorobanLimits (peer: Peer) (limits: MixedPregenSor
             && info.Tx.MaxContractEventsSizeBytes = limits.txMaxContractEventsSizeBytes)
         (fun _ -> LogInfo "Waiting for MIXED_PREGEN_* Soroban limits on %s" peer.ShortName.StringName)
 
-// Exposed for reuse by MissionTriggerTimerMixConsensus.
-let upgradeMixedPregenSorobanLimits
+let upgradeMixedPregenSorobanLimitsWith
     (formation: StellarFormation)
     (coreSets: CoreSet list)
     (baseLoadGen: LoadGen)
     (targetMs: int)
+    (bufferPct: int)
+    (dependentTxClusters: int option)
     =
     let sorobanTxRate = baseLoadGen.sorobanTxRate |> Option.defaultValue 0
 
     if sorobanTxRate > 0 then
         let resources = mixedPregenSorobanResources baseLoadGen.mode
         let footprintEntries = resources.readOnlyEntries + resources.readWriteEntries
-        let targetMaxTxSetSize = sorobanMaxTxSetSizeForTarget targetMs sorobanTxRate
+        let targetMaxTxSetSize = sorobanMaxTxSetSizeForTargetPct targetMs sorobanTxRate bufferPct
 
         LogInfo
-            "Upgrading MIXED_PREGEN_* Soroban limits for %s: Soroban MaxTxSetSize=%d for T=%dms, soroban TPS=%d, buffer=%dx"
+            "Upgrading MIXED_PREGEN_* Soroban limits for %s: Soroban MaxTxSetSize=%d for T=%dms, soroban TPS=%d, buffer=%d%%"
             (baseLoadGen.mode.ToString())
             targetMaxTxSetSize
             targetMs
             sorobanTxRate
-            txSetSizeBufferMultiplier
+            bufferPct
 
         formation.UpgradeSorobanMaxTxSetSize coreSets targetMaxTxSetSize
         formation.SetupUpgradeContract coreSets.Head
@@ -249,10 +263,27 @@ let upgradeMixedPregenSorobanLimits
                   txMaxWriteLedgerEntries = Some limits.txMaxWriteEntries
                   txMaxFootprintSize = limits.txMaxFootprintSize
                   txMaxSizeBytes = Some limits.txMaxSizeBytes
-                  txMaxContractEventsSizeBytes = Some limits.txMaxContractEventsSizeBytes }
+                  txMaxContractEventsSizeBytes = Some limits.txMaxContractEventsSizeBytes
+                  // The network default is a single dependent-tx cluster, which
+                  // serializes Soroban execution and holds a ledger to one
+                  // cluster's instructions; --overlay-v2-optimized allows 8.
+                  ledgerMaxDependentTxClusters = dependentTxClusters }
             (System.TimeSpan.FromSeconds(20.0))
 
         waitForMixedPregenSorobanLimits peer limits
+
+        match dependentTxClusters with
+        | Some n -> peer.WaitForMaxDependentTxClusters n
+        | None -> ()
+
+// Exposed for reuse by MissionTriggerTimerMixConsensus (historical 2x buffer).
+let upgradeMixedPregenSorobanLimits
+    (formation: StellarFormation)
+    (coreSets: CoreSet list)
+    (baseLoadGen: LoadGen)
+    (targetMs: int)
+    =
+    upgradeMixedPregenSorobanLimitsWith formation coreSets baseLoadGen targetMs (txSetSizeBufferMultiplier * 100) None
 
 let private toggleOverlayOnlyMode (formation: StellarFormation) (coreSets: CoreSet list) =
     formation.NetworkCfg.EachPeerInSets
@@ -340,6 +371,118 @@ let private collectLedgerAgePercentiles
     |> Async.RunSynchronously
     |> Array.toList
 
+// Core keeps ledger.age.closed-histogram over a sliding 5-minute window
+// (libmedida's kSliding sample, kDefaultWindowTime), so one read at the end of
+// a longer load judges only its last 5 minutes.
+let ledgerAgeWindowSec = 300
+
+// When a load's ledger-age percentiles are read, in seconds after it starts:
+// consecutive 5-minute windows ending with the planned load, after a warm-up
+// of the remainder. A 300 s load is one read at its end; a 960 s load is a
+// 60 s warm-up and reads at 360, 660 and 960 s. Exposed for unit tests.
+let ledgerAgeReadSchedule (loadDurationSec: int) : int list =
+    let windows = max 1 (loadDurationSec / ledgerAgeWindowSec)
+    let warmUp = max 0 (loadDurationSec - windows * ledgerAgeWindowSec)
+    [ for k in 1 .. windows -> warmUp + k * ledgerAgeWindowSec ]
+
+// Runs `load` while calling `read` at each time of `scheduleMs` (ms after the
+// load starts), and every `periodMs` after the last while the load runs on.
+// When the load ends, reads once more unless the last read began under
+// `minGapMs` earlier. Returns the load's result and the reads, in order, as
+// (ms into the load when the read began, result). `read` must not throw.
+// Exposed for unit tests.
+let runWithPeriodicReads
+    (scheduleMs: int64 list)
+    (periodMs: int64)
+    (minGapMs: int64)
+    (read: unit -> 'r)
+    (load: unit -> 'a)
+    : 'a * (int64 * 'r) list =
+    let clock = System.Diagnostics.Stopwatch.StartNew()
+    let reads = System.Collections.Concurrent.ConcurrentQueue<int64 * 'r>()
+
+    let readNow () =
+        let atMs = clock.ElapsedMilliseconds
+        reads.Enqueue((atMs, read ()))
+
+    let dueMs (k: int) =
+        match List.tryItem k scheduleMs with
+        | Some t -> t
+        | None -> List.last scheduleMs + int64 (k - List.length scheduleMs + 1) * periodMs
+
+    use stop = new System.Threading.CancellationTokenSource()
+
+    let reader =
+        async {
+            let k = ref 0
+
+            while true do
+                let waitMs = dueMs k.Value - clock.ElapsedMilliseconds
+                if waitMs > 0L then do! Async.Sleep(int waitMs)
+                readNow ()
+                k.Value <- k.Value + 1
+        }
+
+    let task = Async.StartAsTask(reader, cancellationToken = stop.Token)
+
+    let result =
+        try
+            load ()
+        finally
+            stop.Cancel()
+
+            try
+                task.Wait()
+            with _ -> ()
+
+    match Seq.tryLast reads with
+    | Some (lastMs, _) when clock.ElapsedMilliseconds - lastMs < minGapMs -> ()
+    | _ -> readNow ()
+
+    result, List.ofSeq reads
+
+// A load's ledger-age percentiles as read `endSec` seconds into it, covering
+// the ledgers closed in the 5 minutes before (or since the metrics were
+// cleared, if less); Error if the read failed.
+type private LedgerAgeWindow = { endSec: int; percentiles: Result<(Peer * float * float) list, string> }
+
+// Runs `load` while reading every node's ledger-age percentiles on
+// ledgerAgeReadSchedule, then every 5 minutes while the load runs past its
+// planned end, and once more when it ends unless the last read is under 30 s
+// old. Every part of the load after the warm-up thus falls in a judged
+// window, and the reads are taken before the idle ledgers core keeps closing
+// after the load.
+let private runWithLedgerAgeWindows
+    (formation: StellarFormation)
+    (coreSets: CoreSet list)
+    (loadDurationSec: int)
+    (load: unit -> 'a)
+    : 'a * LedgerAgeWindow list =
+    let schedule = ledgerAgeReadSchedule loadDurationSec
+
+    LogInfo
+        "Close-time windows: reading ledger-age percentiles at %s s into the %d s load (%d s warm-up)"
+        (schedule |> List.map string |> String.concat ", ")
+        loadDurationSec
+        (List.head schedule - ledgerAgeWindowSec)
+
+    let read () =
+        try
+            Ok(collectLedgerAgePercentiles formation coreSets)
+        with e -> Error e.Message
+
+    let result, reads =
+        runWithPeriodicReads
+            (schedule |> List.map (fun t -> int64 t * 1000L))
+            (int64 ledgerAgeWindowSec * 1000L)
+            30_000L
+            read
+            load
+
+    result,
+    reads
+    |> List.map (fun (atMs, percentiles) -> { endSec = int (atMs / 1000L); percentiles = percentiles })
+
 let private logE2eLatencyMetrics (formation: StellarFormation) (coreSets: CoreSet list) : unit =
     let e2eLatencyMetrics : (string * (Metrics.Metrics -> Metrics.GenericCounter option)) list =
         [ "min", (fun m -> m.LoadgenTxLatencyRunMinMs)
@@ -370,8 +513,8 @@ let private logE2eLatencyMetrics (formation: StellarFormation) (coreSets: CoreSe
 //   P75 in [0.80*T, 1.20*T)
 //   P99 <= 2*T
 //
-// Evaluate a pre-collected snapshot. Core keeps closing ledgers after loadgen
-// exits, so delaying metric collection skews SLA reads.
+// Evaluates one window's pre-collected snapshot (see runWithLedgerAgeWindows):
+// core keeps closing ledgers after loadgen exits, so a late read skews it.
 //
 // FIXME: the P75 tolerance is temporarily widened to +/-20% because
 // stellar-core currently has perf regressions that prevent the intended
@@ -426,6 +569,53 @@ let private checkLedgerAgeSLA (percentiles: (Peer * float * float) list) (target
 
     ok
 
+// Judges every window with checkLedgerAgeSLA; all must be read and pass.
+let private checkLedgerAgeWindows (windows: LedgerAgeWindow list) (targetMs: int) : bool =
+    let n = List.length windows
+
+    windows
+    |> List.mapi
+        (fun i w ->
+            match w.percentiles with
+            | Ok percentiles ->
+                LogInfo
+                    "Close-time window %d/%d at T=%dms: ledgers closed from %d s to %d s into the load"
+                    (i + 1)
+                    n
+                    targetMs
+                    (max 0 (w.endSec - ledgerAgeWindowSec))
+                    w.endSec
+
+                checkLedgerAgeSLA percentiles targetMs
+            | Error msg ->
+                LogError
+                    "Close-time window %d/%d at T=%dms: could not read the ledger-age percentiles %d s into the load: %s"
+                    (i + 1)
+                    n
+                    targetMs
+                    w.endSec
+                    msg
+
+                false)
+    |> List.forall id
+
+// Average percentiles per window, for a candidate already failed.
+let private logLedgerAgeWindowAverages (windows: LedgerAgeWindow list) (targetMs: int) =
+    for w in windows do
+        match w.percentiles with
+        | Ok percentiles when not percentiles.IsEmpty ->
+            let avgP75 = percentiles |> List.averageBy (fun (_, p75, _) -> p75)
+            let avgP99 = percentiles |> List.averageBy (fun (_, _, p99) -> p99)
+
+            LogInfo
+                "Post-failure ledger age at T=%dms, window to %d s: avg-p75=%.0f (%+.1f%% vs target) avg-p99=%.0f"
+                targetMs
+                w.endSec
+                avgP75
+                (100.0 * (avgP75 - float targetMs) / float targetMs)
+                avgP99
+        | _ -> ()
+
 // The load-generating core sets a MIXED_PREGEN_* run uses: at most one
 // generator per requested TPS, so every generator gets a non-zero share, and
 // always at least one set. With load on every validator
@@ -443,7 +633,25 @@ let activeLoadGenCoreSets (everyValidator: bool) (requestedTps: int) (loadGenNod
 
     List.truncate (max 1 fitting) loadGenNodes
 
+// Marks the core sets in `active` as generating load, as --loadgen-keys does
+// for pubnet topologies, so per-node settings keyed on it (the e2e latency
+// metric of --measure-e2e-latency) land on the nodes that submit. Matches by
+// name, since `sets` may carry other option changes. Exposed for unit tests.
+let markLoadGenerators (active: CoreSet list) (sets: CoreSet list) : CoreSet list =
+    let names = active |> List.map (fun cs -> cs.name) |> Set.ofList
+
+    sets
+    |> List.map
+        (fun (cs: CoreSet) ->
+            if names.Contains cs.name then
+                { cs with options = { cs.options with generatesLoad = true } }
+            else
+                cs)
+
 let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadGen option) =
+    // --overlay-v2-optimized: see MissionContext.describeOverlayV2.
+    let v2 = context.overlayV2Optimized
+
     let allNodes =
         if context.pubnetData.IsSome then
             FullPubnetCoreSets context true false
@@ -462,15 +670,47 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
         else
             baseLoadGen
 
+    // Classic and Soroban transaction bytes offered per second, by which
+    // --overlay-v2-optimized splits the tx-set byte allowance. Only the ratio
+    // matters: both phases grow alike with the close time.
+    let offeredTxBytesPerSec =
+        if isMixedPregenMode baseLoadGen.mode then
+            let classicTps =
+                match baseLoadGen.classicTxRate, context.minBlockTimeMixedClassicTxRate with
+                | Some rate, _ -> rate
+                | None, Some rate -> rate
+                | None, None -> context.txRate
+
+            let sorobanTps = baseLoadGen.sorobanTxRate |> Option.defaultValue 0
+            let sorobanTxBytes = int64 (mixedPregenSorobanResources baseLoadGen.mode).txSizeBytes
+            int64 classicTps * classicPaymentTxBytes, int64 sorobanTps * sorobanTxBytes
+        elif baseLoadGen.mode = GeneratePaymentLoad || baseLoadGen.mode = PayPregenerated then
+            int64 context.txRate * classicPaymentTxBytes, 0L
+        else
+            // The other modes offer Soroban load only.
+            0L, int64 context.txRate
+
     let context =
         { context with
               runForMinBlockTime = true
               genesisTestAccountCount = Some(context.genesisTestAccountCount |> Option.defaultValue 100000)
+              offeredTxBytesPerSec = Some offeredTxBytesPerSec
+              // --overlay-v2-optimized always measures e2e latency.
+              measureE2eLatency = context.measureE2eLatency || v2
               numPregeneratedTxs =
                   if usesPregeneratedTxs baseLoadGen.mode then
                       Some(context.numPregeneratedTxs |> Option.defaultValue 2500000)
                   else
                       None }
+
+    match MissionContext.txSetByteAllowances context with
+    | Some allowances when context.overlayV2Optimized ->
+        LogInfo
+            "Tx-set byte allowances: %s, split by the offered bytes (classic %d B/s, Soroban %d B/s)"
+            (MissionContext.describeTxSetByteAllowances allowances)
+            (fst offeredTxBytesPerSec)
+            (snd offeredTxBytesPerSec)
+    | _ -> ()
 
     let tier1 = List.filter (fun (cs: CoreSet) -> cs.options.tier1 = Some true) allNodes
     let loadGenNodes = List.filter (fun (cs: CoreSet) -> cs.options.generatesLoad) allNodes
@@ -544,6 +784,8 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                 allNodes
         | _ -> allNodes
 
+    let allNodes = markLoadGenerators activeLoadGenNodes allNodes
+
     context.ExecuteWithOptionalConsistencyCheck
         allNodes
         None
@@ -552,6 +794,8 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
 
             let numAccounts = context.genesisTestAccountCount.Value
             let fixedTxRate = context.txRate
+            let bufferPct = MissionContext.txSetSizeBufferPct context
+            let loadDurationSec = MissionContext.minBlockTimeLoadDurationSec context
 
             let classicTxRateForLimits =
                 match baseLoadGen.classicTxRate, context.minBlockTimeMixedClassicTxRate with
@@ -603,29 +847,35 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                 peer.WaitForScpLedgerCloseTime targetMs |> ignore
 
             let upgradeClassicMaxTxSetSize (targetMs: int) =
-                let maxTxSetSize = classicMaxTxSetSizeForTarget targetMs classicTxRateForLimits
+                let maxTxSetSize = classicMaxTxSetSizeForTargetPct targetMs classicTxRateForLimits bufferPct
 
                 LogInfo
-                    "Upgrading classic MaxTxSetSize to %d for T=%dms, classic TPS=%d, buffer=%dx"
+                    "Upgrading classic MaxTxSetSize to %d for T=%dms, classic TPS=%d, buffer=%d%%"
                     maxTxSetSize
                     targetMs
                     classicTxRateForLimits
-                    txSetSizeBufferMultiplier
+                    bufferPct
 
                 formation.UpgradeMaxTxSetSize allNodes maxTxSetSize
 
             let upgradeSorobanMaxTxSetSize (targetMs: int) =
                 if isMixedPregenMode baseLoadGen.mode then
-                    upgradeMixedPregenSorobanLimits formation allNodes baseLoadGen targetMs
+                    upgradeMixedPregenSorobanLimitsWith
+                        formation
+                        allNodes
+                        baseLoadGen
+                        targetMs
+                        bufferPct
+                        (if v2 then Some MaxTPSTest.sorobanDependentTxClusters else None)
 
             let evaluateAt (targetMs: int) : bool =
                 let loadGen =
                     { baseLoadGen with
                           accounts = numAccounts
-                          // ~5 min measurement window at fixed TPS. Enough for a
-                          // stable read of the SLA metric without draining the
-                          // tx source.
-                          txs = fixedTxRate * 300
+                          // Measurement window at fixed TPS: ~5 min, enough for a
+                          // stable read of the SLA metric without draining the tx
+                          // source, or longer under --overlay-v2-optimized.
+                          txs = fixedTxRate * loadDurationSec
                           txrate = fixedTxRate }
 
                 applySCPUpgrade targetMs
@@ -646,8 +896,9 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                     // such as load left out of ledgers, fails the candidate.
                     // Everything else is measured while apply is still
                     // disabled, describing the state we measured:
-                    //   * percentiles, the inclusion cross-check and the
-                    //     pairwise consistency and sync checks;
+                    //   * the ledger-age windows are read during the load, and
+                    //     the inclusion cross-check and the pairwise
+                    //     consistency and sync checks after it;
                     //   * apply is never re-enabled, and the between-iteration
                     //     restart discards whatever is left in the nodes'
                     //     queues rather than making the network apply it at
@@ -655,18 +906,24 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                     //     minutes after the window.
                     toggleOverlayOnlyMode formation allNodes
 
-                    let mutable failureReason =
-                        try
-                            formation.RunMultiLoadgen activeLoadGenNodes loadGen
-                            None
-                        with e ->
-                            LogError "Load generation FAILED at T=%dms: %s" targetMs e.Message
-                            Some(sprintf "load generation failed: %s" e.Message)
+                    let loadgenFailure, windows =
+                        runWithLedgerAgeWindows
+                            formation
+                            allNodes
+                            loadDurationSec
+                            (fun () ->
+                                try
+                                    formation.RunMultiLoadgen activeLoadGenNodes loadGen
+                                    None
+                                with e ->
+                                    LogError "Load generation FAILED at T=%dms: %s" targetMs e.Message
+                                    Some(sprintf "load generation failed: %s" e.Message))
 
-                    let percentiles = collectLedgerAgePercentiles formation allNodes
+                    let mutable failureReason = loadgenFailure
 
-                    // Read in-mode for the same reason as the percentiles: the
-                    // between-iteration restart resets these counters.
+                    // Read in-mode for the same reason as the ledger-age
+                    // windows: the between-iteration restart resets these
+                    // counters.
                     let included = collectLedgerTxsIncluded formation allNodes
 
                     if not (checkInclusionSLA included targetMs loadGen.txs) && failureReason.IsNone then
@@ -690,7 +947,7 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                         if failureReason.IsNone then
                             failureReason <- Some(sprintf "health check: %s" e.Message)
 
-                    let slaOk = failureReason.IsNone && checkLedgerAgeSLA percentiles targetMs
+                    let slaOk = failureReason.IsNone && checkLedgerAgeWindows windows targetMs
 
                     LogInfo
                         "Candidate T=%dms at %d TPS: %s%s"
@@ -704,43 +961,36 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
 
                     slaOk
                 else
-                    let loadgenOk =
-                        try
-                            formation.RunMultiLoadgen activeLoadGenNodes loadGen
-                            true
-                        with e ->
-                            LogWarn "Loadgen failed at T=%dms (%s); treating iteration as SLA fail" targetMs e.Message
-
-                            (try
-                                let pct = collectLedgerAgePercentiles formation allNodes
-
-                                if not (List.isEmpty pct) then
-                                    let avgP75 = pct |> List.averageBy (fun (_, p75, _) -> p75)
-                                    let avgP99 = pct |> List.averageBy (fun (_, _, p99) -> p99)
-
-                                    LogInfo
-                                        "Post-failure ledger age at T=%dms: avg-p75=%.0f (%+.1f%% vs target) avg-p99=%.0f"
+                    // The ledger-age windows are read during the load, before
+                    // the consistency checks, which can take long enough to
+                    // skew them.
+                    let loadgenOk, windows =
+                        runWithLedgerAgeWindows
+                            formation
+                            allNodes
+                            loadDurationSec
+                            (fun () ->
+                                try
+                                    formation.RunMultiLoadgen activeLoadGenNodes loadGen
+                                    true
+                                with e ->
+                                    LogWarn
+                                        "Loadgen failed at T=%dms (%s); treating iteration as SLA fail"
                                         targetMs
-                                        avgP75
-                                        (100.0 * (avgP75 - float targetMs) / float targetMs)
-                                        avgP99
-                             with e2 -> LogWarn "Could not collect post-failure percentiles: %s" e2.Message)
+                                        e.Message
 
-                            false
+                                    false)
 
                     if not loadgenOk then
+                        logLedgerAgeWindowAverages windows targetMs
                         false
                     else
-                        // Snapshot SLA metrics before consistency checks; those can take
-                        // long enough to skew the ledger age percentiles.
-                        let ledgerAgePercentiles = collectLedgerAgePercentiles formation allNodes
-
                         if context.measureE2eLatency then
                             logE2eLatencyMetrics formation activeLoadGenNodes
 
                         formation.CheckNoErrorsAndPairwiseConsistency()
                         formation.EnsureAllNodesInSync allNodes
-                        checkLedgerAgeSLA ledgerAgePercentiles targetMs
+                        checkLedgerAgeWindows windows targetMs
 
             // An explicit single-candidate target: --min-block-time-ms ==
             // --max-block-time-ms == T evaluates exactly that T once, in
