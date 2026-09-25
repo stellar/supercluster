@@ -22,9 +22,40 @@ open StellarSupercluster
 
 let private smallNetworkSize = 10
 
-let private searchThresholdMs = 100
+// Candidate close times are always whole seconds: sub-second values hit a
+// known rounding issue in close-time handling, so the search must never
+// propose one. The candidates are the whole seconds in [minMs, maxMs], bounds
+// included, so the default [4000, 5000] range evaluates 4000 and, only if that
+// fails, 5000. Exposed for unit tests.
+let wholeSecondCandidates (minMs: int) (maxMs: int) : int list =
+    let first = max 1000 (((minMs + 999) / 1000) * 1000)
+    let last = (maxMs / 1000) * 1000
+    [ first .. 1000 .. last ]
+
+// Binary search over ascending candidates for the smallest one that passes,
+// assuming every candidate above a passing one passes too. Returns None when
+// none passes. Exposed for unit tests.
+let searchMinPassing (candidates: int list) (passes: int -> bool) : int option =
+    let arr = Array.ofList candidates
+    let mutable failIdx = -1
+    let mutable passIdx = arr.Length
+
+    while passIdx - failIdx > 1 do
+        let mid = (failIdx + passIdx) / 2
+
+        if passes arr.[mid] then passIdx <- mid else failIdx <- mid
+
+    if passIdx < arr.Length then Some arr.[passIdx] else None
 
 // For the purposes of min block test, use high value to avoid noise from SCP timeouts
+// Flat SCP ballot/nomination timeout for the search.
+//
+// Reference measurements, 30 nodes at 500 SAC TPS (2026-07-27, image 3453):
+//   timeout=2000: externalize p75 2447ms, ledger-age p75 4592ms at T=3000 (+53%, fail)
+//   timeout=500:  externalize p75  331ms, ledger-age p75 3028ms at T=3000 (+0.9%)
+// The gap was stalled ballot rounds costing a full timeout before
+// retransmission. Kept at 2000 so that a build claiming to fix the stalls at
+// their source is tested without the shorter timeout masking the effect.
 let private timeout = 2000
 
 let private txSetSizeBufferMultiplier = 2
@@ -245,6 +276,60 @@ let private readLedgerAgePercentiles (peer: Peer) : Peer * float * float =
     let h = peer.GetMetrics().LedgerAgeClosedHistogram
     peer, float h.``75``, float h.``99``
 
+// Transactions included in closed ledgers since the candidate cleared the
+// metrics. ledger.transaction.count is Updated by LedgerManagerImpl even in
+// overlay-only mode (it is marked before the apply-skip branch), so its sum
+// counts every transaction that made it into a tx set with apply disabled.
+let private readLedgerTxsIncluded (peer: Peer) : Peer * float =
+    peer, float (peer.GetMetrics().LedgerTransactionCount.Sum)
+
+let private collectLedgerTxsIncluded (formation: StellarFormation) (coreSets: CoreSet list) : (Peer * float) list =
+    formation.NetworkCfg.PeersInSets(List.toArray coreSets)
+    |> List.map (fun peer -> async { return readLedgerTxsIncluded peer })
+    |> Async.Parallel
+    |> Async.RunSynchronously
+    |> Array.toList
+
+// Fraction of the offered transactions that must reach ledgers for an
+// overlay-only candidate to count. Comparing totals over the window, rather
+// than txs per ledger against TPS x T, is not skewed by the idle ledgers
+// around the load or by long ledgers carrying more.
+let private minInclusionFraction = 0.95
+
+// Cross-check for overlay-only candidates. Loadgen completes only once every
+// transaction its node submitted has been included in a closed ledger, so a
+// completed run includes essentially everything; this confirms it from the
+// ledgers' own transaction counts, which checkLedgerAgeSLA does not look at
+// (closing near-empty ledgers on schedule passes it trivially).
+let private checkInclusionSLA (included: (Peer * float) list) (targetMs: int) (offered: int) : bool =
+    if List.isEmpty included || offered <= 0 then
+        true
+    else
+        let floorTxs = float offered * minInclusionFraction
+        let observed = included |> List.averageBy snd
+        let worstPeer, worstTxs = included |> List.minBy snd
+        let ok = observed >= floorTxs
+
+        LogInfo
+            "Inclusion at T=%dms: %.0f of %d offered transactions reached ledgers (%.1f%%), worst peer=%s %.0f -> %s"
+            targetMs
+            observed
+            offered
+            (100.0 * observed / float offered)
+            worstPeer.ShortName.StringName
+            worstTxs
+            (if ok then "PASS" else "FAIL")
+
+        if not ok then
+            LogError
+                "Only %.1f%% of the %d offered transactions reached ledgers at T=%dms (need >= %.0f%%). The network paced ledgers but was not carrying the load, so the close-time result is meaningless."
+                (100.0 * observed / float offered)
+                offered
+                targetMs
+                (100.0 * minInclusionFraction)
+
+        ok
+
 let private collectLedgerAgePercentiles
     (formation: StellarFormation)
     (coreSets: CoreSet list)
@@ -299,6 +384,13 @@ let private checkLedgerAgeSLA (percentiles: (Peer * float * float) list) (target
     let p99Max = tf * 2.0
     let mutable ok = true
 
+    LogInfo
+        "SLA thresholds at T=%dms: every peer's ledger.age.closed-histogram P75 in [%.0f, %.0f) ms and P99 <= %.0f ms (the P75 band is the temporarily widened +/-20%%; the target is a close-time target, not a P99 guarantee)"
+        targetMs
+        tLo
+        tHi
+        p99Max
+
     let formatDeviation value =
         let deviation = (value - tf) / tf * 100.0
 
@@ -334,14 +426,32 @@ let private checkLedgerAgeSLA (percentiles: (Peer * float * float) list) (target
 
     ok
 
+// The load-generating core sets a MIXED_PREGEN_* run uses: at most one
+// generator per requested TPS, so every generator gets a non-zero share, and
+// always at least one set. With load on every validator
+// (StellarKubeSpecs.LoadOnEveryValidator) a core set brings all of its
+// validators as generators. Exposed for unit tests.
+let activeLoadGenCoreSets (everyValidator: bool) (requestedTps: int) (loadGenNodes: CoreSet list) : CoreSet list =
+    let generators (cs: CoreSet) = if everyValidator then cs.options.nodeCount else 1
+
+    let fitting =
+        loadGenNodes
+        |> List.scan (fun total cs -> total + generators cs) 0
+        |> List.tail
+        |> List.takeWhile (fun total -> total <= max 1 requestedTps)
+        |> List.length
+
+    List.truncate (max 1 fitting) loadGenNodes
+
 let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadGen option) =
     let allNodes =
         if context.pubnetData.IsSome then
             FullPubnetCoreSets context true false
         else
-            StableApproximateTier1CoreSets
+            StableApproximateTier1CoreSetsWithOrgCount
                 context.image
                 (if context.flatQuorum.IsSome then context.flatQuorum.Value else false)
+                context.tier1OrgCount
 
     // Mirrors MaxTPSTest: on small networks, GeneratePaymentLoad runs out of
     // source accounts at high TPS, so switch to PayPregenerated which uses
@@ -373,6 +483,10 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
 
     let isLoadGenNode cs = List.exists (fun (cs': CoreSet) -> cs' = cs) loadGenNodes
 
+    // MIXED_PREGEN_* load runs on every validator of the active core sets,
+    // each with its own account slice.
+    let everyValidator = StellarKubeSpecs.LoadOnEveryValidator context baseLoadGen.mode
+
     let activeLoadGenNodes =
         if isMixedPregenMode baseLoadGen.mode then
             let requestedCount =
@@ -380,21 +494,28 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                     (baseLoadGen.classicTxRate |> Option.defaultValue 0)
                     (baseLoadGen.sorobanTxRate |> Option.defaultValue 0)
 
-            loadGenNodes
-            |> List.truncate (min (List.length loadGenNodes) (max 1 requestedCount))
+            activeLoadGenCoreSets everyValidator requestedCount loadGenNodes
         else
             loadGenNodes
 
+    let isActiveLoadGenNode cs = List.exists (fun (cs': CoreSet) -> cs' = cs) activeLoadGenNodes
+
+    let context = { context with pregenerateTxsPerValidator = everyValidator }
+
     // For pre-generated modes, partition genesis accounts evenly across
     // loadgen nodes and assign offsets so each active node signs txs against
-    // its own slice. Mixed pregen keeps every tier1 core set initialized, but
-    // partitions accounts by the active loadgen count so low-TPS runs still
-    // have enough local accounts on the node that generates load.
+    // its own slice. Mixed pregen partitions accounts over the active loadgen
+    // nodes only, so low-TPS runs still have enough local accounts on the
+    // nodes that generate load; the other core sets pregenerate nothing. With load
+    // on every validator, each core set's slice covers all of its validators
+    // (StellarKubeSpecs.PregenerationOptionsForPeer splits it per pod).
     let allNodes =
         match context.numPregeneratedTxs, context.genesisTestAccountCount, baseLoadGen.mode with
         | Some txs, Some accounts, mode when usesPregeneratedTxs mode ->
             let partitionCount =
-                if isMixedPregenMode mode then
+                if isMixedPregenMode mode && everyValidator then
+                    List.sumBy (fun (cs: CoreSet) -> cs.options.nodeCount) activeLoadGenNodes
+                elif isMixedPregenMode mode then
                     List.length activeLoadGenNodes
                 else
                     List.length loadGenNodes
@@ -405,10 +526,13 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
             List.map
                 (fun (cs: CoreSet) ->
                     let pregenerateTxs =
-                        if isLoadGenNode cs then
-                            let i = if isMixedPregenMode mode then j % partitionCount else j
+                        if isLoadGenNode cs && (not (isMixedPregenMode mode) || isActiveLoadGenNode cs) then
+                            let i = j
 
-                            j <- j + 1
+                            j <-
+                                j
+                                + (if isMixedPregenMode mode && everyValidator then cs.options.nodeCount else 1)
+
                             Some(txs, accountsPerNode, accountsPerNode * i)
                         else
                             Some(0, 1, 0)
@@ -509,42 +633,144 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                 upgradeSorobanMaxTxSetSize targetMs
                 formation.clearMetrics allNodes
 
-                // A loadgen failure is not an SLA signal — it usually means the
-                // requested TPS is too high for the network, or that loadgen
-                // itself lost a tx in the pipeline. Treating it as "SLA missed"
-                // would mislead the binary search, so fail the mission loudly.
-                try
-                    if isMixedPregenMode baseLoadGen.mode then
-                        withOverlayOnlyMode
-                            formation
-                            allNodes
-                            (fun () -> formation.RunMultiLoadgen activeLoadGenNodes loadGen)
+                // Per doc/measuring-minimum-block-time.md, a loadgen failure
+                // (application lagging the offered load, a node dropping out
+                // mid-window, etc.) counts as a failed iteration: the search
+                // raises its lower bound and continues. Killing the mission
+                // here would let one bad window discard the whole search.
+                if isMixedPregenMode baseLoadGen.mode then
+                    // Overlay-only path. Core skips apply by design, but loadgen
+                    // still completes only once every transaction its node
+                    // submitted has been included in a closed ledger (core
+                    // counts inclusion in this mode), so a loadgen failure,
+                    // such as load left out of ledgers, fails the candidate.
+                    // Everything else is measured while apply is still
+                    // disabled, describing the state we measured:
+                    //   * percentiles, the inclusion cross-check and the
+                    //     pairwise consistency and sync checks;
+                    //   * apply is never re-enabled, and the between-iteration
+                    //     restart discards whatever is left in the nodes'
+                    //     queues rather than making the network apply it at
+                    //     once, which previously pushed nodes out of sync
+                    //     minutes after the window.
+                    toggleOverlayOnlyMode formation allNodes
+
+                    let mutable failureReason =
+                        try
+                            formation.RunMultiLoadgen activeLoadGenNodes loadGen
+                            None
+                        with e ->
+                            LogError "Load generation FAILED at T=%dms: %s" targetMs e.Message
+                            Some(sprintf "load generation failed: %s" e.Message)
+
+                    let percentiles = collectLedgerAgePercentiles formation allNodes
+
+                    // Read in-mode for the same reason as the percentiles: the
+                    // between-iteration restart resets these counters.
+                    let included = collectLedgerTxsIncluded formation allNodes
+
+                    if not (checkInclusionSLA included targetMs loadGen.txs) && failureReason.IsNone then
+                        failureReason <- Some "under 95% of the offered transactions reached ledgers"
+
+                    if context.measureE2eLatency then
+                        logE2eLatencyMetrics formation activeLoadGenNodes
+
+                    // Consistency AND in-sync are both still enforced, here,
+                    // while apply is still disabled: a node out of sync at this
+                    // point is a real problem with the run we just measured.
+                    try
+                        formation.CheckNoErrorsAndPairwiseConsistency()
+                        formation.EnsureAllNodesInSync allNodes
+                    with e ->
+                        LogWarn
+                            "Health check failed at T=%dms in overlay-only mode: %s — iteration counts as a fail"
+                            targetMs
+                            e.Message
+
+                        if failureReason.IsNone then
+                            failureReason <- Some(sprintf "health check: %s" e.Message)
+
+                    let slaOk = failureReason.IsNone && checkLedgerAgeSLA percentiles targetMs
+
+                    LogInfo
+                        "Candidate T=%dms at %d TPS: %s%s"
+                        targetMs
+                        fixedTxRate
+                        (if slaOk then "PASS" else "FAIL")
+                        (match failureReason with
+                         | _ when slaOk -> ""
+                         | Some reason -> sprintf " (%s)" reason
+                         | None -> " (close-time SLA not met)")
+
+                    slaOk
+                else
+                    let loadgenOk =
+                        try
+                            formation.RunMultiLoadgen activeLoadGenNodes loadGen
+                            true
+                        with e ->
+                            LogWarn "Loadgen failed at T=%dms (%s); treating iteration as SLA fail" targetMs e.Message
+
+                            (try
+                                let pct = collectLedgerAgePercentiles formation allNodes
+
+                                if not (List.isEmpty pct) then
+                                    let avgP75 = pct |> List.averageBy (fun (_, p75, _) -> p75)
+                                    let avgP99 = pct |> List.averageBy (fun (_, _, p99) -> p99)
+
+                                    LogInfo
+                                        "Post-failure ledger age at T=%dms: avg-p75=%.0f (%+.1f%% vs target) avg-p99=%.0f"
+                                        targetMs
+                                        avgP75
+                                        (100.0 * (avgP75 - float targetMs) / float targetMs)
+                                        avgP99
+                             with e2 -> LogWarn "Could not collect post-failure percentiles: %s" e2.Message)
+
+                            false
+
+                    if not loadgenOk then
+                        false
                     else
-                        formation.RunMultiLoadgen activeLoadGenNodes loadGen
-                with e -> failwithf "Loadgen failed at T=%dms; TPS might be too high (%s)" targetMs e.Message
+                        // Snapshot SLA metrics before consistency checks; those can take
+                        // long enough to skew the ledger age percentiles.
+                        let ledgerAgePercentiles = collectLedgerAgePercentiles formation allNodes
 
-                // Snapshot SLA metrics before consistency checks; those can take
-                // long enough to skew the ledger age percentiles.
-                let ledgerAgePercentiles = collectLedgerAgePercentiles formation allNodes
+                        if context.measureE2eLatency then
+                            logE2eLatencyMetrics formation activeLoadGenNodes
 
-                if context.measureE2eLatency then
-                    logE2eLatencyMetrics formation activeLoadGenNodes
+                        formation.CheckNoErrorsAndPairwiseConsistency()
+                        formation.EnsureAllNodesInSync allNodes
+                        checkLedgerAgeSLA ledgerAgePercentiles targetMs
 
-                formation.CheckNoErrorsAndPairwiseConsistency()
-                formation.EnsureAllNodesInSync allNodes
-                checkLedgerAgeSLA ledgerAgePercentiles targetMs
+            // An explicit single-candidate target: --min-block-time-ms ==
+            // --max-block-time-ms == T evaluates exactly that T once, in
+            // milliseconds, with no whole-second rounding and no search (upstream
+            // rejects min == max). The whole-second search below is unchanged for
+            // min < max. Everything downstream (capacity, ledger target close
+            // time, SCP timeouts, verdict and the final "No block time" failure)
+            // is the same code path evaluateAt already uses.
+            let singleCandidate = context.minBlockTimeMs = context.maxBlockTimeMs
 
-            if context.minBlockTimeMs >= context.maxBlockTimeMs then
+            if context.minBlockTimeMs > context.maxBlockTimeMs then
                 failwithf
-                    "--min-block-time-ms=%d must be strictly less than --max-block-time-ms=%d"
+                    "--min-block-time-ms=%d must not exceed --max-block-time-ms=%d"
                     context.minBlockTimeMs
                     context.maxBlockTimeMs
 
-            let mutable lo = context.minBlockTimeMs
-            let mutable hi = context.maxBlockTimeMs
-            let mutable bestPassing = None
+            let candidates = wholeSecondCandidates context.minBlockTimeMs context.maxBlockTimeMs
 
-            LogInfo "Starting min block time search: T in [%d, %d] ms, fixed TPS = %d" lo hi fixedTxRate
+            if not singleCandidate && List.isEmpty candidates then
+                failwithf
+                    "No whole-second close time in [%d, %d] ms: --min-block-time-ms and --max-block-time-ms must include at least one whole second"
+                    context.minBlockTimeMs
+                    context.maxBlockTimeMs
+
+            LogInfo
+                "Starting min block time search: T in [%d, %d] ms (whole-second candidates: %s), fixed TPS = %d"
+                context.minBlockTimeMs
+                context.maxBlockTimeMs
+                (candidates |> List.map string |> String.concat ", ")
+                fixedTxRate
 
             // Restart-or-sleep between iterations. Pre-generated modes require
             // a full restart because the pregenerated txs have baked-in
@@ -572,22 +798,40 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                     System.Threading.Thread.Sleep(5 * 60 * 1000)
                     formation.EnsureAllNodesInSync allNodes
 
-            let mutable needsRecovery = false
+            let needsRecovery = ref false
 
-            while hi - lo > searchThresholdMs do
-                if needsRecovery then restartCoreSetsOrWait ()
+            // One search step: recover from the previous candidate if needed,
+            // then evaluate T.
+            let evaluateCandidate (t: int) : bool =
+                if needsRecovery.Value then restartCoreSetsOrWait ()
 
-                let mid = lo + (hi - lo) / 2
-
-                if evaluateAt mid then
-                    LogInfo "SLA met at T=%dms; lowering upper bound" mid
-                    hi <- mid
-                    bestPassing <- Some mid
-                    needsRecovery <- false
+                if evaluateAt t then
+                    LogInfo "SLA met at T=%dms; lowering upper bound" t
+                    // Overlay-only runs never apply their transactions, so the
+                    // nodes' state and queues are not fit for the next
+                    // iteration: leftovers starve its upgrade-contract loadgen,
+                    // which then fails hard. Restart after a pass as well, not
+                    // just after a failure.
+                    needsRecovery.Value <- isMixedPregenMode baseLoadGen.mode
+                    true
                 else
-                    LogInfo "SLA not met at T=%dms; raising lower bound" mid
-                    lo <- mid
-                    needsRecovery <- true
+                    LogInfo "SLA not met at T=%dms; raising lower bound" t
+                    needsRecovery.Value <- true
+                    false
+
+            let bestPassing =
+                if singleCandidate then
+                    let t = context.minBlockTimeMs
+                    LogInfo "Explicit single-candidate target T=%dms (no whole-second rounding, no search)" t
+
+                    if evaluateAt t then
+                        LogInfo "SLA met at T=%dms (single candidate)" t
+                        Some t
+                    else
+                        LogInfo "SLA not met at T=%dms (single candidate)" t
+                        None
+                else
+                    searchMinPassing candidates evaluateCandidate
 
             match bestPassing with
             | Some t ->

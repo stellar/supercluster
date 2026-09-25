@@ -147,6 +147,44 @@ let Taipei = { lat = 25.0329; lon = 121.5654 }
 // of nodes.
 let Tokyo = { lat = 35.6895; lon = 139.69171 }
 
+// Further cloud and hosting regions, used only by the synthetic organizations
+// StableApproximateTier1CoreSetsWithOrgCount adds beyond its base 10 (not by
+// pubnet simulations, which draw from `locations` below).
+let Amsterdam = { lat = 52.3676; lon = 4.9041 } // Azure westeurope, many DCs
+
+let Atlanta = { lat = 33.749; lon = -84.388 }
+let Auckland = { lat = -36.8485; lon = 174.7633 } // AWS ap-southeast-6
+let Bahrain = { lat = 26.0667; lon = 50.5577 } // AWS me-south-1
+let Bogota = { lat = 4.711; lon = -74.0721 }
+let BuenosAires = { lat = -34.6037; lon = -58.3816 }
+let CapeTown = { lat = -33.9249; lon = 18.4241 } // AWS af-south-1
+let Chicago = { lat = 41.8781; lon = -87.6298 }
+let Dallas = { lat = 32.7767; lon = -96.797 } // GCP us-south1
+let Dubai = { lat = 25.2048; lon = 55.2708 } // Azure uaenorth
+let Dublin = { lat = 53.3498; lon = -6.2603 } // AWS eu-west-1
+let Jakarta = { lat = -6.2088; lon = 106.8456 } // AWS ap-southeast-3
+let Johannesburg = { lat = -26.2041; lon = 28.0473 } // Azure southafricanorth
+let Lagos = { lat = 6.5244; lon = 3.3792 }
+let LosAngeles = { lat = 34.0522; lon = -118.2437 } // GCP us-west2
+let Madrid = { lat = 40.4168; lon = -3.7038 } // GCP europe-southwest1
+let Melbourne = { lat = -37.8136; lon = 144.9631 } // GCP australia-southeast2
+let MexicoCity = { lat = 19.4326; lon = -99.1332 }
+let Miami = { lat = 25.7617; lon = -80.1918 }
+let Milan = { lat = 45.4642; lon = 9.19 } // AWS eu-south-1
+let Mumbai = { lat = 19.076; lon = 72.8777 } // AWS ap-south-1
+let Nuremberg = { lat = 49.4521; lon = 11.0767 } // Hetzner
+let Osaka = { lat = 34.6937; lon = 135.5023 } // AWS ap-northeast-3
+let Paris = { lat = 48.8566; lon = 2.3522 } // AWS eu-west-3
+let Santiago = { lat = -33.4489; lon = -70.6693 } // GCP southamerica-west1
+let SanJose = { lat = 37.3382; lon = -121.8863 }
+let Seoul = { lat = 37.5665; lon = 126.978 } // AWS ap-northeast-2
+let Stockholm = { lat = 59.3293; lon = 18.0686 } // AWS eu-north-1
+let Sydney = { lat = -33.8688; lon = 151.2093 } // AWS ap-southeast-2
+let TelAviv = { lat = 32.0853; lon = 34.7818 } // GCP me-west1
+let Toronto = { lat = 43.6532; lon = -79.3832 } // GCP northamerica-northeast2
+let Warsaw = { lat = 52.2297; lon = 21.0122 } // GCP europe-central2, OVH
+let Zurich = { lat = 47.3769; lon = 8.5417 } // GCP europe-west6
+
 let locations =
     [ Ashburn
       Brussels
@@ -955,9 +993,57 @@ let TestnetCoreSetOptions (image: string) =
           initialization = { CoreSetInitialization.Default with waitForConsensus = true }
           dumpDatabase = false }
 
+// Synthetic organizations, in the order they are added, that extend
+// StableApproximateTier1CoreSets past its 10 organizations (--tier1-org-count).
+// Most spread their three validators over two regions, like real operators.
+// Every block of additions keeps the mix at roughly one third North America,
+// one third Europe and one third elsewhere (Asia, South America, Oceania,
+// Africa, Middle East). The base 10 use 13 distinct locations; with 19
+// organizations there are 37, with all 40 there are 51.
+let tier1ExtraOrgs : (string * GeoLoc list) list =
+    [ ("x01", [ Dublin; Amsterdam; Toronto ])
+      ("x02", [ SaoPaulo; Miami; Madrid ])
+      ("x03", [ Tokyo; Seoul; SanJose ])
+      ("x04", [ Mumbai; Bahrain; Frankfurt ])
+      ("x05", [ Sydney; Singapore; LosAngeles ])
+      ("x06", [ Paris; Stockholm; Chicago ])
+      ("x07", [ Dallas; Atlanta; Warsaw ])
+      ("x08", [ CapeTown; Johannesburg; Purfleet ])
+      ("x09", [ Zurich; Milan; Ashburn ])
+      ("x10", [ MexicoCity; Dallas; Bogota ])
+      ("x11", [ Osaka; Taipei; Portland ])
+      ("x12", [ Nuremberg; Falkenstein; Helsinki ])
+      ("x13", [ Jakarta; Singapore; HongKong ])
+      ("x14", [ Toronto; Beauharnois; Dublin ])
+      ("x15", [ Santiago; BuenosAires; Miami ])
+      ("x16", [ TelAviv; Dubai; Milan ])
+      ("x17", [ Melbourne; Sydney; Auckland ])
+      ("x18", [ Chicago; CouncilBluffs; Frankfurt ])
+      ("x19", [ Lagos; Paris; Ashburn ])
+      ("x20", [ SanJose; LosAngeles; Tokyo ])
+      ("x21", [ Amsterdam; Warsaw; Stockholm ])
+      ("x22", [ Atlanta; Clifton; Madrid ])
+      ("x23", [ Chennai; Mumbai; Singapore ])
+      ("x24", [ Columbus; Chicago; Brussels ])
+      ("x25", [ Zurich; Frankfurt; Seoul ])
+      ("x26", [ Portland; SanJose; Dublin ])
+      ("x27", [ Purfleet; Paris; SaoPaulo ])
+      ("x28", [ Dallas; MexicoCity; Toronto ])
+      ("x29", [ Helsinki; Stockholm; Osaka ])
+      ("x30", [ Miami; Ashburn; Nuremberg ]) ]
+
+let tier1BaseOrgCount = 10
+
+let tier1MaxOrgCount = tier1BaseOrgCount + List.length tier1ExtraOrgs
+
 // This coreset is a synthetic approximation of the Tier1 group, intended
-// to be used in stable benchmarks rather than experiments.
-let StableApproximateTier1CoreSets (image: string) (flatQuorum: bool) : CoreSet list =
+// to be used in stable benchmarks rather than experiments. orgCount (None =
+// the 10 base organizations) adds tier1ExtraOrgs, up to tier1MaxOrgCount.
+let StableApproximateTier1CoreSetsWithOrgCount
+    (image: string)
+    (flatQuorum: bool)
+    (orgCount: int option)
+    : CoreSet list =
     let allOrgs : Map<string, GeoLoc list> =
         Map.ofList [ ("bd", [ Brussels; CouncilBluffs; Taipei ])
                      ("ct", [ Frankfurt; Purfleet; Brussels ])
@@ -969,6 +1055,17 @@ let StableApproximateTier1CoreSets (image: string) (flatQuorum: bool) : CoreSet 
                      ("pn", [ Beauharnois; Helsinki; Purfleet ])
                      ("rg", [ Brussels; Frankfurt; Brussels ])
                      ("sdf", [ Ashburn; Ashburn; Ashburn ]) ]
+
+    let extra =
+        match orgCount with
+        | None -> 0
+        | Some n when n >= tier1BaseOrgCount && n <= tier1MaxOrgCount -> n - tier1BaseOrgCount
+        | Some n ->
+            failwithf "tier1 organization count must be between %d and %d, got %d" tier1BaseOrgCount tier1MaxOrgCount n
+
+    let extraOrgs = tier1ExtraOrgs |> List.truncate extra
+
+    let allOrgs = Map.ofList (Map.toList allOrgs @ extraOrgs)
 
     let allOrgPairs = Map.toList allOrgs
     let orgKeys _ nodes = List.map (fun _ -> KeyPair.Random()) nodes
@@ -1028,3 +1125,6 @@ let StableApproximateTier1CoreSets (image: string) (flatQuorum: bool) : CoreSet 
           options = coreSetOpts }
 
     List.map orgCoreSet allOrgPairs
+
+let StableApproximateTier1CoreSets (image: string) (flatQuorum: bool) : CoreSet list =
+    StableApproximateTier1CoreSetsWithOrgCount image flatQuorum None
