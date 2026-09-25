@@ -1851,6 +1851,51 @@ let ``Once every node has answered, a missed probe does not fail the boot bound`
     Assert.Equal(StellarStatefulSets.meshWaitBounds.stallSec, at)
 
 [<Fact>]
+let ``Close times are judged in 5-minute windows ending with the load, after a warm-up`` () =
+    Assert.Equal<int list>([ 300 ], MinBlockTimeTest.ledgerAgeReadSchedule 300)
+    // --overlay-v2-optimized: a 60 s warm-up, then three windows covering the rest.
+    Assert.Equal<int list>([ 360; 660; 960 ], MinBlockTimeTest.ledgerAgeReadSchedule 960)
+    Assert.Equal<int list>([ 300; 600 ], MinBlockTimeTest.ledgerAgeReadSchedule 600)
+    // Shorter than a window: one read at the planned end.
+    Assert.Equal<int list>([ 300 ], MinBlockTimeTest.ledgerAgeReadSchedule 120)
+
+// Runs runWithPeriodicReads with reads due at 200 and 400 ms, then every
+// 200 ms, and a 100 ms minimum gap before the final read; returns when each
+// read began, in ms.
+let private periodicReadTimes (loadMs: int) =
+    let result, reads =
+        MinBlockTimeTest.runWithPeriodicReads
+            [ 200L; 400L ]
+            200L
+            100L
+            (fun () -> ())
+            (fun () ->
+                System.Threading.Thread.Sleep loadMs
+                "done")
+
+    Assert.Equal("done", result)
+    reads |> List.map fst
+
+[<Fact>]
+let ``Periodic reads follow the schedule, continue while the load runs on, and read at its end`` () =
+    // 1000 ms: 200, 400, then 600 and 800 past the schedule, and a final read
+    // at the end, 200 ms after the last.
+    let times = periodicReadTimes 1000
+    Assert.Equal(5, times.Length)
+    Assert.All(List.pairwise times, (fun (a, b) -> Assert.True(b > a)))
+    Assert.InRange(times.Head, 190L, 350L)
+    Assert.InRange(List.last times, 990L, 1300L)
+
+[<Fact>]
+let ``Periodic reads skip the final read right after a scheduled one, and read a load shorter than the schedule`` () =
+    // Ends 50 ms after the read due at 800 ms: no final read.
+    Assert.Equal(4, (periodicReadTimes 850).Length)
+    // Ends before the first read is due: only the final read.
+    let times = periodicReadTimes 50
+    Assert.Equal(1, times.Length)
+    Assert.InRange(times.Head, 40L, 190L)
+
+[<Fact>]
 let ``MIXED_PREGEN runs use at most one generator per requested TPS`` () =
     let sets = StableApproximateTier1CoreSets "img" false
     let count everyValidator tps = (MinBlockTimeTest.activeLoadGenCoreSets everyValidator tps sets).Length

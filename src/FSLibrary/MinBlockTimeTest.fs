@@ -371,6 +371,118 @@ let private collectLedgerAgePercentiles
     |> Async.RunSynchronously
     |> Array.toList
 
+// Core keeps ledger.age.closed-histogram over a sliding 5-minute window
+// (libmedida's kSliding sample, kDefaultWindowTime), so one read at the end of
+// a longer load judges only its last 5 minutes.
+let ledgerAgeWindowSec = 300
+
+// When a load's ledger-age percentiles are read, in seconds after it starts:
+// consecutive 5-minute windows ending with the planned load, after a warm-up
+// of the remainder. A 300 s load is one read at its end; a 960 s load is a
+// 60 s warm-up and reads at 360, 660 and 960 s. Exposed for unit tests.
+let ledgerAgeReadSchedule (loadDurationSec: int) : int list =
+    let windows = max 1 (loadDurationSec / ledgerAgeWindowSec)
+    let warmUp = max 0 (loadDurationSec - windows * ledgerAgeWindowSec)
+    [ for k in 1 .. windows -> warmUp + k * ledgerAgeWindowSec ]
+
+// Runs `load` while calling `read` at each time of `scheduleMs` (ms after the
+// load starts), and every `periodMs` after the last while the load runs on.
+// When the load ends, reads once more unless the last read began under
+// `minGapMs` earlier. Returns the load's result and the reads, in order, as
+// (ms into the load when the read began, result). `read` must not throw.
+// Exposed for unit tests.
+let runWithPeriodicReads
+    (scheduleMs: int64 list)
+    (periodMs: int64)
+    (minGapMs: int64)
+    (read: unit -> 'r)
+    (load: unit -> 'a)
+    : 'a * (int64 * 'r) list =
+    let clock = System.Diagnostics.Stopwatch.StartNew()
+    let reads = System.Collections.Concurrent.ConcurrentQueue<int64 * 'r>()
+
+    let readNow () =
+        let atMs = clock.ElapsedMilliseconds
+        reads.Enqueue((atMs, read ()))
+
+    let dueMs (k: int) =
+        match List.tryItem k scheduleMs with
+        | Some t -> t
+        | None -> List.last scheduleMs + int64 (k - List.length scheduleMs + 1) * periodMs
+
+    use stop = new System.Threading.CancellationTokenSource()
+
+    let reader =
+        async {
+            let k = ref 0
+
+            while true do
+                let waitMs = dueMs k.Value - clock.ElapsedMilliseconds
+                if waitMs > 0L then do! Async.Sleep(int waitMs)
+                readNow ()
+                k.Value <- k.Value + 1
+        }
+
+    let task = Async.StartAsTask(reader, cancellationToken = stop.Token)
+
+    let result =
+        try
+            load ()
+        finally
+            stop.Cancel()
+
+            try
+                task.Wait()
+            with _ -> ()
+
+    match Seq.tryLast reads with
+    | Some (lastMs, _) when clock.ElapsedMilliseconds - lastMs < minGapMs -> ()
+    | _ -> readNow ()
+
+    result, List.ofSeq reads
+
+// A load's ledger-age percentiles as read `endSec` seconds into it, covering
+// the ledgers closed in the 5 minutes before (or since the metrics were
+// cleared, if less); Error if the read failed.
+type private LedgerAgeWindow = { endSec: int; percentiles: Result<(Peer * float * float) list, string> }
+
+// Runs `load` while reading every node's ledger-age percentiles on
+// ledgerAgeReadSchedule, then every 5 minutes while the load runs past its
+// planned end, and once more when it ends unless the last read is under 30 s
+// old. Every part of the load after the warm-up thus falls in a judged
+// window, and the reads are taken before the idle ledgers core keeps closing
+// after the load.
+let private runWithLedgerAgeWindows
+    (formation: StellarFormation)
+    (coreSets: CoreSet list)
+    (loadDurationSec: int)
+    (load: unit -> 'a)
+    : 'a * LedgerAgeWindow list =
+    let schedule = ledgerAgeReadSchedule loadDurationSec
+
+    LogInfo
+        "Close-time windows: reading ledger-age percentiles at %s s into the %d s load (%d s warm-up)"
+        (schedule |> List.map string |> String.concat ", ")
+        loadDurationSec
+        (List.head schedule - ledgerAgeWindowSec)
+
+    let read () =
+        try
+            Ok(collectLedgerAgePercentiles formation coreSets)
+        with e -> Error e.Message
+
+    let result, reads =
+        runWithPeriodicReads
+            (schedule |> List.map (fun t -> int64 t * 1000L))
+            (int64 ledgerAgeWindowSec * 1000L)
+            30_000L
+            read
+            load
+
+    result,
+    reads
+    |> List.map (fun (atMs, percentiles) -> { endSec = int (atMs / 1000L); percentiles = percentiles })
+
 let private logE2eLatencyMetrics (formation: StellarFormation) (coreSets: CoreSet list) : unit =
     let e2eLatencyMetrics : (string * (Metrics.Metrics -> Metrics.GenericCounter option)) list =
         [ "min", (fun m -> m.LoadgenTxLatencyRunMinMs)
@@ -401,8 +513,8 @@ let private logE2eLatencyMetrics (formation: StellarFormation) (coreSets: CoreSe
 //   P75 in [0.80*T, 1.20*T)
 //   P99 <= 2*T
 //
-// Evaluate a pre-collected snapshot. Core keeps closing ledgers after loadgen
-// exits, so delaying metric collection skews SLA reads.
+// Evaluates one window's pre-collected snapshot (see runWithLedgerAgeWindows):
+// core keeps closing ledgers after loadgen exits, so a late read skews it.
 //
 // FIXME: the P75 tolerance is temporarily widened to +/-20% because
 // stellar-core currently has perf regressions that prevent the intended
@@ -456,6 +568,53 @@ let private checkLedgerAgeSLA (percentiles: (Peer * float * float) list) (target
             (formatDeviation avgP99)
 
     ok
+
+// Judges every window with checkLedgerAgeSLA; all must be read and pass.
+let private checkLedgerAgeWindows (windows: LedgerAgeWindow list) (targetMs: int) : bool =
+    let n = List.length windows
+
+    windows
+    |> List.mapi
+        (fun i w ->
+            match w.percentiles with
+            | Ok percentiles ->
+                LogInfo
+                    "Close-time window %d/%d at T=%dms: ledgers closed from %d s to %d s into the load"
+                    (i + 1)
+                    n
+                    targetMs
+                    (max 0 (w.endSec - ledgerAgeWindowSec))
+                    w.endSec
+
+                checkLedgerAgeSLA percentiles targetMs
+            | Error msg ->
+                LogError
+                    "Close-time window %d/%d at T=%dms: could not read the ledger-age percentiles %d s into the load: %s"
+                    (i + 1)
+                    n
+                    targetMs
+                    w.endSec
+                    msg
+
+                false)
+    |> List.forall id
+
+// Average percentiles per window, for a candidate already failed.
+let private logLedgerAgeWindowAverages (windows: LedgerAgeWindow list) (targetMs: int) =
+    for w in windows do
+        match w.percentiles with
+        | Ok percentiles when not percentiles.IsEmpty ->
+            let avgP75 = percentiles |> List.averageBy (fun (_, p75, _) -> p75)
+            let avgP99 = percentiles |> List.averageBy (fun (_, _, p99) -> p99)
+
+            LogInfo
+                "Post-failure ledger age at T=%dms, window to %d s: avg-p75=%.0f (%+.1f%% vs target) avg-p99=%.0f"
+                targetMs
+                w.endSec
+                avgP75
+                (100.0 * (avgP75 - float targetMs) / float targetMs)
+                avgP99
+        | _ -> ()
 
 // The load-generating core sets a MIXED_PREGEN_* run uses: at most one
 // generator per requested TPS, so every generator gets a non-zero share, and
@@ -737,8 +896,9 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                     // such as load left out of ledgers, fails the candidate.
                     // Everything else is measured while apply is still
                     // disabled, describing the state we measured:
-                    //   * percentiles, the inclusion cross-check and the
-                    //     pairwise consistency and sync checks;
+                    //   * the ledger-age windows are read during the load, and
+                    //     the inclusion cross-check and the pairwise
+                    //     consistency and sync checks after it;
                     //   * apply is never re-enabled, and the between-iteration
                     //     restart discards whatever is left in the nodes'
                     //     queues rather than making the network apply it at
@@ -746,18 +906,24 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                     //     minutes after the window.
                     toggleOverlayOnlyMode formation allNodes
 
-                    let mutable failureReason =
-                        try
-                            formation.RunMultiLoadgen activeLoadGenNodes loadGen
-                            None
-                        with e ->
-                            LogError "Load generation FAILED at T=%dms: %s" targetMs e.Message
-                            Some(sprintf "load generation failed: %s" e.Message)
+                    let loadgenFailure, windows =
+                        runWithLedgerAgeWindows
+                            formation
+                            allNodes
+                            loadDurationSec
+                            (fun () ->
+                                try
+                                    formation.RunMultiLoadgen activeLoadGenNodes loadGen
+                                    None
+                                with e ->
+                                    LogError "Load generation FAILED at T=%dms: %s" targetMs e.Message
+                                    Some(sprintf "load generation failed: %s" e.Message))
 
-                    let percentiles = collectLedgerAgePercentiles formation allNodes
+                    let mutable failureReason = loadgenFailure
 
-                    // Read in-mode for the same reason as the percentiles: the
-                    // between-iteration restart resets these counters.
+                    // Read in-mode for the same reason as the ledger-age
+                    // windows: the between-iteration restart resets these
+                    // counters.
                     let included = collectLedgerTxsIncluded formation allNodes
 
                     if not (checkInclusionSLA included targetMs loadGen.txs) && failureReason.IsNone then
@@ -781,7 +947,7 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                         if failureReason.IsNone then
                             failureReason <- Some(sprintf "health check: %s" e.Message)
 
-                    let slaOk = failureReason.IsNone && checkLedgerAgeSLA percentiles targetMs
+                    let slaOk = failureReason.IsNone && checkLedgerAgeWindows windows targetMs
 
                     LogInfo
                         "Candidate T=%dms at %d TPS: %s%s"
@@ -795,43 +961,36 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
 
                     slaOk
                 else
-                    let loadgenOk =
-                        try
-                            formation.RunMultiLoadgen activeLoadGenNodes loadGen
-                            true
-                        with e ->
-                            LogWarn "Loadgen failed at T=%dms (%s); treating iteration as SLA fail" targetMs e.Message
-
-                            (try
-                                let pct = collectLedgerAgePercentiles formation allNodes
-
-                                if not (List.isEmpty pct) then
-                                    let avgP75 = pct |> List.averageBy (fun (_, p75, _) -> p75)
-                                    let avgP99 = pct |> List.averageBy (fun (_, _, p99) -> p99)
-
-                                    LogInfo
-                                        "Post-failure ledger age at T=%dms: avg-p75=%.0f (%+.1f%% vs target) avg-p99=%.0f"
+                    // The ledger-age windows are read during the load, before
+                    // the consistency checks, which can take long enough to
+                    // skew them.
+                    let loadgenOk, windows =
+                        runWithLedgerAgeWindows
+                            formation
+                            allNodes
+                            loadDurationSec
+                            (fun () ->
+                                try
+                                    formation.RunMultiLoadgen activeLoadGenNodes loadGen
+                                    true
+                                with e ->
+                                    LogWarn
+                                        "Loadgen failed at T=%dms (%s); treating iteration as SLA fail"
                                         targetMs
-                                        avgP75
-                                        (100.0 * (avgP75 - float targetMs) / float targetMs)
-                                        avgP99
-                             with e2 -> LogWarn "Could not collect post-failure percentiles: %s" e2.Message)
+                                        e.Message
 
-                            false
+                                    false)
 
                     if not loadgenOk then
+                        logLedgerAgeWindowAverages windows targetMs
                         false
                     else
-                        // Snapshot SLA metrics before consistency checks; those can take
-                        // long enough to skew the ledger age percentiles.
-                        let ledgerAgePercentiles = collectLedgerAgePercentiles formation allNodes
-
                         if context.measureE2eLatency then
                             logE2eLatencyMetrics formation activeLoadGenNodes
 
                         formation.CheckNoErrorsAndPairwiseConsistency()
                         formation.EnsureAllNodesInSync allNodes
-                        checkLedgerAgeSLA ledgerAgePercentiles targetMs
+                        checkLedgerAgeWindows windows targetMs
 
             // An explicit single-candidate target: --min-block-time-ms ==
             // --max-block-time-ms == T evaluates exactly that T once, in

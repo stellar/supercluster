@@ -295,7 +295,8 @@ module MissionContext =
     let describeTxSetByteAllowances (classic: int, soroban: int) : string =
         sprintf "classic %.1f MiB, Soroban %.1f MiB" (float classic / float mib) (float soroban / float mib)
 
-    /// MinBlockTime* load per candidate, in seconds: upstream's 300, or 960 under --overlay-v2-optimized.
+    /// MinBlockTime* load per candidate, in seconds: upstream's 300, or 960 under --overlay-v2-optimized (a 60 s
+    /// warm-up, then three 5-minute close-time windows; see MinBlockTimeTest.ledgerAgeReadSchedule).
     let minBlockTimeLoadDurationSec (ctx: MissionContext) : int = if ctx.overlayV2Optimized then 960 else 300
 
     /// Whether --measure-e2e-latency needs --loadgen-keys to find the load-generating nodes: MinBlockTime* missions
