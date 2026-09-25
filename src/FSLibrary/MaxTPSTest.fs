@@ -64,6 +64,11 @@ let upgradeSorobanTxLimits (context: MissionContext) (formation: StellarFormatio
               txMaxFootprintSize = entries
               txMaxSizeBytes = maxOption txSizeBytes wasmBytes
               maxContractSizeBytes = Option.map ((*) multiplier) (maxDistributionValue context.wasmBytesDistribution)
+              // Contract events have their own per-tx cap. Left at the network
+              // default, an invoke emitting more events than it allows fails on
+              // apply, which looks like transactions vanishing rather than a
+              // limit (the mixed-pregen path raises its cap too).
+              txMaxContractEventsSizeBytes = maxOption txSizeBytes wasmBytes
               // Memory limit must be reasonably high
               txMemoryLimit = Some 200000000 }
         (System.DateTime.UtcNow)
