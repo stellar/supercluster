@@ -230,6 +230,12 @@ module MissionContext =
     /// enableInMemoryBuckets), or --run-for-max-tps, whose high-throughput config has always included it.
     let inMemoryBuckets (ctx: MissionContext) : bool = ctx.enableInMemoryBuckets || ctx.runForMaxTps.IsSome
 
+    /// Whether a core set's nodes run on postgres: its dbType says so, or a max-TPS mission, which uses postgres
+    /// whatever the dbType (parallel apply is only supported on postgres). The one decision behind the DATABASE
+    /// setting, the postgres sidecar and the pod's postgres setup steps, so they cannot disagree.
+    let usesPostgres (ctx: MissionContext) (dbType: StellarCoreSet.DBType) : bool =
+        dbType = StellarCoreSet.Postgres || ctx.runForMaxTps.IsSome
+
     /// What --overlay-v2-optimized sets on the perf-sensitive benchmark missions (MinBlockTimeClassic/Mixed
     /// and MaxTPSClassic/Mixed), applied on top of the command-line context like their dedicatedNodes = true:
     /// in-memory BucketListDB, no test-only tx meta and one stellar-core pod per worker node (as --one-stellar-core-per-host).

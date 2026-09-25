@@ -1752,6 +1752,46 @@ let ``--measure-e2e-latency needs --loadgen-keys except for MinBlockTime mission
     Assert.True(needsKeys withOther)
 
 [<Fact>]
+let ``DATABASE, the postgres sidecar and the pod's postgres setup agree`` () =
+    // DATABASE is postgres, the pod has the postgres sidecar, and the core
+    // container waits for it; for every node, or for none.
+    let postgresEverywhere (c: MissionContext) (cs: CoreSet) =
+        let cfg = MakeNetworkCfg { c with installNetworkDelay = Some false } [ cs ] passOpt
+        let toml = cfg.StellarCoreCfg(cs, 0, MainCoreContainer).ToString()
+        let containers = (cfg.ToPodTemplateSpec cs).Spec.Containers
+        let core = containers |> Seq.find (fun k -> k.Name = CfgVal.stellarCoreContainerName "run")
+
+        let waits =
+            (String.concat " " core.Command + String.concat " " core.Args)
+                .Contains "pg_isready"
+
+        [ toml.Contains "DATABASE = \"postgresql://"
+          containers |> Seq.exists (fun k -> k.Name = "postgres")
+          waits ]
+
+    // Job pods decide it the same way.
+    let jobPostgres (c: MissionContext) (opts: CoreSetOptions) =
+        let cfg = { MakeNetworkCfg c [ coreSet ] passOpt with jobCoreSetOptions = Some opts }
+        let containers = (cfg.GetJobPodTemplateSpec "job" [| "run" |] "img" false).Spec.Containers
+        let core = containers |> Seq.head
+
+        let waits =
+            (String.concat " " core.Command + String.concat " " core.Args)
+                .Contains "pg_isready"
+
+        [ containers |> Seq.exists (fun k -> k.Name = "postgres"); waits ]
+
+    let pgSet = { coreSet with options = { coreSet.options with dbType = Postgres } }
+    let maxTps = { ctx with runForMaxTps = Some "soroban" }
+    Assert.Equal<bool list>([ true; true ], jobPostgres maxTps coreSetOptions)
+    Assert.Equal<bool list>([ true; true ], jobPostgres ctx pgSet.options)
+    Assert.Equal<bool list>([ false; false ], jobPostgres ctx coreSetOptions)
+    // The core set's dbType is the default Sqlite; max-TPS still runs on postgres.
+    Assert.Equal<bool list>([ true; true; true ], postgresEverywhere maxTps coreSet)
+    Assert.Equal<bool list>([ true; true; true ], postgresEverywhere ctx pgSet)
+    Assert.Equal<bool list>([ false; false; false ], postgresEverywhere ctx coreSet)
+
+[<Fact>]
 let ``MIXED_PREGEN runs use at most one generator per requested TPS`` () =
     let sets = StableApproximateTier1CoreSets "img" false
     let count everyValidator tps = (MinBlockTimeTest.activeLoadGenCoreSets everyValidator tps sets).Length

@@ -726,34 +726,34 @@ type NetworkCfg with
                 let t = ShCmd.OfStr "true"
                 Some(ShCmd.ShOr [| cmd; t |])
 
-        let setPgHost : ShCmd Option =
-            match opts.dbType with
-            | Postgres -> Some(ShCmd.ExDefVar "PGHOST" CfgVal.pgHost)
-            | _ -> None
+        // The pg setup and wait steps below fire whenever the node runs on
+        // postgres (MissionContext.usesPostgres, which also decides DATABASE
+        // and the sidecar). Otherwise `new-db` can race the sidecar's startup
+        // and crash the container.
+        let usesPostgres = MissionContext.usesPostgres self.missionContext opts.dbType
 
-        let setPgUser : ShCmd Option =
-            match opts.dbType with
-            | Postgres -> Some(ShCmd.ExDefVar "PGUSER" CfgVal.pgUser)
-            | _ -> None
+        let setPgHost : ShCmd Option = if usesPostgres then Some(ShCmd.ExDefVar "PGHOST" CfgVal.pgHost) else None
+
+        let setPgUser : ShCmd Option = if usesPostgres then Some(ShCmd.ExDefVar "PGUSER" CfgVal.pgUser) else None
 
         let createDbs : ShCmd Option array =
-            match opts.dbType with
-            | Postgres ->
+            if usesPostgres then
                 [| for i in 0 .. 9 ->
                        Some(
                            ShCmd.OfStrs [| "createdb"
                                            "test" + i.ToString() |]
                        )
                        |> ignoreError |]
-            | _ -> [||]
+            else
+                [||]
 
         let waitForDB : ShCmd Option =
-            match opts.dbType with
-            | Postgres ->
+            if usesPostgres then
                 let pgIsReady = [| "pg_isready"; "-h"; CfgVal.pgHost; "-d"; CfgVal.pgDb; "-U"; CfgVal.pgUser |]
                 let sleep2 = [| "sleep"; "2" |]
                 Some(ShCmd.Until pgIsReady sleep2)
-            | _ -> None
+            else
+                None
 
         let waitForTime : ShCmd Option =
             match opts.syncStartupDelay with
@@ -895,9 +895,10 @@ type NetworkCfg with
                         initCmds
                         [| jobName |]
 
-                match opts.dbType with
-                | Postgres -> [| coreContainer; PostgresContainer self.missionContext.postgresImage |]
-                | _ -> [| coreContainer |]
+                if MissionContext.usesPostgres self.missionContext opts.dbType then
+                    [| coreContainer; PostgresContainer self.missionContext.postgresImage |]
+                else
+                    [| coreContainer |]
 
         let containers = TryAddPrometheusContainer self.missionContext containers
         let annotations = TryGetPrometheusAnnotation self.missionContext
@@ -999,7 +1000,7 @@ type NetworkCfg with
             else
                 runCmd
 
-        let usePostgres = (coreSet.options.dbType = Postgres || self.missionContext.runForMaxTps.IsSome)
+        let usePostgres = MissionContext.usesPostgres self.missionContext coreSet.options.dbType
         let exportToPrometheus = self.missionContext.exportToPrometheus
 
         let res = self.missionContext.coreResources
