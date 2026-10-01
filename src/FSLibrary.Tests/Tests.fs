@@ -152,7 +152,6 @@ let ctx : MissionContext =
       minBlockTimeMixedMode = "mixed_pregen_sac_payment"
       minBlockTimeMixedClassicTxRate = None
       minBlockTimeMixedSorobanTxRate = None
-      tier1OrgCount = None
       pregenerateTxsPerValidator = false
       runForMinBlockTime = false
       forceOldStyleTriggerTimerPct = 0
@@ -1318,7 +1317,7 @@ let ``All validator partitions preserve rate duration and disjoint account slice
 
 [<Fact>]
 let ``57 validator topology and initialization match every generator partition`` () =
-    let sets = StableApproximateTier1CoreSetsWithOrgCount "frozen-image" false (Some 19)
+    let sets = StableApproximateTier1CoreSetsWithExtraOrgs "frozen-image" false 9
     Assert.Equal(19, sets.Length)
     Assert.Equal(57, sets |> List.sumBy (fun s -> s.options.nodeCount))
 
@@ -1375,7 +1374,7 @@ let ``Fixed duration partition rejects a partial second transaction budget`` () 
 
 [<Fact>]
 let ``Submission accounting includes all started validators and preserves legacy selection`` () =
-    let sets = StableApproximateTier1CoreSetsWithOrgCount "frozen-image" false (Some 19)
+    let sets = StableApproximateTier1CoreSetsWithExtraOrgs "frozen-image" false 9
     let selected = StellarStatefulSets.LoadgenPeerIndices true sets
     Assert.Equal(57, selected.Length)
 
@@ -1399,61 +1398,62 @@ let ``Submission accounting includes all started validators and preserves legacy
     Assert.All(legacy, (fun (_, i) -> Assert.Equal(0, i)))
 
 [<Fact>]
-let ``Tier1 topology keeps its 10 organizations unless --tier1-org-count adds diverse ones`` () =
+let ``--tier-1-orgs-to-add extends the synthetic tier 1 topology with diverse organizations`` () =
     let orgs (sets: CoreSet list) = sets |> List.map (fun cs -> cs.name.StringName) |> List.sort
-    let upstream = StableApproximateTier1CoreSets "img" false
-    Assert.Equal(10, upstream.Length)
-    Assert.Equal<string list>(orgs upstream, orgs (StableApproximateTier1CoreSetsWithOrgCount "img" false None))
-    Assert.Equal<string list>(orgs upstream, orgs (StableApproximateTier1CoreSetsWithOrgCount "img" false (Some 10)))
-    let twelve = StableApproximateTier1CoreSetsWithOrgCount "img" false (Some 12)
-    Assert.Equal<string list>(List.sort (orgs upstream @ [ "x01"; "x02" ]), orgs twelve)
-    // Adding organizations never changes the base ones.
     let locsOf (sets: CoreSet list) name = (sets |> List.find (fun cs -> cs.name.StringName = name)).options.nodeLocs
+    let baseSets = StableApproximateTier1CoreSets "img" false
+    Assert.Equal(10, baseSets.Length)
+    Assert.Equal<string list>(orgs baseSets, orgs (StableApproximateTier1CoreSetsWithExtraOrgs "img" false 0))
 
-    for org in orgs upstream do
-        Assert.Equal(locsOf upstream org, locsOf twelve org)
+    // Organizations are added in tier1ExtraOrgs order with their own
+    // locations, and never change the base ones.
+    let twelve = StableApproximateTier1CoreSetsWithExtraOrgs "img" false 2
+    Assert.Equal<string list>(List.sort (orgs baseSets @ [ "x01"; "x02" ]), orgs twelve)
+    Assert.Equal(Some [ Dublin; Amsterdam; Toronto ], locsOf twelve "x01")
 
-    Assert.Equal(40, tier1MaxOrgCount)
-    let all = StableApproximateTier1CoreSetsWithOrgCount "img" false (Some 40)
+    for org in orgs baseSets do
+        Assert.Equal(locsOf baseSets org, locsOf twelve org)
+
+    // All 30: 40 organizations of 3 validators, no two extra ones at the same
+    // three locations.
+    let all = StableApproximateTier1CoreSetsWithExtraOrgs "img" false 30
     Assert.Equal(40, all.Length)
-    Assert.Equal(120, all |> List.sumBy (fun cs -> cs.options.nodeCount))
+    Assert.All(all, (fun cs -> Assert.Equal(3, cs.options.nodeCount)))
     Assert.All(all, (fun cs -> Assert.Equal(3, cs.options.nodeLocs.Value.Length)))
-    // Far more locations than the base topology's 13, on every inhabited
-    // continent (southern-hemisphere and eastern-hemisphere sites included).
-    let distinctLocs (sets: CoreSet list) = sets |> List.collect (fun cs -> cs.options.nodeLocs.Value) |> List.distinct
 
-    let locs = distinctLocs all
-    Assert.Equal(13, (distinctLocs upstream).Length)
-
-    Assert.Equal(
-        37,
-        (distinctLocs (StableApproximateTier1CoreSetsWithOrgCount "img" false (Some 19)))
-            .Length
-    )
-
-    Assert.Equal(51, locs.Length)
-    Assert.Contains(locs, (fun l -> l.lat < -30.0 && l.lon > 140.0)) // Oceania
-    Assert.Contains(locs, (fun l -> l.lat < -20.0 && l.lon < -40.0)) // South America
-    Assert.Contains(locs, (fun l -> l.lat < -20.0 && l.lon > 10.0 && l.lon < 40.0)) // southern Africa
-    // Each extra organization is distinct: no two share the same three locations.
     let extraLocSets =
         all
         |> List.filter (fun cs -> cs.name.StringName.StartsWith "x")
         |> List.map (fun cs -> List.sort cs.options.nodeLocs.Value)
 
-    Assert.Equal(30, extraLocSets.Length)
     Assert.Equal(30, extraLocSets |> List.distinct |> List.length)
-    // The quorum grows with the organizations: 67% of 40 inner sets.
+
+    // The extra organizations reach regions with no base validator: Oceania,
+    // South America, Africa, the Middle East and more of Asia.
+    let locsIn (sets: CoreSet list) = sets |> List.collect (fun cs -> cs.options.nodeLocs.Value)
+
+    for region in [ Sydney
+                    Auckland
+                    SaoPaulo
+                    BuenosAires
+                    CapeTown
+                    Lagos
+                    Dubai
+                    TelAviv
+                    Tokyo
+                    Mumbai ] do
+        Assert.DoesNotContain(region, locsIn baseSets)
+        Assert.Contains(region, locsIn all)
+
+    // The quorum grows with the organizations: one inner set per organization.
     match all.Head.options.quorumSet with
     | ExplicitQuorum q -> Assert.Equal(40, q.innerQuorumSets.Length)
     | _ -> failwith "Expected explicit organization quorum"
 
-    Assert.ThrowsAny<System.Exception>
-        (fun () -> StableApproximateTier1CoreSetsWithOrgCount "img" false (Some 9) |> ignore)
+    Assert.ThrowsAny<System.Exception>(fun () -> StableApproximateTier1CoreSetsWithExtraOrgs "img" false -1 |> ignore)
     |> ignore
 
-    Assert.ThrowsAny<System.Exception>
-        (fun () -> StableApproximateTier1CoreSetsWithOrgCount "img" false (Some 41) |> ignore)
+    Assert.ThrowsAny<System.Exception>(fun () -> StableApproximateTier1CoreSetsWithExtraOrgs "img" false 31 |> ignore)
     |> ignore
 
 [<Fact>]

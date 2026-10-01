@@ -440,10 +440,10 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
         if context.pubnetData.IsSome then
             FullPubnetCoreSets context true false
         else
-            StableApproximateTier1CoreSetsWithOrgCount
+            StableApproximateTier1CoreSetsWithExtraOrgs
                 context.image
                 (if context.flatQuorum.IsSome then context.flatQuorum.Value else false)
-                context.tier1OrgCount
+                context.tier1OrgsToAdd
 
     // Mirrors MaxTPSTest: on small networks, GeneratePaymentLoad runs out of
     // source accounts at high TPS, so switch to PayPregenerated which uses

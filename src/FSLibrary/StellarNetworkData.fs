@@ -148,7 +148,7 @@ let Taipei = { lat = 25.0329; lon = 121.5654 }
 let Tokyo = { lat = 35.6895; lon = 139.69171 }
 
 // Further cloud and hosting regions, used only by the synthetic organizations
-// StableApproximateTier1CoreSetsWithOrgCount adds beyond its base 10 (not by
+// StableApproximateTier1CoreSetsWithExtraOrgs adds beyond its base 10 (not by
 // pubnet simulations, which draw from `locations` below).
 let Amsterdam = { lat = 52.3676; lon = 4.9041 } // Azure westeurope, many DCs
 
@@ -994,7 +994,7 @@ let TestnetCoreSetOptions (image: string) =
           dumpDatabase = false }
 
 // Synthetic organizations, in the order they are added, that extend
-// StableApproximateTier1CoreSets past its 10 organizations (--tier1-org-count).
+// StableApproximateTier1CoreSets past its 10 organizations (--tier-1-orgs-to-add).
 // Most spread their three validators over two regions, like real operators.
 // Every block of additions keeps the mix at roughly one third North America,
 // one third Europe and one third elsewhere (Asia, South America, Oceania,
@@ -1032,18 +1032,10 @@ let tier1ExtraOrgs : (string * GeoLoc list) list =
       ("x29", [ Helsinki; Stockholm; Osaka ])
       ("x30", [ Miami; Ashburn; Nuremberg ]) ]
 
-let tier1BaseOrgCount = 10
-
-let tier1MaxOrgCount = tier1BaseOrgCount + List.length tier1ExtraOrgs
-
 // This coreset is a synthetic approximation of the Tier1 group, intended
-// to be used in stable benchmarks rather than experiments. orgCount (None =
-// the 10 base organizations) adds tier1ExtraOrgs, up to tier1MaxOrgCount.
-let StableApproximateTier1CoreSetsWithOrgCount
-    (image: string)
-    (flatQuorum: bool)
-    (orgCount: int option)
-    : CoreSet list =
+// to be used in stable benchmarks rather than experiments. Its 10
+// organizations are followed by the first extraOrgs of tier1ExtraOrgs.
+let StableApproximateTier1CoreSetsWithExtraOrgs (image: string) (flatQuorum: bool) (extraOrgs: int) : CoreSet list =
     let allOrgs : Map<string, GeoLoc list> =
         Map.ofList [ ("bd", [ Brussels; CouncilBluffs; Taipei ])
                      ("ct", [ Frankfurt; Purfleet; Brussels ])
@@ -1056,16 +1048,13 @@ let StableApproximateTier1CoreSetsWithOrgCount
                      ("rg", [ Brussels; Frankfurt; Brussels ])
                      ("sdf", [ Ashburn; Ashburn; Ashburn ]) ]
 
-    let extra =
-        match orgCount with
-        | None -> 0
-        | Some n when n >= tier1BaseOrgCount && n <= tier1MaxOrgCount -> n - tier1BaseOrgCount
-        | Some n ->
-            failwithf "tier1 organization count must be between %d and %d, got %d" tier1BaseOrgCount tier1MaxOrgCount n
+    if extraOrgs < 0 || extraOrgs > List.length tier1ExtraOrgs then
+        failwithf
+            "--tier-1-orgs-to-add must be between 0 and %d for the synthetic tier 1 topology, got %d"
+            (List.length tier1ExtraOrgs)
+            extraOrgs
 
-    let extraOrgs = tier1ExtraOrgs |> List.truncate extra
-
-    let allOrgs = Map.ofList (Map.toList allOrgs @ extraOrgs)
+    let allOrgs = Map.ofList (Map.toList allOrgs @ List.truncate extraOrgs tier1ExtraOrgs)
 
     let allOrgPairs = Map.toList allOrgs
     let orgKeys _ nodes = List.map (fun _ -> KeyPair.Random()) nodes
@@ -1127,4 +1116,4 @@ let StableApproximateTier1CoreSetsWithOrgCount
     List.map orgCoreSet allOrgPairs
 
 let StableApproximateTier1CoreSets (image: string) (flatQuorum: bool) : CoreSet list =
-    StableApproximateTier1CoreSetsWithOrgCount image flatQuorum None
+    StableApproximateTier1CoreSetsWithExtraOrgs image flatQuorum 0
