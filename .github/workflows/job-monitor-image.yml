@@ -3,7 +3,7 @@ name: Job monitor image
 # Builds the parallel catchup job monitor image and pushes it to
 # public.ecr.aws/stellar/ssc-job-monitor. Replaces the Jenkins job
 # Core/stellar-supercluster-job-monitor-docker. PRs only build the image;
-# pushes to main also publish it.
+# pushes to main and manual runs on main also publish it.
 
 on:
   push:
@@ -18,6 +18,7 @@ on:
       - 'src/MissionParallelCatchup/Dockerfile.jobmonitor'
       - 'src/MissionParallelCatchup/job_monitor.py'
       - '.github/workflows/job-monitor-image.yml'
+  workflow_dispatch:
 
 permissions:
   id-token: write
@@ -48,13 +49,13 @@ jobs:
 
       - name: ECR login
         id: ecr-login
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: stellar/actions/sdf-ecr-login@main
         with:
           login-public-ecr: 'true'
 
       - name: Push to public ECR
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           REGISTRY: ${{ steps.ecr-login.outputs.ecr-public-registry }}
           LABEL: ${{ steps.vars.outputs.label }}
