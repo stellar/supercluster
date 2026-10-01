@@ -9,12 +9,14 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'src/MissionParallelCatchup/*job*monitor*'
+      - 'src/MissionParallelCatchup/Dockerfile.jobmonitor'
+      - 'src/MissionParallelCatchup/job_monitor.py'
       - '.github/workflows/job-monitor-image.yml'
   pull_request:
     branches: [ main ]
     paths:
-      - 'src/MissionParallelCatchup/*job*monitor*'
+      - 'src/MissionParallelCatchup/Dockerfile.jobmonitor'
+      - 'src/MissionParallelCatchup/job_monitor.py'
       - '.github/workflows/job-monitor-image.yml'
 
 permissions:
