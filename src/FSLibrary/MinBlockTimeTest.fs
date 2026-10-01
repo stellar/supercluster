@@ -586,7 +586,9 @@ let private checkLedgerAgeSLA (percentiles: (Peer * float * float) list) (target
 
     ok
 
-// Judges every window with checkLedgerAgeSLA; all must be read and pass.
+// Judges every window with checkLedgerAgeSLA; all must be read and pass. An
+// unread window reaches here only after a failed load (evaluateAt aborts the
+// mission otherwise).
 let private checkLedgerAgeWindows (windows: LedgerAgeWindow list) (targetMs: int) : bool =
     let n = List.length windows
 
@@ -904,6 +906,28 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                             with e ->
                                 LogWarn "Loadgen failed at T=%dms: %s" targetMs e.Message
                                 Some(sprintf "load generation failed: %s" e.Message))
+
+                // As for the metrics below, a window that cannot be read during
+                // a load that completes leaves the candidate unmeasured, so the
+                // mission aborts; after a failed load it is judged, and fails,
+                // with the candidate.
+                if loadgenFailure.IsNone then
+                    let unread =
+                        windows
+                        |> List.tryPick
+                            (fun w ->
+                                match w.percentiles with
+                                | Error msg -> Some(w.endSec, msg)
+                                | Ok _ -> None)
+
+                    match unread with
+                    | Some (endSec, msg) ->
+                        failwithf
+                            "Could not read the ledger-age percentiles %d s into the load at T=%dms, so the candidate cannot be judged: %s"
+                            endSec
+                            targetMs
+                            msg
+                    | None -> ()
 
                 // Read before the health checks too, and before the restart
                 // resets these counters.
