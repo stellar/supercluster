@@ -1682,6 +1682,8 @@ let ``--overlay-v2-optimized tunes MinBlockTime tx-set limits, load window and t
     Assert.Equal(125, MissionContext.txSetSizeBufferPct v2ctx)
     Assert.Equal(300, MissionContext.minBlockTimeLoadDurationSec ctx)
     Assert.Equal(960, MissionContext.minBlockTimeLoadDurationSec v2ctx)
+    Assert.Equal(2000, MissionContext.minBlockTimeScpTimeoutMs ctx)
+    Assert.Equal(500, MissionContext.minBlockTimeScpTimeoutMs v2ctx)
 
     let mib = 1024 * 1024
     let allowances = MissionContext.txSetByteAllowances

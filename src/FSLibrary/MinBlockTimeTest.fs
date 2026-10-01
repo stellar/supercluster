@@ -54,9 +54,6 @@ let searchMinPassing (candidates: int list) (passes: int -> bool) : int option =
 
     if passIdx < arr.Length then Some arr.[passIdx] else None
 
-// For the purposes of min block test, use high value to avoid noise from SCP timeouts
-let private timeout = 2000
-
 let private txSetSizeBufferMultiplier = 2
 
 // Buffer as a percentage of the offered txs per ledger (200 = the historical
@@ -785,6 +782,7 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
             let fixedTxRate = context.txRate
             let bufferPct = MissionContext.txSetSizeBufferPct context
             let loadDurationSec = MissionContext.minBlockTimeLoadDurationSec context
+            let scpTimeoutMs = MissionContext.minBlockTimeScpTimeoutMs context
 
             let classicTxRateForLimits =
                 match baseLoadGen.classicTxRate, context.minBlockTimeMixedClassicTxRate with
@@ -826,10 +824,10 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                     { LoadGen.GetDefault() with
                           mode = CreateSorobanUpgrade
                           ledgerTargetCloseTimeMilliseconds = Some targetMs
-                          ballotTimeoutInitialMilliseconds = Some timeout
-                          ballotTimeoutIncrementMilliseconds = Some timeout
-                          nominationTimeoutInitialMilliseconds = Some timeout
-                          nominationTimeoutIncrementMilliseconds = Some timeout }
+                          ballotTimeoutInitialMilliseconds = Some scpTimeoutMs
+                          ballotTimeoutIncrementMilliseconds = Some scpTimeoutMs
+                          nominationTimeoutInitialMilliseconds = Some scpTimeoutMs
+                          nominationTimeoutIncrementMilliseconds = Some scpTimeoutMs }
                     (System.DateTime.UtcNow.AddSeconds(20.0))
 
                 let peer = formation.NetworkCfg.GetPeer allNodes.Head 0

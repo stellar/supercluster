@@ -296,6 +296,18 @@ module MissionContext =
     /// warm-up, then three 5-minute close-time windows; see MinBlockTimeTest.ledgerAgeReadSchedule).
     let minBlockTimeLoadDurationSec (ctx: MissionContext) : int = if ctx.overlayV2Optimized then 960 else 300
 
+    /// MinBlockTime* SCP ballot and nomination timeouts (initial and increment), in ms: 2000, high enough to keep
+    /// SCP timeouts out of the measurement, or 500 under --overlay-v2-optimized, which measures the best case.
+    ///
+    /// Reference measurements, 30 nodes at 500 SAC TPS (2026-07-27, image 3453), one run each:
+    ///   2000 ms: externalize p75 2447 ms, ledger-age p75 4592 ms at T=3000 (+53%, fail)
+    ///    500 ms: externalize p75  331 ms, ledger-age p75 3028 ms at T=3000 (+0.9%)
+    /// A stalled ballot round recovers only when its timer fires, so each stall costs a full timeout. At 2000 ms
+    /// that stretches the ledger, the next tx set is bigger at the fixed TPS, and bigger sets stall more often, so
+    /// the stalls snowball: an externalize p75 above the timeout means over a quarter of slots stalled. At 500 ms a
+    /// stall costs little, ledgers stay near target and stalls stay rare.
+    let minBlockTimeScpTimeoutMs (ctx: MissionContext) : int = if ctx.overlayV2Optimized then 500 else 2000
+
     /// Whether --measure-e2e-latency needs --loadgen-keys to find the load-generating nodes: MinBlockTime* missions
     /// mark their own (MinBlockTimeTest.markLoadGenerators); other missions only have the keys.
     let e2eLatencyNeedsLoadgenKeys (missions: string seq) : bool =
@@ -310,6 +322,7 @@ module MissionContext =
 
             [ sprintf "MinBlockTime* tx-set limits: %d%% of the offered txs per ledger" (txSetSizeBufferPct ctx)
               sprintf "MinBlockTime* load window: %d s per candidate" (minBlockTimeLoadDurationSec ctx)
+              sprintf "MinBlockTime* SCP timeouts: %d ms ballot and nomination" (minBlockTimeScpTimeoutMs ctx)
               (match txSetByteAllowances ctx with
                | Some allowances -> "tx-set byte allowances: " + describeTxSetByteAllowances allowances
                | None when ctx.runForMaxTps.IsNone ->
