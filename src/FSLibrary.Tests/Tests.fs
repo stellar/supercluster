@@ -1268,6 +1268,36 @@ let private searchMinPassingTrace (candidates: int list) (passes: int -> bool) :
     result, evaluated.Value
 
 [<Fact>]
+let ``Overlay-only inclusion agrees only when every node holds the same count covering the offered load`` () =
+    let agrees = MinBlockTimeTest.inclusionAgrees 1000
+
+    Assert.True(
+        agrees [ "a", 1000.0
+                 "b", 1000.0
+                 "c", 1000.0 ]
+    )
+    // A node that has not closed the last loaded ledger yet.
+    Assert.False(
+        agrees [ "a", 1000.0
+                 "b", 1000.0
+                 "c", 880.0 ]
+    )
+    // A node counting transactions the others did not.
+    Assert.False(
+        agrees [ "a", 1000.0
+                 "b", 1000.0
+                 "c", 1003.0 ]
+    )
+    // Every node agrees, but on fewer than were offered.
+    Assert.False(
+        agrees [ "a", 900.0
+                 "b", 900.0
+                 "c", 900.0 ]
+    )
+
+    Assert.False(agrees [])
+
+[<Fact>]
 let ``Min block time search finds the smallest passing candidate`` () =
     let candidates = [ 1000 .. 1000 .. 5000 ]
 

@@ -272,55 +272,83 @@ let private readLedgerAgePercentiles (peer: Peer) : Peer * float * float =
 let private readLedgerTxsIncluded (peer: Peer) : Peer * float =
     peer, float (peer.GetMetrics().LedgerTransactionCount.Sum)
 
-let private collectLedgerTxsIncluded (formation: StellarFormation) (coreSets: CoreSet list) : (Peer * float) list =
-    formation.NetworkCfg.PeersInSets(List.toArray coreSets)
-    |> List.map (fun peer -> async { return readLedgerTxsIncluded peer })
-    |> Async.Parallel
-    |> Async.RunSynchronously
-    |> Array.toList
+// Whether every node reports the same count of transactions in its ledgers,
+// covering the `offered` load. Exposed for unit tests.
+let inclusionAgrees (offered: int) (included: ('node * float) list) : bool =
+    match included |> List.map snd |> List.distinct with
+    | [ txs ] -> txs >= float offered
+    | _ -> false
 
-// Fraction of the offered transactions that must reach ledgers for an
-// overlay-only candidate to count. Comparing totals over the window, rather
-// than txs per ledger against TPS x T, is not skewed by the idle ledgers
-// around the load or by long ledgers carrying more.
-let private minInclusionFraction = 0.95
+// Every node's included-transaction count after a completed load, re-read for
+// up to two close times until they agree (inclusionAgrees): a node that had
+// not yet closed the last loaded ledger when first read catches up. After a
+// completed load only empty ledgers close, so waiting cannot hide a mismatch.
+let private collectLedgerTxsIncluded
+    (formation: StellarFormation)
+    (coreSets: CoreSet list)
+    (offered: int)
+    (targetMs: int)
+    : (Peer * float) list =
+    let readAll () =
+        formation.NetworkCfg.PeersInSets(List.toArray coreSets)
+        |> List.map (fun peer -> async { return readLedgerTxsIncluded peer })
+        |> Async.Parallel
+        |> Async.RunSynchronously
+        |> Array.toList
 
-// Cross-check for overlay-only candidates. Loadgen completes only once every
-// transaction its node submitted has been included in a closed ledger, so a
-// completed run includes essentially everything; this confirms it from the
-// ledgers' own transaction counts, which checkLedgerAgeSLA does not look at
-// (closing near-empty ledgers on schedule passes it trivially). Returns why
-// the candidate fails, or None.
+    let clock = System.Diagnostics.Stopwatch.StartNew()
+    let mutable included = readAll ()
+
+    while not (inclusionAgrees offered included)
+          && clock.ElapsedMilliseconds < 2L * int64 targetMs do
+        System.Threading.Thread.Sleep 1000
+        included <- readAll ()
+
+    included
+
+// Cross-check for overlay-only candidates after a completed load: every node
+// must report the same count of transactions in its ledgers, covering the
+// offered load. Loadgen completes only once every transaction its node
+// submitted has been included in a closed ledger, and nodes that close the
+// same ledgers count the same transactions, so a load the network carried
+// agrees; this confirms it from the ledgers' own counts, which
+// checkLedgerAgeSLA does not look at (closing near-empty ledgers on schedule
+// passes it trivially). Comparing totals over the window, rather than txs per
+// ledger against TPS x T, is not skewed by the idle ledgers around the load or
+// by long ledgers carrying more. A node still behind after
+// collectLedgerTxsIncluded's re-reads, or a shortfall on every node, fails the
+// candidate. Returns why, or None.
 let private inclusionFailure (included: (Peer * float) list) (targetMs: int) (offered: int) : string option =
-    if List.isEmpty included || offered <= 0 then
+    if List.isEmpty included then
         None
     else
-        let floorTxs = float offered * minInclusionFraction
-        let observed = included |> List.averageBy snd
-        let worstPeer, worstTxs = included |> List.minBy snd
-        let ok = observed >= floorTxs
+        match included |> List.map snd |> List.distinct with
+        | [ txs ] when txs >= float offered ->
+            LogInfo
+                "Inclusion at T=%dms: every node's ledgers hold %.0f transactions for the %d offered -> PASS"
+                targetMs
+                txs
+                offered
 
-        LogInfo
-            "Inclusion at T=%dms: %.0f of %d offered transactions reached ledgers (%.1f%%), worst peer=%s %.0f -> %s"
-            targetMs
-            observed
-            offered
-            (100.0 * observed / float offered)
-            worstPeer.ShortName.StringName
-            worstTxs
-            (if ok then "PASS" else "FAIL")
-
-        if ok then
             None
-        else
+        | [ txs ] ->
             LogError
-                "Only %.1f%% of the %d offered transactions reached ledgers at T=%dms (need >= %.0f%%). The network paced ledgers but was not carrying the load, so the close-time result is meaningless."
-                (100.0 * observed / float offered)
+                "Every node's ledgers hold %.0f of the %d offered transactions at T=%dms, although loadgen reported all of them included."
+                txs
                 offered
                 targetMs
-                (100.0 * minInclusionFraction)
 
-            Some(sprintf "under %.0f%% of the offered transactions reached ledgers" (100.0 * minInclusionFraction))
+            Some(sprintf "every node's ledgers hold %.0f of the %d offered transactions" txs offered)
+        | _ ->
+            LogError
+                "Nodes disagree on how many transactions their ledgers hold at T=%dms (%s; %d offered): a node fell behind, forked or did not close every ledger itself."
+                targetMs
+                (included
+                 |> List.map (fun (peer, txs) -> sprintf "%s: %.0f" peer.ShortName.StringName txs)
+                 |> String.concat ", ")
+                offered
+
+            Some "nodes disagree on how many transactions their ledgers hold"
 
 let private collectLedgerAgePercentiles
     (formation: StellarFormation)
@@ -625,11 +653,11 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
 
                 // Per doc/measuring-minimum-block-time.md, each failure below (a
                 // loadgen failure, such as application lagging the offered load
-                // or a node dropping out mid-window, unreadable metrics, missing
-                // inclusion, or nodes out of sync or inconsistent) fails the
-                // candidate, not the mission: the search raises its lower bound
-                // and continues. Killing the mission would let one bad window
-                // discard the whole search.
+                // or a node dropping out mid-window, nodes disagreeing on the
+                // transactions in their ledgers, or nodes out of sync or
+                // inconsistent) fails the candidate, not the mission: the search
+                // raises its lower bound and continues. Killing the mission would
+                // let one bad window discard the whole search.
                 let loadgenFailure =
                     try
                         formation.RunMultiLoadgen activeLoadGenNodes loadGen
@@ -641,18 +669,38 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
                 // Snapshot the window's metrics before the health checks: core
                 // keeps closing ledgers after loadgen exits, and the checks can
                 // take long enough to skew the ledger age percentiles.
+                //
+                // Metrics that cannot be read after a completed load leave the
+                // candidate unmeasured, a harness or network problem rather than
+                // a verdict, so the mission aborts instead of letting the search
+                // move on as if it had failed. After a failed load the candidate
+                // has already failed, usually because a node dropped out, which
+                // also makes its metrics unreadable, so that is only logged.
                 let snapshot =
                     try
                         let percentiles = collectLedgerAgePercentiles formation allNodes
-                        let included = if overlayOnly then collectLedgerTxsIncluded formation allNodes else []
+
+                        // Only a completed load is cross-checked: a failed one has
+                        // already failed the candidate.
+                        let included =
+                            if overlayOnly && loadgenFailure.IsNone then
+                                collectLedgerTxsIncluded formation allNodes loadGen.txs targetMs
+                            else
+                                []
 
                         if context.measureE2eLatency then
                             logE2eLatencyMetrics formation activeLoadGenNodes
 
-                        Ok(percentiles, included)
-                    with e ->
-                        LogWarn "Could not read metrics at T=%dms: %s" targetMs e.Message
-                        Error(sprintf "could not read metrics: %s" e.Message)
+                        Some(percentiles, included)
+                    with
+                    | e when loadgenFailure.IsNone ->
+                        failwithf
+                            "Could not read metrics at T=%dms after a completed load, so the candidate cannot be judged: %s"
+                            targetMs
+                            e.Message
+                    | e ->
+                        LogWarn "Could not read metrics at T=%dms after the failed load: %s" targetMs e.Message
+                        None
 
                 let healthFailure =
                     try
@@ -665,13 +713,13 @@ let minBlockTimeTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg:
 
                 // The close-time SLA is logged even when the candidate already
                 // failed, so every window reports where its close times landed.
-                let slaOk, metricsFailure =
+                let slaOk, missingInclusion =
                     match snapshot with
-                    | Ok (percentiles, included) ->
+                    | Some (percentiles, included) ->
                         checkLedgerAgeSLA percentiles targetMs, inclusionFailure included targetMs loadGen.txs
-                    | Error reason -> false, Some reason
+                    | None -> false, None
 
-                let failure = List.tryPick id [ loadgenFailure; metricsFailure; healthFailure ]
+                let failure = List.tryPick id [ loadgenFailure; missingInclusion; healthFailure ]
 
                 let pass = failure.IsNone && slaOk
 
