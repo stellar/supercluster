@@ -766,7 +766,9 @@ type Tests(output: ITestOutputHelper) =
         let nCfgWithoutSimulateApply =
             MakeNetworkCfg { ctx with simulateApplyWeight = None; simulateApplyDuration = None } [ coreSet ] passOpt
 
-        let cmds = nCfgWithoutSimulateApply.getInitCommands PeerSpecificConfigFile coreSet.options
+        let cmds =
+            nCfgWithoutSimulateApply.getInitCommands PeerSpecificConfigFile coreSet.options None
+
         let cmdStr = ShAnd(cmds).ToString()
 
         let exp =
@@ -775,7 +777,7 @@ type Tests(output: ITestOutputHelper) =
 
         Assert.Equal(exp, cmdStr)
 
-        let cmds = nCfg.getInitCommands PeerSpecificConfigFile coreSet.options
+        let cmds = nCfg.getInitCommands PeerSpecificConfigFile coreSet.options None
         let cmdStr = ShAnd(cmds).ToString()
         Assert.Equal(exp, cmdStr)
 
@@ -1498,10 +1500,11 @@ let ``Validators pregenerate their own account slices only when the MinBlockTime
 
     let pregenSet = MakeLiveCoreSet "pregen" pregenOpts
 
+    let nCfg (c: MissionContext) =
+        MakeNetworkCfg { c with installNetworkDelay = Some false } [ pregenSet ] passOpt
+
     let script (c: MissionContext) =
-        let pod =
-            (MakeNetworkCfg { c with installNetworkDelay = Some false } [ pregenSet ] passOpt)
-                .ToPodTemplateSpec pregenSet
+        let pod = (nCfg c).ToPodTemplateSpec pregenSet
 
         let core =
             pod.Spec.Containers
@@ -1514,7 +1517,25 @@ let ``Validators pregenerate their own account slices only when the MinBlockTime
     let shared = script { ctx with runForMinBlockTime = true }
     Assert.Contains("'--offset 0'", shared)
     Assert.DoesNotContain("'--offset 100'", shared)
-    let perValidator = script { ctx with runForMinBlockTime = true; pregenerateTxsPerValidator = true }
+    let perValidatorCtx = { ctx with runForMinBlockTime = true; pregenerateTxsPerValidator = true }
+    let perValidator = script perValidatorCtx
 
     for offset in [ 0; 100; 200 ] do
         Assert.Contains(sprintf "'--offset %d'" offset, perValidator)
+
+    // One branch per validator inside the init chain, so a failed
+    // pregeneration still keeps stellar-core from starting, and a pod that
+    // matches no validator fails instead of starting without its txs.
+    let names = Array.init 3 (fun i -> ((nCfg perValidatorCtx).PodName pregenSet i).StringName)
+
+    let cmds =
+        (nCfg perValidatorCtx).getInitCommands PeerSpecificConfigFile pregenSet.options (Some names)
+
+    let branches =
+        cmds
+        |> Array.choose
+            (function
+            | ShIf (_, _, elifs, Some otherwise) -> Some(elifs.Length, otherwise.ToString())
+            | _ -> None)
+
+    Assert.Equal<(int * string) array>([| (2, "false") |], branches)

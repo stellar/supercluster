@@ -678,7 +678,13 @@ type NetworkCfg with
         | None -> cfgs
         | Some (opts) -> Array.append cfgs [| self.JobConfigMap(opts) |]
 
-    member self.getInitCommands (configOpt: ConfigOption) (opts: CoreSetOptions) : ShCmd array =
+    // perValidatorPeerNames: the pods of a MissionContext.pregenerateTxsPerValidator
+    // core set, in validator order, when each pregenerates its own account slice.
+    member self.getInitCommands
+        (configOpt: ConfigOption)
+        (opts: CoreSetOptions)
+        (perValidatorPeerNames: string array option)
+        : ShCmd array =
         let cfgWords = cfgFileArgs configOpt InitCoreContainer
 
         let runCore args =
@@ -753,16 +759,34 @@ type NetworkCfg with
         // we want.
         let newHistIgnoreError = ignoreError newHist
 
-        let pregenerate =
-            match init.pregenerateTxs with
-            | None -> None
-            | Some (txs, accounts, offset) ->
-                runCoreIf
-                    true
-                    [| "pregenerate-loadgen-txs"
+        let pregenerateTxs (txs: int, accounts: int, offset: int) =
+            runCore [| "pregenerate-loadgen-txs"
                        "--count " + txs.ToString()
                        "--accounts " + accounts.ToString()
                        "--offset " + offset.ToString() |]
+
+        // Per validator, each pod pregenerates its own slice
+        // (PregenerationOptionsForPeer). The branch stays in the init chain, so
+        // a failure still keeps stellar-core from starting, and a pod that
+        // matches no validator fails instead of starting without its txs.
+        let pregenerate =
+            match init.pregenerateTxs, perValidatorPeerNames with
+            | None, _ -> None
+            | Some slice, None -> Some(pregenerateTxs slice)
+            | Some _, Some names ->
+                let branch i (name: string) =
+                    let isPeer =
+                        ShCmd [| ShWord.OfStr "test"
+                                 ShWord.Var CfgVal.peerNameEnvVarName
+                                 ShWord.OfStr "="
+                                 ShWord.OfStr name |]
+
+                    isPeer, pregenerateTxs (PregenerationOptionsForPeer opts i).initialization.pregenerateTxs.Value
+
+                match Array.mapi branch names |> List.ofArray with
+                | [] -> None
+                | (isFirst, first) :: rest ->
+                    Some(ShCmd.ShIf(isFirst, first, Array.ofList rest, Some(ShCmd.OfStr "false")))
 
         let initialCatchup = runCoreIf init.initialCatchup [| "catchup"; "current/0" |]
 
@@ -850,7 +874,7 @@ type NetworkCfg with
             | None ->
                 [| CoreContainerForCommand image cfgOpt asan self.missionContext.coreEnv res command [||] [| jobName |] |]
             | Some (opts) ->
-                let initCmds = self.getInitCommands cfgOpt opts
+                let initCmds = self.getInitCommands cfgOpt opts None
 
                 let coreContainer =
                     CoreContainerForCommand
@@ -943,21 +967,10 @@ type NetworkCfg with
         let volumes = Array.append peerCfgVolumes [| dataVol; historyCfgVolume |]
 
         let initCommands =
-            if self.missionContext.pregenerateTxsPerValidator then
-                peerNames
-                |> Array.mapi
-                    (fun i name ->
-                        let commands = self.getInitCommands cfgOpt (PregenerationOptionsForPeer coreSet.options i)
-
-                        let test =
-                            ShCmd [| ShWord.OfStr "test"
-                                     ShWord.Var CfgVal.peerNameEnvVarName
-                                     ShWord.OfStr "="
-                                     ShWord.OfStr name |]
-
-                        ShCmd.ShIf(test, ShCmd.ShSeq commands, [||], None))
-            else
-                self.getInitCommands cfgOpt coreSet.options
+            self.getInitCommands
+                cfgOpt
+                coreSet.options
+                (if self.missionContext.pregenerateTxsPerValidator then Some peerNames else None)
 
         let runCmd = [| "run" |]
 
