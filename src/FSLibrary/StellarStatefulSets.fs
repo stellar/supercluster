@@ -71,10 +71,11 @@ let private getAveragePeerCount (topology: Map<string, string array>) : float =
     if nodeCount > 0 then float total / float nodeCount else 0.0
 
 // Divide aggregate rate, account space and duration across actual generators.
-// In fixed-duration mode (LoadOnEveryValidator runs), derive each transaction
+// In fixed-duration mode (load on every validator), derive each transaction
 // budget from its assigned rate; equal transaction budgets would make
-// remainder-rate peers finish early. Otherwise this is upstream's even split.
-let PartitionValidatorLoad (n: int) (fixedDuration: bool) (full: LoadGen) =
+// remainder-rate peers finish early. Otherwise every generator gets an equal
+// share of the transactions.
+let PartitionValidatorLoad (n: int) (fixedDuration: bool) (full: LoadGen) : LoadGen list =
     if n <= 0 then invalidArg "n" "Need at least one generator"
 
     if fixedDuration && full.accounts < n then
@@ -108,8 +109,8 @@ let PartitionValidatorLoad (n: int) (fixedDuration: bool) (full: LoadGen) =
 
 // A single generator selection is shared by launch and final submission
 // accounting: every validator of each core set when everyValidator
-// (StellarKubeSpecs.LoadOnEveryValidator), else node 0 of each, as upstream.
-let LoadgenPeerIndices (everyValidator: bool) (coreSets: CoreSet list) =
+// (MissionContext.pregenerateTxsPerValidator), else node 0 of each.
+let LoadgenPeerIndices (everyValidator: bool) (coreSets: CoreSet list) : (CoreSet * int) list =
     coreSets
     |> List.collect (fun cs -> [ for i in 0 .. (if everyValidator then cs.options.nodeCount - 1 else 0) -> cs, i ])
 
@@ -323,8 +324,8 @@ let autoscalerView
 
 type StellarFormation with
 
-    member self.LoadGenPeers (coreSets: CoreSet list) (loadGen: LoadGen) =
-        LoadgenPeerIndices(LoadOnEveryValidator self.NetworkCfg.missionContext loadGen.mode) coreSets
+    member self.LoadGenPeers(coreSets: CoreSet list) : Peer list =
+        LoadgenPeerIndices self.NetworkCfg.missionContext.pregenerateTxsPerValidator coreSets
         |> List.map (fun (cs, i) -> self.NetworkCfg.GetPeer cs i)
 
     member self.GetCoreSetForStatefulSet(ss: V1StatefulSet) =
@@ -830,10 +831,11 @@ type StellarFormation with
 
     // This is similar to RunLoadgen but runs a 1/N fractional portion of a
     // given LoadGen on each of N generators (LoadGenPeers: node 0 of each
-    // CoreSet, or every validator of each for LoadOnEveryValidator runs).
+    // CoreSet, or every validator of each when each pregenerated its own
+    // account slice).
     member self.RunMultiLoadgen (coreSets: CoreSet list) (fullLoadGen: LoadGen) =
-        let everyValidator = LoadOnEveryValidator self.NetworkCfg.missionContext fullLoadGen.mode
-        let loadGenPeers = self.LoadGenPeers coreSets fullLoadGen
+        let everyValidator = self.NetworkCfg.missionContext.pregenerateTxsPerValidator
+        let loadGenPeers = self.LoadGenPeers coreSets
         let shares = PartitionValidatorLoad loadGenPeers.Length everyValidator fullLoadGen
 
         let hasNonZeroRate (loadGen: LoadGen) =

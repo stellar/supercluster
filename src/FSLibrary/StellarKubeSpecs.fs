@@ -5,7 +5,6 @@
 module StellarKubeSpecs
 
 open StellarCoreCfg
-open StellarCoreHTTP
 open k8s.Models
 open StellarMissionContext
 open StellarNetworkCfg
@@ -35,16 +34,10 @@ type ConfigOption =
     // container picks up a peer-specific config.
     | PeerSpecificConfigFile
 
-// MinBlockTimeMixed's MIXED_PREGEN_* load runs on every validator rather than
-// one node per load-generating core set, each with its own account slice (see
-// PregenerationOptionsForPeer and StellarStatefulSets.LoadgenPeerIndices).
-let LoadOnEveryValidator (ctx: MissionContext) (mode: LoadGenMode) : bool =
-    ctx.runForMinBlockTime && isMixedPregenMode mode
-
-// For LoadOnEveryValidator runs (MissionContext.pregenerateTxsPerValidator):
-// the organization's options store its first account offset; each validator
-// gets the following disjoint slice.
-let PregenerationOptionsForPeer (opts: CoreSetOptions) (index: int) =
+// For MissionContext.pregenerateTxsPerValidator runs, whose load runs on every
+// validator: the organization's options store its first account offset; each
+// validator gets the following disjoint slice.
+let PregenerationOptionsForPeer (opts: CoreSetOptions) (index: int) : CoreSetOptions =
     if index < 0 || index >= opts.nodeCount then
         invalidArg "index" "Invalid validator index"
 

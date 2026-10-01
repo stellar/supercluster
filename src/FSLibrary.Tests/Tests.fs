@@ -1247,37 +1247,55 @@ let ``Min block time candidates are the whole seconds in the range, bounds inclu
     Assert.Empty(MinBlockTimeTest.wholeSecondCandidates 1100 1900)
 
 [<Fact>]
+let ``Equal min block time bounds evaluate exactly that close time`` () =
+    Assert.Equal<int list>([ 4000 ], MinBlockTimeTest.closeTimeCandidates 4000 4000)
+    // An explicit target is not rounded to a whole second.
+    Assert.Equal<int list>([ 1500 ], MinBlockTimeTest.closeTimeCandidates 1500 1500)
+    Assert.Equal<int list>([ 4000; 5000 ], MinBlockTimeTest.closeTimeCandidates 4000 5000)
+    Assert.Empty(MinBlockTimeTest.closeTimeCandidates 1100 1900)
+
+// The search result and the candidates it evaluated, in order.
+let private searchMinPassingTrace (candidates: int list) (passes: int -> bool) : int option * int list =
+    let evaluated = ref []
+
+    let result =
+        MinBlockTimeTest.searchMinPassing
+            candidates
+            (fun t ->
+                evaluated.Value <- evaluated.Value @ [ t ]
+                passes t)
+
+    result, evaluated.Value
+
+[<Fact>]
 let ``Min block time search finds the smallest passing candidate`` () =
     let candidates = [ 1000 .. 1000 .. 5000 ]
 
     for threshold in candidates do
-        let evaluated = System.Collections.Generic.List<int>()
-
-        let result =
-            MinBlockTimeTest.searchMinPassing
-                candidates
-                (fun t ->
-                    evaluated.Add t
-                    t >= threshold)
-
+        let result, evaluated = searchMinPassingTrace candidates (fun t -> t >= threshold)
         Assert.Equal(Some threshold, result)
-        Assert.InRange(evaluated.Count, 1, 3)
+        // Binary search over 5 candidates: at most ceil(log2 6) = 3 evaluations.
+        Assert.InRange(evaluated.Length, 1, 3)
 
-    Assert.Equal(None, MinBlockTimeTest.searchMinPassing candidates (fun _ -> false))
-    Assert.Equal(None, MinBlockTimeTest.searchMinPassing [] (fun _ -> true))
+    Assert.Equal(None, fst (searchMinPassingTrace candidates (fun _ -> false)))
+    Assert.Equal(None, fst (searchMinPassingTrace [] (fun _ -> true)))
 
     // The default [4000, 5000] range evaluates 4000 first, then 5000 only if 4000 fails.
-    let evaluated = System.Collections.Generic.List<int>()
+    Assert.Equal((Some 5000, [ 4000; 5000 ]), searchMinPassingTrace [ 4000; 5000 ] (fun t -> t >= 5000))
+    Assert.Equal((Some 4000, [ 4000 ]), searchMinPassingTrace [ 4000; 5000 ] (fun t -> t >= 4000))
+    // A single candidate is evaluated once.
+    Assert.Equal((None, [ 1500 ]), searchMinPassingTrace [ 1500 ] (fun _ -> false))
 
-    let result =
-        MinBlockTimeTest.searchMinPassing
-            [ 4000; 5000 ]
-            (fun t ->
-                evaluated.Add t
-                t >= 5000)
+// The shape of a MinBlockTimeMixed milestone run: --tier-1-orgs-to-add 9 gives
+// 19 organizations of 3 validators, so 57 load generators. 1,200,000 genesis
+// accounts do not divide evenly among 57 (1,200,000 = 57 * 21,052 + 36), so
+// the tests below see both floored and spread values.
+let private milestoneOrgsToAdd = 9
 
-    Assert.Equal(Some 5000, result)
-    Assert.Equal<int list>([ 4000; 5000 ], List.ofSeq evaluated)
+let private milestoneOrgs = 10 + milestoneOrgsToAdd
+let private milestoneValidators = milestoneOrgs * 3
+let private milestoneAccounts = 1200000
+let private milestoneAccountsPerValidator = milestoneAccounts / milestoneValidators
 
 [<Theory>]
 [<InlineData(1000)>]
@@ -1285,29 +1303,34 @@ let ``Min block time search finds the smallest passing candidate`` () =
 [<InlineData(3000)>]
 [<InlineData(5000)>]
 let ``All validator partitions preserve rate duration and disjoint account slices`` (rate: int) =
+    let durationSec = 960
+
     let full =
         { LoadGen.GetDefault() with
               mode = MixedPregenSACPayment
-              accounts = 1200000
+              accounts = milestoneAccounts
               txrate = rate
-              txs = rate * 960
+              txs = rate * durationSec
               classicTxRate = Some 0
               sorobanTxRate = Some rate }
 
-    let shares = StellarStatefulSets.PartitionValidatorLoad 57 true full
-    Assert.Equal(57, shares.Length)
+    let shares = StellarStatefulSets.PartitionValidatorLoad milestoneValidators true full
+    Assert.Equal(milestoneValidators, shares.Length)
+    // Rates are spread, at most one apart, so they add up to the offered rate;
+    // each transaction budget is its rate for the whole duration.
     Assert.Equal(rate, shares |> List.sumBy (fun s -> s.txrate))
-    Assert.Equal(rate * 960, shares |> List.sumBy (fun s -> s.txs))
-    Assert.Equal(1199964, shares |> List.sumBy (fun s -> s.accounts))
+    Assert.Equal(rate * durationSec, shares |> List.sumBy (fun s -> s.txs))
     let rates = shares |> List.map (fun s -> s.txrate)
     Assert.True(List.max rates - List.min rates <= 1)
+    // Accounts are floored: 57 * 21,052 = 1,199,964, leaving 36 unused.
+    Assert.Equal(milestoneValidators * milestoneAccountsPerValidator, shares |> List.sumBy (fun s -> s.accounts))
 
     shares
     |> List.iteri
         (fun i s ->
-            Assert.Equal(21052, s.accounts)
-            Assert.Equal(i * 21052, s.offset)
-            Assert.Equal(s.txrate * 960, s.txs)
+            Assert.Equal(milestoneAccountsPerValidator, s.accounts)
+            Assert.Equal(i * milestoneAccountsPerValidator, s.offset)
+            Assert.Equal(s.txrate * durationSec, s.txs)
             Assert.Equal(Some s.txrate, s.sorobanTxRate)
             Assert.Equal(Some 0, s.classicTxRate)
             Assert.True(s.offset + s.accounts <= full.accounts))
@@ -1316,49 +1339,104 @@ let ``All validator partitions preserve rate duration and disjoint account slice
         Assert.True(a.offset + a.accounts <= b.offset)
 
 [<Fact>]
-let ``57 validator topology and initialization match every generator partition`` () =
-    let sets = StableApproximateTier1CoreSetsWithExtraOrgs "frozen-image" false 9
-    Assert.Equal(19, sets.Length)
-    Assert.Equal(57, sets |> List.sumBy (fun s -> s.options.nodeCount))
+let ``Partition spreads rates but floors accounts and even-split txs`` () =
+    // 3 generators, and every value leaves a remainder.
+    let full =
+        { LoadGen.GetDefault() with
+              accounts = 1000
+              txrate = 100
+              txs = 30001
+              spikesize = 10 }
+
+    let shares = StellarStatefulSets.PartitionValidatorLoad 3 false full
+    let field f = shares |> List.map f
+    // Rates and spike sizes are spread: the first generators each take one of
+    // the remainder, so the shares still add up (100 = 34 + 33 + 33).
+    Assert.Equal<int list>([ 34; 33; 33 ], field (fun s -> s.txrate))
+    Assert.Equal<int list>([ 4; 3; 3 ], field (fun s -> s.spikesize))
+    // Accounts are floored to 1000 / 3 = 333 per generator, offset by slice,
+    // so the last account is unused.
+    Assert.Equal<int list>([ 333; 333; 333 ], field (fun s -> s.accounts))
+    Assert.Equal<int list>([ 0; 333; 666 ], field (fun s -> s.offset))
+    // Without a fixed duration each generator gets 30001 / 3 = 10000 txs,
+    // floored too.
+    Assert.Equal<int list>([ 10000; 10000; 10000 ], field (fun s -> s.txs))
+
+[<Fact>]
+let ``Fixed duration partition spreads classic and Soroban rates separately`` () =
+    let full =
+        { LoadGen.GetDefault() with
+              accounts = 900
+              txrate = 15
+              txs = 15 * 300
+              classicTxRate = Some 10
+              sorobanTxRate = Some 5 }
+
+    let shares = StellarStatefulSets.PartitionValidatorLoad 3 true full
+    let field f = shares |> List.map f
+    Assert.Equal<int option list>([ Some 4; Some 3; Some 3 ], field (fun s -> s.classicTxRate))
+    Assert.Equal<int option list>([ Some 2; Some 2; Some 1 ], field (fun s -> s.sorobanTxRate))
+    // Each generator's rate is the sum of its two streams, and its budget is
+    // that rate for the full 300 s, so the budgets add up exactly.
+    Assert.Equal<int list>([ 6; 5; 4 ], field (fun s -> s.txrate))
+    Assert.Equal<int list>([ 1800; 1500; 1200 ], field (fun s -> s.txs))
+    Assert.Equal(full.txs, shares |> List.sumBy (fun s -> s.txs))
+
+[<Fact>]
+let ``Milestone topology pregenerates each validator's slice of its load partition`` () =
+    let sets =
+        StableApproximateTier1CoreSetsWithExtraOrgs "frozen-image" false milestoneOrgsToAdd
+
+    Assert.Equal(milestoneOrgs, sets.Length)
+    Assert.Equal(milestoneValidators, sets |> List.sumBy (fun s -> s.options.nodeCount))
 
     let full =
         { LoadGen.GetDefault() with
               mode = MixedPregenSACPayment
-              accounts = 1200000
+              accounts = milestoneAccounts
               txrate = 5000
-              txs = 4800000
+              txs = 5000 * 960
               classicTxRate = Some 0
               sorobanTxRate = Some 5000 }
 
-    let shares = StellarStatefulSets.PartitionValidatorLoad 57 true full
+    let shares = StellarStatefulSets.PartitionValidatorLoad milestoneValidators true full
     let keys = sets |> List.collect (fun s -> s.keys |> Array.toList)
-    Assert.Equal(57, keys |> List.map (fun k -> k.AccountId) |> Set.ofList |> Set.count)
+    Assert.Equal(milestoneValidators, keys |> List.map (fun k -> k.AccountId) |> Set.ofList |> Set.count)
 
     sets
     |> List.iteri
         (fun orgIndex cs ->
             Assert.Equal(Some true, cs.options.tier1)
             Assert.Equal(3, cs.options.nodeCount)
-            Assert.Equal(57, cs.options.preferredPeersMap.Value.Count)
+            // Full mesh: every validator prefers the other 56.
+            Assert.Equal(milestoneValidators, cs.options.preferredPeersMap.Value.Count)
 
             for peers in cs.options.preferredPeersMap.Value.Values do
-                Assert.Equal(56, peers.Length)
+                Assert.Equal(milestoneValidators - 1, peers.Length)
 
             match cs.options.quorumSet with
             | ExplicitQuorum q ->
                 Assert.Equal(Some 67, q.thresholdPercent)
-                Assert.Equal(19, q.innerQuorumSets.Length)
+                Assert.Equal(milestoneOrgs, q.innerQuorumSets.Length)
 
                 for inner in q.innerQuorumSets do
                     Assert.Equal(Some 51, inner.thresholdPercent)
                     Assert.Equal(3, inner.validators.Count)
             | _ -> failwith "Expected explicit organization quorum"
 
+            // MinBlockTimeTest gives each organization the slice starting at
+            // its first validator's offset; PregenerationOptionsForPeer must
+            // then hand each validator the slice its load share uses.
             let options =
                 { cs.options with
                       initialization =
                           { cs.options.initialization with
-                                pregenerateTxs = Some(10000, 21052, orgIndex * 3 * 21052) } }
+                                pregenerateTxs =
+                                    Some(
+                                        10000,
+                                        milestoneAccountsPerValidator,
+                                        orgIndex * 3 * milestoneAccountsPerValidator
+                                    ) } }
 
             for i in 0 .. 2 do
                 let actual = PregenerationOptionsForPeer options i
@@ -1367,19 +1445,31 @@ let ``57 validator topology and initialization match every generator partition``
 
 [<Fact>]
 let ``Fixed duration partition rejects a partial second transaction budget`` () =
-    let full = { LoadGen.GetDefault() with accounts = 1200000; txrate = 5000; txs = 4800001 }
+    // Each validator's budget is its rate times the duration in whole seconds.
+    // 4,800,001 txs at 5,000 TPS is 960.0002 s, which no such budgets add up
+    // to, so the partition refuses it rather than dropping or adding a tx.
+    let full =
+        { LoadGen.GetDefault() with
+              accounts = milestoneAccounts
+              txrate = 5000
+              txs = 4800001 }
 
-    Assert.Throws<System.ArgumentException>(fun () -> StellarStatefulSets.PartitionValidatorLoad 57 true full |> ignore)
+    Assert.Throws<System.ArgumentException>
+        (fun () ->
+            StellarStatefulSets.PartitionValidatorLoad milestoneValidators true full
+            |> ignore)
     |> ignore
 
 [<Fact>]
-let ``Submission accounting includes all started validators and preserves legacy selection`` () =
-    let sets = StableApproximateTier1CoreSetsWithExtraOrgs "frozen-image" false 9
+let ``Load runs on every validator of each core set or on node 0 of each`` () =
+    let sets =
+        StableApproximateTier1CoreSetsWithExtraOrgs "frozen-image" false milestoneOrgsToAdd
+
     let selected = StellarStatefulSets.LoadgenPeerIndices true sets
-    Assert.Equal(57, selected.Length)
+    Assert.Equal(milestoneValidators, selected.Length)
 
     Assert.Equal(
-        57,
+        milestoneValidators,
         selected
         |> List.map (fun (cs, i) -> cs.keys.[i].AccountId)
         |> Set.ofList
@@ -1387,15 +1477,13 @@ let ``Submission accounting includes all started validators and preserves legacy
     )
 
     Assert.Equal<int list>(
-        [ 19; 19; 19 ],
+        [ milestoneOrgs; milestoneOrgs; milestoneOrgs ],
         [ for i in 0 .. 2 -> selected |> List.filter (fun (_, j) -> i = j) |> List.length ]
     )
-    // A one-peer-per-organization tally would incorrectly report only one third.
-    let submitted = selected |> List.sumBy (fun (_, i) -> if i = 0 then 34000 else 33000)
-    Assert.Equal(1900000, submitted)
-    let legacy = StellarStatefulSets.LoadgenPeerIndices false sets
-    Assert.Equal(19, legacy.Length)
-    Assert.All(legacy, (fun (_, i) -> Assert.Equal(0, i)))
+
+    let nodeZero = StellarStatefulSets.LoadgenPeerIndices false sets
+    Assert.Equal(milestoneOrgs, nodeZero.Length)
+    Assert.All(nodeZero, (fun (_, i) -> Assert.Equal(0, i)))
 
 [<Fact>]
 let ``--tier-1-orgs-to-add extends the synthetic tier 1 topology with diverse organizations`` () =
@@ -1459,37 +1547,24 @@ let ``--tier-1-orgs-to-add extends the synthetic tier 1 topology with diverse or
 [<Fact>]
 let ``MIXED_PREGEN runs use at most one generator per requested TPS`` () =
     let sets = StableApproximateTier1CoreSets "img" false
-    let count everyValidator tps = (MinBlockTimeTest.activeLoadGenCoreSets everyValidator tps sets).Length
-    // With load on every validator each organization brings its 3 validators.
-    Assert.Equal(10, count true 5000)
-    Assert.Equal(10, count true 30)
-    Assert.Equal(3, count true 10)
-    Assert.Equal(1, count true 2)
-    Assert.Equal(1, count true 0)
-    // One generator per organization otherwise, as upstream.
-    Assert.Equal(5, count false 5)
-    Assert.Equal(10, count false 5000)
+    let count tps = (MinBlockTimeTest.activeLoadGenCoreSets tps sets).Length
+    // Load runs on every validator, so each organization brings 3 generators:
+    // 10 TPS fits 3 organizations (9 generators), not 4 (12).
+    Assert.Equal(10, count 5000)
+    Assert.Equal(10, count 30)
+    Assert.Equal(3, count 10)
+    // Always at least one organization, even below its 3 generators.
+    Assert.Equal(1, count 2)
+    Assert.Equal(1, count 0)
 
 [<Fact>]
-let ``MIXED_PREGEN load runs on every validator in MinBlockTime runs`` () =
-    let minBlock = { ctx with runForMinBlockTime = true }
-    Assert.True(LoadOnEveryValidator minBlock MixedPregenSACPayment)
-    Assert.False(LoadOnEveryValidator minBlock GeneratePaymentLoad)
-    Assert.False(LoadOnEveryValidator ctx MixedPregenSACPayment)
+let ``MinBlockTime runs every MIXED_PREGEN mode, and only those, on every validator`` () =
+    // MinBlockTimeTest loads every validator exactly when isMixedPregenMode.
+    for mode in [ MixedPregenSACPayment; MixedPregenOZTokenTransfer; MixedPregenSoroswapSwap ] do
+        Assert.True(isMixedPregenMode mode)
 
-    // Upstream's per-node split: equal accounts and txs, offsets by slice.
-    let full =
-        { LoadGen.GetDefault() with
-              accounts = 1000
-              txrate = 100
-              txs = 30000
-              spikesize = 10 }
-
-    let shares = StellarStatefulSets.PartitionValidatorLoad 3 false full
-    Assert.Equal<int list>([ 333; 333; 333 ], shares |> List.map (fun s -> s.accounts))
-    Assert.Equal<int list>([ 0; 333; 666 ], shares |> List.map (fun s -> s.offset))
-    Assert.Equal<int list>([ 10000; 10000; 10000 ], shares |> List.map (fun s -> s.txs))
-    Assert.Equal<int list>([ 34; 33; 33 ], shares |> List.map (fun s -> s.txrate))
+    for mode in [ GeneratePaymentLoad; PayPregenerated ] do
+        Assert.False(isMixedPregenMode mode)
 
 [<Fact>]
 let ``Validators pregenerate their own account slices only when the MinBlockTime load runs on every validator`` () =

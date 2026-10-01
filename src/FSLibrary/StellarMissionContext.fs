@@ -165,10 +165,10 @@ type MissionContext =
       minBlockTimeMixedMode: string
       minBlockTimeMixedClassicTxRate: int option
       minBlockTimeMixedSorobanTxRate: int option
-      // Set by MinBlockTimeTest when its load runs on every validator
-      // (StellarKubeSpecs.LoadOnEveryValidator for the mission's actual load
-      // mode): each validator then pregenerates transactions for its own
-      // account slice (StellarKubeSpecs.PregenerationOptionsForPeer).
+      // Set by MinBlockTimeTest for MIXED_PREGEN_* load: each validator
+      // pregenerates transactions for its own account slice
+      // (StellarKubeSpecs.PregenerationOptionsForPeer), and RunMultiLoadgen
+      // runs the load on every validator rather than node 0 of each core set.
       pregenerateTxsPerValidator: bool
       runForMinBlockTime: bool
       forceOldStyleTriggerTimerPct: int
