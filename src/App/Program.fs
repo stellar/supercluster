@@ -149,7 +149,8 @@ type MissionOptions
         bimodalDrift: seq<int>,
         driftPct: int,
         ledgerCloseTimeMs: int option,
-        forceOldStyleTriggerTimer: bool option
+        forceOldStyleTriggerTimer: bool option,
+        overlayV2Optimized: bool
     ) =
 
     [<Option('k', "kubeconfig", HelpText = "Kubernetes config file", Required = false, Default = "~/.kube/config")>]
@@ -329,7 +330,7 @@ type MissionOptions
     member self.PubnetData = pubnetData
 
     [<Option("measure-e2e-latency",
-             HelpText = "Set to enable the loadgen e2e metrics",
+             HelpText = "Set to enable the loadgen e2e metrics (needs --loadgen-keys, except for MinBlockTime* missions)",
              Required = false,
              Default = false)>]
     member self.MeasureE2eLatency = measureE2eLatency
@@ -457,7 +458,7 @@ type MissionOptions
     member self.EnableParallelApply : bool = enableParallelApply
 
     [<Option("in-memory-buckets",
-             HelpText = "Enable in-memory buckets by setting BUCKETLIST_DB_INDEX_PAGE_SIZE_EXPONENT=0",
+             HelpText = "Enable in-memory buckets by setting BUCKETLIST_DB_INDEX_PAGE_SIZE_EXPONENT=0 on any mission. With --overlay-v2-optimized, perf missions already default to it.",
              Required = false,
              Default = false)>]
     member self.EnableInMemoryBuckets : bool = enableInMemoryBuckets
@@ -709,6 +710,12 @@ type MissionOptions
              Required = false)>]
     member self.ForceOldStyleTriggerTimer = forceOldStyleTriggerTimer
 
+    [<Option("overlay-v2-optimized",
+             HelpText = "Settings tuned for the experimental Rust-overlay (v2) stellar-core image, in one flag; without it missions keep upstream's configs, resources and limits. It sets: MinBlockTime* tx-set limits at 125% of the offered txs per ledger (instead of 2x), 960 s of load per candidate (instead of 300 s) and 500 ms SCP ballot/nomination timeouts (instead of 2000 ms); MinBlockTime* tx-set byte allowances that split 10 MiB by the offered classic/Soroban bytes, at least 1 MiB each (instead of core's 5 MiB each); for perf missions in-memory BucketListDB, no test tx meta, one stellar-core pod per host and 8 vCPU / no CPU limit / 16Gi validators with TOKIO_WORKER_THREADS=8 (--core-env can override it); 8 dependent-tx Soroban clusters; bounded overlay-mesh waits with restarts; and e2e latency measured on the MinBlockTime* load generators (as --measure-e2e-latency). The run log lists what it sets.",
+             Required = false,
+             Default = false)>]
+    member self.OverlayV2Optimized : bool = overlayV2Optimized
+
 let splitLabel (lab: string) : (string * string option) =
     match lab.Split ':' |> Array.toList with
     | [ x ] -> x, None
@@ -770,8 +777,10 @@ let main argv =
             if mission.LoadgenKeys.IsSome && mission.PubnetData.IsNone then
                 failwith "Error: --loadgen-keys requires --pubnet-data to be set"
 
-            if mission.MeasureE2eLatency && mission.LoadgenKeys.IsNone then
-                failwith "Error: --measure-e2e-latency requires --loadgen-keys"
+            if mission.MeasureE2eLatency
+               && mission.LoadgenKeys.IsNone
+               && MissionContext.e2eLatencyNeedsLoadgenKeys mission.Missions then
+                failwith "Error: --measure-e2e-latency requires --loadgen-keys (except for MinBlockTime* missions)"
 
             let _ = logToConsoleAndFile (sprintf "%s/stellar-supercluster.log" mission.Destination)
 
@@ -870,6 +879,7 @@ let main argv =
                                exportToPrometheus = mission.ExportToPrometheus
                                probeTimeout = mission.ProbeTimeout
                                coreResources = SmallTestResources
+                               overlayV2Optimized = mission.OverlayV2Optimized
                                keepData = mission.KeepData
                                unevenSched = mission.UnevenSched
                                oneStellarCorePerHost = mission.OneStellarCorePerHost
@@ -920,6 +930,10 @@ let main argv =
                                enableBackgroundSigValidation = mission.EnableBackgroundSigValidation
                                enableParallelApply = mission.EnableParallelApply
                                enableInMemoryBuckets = mission.EnableInMemoryBuckets
+                               // Off by default; --overlay-v2-optimized perf missions turn it on
+                               // via MissionContext.withOverlayV2PerfDefaults.
+                               disableTxMetaForTesting = false
+                               offeredTxBytesPerSec = None
                                peerFloodCapacity = mission.PeerFloodCapacity
                                peerFloodCapacityBytes = mission.PeerFloodCapacityBytes
                                outboundByteLimit = mission.OutboundByteLimit
@@ -973,6 +987,9 @@ let main argv =
                                driftPct = mission.DriftPct
                                ledgerCloseTimeMs = mission.LedgerCloseTimeMs
                                forceOldStyleTriggerTimer = mission.ForceOldStyleTriggerTimer }
+
+                         for line in MissionContext.describeOverlayV2 missionContext do
+                             LogInfo "--overlay-v2-optimized: %s" line
 
                          allMissions.[m] missionContext
 

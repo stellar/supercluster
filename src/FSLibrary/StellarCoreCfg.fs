@@ -220,14 +220,17 @@ type StellarCoreCfg =
         let logLevelCommands = List.append debugLevelCommands traceLevelCommands
         let preferredPeers = List.map (fun (x: PeerDnsName) -> x.StringName) self.preferredPeers
 
-        match self.network.missionContext.runForMaxTps with
-        | Some _ ->
-            // parallel apply feature is only supported on Postgres (for now)
-            let url = PostgreSQL(CfgVal.pgDb, CfgVal.pgUser, CfgVal.pgPassword, CfgVal.pgHost)
-            t.Add("DATABASE", url.ToString()) |> ignore
-        | None -> t.Add("DATABASE", self.database.ToString()) |> ignore
+        // Postgres whenever MissionContext.usesPostgres (see getDbUrl).
+        t.Add("DATABASE", self.database.ToString()) |> ignore
 
         t.Add("METADATA_DEBUG_LEDGERS", 0) |> ignore
+
+        // Test builds otherwise keep tx meta for every ledger, deep-copying
+        // the tx set into LedgerCloseMeta twice per ledger on the apply path.
+        // Set by the --overlay-v2-optimized perf-mission defaults; emitted
+        // only here.
+        if self.network.missionContext.disableTxMetaForTesting then
+            t.Add("DISABLE_TX_META_FOR_TESTING", true) |> ignore
 
         if self.network.missionContext.enableParallelApply then
             t.Add("EXPERIMENTAL_PARALLEL_LEDGER_APPLY", true) |> ignore
@@ -255,15 +258,13 @@ type StellarCoreCfg =
             t.Add("TESTING_IGNORE_LEDGER_TIME_UPGRADE_BOUNDS", true) |> ignore
             t.Add("FLOOD_DEMAND_BACKOFF_DELAY_MS", 1000) |> ignore
 
-        match self.network.missionContext.runForMaxTps with
-        | Some "classic" ->
-            t.Add("TESTING_MAX_CLASSIC_BYTE_ALLOWANCE", 1024 * 1024 * 9) |> ignore
-            t.Add("TESTING_MAX_SOROBAN_BYTE_ALLOWANCE", 1024 * 1024 * 1) |> ignore
-        | Some "soroban" ->
-            t.Add("TESTING_MAX_CLASSIC_BYTE_ALLOWANCE", 1024 * 1024 * 1) |> ignore
-            t.Add("TESTING_MAX_SOROBAN_BYTE_ALLOWANCE", 1024 * 1024 * 9) |> ignore
-        | Some "classic-prev-version" -> ()
-        | Some _ -> failwith "run-for-max-tps must be either classic, classic-prev-version, or soroban"
+        // Core caps each tx-set phase at its byte allowance (5 MiB by default,
+        // NetworkConstants.h) unless these test knobs are set, whatever the
+        // network limits say.
+        match StellarMissionContext.MissionContext.txSetByteAllowances self.network.missionContext with
+        | Some (classic, soroban) ->
+            t.Add("TESTING_MAX_CLASSIC_BYTE_ALLOWANCE", classic) |> ignore
+            t.Add("TESTING_MAX_SOROBAN_BYTE_ALLOWANCE", soroban) |> ignore
         | None -> ()
 
         if self.skipHighCriticalValidatorChecks
@@ -400,8 +401,8 @@ type StellarCoreCfg =
 
         match self.network.missionContext.runForMaxTps with
         | Some mode ->
-            if not self.network.missionContext.enableInMemoryBuckets then
-                t.Add("BUCKETLIST_DB_INDEX_PAGE_SIZE_EXPONENT", 0) |> ignore
+            // BUCKETLIST_DB_INDEX_PAGE_SIZE_EXPONENT is decided once below
+            // (MissionContext.inMemoryBuckets), which covers this mode too.
 
             if not self.network.missionContext.enableParallelApply then
                 t.Add("EXPERIMENTAL_PARALLEL_LEDGER_APPLY", true) |> ignore
@@ -437,7 +438,7 @@ type StellarCoreCfg =
         | Some batchSize -> t.Add("EXPERIMENTAL_TX_BATCH_MAX_SIZE", batchSize) |> ignore
         | None -> ()
 
-        if self.network.missionContext.enableInMemoryBuckets then
+        if StellarMissionContext.MissionContext.inMemoryBuckets self.network.missionContext then
             t.Add("BUCKETLIST_DB_INDEX_PAGE_SIZE_EXPONENT", 0) |> ignore
 
         match self.surveyPhaseDuration with
@@ -658,10 +659,13 @@ type NetworkCfg with
         | None -> failwith "Unable to create preferredPeers without preferredPeersMap"
 
     member self.getDbUrl(o: CoreSetOptions) : DatabaseURL =
-        match o.dbType with
-        | Postgres -> PostgreSQL(CfgVal.pgDb, CfgVal.pgUser, CfgVal.pgPassword, CfgVal.pgHost)
-        | Sqlite -> SQLite3File CfgVal.databasePath
-        | SqliteMemory -> SQLite3Memory
+        if StellarMissionContext.MissionContext.usesPostgres self.missionContext o.dbType then
+            PostgreSQL(CfgVal.pgDb, CfgVal.pgUser, CfgVal.pgPassword, CfgVal.pgHost)
+        else
+            match o.dbType with
+            | Sqlite -> SQLite3File CfgVal.databasePath
+            | SqliteMemory -> SQLite3Memory
+            | Postgres -> failwith "unreachable: usesPostgres covers the Postgres dbType"
 
     member self.StellarCoreCfgForJob(opts: CoreSetOptions) : StellarCoreCfg =
         { network = self

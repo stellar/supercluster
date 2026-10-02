@@ -14,8 +14,8 @@ open StellarCoreHTTP
 
 let maxTPSMixed (baseContext: MissionContext) =
     let context =
-        { baseContext with
-              coreResources = SimulatePubnetTier1PerfResources
+        { MissionContext.withOverlayV2PerfDefaults baseContext with
+              coreResources = MissionContext.perfMissionCoreResources baseContext SimulatePubnetTier1PerfResources
               installNetworkDelay = Some(baseContext.installNetworkDelay |> Option.defaultValue true)
               enableTailLogging = false
               // Isolate this perf run onto its own nodes so co-tenant pods from
