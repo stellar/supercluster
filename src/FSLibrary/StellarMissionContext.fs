@@ -66,6 +66,14 @@ type MissionContext =
       coreResources: CoreResources
       keepData: bool
       unevenSched: bool
+      // --one-stellar-core-per-host: this run's stellar-core StatefulSet pods
+      // (validators and watchers) carry a *required* pod anti-affinity against
+      // each other on kubernetes.io/hostname and request their limits, so each
+      // gets a worker node sized to what it may use. The placement is checked
+      // whenever pods start, and the run fails fast if they cannot be scheduled.
+      // The soft topology spread alone lets the scheduler pack them when few
+      // nodes are available.
+      oneStellarCorePerHost: bool
       // When set, this run requires exclusive use of its nodes: its pods will
       // not be scheduled onto a node hosting another run's stellar-core pods,
       // and no other run's stellar-core pods will be scheduled onto its nodes
@@ -126,6 +134,10 @@ type MissionContext =
 
       asanOptions: string option
 
+      // Extra environment for every stellar-core container (and the overlay
+      // process it spawns), as (NAME, VALUE) pairs from --core-env.
+      coreEnv: (string * string) list
+
       // Tail logging can cause the pubnet simulation missions like SorobanLoadGeneration
       // and SimulatePubnet to fail on the heartbeat handler due to what looks like a
       // server disconnection. Our solution for now is to just disable tail logging on
@@ -160,3 +172,31 @@ type MissionContext =
       driftPct: int
       ledgerCloseTimeMs: int option
       forceOldStyleTriggerTimer: bool option }
+
+module MissionContext =
+    /// Parse repeatable --core-env NAME=VALUE entries. Rejects blank or malformed entries, names that are not
+    /// environment variable names, and duplicate names, so a typo cannot silently drop a setting.
+    let parseCoreEnv (entries: seq<string>) : (string * string) list =
+        let parsed =
+            entries
+            |> Seq.map
+                (fun e ->
+                    match e.IndexOf('=') with
+                    | i when
+                        i > 0
+                        && System.Text.RegularExpressions.Regex.IsMatch(
+                            e.Substring(0, i),
+                            @"\A[A-Za-z_][A-Za-z0-9_]*\z"
+                        ) -> (e.Substring(0, i), e.Substring(i + 1))
+                    | _ ->
+                        failwithf
+                            "--core-env expects NAME=VALUE with NAME made of letters, digits and underscores, not starting with a digit; got '%s'"
+                            e)
+            |> List.ofSeq
+
+        let names = parsed |> List.map fst
+
+        if List.length names <> (names |> List.distinct |> List.length) then
+            failwithf "--core-env has duplicate names: %A" names
+
+        parsed
