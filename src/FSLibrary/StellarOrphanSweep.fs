@@ -114,16 +114,15 @@ let private sweepWithCutoff (cutoff: DateTime) (kube: Kubernetes) (ns: string) (
 
     // PCv2 workers are bare pods, so nothing else in this sweep would reap them.
     // Restricted to ownerless pods: everything else goes away with its controller.
+    // Listed here, after the helm uninstalls above, so pods they already removed are not deleted again.
     sweepKind
         apiRateLimit
         "Pod"
         (fun () ->
-            podItems
+            kube.ListNamespacedPod(namespaceParameter = ns).Items
             |> Seq.filter (fun p -> isNull p.Metadata.OwnerReferences || p.Metadata.OwnerReferences.Count = 0)
             |> Seq.map (fun p -> p.Metadata))
-        (fun n ->
-            kube.DeleteNamespacedPod(namespaceParameter = ns, name = n, propagationPolicy = "Foreground")
-            |> ignore)
+        (fun n -> kube.DeleteNamespacedPod(namespaceParameter = ns, name = n) |> ignore)
         cutoff
 
     sweepKind
