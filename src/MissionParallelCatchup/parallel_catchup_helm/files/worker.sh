@@ -9,6 +9,7 @@ if [ -z "$FAILED_QUEUE" ]; then echo "FAILED_QUEUE not set"; exit 1; fi
 if [ -z "$SUCCESS_QUEUE" ]; then echo "SUCCESS_QUEUE not set"; exit 1; fi
 if [ -z "$METRICS" ]; then echo "METRICS not set"; exit 1; fi
 if [ -z "$JOB_OWNERS" ]; then echo "JOB_OWNERS not set"; exit 1; fi
+if [ -z "$RETIRING" ]; then echo "RETIRING not set"; exit 1; fi
 if [ -z "$RELEASE_NAME" ]; then echo "RELEASE_NAME not set"; exit 1; fi
 if [ -z "$POD_NAME" ]; then echo "POD_NAME not set"; exit 1; fi
 
@@ -28,8 +29,9 @@ return job'
 
 while true; do
 # Stop claiming once the job monitor marks us, so the driver can remove us without interrupting a range.
-if [ "$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" SISMEMBER "retiring" "$POD_NAME")" = "1" ]; then
-    echo "$(date) $POD_NAME is retiring; not claiming."
+# Fail closed: anything but an explicit 0 (marked, or redis-cli error) means don't claim.
+if [ "$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" SISMEMBER "$RETIRING" "$POD_NAME")" != "0" ]; then
+    echo "$(date) $POD_NAME is retiring or redis unreachable; not claiming."
     sleep $SLEEP_INTERVAL
     continue
 fi
