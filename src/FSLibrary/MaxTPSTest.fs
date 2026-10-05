@@ -129,9 +129,10 @@ let maxTPSTest (context: MissionContext) (baseLoadGen: LoadGen) (setupCfg: LoadG
         if context.pubnetData.IsSome then
             FullPubnetCoreSets context true false
         else
-            StableApproximateTier1CoreSets
+            StableApproximateTier1CoreSetsWithExtraOrgs
                 context.image
                 (if context.flatQuorum.IsSome then context.flatQuorum.Value else false)
+                context.tier1OrgsToAdd
 
     // PayPregenerated requires node restart between failed iterations to ensure validity of the pregenerated transactions
     // However, large-scale simulation restarts can be slow, so for now only use the new mode on small networks
