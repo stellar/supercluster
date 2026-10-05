@@ -1,0 +1,12 @@
+{
+  "workspace": ".",
+  "csharp_sast_enabled": true,
+  "python_sast_enabled": true,
+  "sast_ignore_overrides": "python-start-process-with-shell:scripts/eks-init.py,python-subprocess-shell-true:scripts/eks-init.py",
+  "secret_scanning_enabled": true,
+  "console_tabular_enabled": true,
+  "dockerfiles": "Dockerfile.netdelay,src/MissionParallelCatchup/Dockerfile.jobmonitor",
+  "socket_tier_1_enabled": false,
+  "trivy_vuln_enabled": false,
+  "trufflehog_exclude_dir": "bin,obj,.venv,venv,__pycache__,.git,yarn.lock,package-lock.json,pnpm-lock.yaml,Cargo.lock,go.sum,poetry.lock,Gemfile.lock,composer.lock"
+}
