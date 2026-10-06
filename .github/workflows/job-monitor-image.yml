@@ -1,0 +1,62 @@
+name: Job monitor image
+
+# Builds the parallel catchup job monitor image and pushes it to
+# public.ecr.aws/stellar/ssc-job-monitor. Replaces the Jenkins job
+# Core/stellar-supercluster-job-monitor-docker. Manual runs from other
+# branches only build the image.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/MissionParallelCatchup/Dockerfile.jobmonitor'
+      - 'src/MissionParallelCatchup/job_monitor.py'
+      - '.github/workflows/job-monitor-image.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: job-monitor-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Determine image label
+        id: vars
+        run: echo "label=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build image
+        env:
+          LABEL: ${{ steps.vars.outputs.label }}
+        run: |
+          docker build \
+            -f src/MissionParallelCatchup/Dockerfile.jobmonitor \
+            -t "ssc-job-monitor:${LABEL}" \
+            src/MissionParallelCatchup
+
+      - name: ECR login
+        id: ecr-login
+        if: github.ref == 'refs/heads/main'
+        uses: stellar/actions/sdf-ecr-login@main
+        with:
+          login-public-ecr: 'true'
+
+      - name: Push to public ECR
+        if: github.ref == 'refs/heads/main'
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.ecr-public-registry }}
+          LABEL: ${{ steps.vars.outputs.label }}
+        run: |
+          set -eu
+          IMAGE="${REGISTRY}/stellar/ssc-job-monitor"
+          docker tag "ssc-job-monitor:${LABEL}" "${IMAGE}:${LABEL}"
+          docker tag "ssc-job-monitor:${LABEL}" "${IMAGE}:latest"
+          docker push "${IMAGE}:${LABEL}"
+          docker push "${IMAGE}:latest"
