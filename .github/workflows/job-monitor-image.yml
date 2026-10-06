@@ -44,7 +44,7 @@ jobs:
       - name: ECR login
         id: ecr-login
         if: github.ref == 'refs/heads/main'
-        uses: stellar/actions/sdf-ecr-login@main
+        uses: stellar/actions/sdf-ecr-login@268143092b40d0c854b08a9ad941ab9ae03527e9 # main as of stellar/actions#117
         with:
           login-public-ecr: 'true'
 
