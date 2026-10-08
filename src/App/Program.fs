@@ -67,6 +67,7 @@ type MissionOptions
         numInstances: int option,
         keepData: bool,
         unevenSched: bool,
+        oneStellarCorePerHost: bool,
         requireNodeLabels: seq<string>,
         avoidNodeLabels: seq<string>,
         tolerateNodeTaints: seq<string>,
@@ -121,6 +122,7 @@ type MissionOptions
         numPregeneratedTxs: int option,
         genesisTestAccountCount: int option,
         asanOptions: string option,
+        coreEnv: seq<string>,
         catchupSkipKnownResultsForTesting: bool option,
         checkEventsAreConsistentWithEntryDiffs: bool option,
         enableRelaxedAutoQsetConfig: bool,
@@ -295,6 +297,12 @@ type MissionOptions
              Required = false,
              Default = false)>]
     member self.UnevenSched = unevenSched
+
+    [<Option("one-stellar-core-per-host",
+             HelpText = "Place this run's stellar-core pods (validators and watchers) one per worker node, with a hard pod anti-affinity, and have each request its limits so an autoscaler provisions a node sized to what the pod may use. The placement is checked whenever pods start (creation and every restart), and the run fails with the scheduler's reason if pods cannot be scheduled: once the cluster autoscaler reports it cannot provision a node, or after 3 minutes unschedulable (10 while an autoscaler is provisioning nodes). For identical nodes across runs, also pin the instance type, e.g. --require-node-labels node.kubernetes.io/instance-type:c5.4xlarge.",
+             Required = false,
+             Default = false)>]
+    member self.OneStellarCorePerHost = oneStellarCorePerHost
 
     [<Option("require-node-labels", HelpText = "Only run on nodes with matching `key:value` labels", Required = false)>]
     member self.RequireNodeLabels = requireNodeLabels
@@ -547,6 +555,11 @@ type MissionOptions
 
     [<Option("asan-options", HelpText = "Value for ASAN_OPTIONS environment variable", Required = false)>]
     member self.asanOptions = asanOptions
+
+    [<Option("core-env",
+             HelpText = "Extra NAME=VALUE environment variables for every stellar-core container, in StatefulSet and job pods alike (the overlay process inherits them). Pass several after one flag, as --core-env A=1 B=2: repeating the flag is an error, and a quoted \"A=1 B=2\" sets only A (to \"1 B=2\"). NAME must be an environment variable name; STELLAR_CORE_PEER_SHORT_NAME and ASAN_OPTIONS are set by the harness and cannot be overridden (use --asan-options).",
+             Required = false)>]
+    member self.CoreEnv = coreEnv
 
     [<Option("catchup-skip-known-results-for-testing",
              HelpText = "when this flag is provided, pubnet parallel catchup workers will run with CATCHUP_SKIP_KNOWN_RESULTS_FOR_TESTING = true, resulting in skipping application of failed transaction and signature verification",
@@ -822,6 +835,9 @@ let main argv =
                          | true, false -> failwith "Error: --benchmark-only requires --benchmark-infra to be set"
                          | _ -> ()
 
+                         let coreEnv = MissionContext.parseCoreEnv mission.CoreEnv
+                         StellarKubeSpecs.rejectReservedCoreEnv coreEnv
+
                          let missionContext =
                              { MissionContext.kube = kube
                                kubeCfg = mission.KubeConfig
@@ -856,6 +872,7 @@ let main argv =
                                coreResources = SmallTestResources
                                keepData = mission.KeepData
                                unevenSched = mission.UnevenSched
+                               oneStellarCorePerHost = mission.OneStellarCorePerHost
                                // Off by default; perf-sensitive missions (Max TPS, Min Block Time)
                                // turn this on themselves via their MissionContext override.
                                dedicatedNodes = false
@@ -925,6 +942,7 @@ let main argv =
                                updateSorobanCosts = None
                                genesisTestAccountCount = mission.GenesisTestAccountCount
                                asanOptions = mission.asanOptions
+                               coreEnv = coreEnv
                                enableRelaxedAutoQsetConfig = mission.EnableRelaxedAutoQsetConfig
                                jobMonitorExternalHost = mission.JobMonitorExternalHost
                                txBatchMaxSize = mission.TxBatchMaxSize

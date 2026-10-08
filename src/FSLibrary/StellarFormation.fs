@@ -49,6 +49,12 @@ type StellarFormation
     let mutable disposed = false
     let mutable jobNumber = 0
 
+    // Lock for WithLive's read-modify-write of networkCfg and statefulSets.
+    // Missions start and stop core sets concurrently; unserialized, one
+    // update can overwrite another's live state, rebuilding that StatefulSet
+    // with 0 replicas and leaving the network permanently short a node.
+    let stateLock = obj ()
+
     // SIGTERM (Jenkins timeout, docker stop, OOM-kill grace) and SIGINT
     // (Ctrl+C in a local dev run) both bypass the `use formation = ...`
     // binding's Dispose, so without an explicit handler the anchor delete
@@ -93,6 +99,7 @@ type StellarFormation
     member self.SetNetworkCfg(n: NetworkCfg) = networkCfg <- n
     member self.StatefulSets = statefulSets
     member self.SetStatefulSets(s: V1StatefulSet list) = statefulSets <- s
+    member self.StateLock : obj = stateLock
 
     member self.ForceCleanup() =
         LogInfo
