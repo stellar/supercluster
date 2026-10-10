@@ -150,8 +150,8 @@ let MaxTPSClassicCoreResourceRequirements : V1ResourceRequirements =
 
 let ParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
     // When doing parallel catchup, we give each container
-    // 0.25 vCPUs, 8Gi RAM and 35 GB of disk bursting to 2vCPU, 28Gi (28672Mi) and 40 GB
-    makeResourceRequirementsWithStorageLimit 250 8192 35 2000 28672 40
+    // 0.25 vCPUs, 8Gi RAM and 35 GB of disk bursting to 2vCPU, 28Gi (28672Mi) and 45 GB
+    makeResourceRequirementsWithStorageLimit 250 8192 35 2000 28672 45
 
 let NonParallelCatchupCoreResourceRequirements : V1ResourceRequirements =
     // When doing non-parallel catchup, we give each container
