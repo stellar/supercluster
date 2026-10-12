@@ -71,6 +71,7 @@ let private sweepWithCutoff (cutoff: DateTime) (kube: Kubernetes) (ns: string) (
     ApiRateLimit.sleepUntilNextRateLimitedApiCallTime apiRateLimit
 
     let stsItems = kube.ListNamespacedStatefulSet(namespaceParameter = ns).Items
+    ApiRateLimit.sleepUntilNextRateLimitedApiCallTime apiRateLimit
     let podItems = kube.ListNamespacedPod(namespaceParameter = ns).Items
 
     for release in podItems

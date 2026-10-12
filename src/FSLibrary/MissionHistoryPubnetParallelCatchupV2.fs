@@ -460,6 +460,7 @@ let historyPubnetParallelCatchupV2 (context: MissionContext) =
 
                         for pod in toRetire do
                             try
+                                ApiRateLimit.sleepUntilNextRateLimitedApiCallTime context.apiRateLimit
                                 context.kube.DeleteNamespacedPod(pod, context.namespaceProperty) |> ignore
                             with :? k8s.Autorest.HttpOperationException as ex when
                                 ex.Response.StatusCode = Net.HttpStatusCode.NotFound ->
