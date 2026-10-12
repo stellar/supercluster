@@ -186,12 +186,8 @@ def update_status_and_metrics():
                 queue_in_progress_count = len(jobs_in_progress)
                 queue_remain_count = redis_client.llen(JOB_QUEUE)
 
-            # --- Phase 1c: Owners and retiring set ---
-            # Names here are pod names ("{WORKER_PREFIX}-{i}") as worker.sh stores them in JOB_OWNERS.
-            busy = set(job_owners.values())
-            retiring = redis_client.smembers(RETIRING)
-            # --- Phase 2: Quick single-ping check of workers that own in-progress jobs (before marking) ---
-            active_workers = busy
+            # --- Phase 2: Quick single-ping check of workers that own in-progress jobs ---
+            active_workers = set(job_owners.values())
             worker_statuses = []
             workers_up = 0
             workers_down = 0
@@ -208,12 +204,13 @@ def update_status_and_metrics():
             workers_refresh_duration = time.time() - workers_refresh_start_time
             logger.info("Finished workers liveness check")
 
-            down = {s['pod'] for s in worker_statuses if s['status'] == 'down'}
-            live_busy = busy - retiring - down
-
             # --- Phase 2b: Mark surplus idle workers as retiring; worker.sh stops claiming once marked ---
+            # Names here are pod names ("{WORKER_PREFIX}-{i}") as worker.sh stores them in JOB_OWNERS.
+            down = {s['pod'] for s in worker_statuses if s['status'] == 'down'}
+            retiring = redis_client.smembers(RETIRING)
+            live_busy = active_workers - retiring - down
             candidates = sorted(w for w in (f"{WORKER_PREFIX}-{i}" for i in range(WORKER_COUNT))
-                                if w not in busy and w not in retiring)
+                                if w not in active_workers and w not in retiring)
             outstanding = queue_remain_count + queue_in_progress_count
             keep = max(outstanding, MIN_UNMARKED_WORKERS)
             to_mark = []
@@ -225,7 +222,7 @@ def update_status_and_metrics():
                 redis_client.sadd(RETIRING, *to_mark)
                 logger.info("Marked %d workers retiring (%d outstanding)", len(to_mark), outstanding)
             # Marked on an earlier pass and still idle; names stay here after the driver deletes them.
-            retirable = sorted(retiring - busy)
+            retirable = sorted(retiring - active_workers)
 
             # --- Phase 3: Retry stuck jobs (only if ALL active workers down AND in_progress non-empty) ---
             # Note: queue_in_progress_count is from Phase 1 and may be stale by this point.
