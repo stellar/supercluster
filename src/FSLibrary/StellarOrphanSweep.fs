@@ -5,6 +5,7 @@
 module StellarOrphanSweep
 
 open System
+open System.Text.RegularExpressions
 open k8s
 open k8s.Models
 
@@ -77,8 +78,11 @@ let private sweepWithCutoff (cutoff: DateTime) (kube: Kubernetes) (ns: string) (
     for release in podItems
                    |> Seq.filter (fun pod -> isOlderThan cutoff pod.Metadata)
                    |> Seq.map (fun pod -> pod.Metadata.Name)
-                   |> Seq.filter (fun name -> name.StartsWith("parallel-catchup-") && name.Contains("-stellar-core"))
-                   |> Seq.map (fun name -> name.Substring(0, name.LastIndexOf("-stellar-core")))
+                   |> Seq.filter
+                       (fun name ->
+                           name.StartsWith("parallel-catchup-")
+                           && Regex.IsMatch(name, "-stellar-core-\\d+$"))
+                   |> Seq.map (fun name -> name.Substring(0, name.LastIndexOf("-stellar-core-")))
                    |> Set.ofSeq do
         LogInfo "Orphan sweep: helm uninstall %s" release
 
