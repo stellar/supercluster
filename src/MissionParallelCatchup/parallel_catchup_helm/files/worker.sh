@@ -9,6 +9,7 @@ if [ -z "$FAILED_QUEUE" ]; then echo "FAILED_QUEUE not set"; exit 1; fi
 if [ -z "$SUCCESS_QUEUE" ]; then echo "SUCCESS_QUEUE not set"; exit 1; fi
 if [ -z "$METRICS" ]; then echo "METRICS not set"; exit 1; fi
 if [ -z "$JOB_OWNERS" ]; then echo "JOB_OWNERS not set"; exit 1; fi
+if [ -z "$RETIRING" ]; then echo "RETIRING not set"; exit 1; fi
 if [ -z "$RELEASE_NAME" ]; then echo "RELEASE_NAME not set"; exit 1; fi
 if [ -z "$POD_NAME" ]; then echo "POD_NAME not set"; exit 1; fi
 
@@ -27,6 +28,15 @@ if job then redis.call("HSET", KEYS[3], job, ARGV[1]) end
 return job'
 
 while true; do
+# Stop claiming once the job monitor marks us, so the driver can remove us without interrupting a range.
+# Fail closed: anything but an explicit 0 (marked, or redis-cli error) means don't claim.
+if [ "$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" SISMEMBER "$RETIRING" "$POD_NAME")" != "0" ]; then
+    echo "$(date) $POD_NAME is retiring or redis unreachable; not claiming."
+    sleep $SLEEP_INTERVAL
+    continue
+fi
+
+
 # Claim the next job: atomically move it from the job queue to the progress
 # queue and record this pod as its owner. Our ranges are generated in the order
 # we want to run them from left to right, so we always pull from the left
@@ -84,8 +94,7 @@ if [ $CLAIM_EXIT_CODE -eq 0 ] && [ "$CLAIM_VALID" = true ]; then
     fi
 
     # Push metrics to redis in a transaction to ensure data consistency. Retry for 5min on failures
-    # Extract the pod ordinal (last hyphen-separated segment) from pod name like "release-name-stellar-core-0"
-    core_id=$(echo "$POD_NAME" | awk -F'-' '{print $NF}')
+    core_id="$WORKER_INDEX"
     # Validate core_id was extracted successfully
     if [ -z "$core_id" ]; then
         echo "Error: Failed to extract core_id from POD_NAME: $POD_NAME"

@@ -1,5 +1,6 @@
 import os
 import redis
+import socket
 import requests
 import json
 import sys
@@ -26,6 +27,8 @@ FAILED_QUEUE = os.getenv('FAILED_QUEUE', 'failed') # SET
 PROGRESS_QUEUE = os.getenv('PROGRESS_QUEUE', 'in_progress') #LIST
 METRICS = os.getenv('METRICS', 'metrics') # SET
 JOB_OWNERS = os.getenv('JOB_OWNERS', 'job_owners') # HASH
+RETIRING = os.getenv('RETIRING', 'retiring') # SET
+MIN_UNMARKED_WORKERS = int(os.getenv('MIN_UNMARKED_WORKERS', 8))
 WORKER_PREFIX = os.getenv('WORKER_PREFIX', 'stellar-core')
 NAMESPACE = os.getenv('NAMESPACE', 'default')
 WORKER_COUNT = int(os.getenv('WORKER_COUNT', 3))
@@ -77,6 +80,7 @@ status = {
     'jobs_failed': [],
     'jobs_in_progress': [],
     'workers': [],
+    'retirable': [],
     'workers_up': 0,
     'workers_down': 0,
     'workers_refresh_duration': 0,
@@ -148,6 +152,14 @@ def ping_worker(pod_name, retries=1):
                 time.sleep(STUCK_JOB_PING_DELAY_SECS)
     return False
 
+def pod_exists(pod_name):
+    # Trailing dot skips the resolv.conf search list, so a miss costs one query.
+    try:
+        socket.gethostbyname(f"{pod_name}.{WORKER_PREFIX}.{NAMESPACE}.svc.cluster.local.")
+        return True
+    except (socket.gaierror, UnicodeError):
+        return False
+
 def update_status_and_metrics():
     global status
     mission_start_time = time.time()
@@ -192,6 +204,26 @@ def update_status_and_metrics():
             workers_refresh_duration = time.time() - workers_refresh_start_time
             logger.info("Finished workers liveness check")
 
+            # --- Phase 2b: Mark surplus idle workers as retiring; worker.sh stops claiming once marked ---
+            # Names here are pod names ("{WORKER_PREFIX}-{i}") as worker.sh stores them in JOB_OWNERS.
+            down = {s['pod'] for s in worker_statuses if s['status'] == 'down'}
+            retiring = redis_client.smembers(RETIRING)
+            live_busy = active_workers - retiring - down
+            candidates = sorted(w for w in (f"{WORKER_PREFIX}-{i}" for i in range(WORKER_COUNT))
+                                if w not in active_workers and w not in retiring)
+            outstanding = queue_remain_count + queue_in_progress_count
+            keep = max(outstanding, MIN_UNMARKED_WORKERS)
+            to_mark = []
+            # Resolve only when the name count says something could be marked: at t=0 outstanding >= fleet, so zero lookups.
+            if len(live_busy) + len(candidates) > keep:
+                unmarked_idle = [w for w in candidates if pod_exists(w)]
+                to_mark = unmarked_idle[:max(0, len(live_busy) + len(unmarked_idle) - keep)]
+            if to_mark:
+                redis_client.sadd(RETIRING, *to_mark)
+                logger.info("Marked %d workers retiring (%d outstanding)", len(to_mark), outstanding)
+            # Marked on an earlier pass and still idle; names stay here after the driver deletes them.
+            retirable = sorted(retiring - active_workers)
+
             # --- Phase 3: Retry stuck jobs (only if ALL active workers down AND in_progress non-empty) ---
             # Note: queue_in_progress_count is from Phase 1 and may be stale by this point.
             # If a job completed during Phase 2 pings, we may enter this block unnecessarily.
@@ -231,6 +263,7 @@ def update_status_and_metrics():
                     'jobs_failed': jobs_failed,
                     'jobs_in_progress': jobs_in_progress,
                     'workers': worker_statuses,
+                    'retirable': retirable,
                     'workers_up': workers_up,
                     'workers_down': workers_down,
                     'workers_refresh_duration': workers_refresh_duration,
