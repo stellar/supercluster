@@ -7,6 +7,20 @@ feeding them traffic (and/or invoking their internal load-generation testing
 subsystem). It is a second-generation tool, replacing the functionality of an
 older and now-retired package called Stellar Core commander (SCC).
 
+> [!IMPORTANT]
+> ## ⚠️ Internal testing tool—for use on Stellar's test infrastructure only
+>
+> This repository is maintained by the Stellar Development Foundation as an
+> integration testing tool for stellar-core. It is intended to run inside
+> SDF's internal test infrastructure, against short-lived test networks. It is
+> not intended to be served, deployed as a service, or exposed to external
+> networks or users, and is not supported for any other use.
+>
+> **Security researchers:** this repository is excluded from the
+> [Stellar bug bounty program](https://hackerone.com/stellar). Vulnerabilities
+> in Supercluster itself are out of scope. Vulnerabilities in stellar-core
+> should be reported against stellar-core.
+
 ## Why a new tool
 
 SSC Has the following differences from SCC:
