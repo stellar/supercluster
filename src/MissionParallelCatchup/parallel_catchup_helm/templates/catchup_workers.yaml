@@ -114,7 +114,7 @@ spec:
         app: {{ $.Release.Name }}-stellar-core
     # Note: maxSkew affects dynamic node scheduling with karpenter
     # See https://github.com/stellar/supercluster/issues/330
-    maxSkew: 2
+    maxSkew: 3
     topologyKey: kubernetes.io/hostname
     whenUnsatisfiable: DoNotSchedule
   {{- end }}
