@@ -25,6 +25,7 @@ spec:
       labels:
         app: {{ .Values.redis.hostname }}
     spec:
+      priorityClassName: {{ .Values.infraPriorityClassName }}
       containers:
       - name: redis
         image: redis:7

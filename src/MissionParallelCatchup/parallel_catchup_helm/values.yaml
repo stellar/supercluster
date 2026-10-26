@@ -60,3 +60,7 @@ range_generator:
 
 service_account:
   annotations: []
+
+# Must exist on the cluster (stellar/kube cluster-config). Puts redis, preload
+# and the job monitor ahead of the workers in the scheduling queue.
+infraPriorityClassName: catchup-infra

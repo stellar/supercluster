@@ -59,6 +59,7 @@ spec:
         prometheus.io/port: "8080"
         prometheus.io/path: "/prometheus"
     spec:
+      priorityClassName: {{ .Values.infraPriorityClassName }}
       containers:
       - name: job-monitor
         image: {{ .Values.monitor.image }}
