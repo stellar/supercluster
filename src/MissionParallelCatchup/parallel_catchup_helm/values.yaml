@@ -60,3 +60,5 @@ range_generator:
 
 service_account:
   annotations: []
+
+infraPriorityClassName: catchup-infra
