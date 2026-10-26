@@ -5,7 +5,9 @@ metadata:
 spec:
   template:
     spec:
-      priorityClassName: {{ .Values.infraPriorityClassName }}
+      {{- with .Values.infraPriorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
       containers:
       - name: preload
         image: redis:7
