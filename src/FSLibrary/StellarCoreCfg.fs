@@ -256,12 +256,13 @@ type StellarCoreCfg =
             t.Add("FLOOD_DEMAND_BACKOFF_DELAY_MS", 1000) |> ignore
 
         match self.network.missionContext.runForMaxTps with
-        | Some "classic" ->
-            t.Add("TESTING_MAX_CLASSIC_BYTE_ALLOWANCE", 1024 * 1024 * 9) |> ignore
-            t.Add("TESTING_MAX_SOROBAN_BYTE_ALLOWANCE", 1024 * 1024 * 1) |> ignore
+        | Some "classic"
         | Some "soroban" ->
-            t.Add("TESTING_MAX_CLASSIC_BYTE_ALLOWANCE", 1024 * 1024 * 1) |> ignore
-            t.Add("TESTING_MAX_SOROBAN_BYTE_ALLOWANCE", 1024 * 1024 * 9) |> ignore
+            // Lift core's tx set byte allowances and overlay message size limit
+            // so the search measures throughput rather than a byte cap
+            // (stellar-core 29 lowered MAX_TX_SET_ALLOWANCE to 4 MB). Requires
+            // stellar-core 25 or later.
+            t.Add("IGNORE_MESSAGE_LIMITS_FOR_TESTING", true) |> ignore
         | Some "classic-prev-version" -> ()
         | Some _ -> failwith "run-for-max-tps must be either classic, classic-prev-version, or soroban"
         | None -> ()
