@@ -172,6 +172,22 @@ let nCfg = MakeNetworkCfg ctx [ coreSet ] passOpt
 type Tests(output: ITestOutputHelper) =
 
     [<Fact>]
+    member __.``MaxTps modes ignore core message limits``() =
+        for mode, expected in [ Some "classic", true
+                                Some "soroban", true
+                                Some "classic-prev-version", false
+                                None, false ] do
+            let context = { ctx with runForMaxTps = mode }
+
+            for containerType in [ MainCoreContainer; InitCoreContainer ] do
+                let toml =
+                    (MakeNetworkCfg context [ coreSet ] passOpt)
+                        .StellarCoreCfg(coreSet, 1, containerType)
+                        .ToString()
+
+                Assert.Equal(expected, toml.Contains("IGNORE_MESSAGE_LIMITS_FOR_TESTING = true"))
+
+    [<Fact>]
     member __.``TOML Config looks reasonable``() =
         let cfg = nCfg.StellarCoreCfg(coreSet, 1, MainCoreContainer)
         let toml = cfg.ToString()
