@@ -147,7 +147,7 @@ type StellarFormation
         let ns = self.NetworkCfg.NamespaceProperty
         let fs = sprintf "involvedObject.name=%s" name
         self.sleepUntilNextRateLimitedApiCallTime ()
-        self.Kube.ListNamespacedEvent(namespaceParameter = ns, fieldSelector = fs)
+        self.Kube.CoreV1.ListNamespacedEvent(namespaceParameter = ns, fieldSelector = fs)
 
     member self.GetAbnormalEventsForObject(name: string) =
         let events = List.ofSeq (self.GetEventsForObject(name).Items)

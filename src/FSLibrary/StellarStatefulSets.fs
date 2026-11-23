@@ -444,6 +444,7 @@ type StellarFormation with
 
                 self
                     .Kube
+                    .CoreV1
                     .ListNamespacedEvent(
                         namespaceParameter = self.NetworkCfg.NamespaceProperty,
                         fieldSelector = sprintf "involvedObject.kind=Pod,reason=%s" reason
