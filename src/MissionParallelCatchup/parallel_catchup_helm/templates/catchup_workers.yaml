@@ -63,6 +63,10 @@ spec:
     effect: {{ .effect }}
   {{- end }}
   {{- end }}
+  dnsConfig:
+    options:
+    - name: ndots
+      value: "2"
   containers:
   - name: stellar-core
     image: {{ $.Values.worker.stellar_core_image }}

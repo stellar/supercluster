@@ -34,6 +34,13 @@ type ConfigOption =
     // container picks up a peer-specific config.
     | PeerSpecificConfigFile
 
+// ndots:2 resolves archive and S3 hosts (2+ dots) directly instead of first
+// walking the cluster search domains, which multiplied DNS load ~5x at mission
+// start and overflowed conntrack on the CoreDNS node. Short in-cluster names
+// still search first.
+let MissionPodDnsConfig () : V1PodDNSConfig =
+    V1PodDNSConfig(options = [| V1PodDNSConfigOption(name = "ndots", value = "2") |])
+
 let CoreContainerVolumeMounts (peerOrJobNames: string array) (configOpt: ConfigOption) : V1VolumeMount array =
     let arr =
         [| V1VolumeMount(name = CfgVal.dataVolumeName, mountPath = CfgVal.dataVolumePath) |]
@@ -857,7 +864,8 @@ type NetworkCfg with
                     tolerations = self.Tolerations(),
                     topologySpreadConstraints = self.TopologyConstraints(),
                     restartPolicy = "Never",
-                    shareProcessNamespace = System.Nullable<bool>(true)
+                    shareProcessNamespace = System.Nullable<bool>(true),
+                    dnsConfig = MissionPodDnsConfig()
                 ),
             metadata =
                 V1ObjectMeta(
@@ -971,7 +979,8 @@ type NetworkCfg with
                 ?affinity = self.CorePodAffinity(),
                 tolerations = self.Tolerations(),
                 topologySpreadConstraints = self.TopologyConstraints(),
-                volumes = volumes
+                volumes = volumes,
+                dnsConfig = MissionPodDnsConfig()
             )
 
         V1PodTemplateSpec(
