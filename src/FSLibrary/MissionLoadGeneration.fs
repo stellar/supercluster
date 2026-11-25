@@ -21,6 +21,7 @@ let loadGeneration (context: MissionContext) =
 
     let context =
         { context with
+              coreResources = MediumTestResources
               numAccounts = 2000
               numTxs = 2000
               txRate = 20
