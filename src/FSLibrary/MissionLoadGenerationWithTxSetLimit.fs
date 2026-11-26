@@ -22,7 +22,7 @@ let loadGenerationWithTxSetLimit (context: MissionContext) =
 
     let context =
         { context.WithSmallLoadgenOptions with
-              coreResources = MediumTestResources
+              coreResources = UpgradeResources
               numAccounts = 50000
               numTxs = 50000
               txRate = 1000
