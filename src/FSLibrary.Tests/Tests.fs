@@ -388,8 +388,7 @@ type Tests(output: ITestOutputHelper) =
     member __.``Mission pods resolve external hosts with ndots 2``() =
         let nCfg = MakeNetworkCfg { ctx with installNetworkDelay = Some false } [ coreSet ] passOpt
 
-        let ndots (spec: k8s.Models.V1PodSpec) =
-            (spec.DnsConfig.Options |> Seq.find (fun o -> o.Name = "ndots")).Value
+        let ndots (spec: k8s.Models.V1PodSpec) = (spec.DnsConfig.Options |> Seq.find (fun o -> o.Name = "ndots")).Value
 
         Assert.Equal("2", ndots (nCfg.ToPodTemplateSpec coreSet).Spec)
         Assert.Equal("2", ndots (nCfg.GetJobPodTemplateSpec "job-1" [| "catchup" |] "img" false).Spec)
