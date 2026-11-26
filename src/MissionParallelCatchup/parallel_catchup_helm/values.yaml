@@ -14,6 +14,10 @@ redis:
       memory: "100Mi"
 
 worker:
+  dnsConfig:
+    options:
+    - name: ndots
+      value: "2"
   stellar_core_image: "stellar/stellar-core:latest"
   replicas: 5
   requireNodeLabels: []
