@@ -501,7 +501,7 @@ type MissionOptions
     member self.SimulateApplyWeight = simulateApplyWeight
 
     [<Option("tier-1-orgs-to-add",
-             HelpText = "The number of tier-1 organizations to add while scaling the network in SimulatePubnet",
+             HelpText = "The number of tier-1 organizations to add: while scaling the network in SimulatePubnet and other --pubnet-data missions; otherwise, 0 (default) to 30 synthetic organizations (3 validators each) added to the synthetic Tier1 topology of the MinBlockTime* and MaxTPS* missions in a fixed order, spread over further regions (North America, Europe, Asia, South America, Oceania, Africa, Middle East).",
              Required = false)>]
     member self.Tier1OrgsToAdd = tier1OrgsToAdd
 
@@ -965,6 +965,7 @@ let main argv =
                                minBlockTimeMixedMode = mission.MinBlockTimeMixedMode
                                minBlockTimeMixedClassicTxRate = mission.MinBlockTimeMixedClassicTxRate
                                minBlockTimeMixedSorobanTxRate = mission.MinBlockTimeMixedSorobanTxRate
+                               pregenerateTxsPerValidator = false
                                runForMinBlockTime = false
                                forceOldStyleTriggerTimerPct = mission.ForceOldStyleTriggerTimerPct
                                uniformDrift = List.ofSeq mission.UniformDrift

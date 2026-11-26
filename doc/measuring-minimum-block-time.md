@@ -7,7 +7,7 @@ Supercluster provides two missions that measure the minimum ledger target close 
 
 Other than the type of load generated, these two missions are identical. They both spin up a configurable network of stellar-core nodes, then search for the smallest `ledgerTargetCloseTimeMilliseconds` value that the network can sustain, using a binary search over the range `[--min-block-time-ms, --max-block-time-ms]`. For each candidate close time `T`, the missions upgrade the network's SCP timing settings to `T` (with proportionally scaled ballot and nomination timeouts), run ~5 minutes of load at the fixed transaction rate, then check the `ledger.age.closed-histogram` metric on every node against the SLA. If the SLA is met, the missions try again with a smaller `T`; otherwise, they try with a larger `T`.
 
-The missions perform the binary search to find the minimum sustainable block time. Upon completion, the missions emit a log line of the form `Minimum sustainable block time: 4500 ms (fixed TPS 1000, image ...)`.
+The missions perform the binary search to find the minimum sustainable block time. Upon completion, the missions emit a log line of the form `Minimum sustainable block time: 4000 ms (fixed TPS 1000, image ...)`.
 
 ## SLA: pass/fail criteria
 
@@ -18,9 +18,11 @@ A candidate close time `T` is considered a **pass** if and only if, **on every n
 
 > **FIXME (P75 tolerance):** the intended P75 band is `[0.95·T, 1.05·T)` (±5%), but stellar-core currently has performance regressions that prevent the stricter band from being achievable under load. The tolerance has been temporarily widened to ±20% so the test can exercise the rest of the pipeline; tighten it back to ±5% (or narrower) once those regressions are fixed.
 
-If any node violates any of these bounds, `T` is considered a **fail** and the binary search raises its lower bound. The same is true if the load run itself errors (e.g., stellar-core's internal `loadgen-run-failed` counter increments, nodes fall out of sync, or peers report inconsistent ledger hashes) — in that case the mission treats the iteration as a fail and the search continues upward.
+If any node violates any of these bounds, `T` is considered a **fail** and the binary search raises its lower bound. The same is true if the load run itself errors (e.g., stellar-core's internal `loadgen-run-failed` counter increments, nodes fall out of sync, or peers report inconsistent ledger hashes) — in that case the mission treats the iteration as a fail and the search continues upward. If instead the load completes but its metrics cannot be read, the candidate was not measured, so the mission aborts rather than count it as a fail.
 
-The search terminates when the upper and lower bounds are within 100 ms of each other. If no candidate in the range satisfied the SLA, the mission fails with `"No block time in [lo, hi] ms satisfied the SLA at TPS N"`.
+Overlay-only candidates (`MinBlockTimeMixed`) never apply their transactions, but stellar-core's load generator still completes only once every transaction it submitted has been included in a closed ledger, so a load generator failure (such as load left out of ledgers) fails the candidate. That needs stellar-core master, or a Rust-overlay image built from 2026-07-31 on (earlier ones never count the transactions as included, so every overlay-only candidate fails). These candidates are judged while still in overlay-only mode: in addition to the close-time SLA above, the consistency and sync checks must pass and, as a cross-check after a completed load, every node must report the same `ledger.transaction.count` total, covering every offered transaction (a node still closing the last loaded ledger gets up to two close times to catch up). Otherwise, for example when a node fell further behind, the candidate fails. Apply is not re-enabled; the nodes are restarted, discarding what is left in their queues, before the next candidate.
+
+Candidate close times are always whole seconds: the search runs over the whole seconds in `[--min-block-time-ms, --max-block-time-ms]`, bounds included, so the default range evaluates `4000` ms and, only if that fails, `5000` ms. Equal bounds evaluate exactly that close time once, without rounding. If no candidate in the range satisfied the SLA, the mission fails with `"No block time in [lo, hi] ms satisfied the SLA at TPS N"`.
 
 ## Docker images with performance tests enabled
 
@@ -38,9 +40,10 @@ These parameters affect both `MinBlockTimeClassic` and `MinBlockTimeMixed` missi
 
 * `--tx-rate`: The fixed transaction rate (TPS) used for every iteration of the search. For `MinBlockTimeMixed`, this is used only when neither `--classic-tx-rate` nor `--soroban-tx-rate` is set, in which case the mission splits it evenly between classic and Soroban streams. The mission answers the question "what is the smallest block time the network can sustain at this TPS?" so choosing a TPS the network clearly cannot sustain (e.g., above the network's max TPS at default block time) will result in the mission failing with no block time satisfying the SLA.
 * `--min-block-time-ms`: Binary search lower bound, in milliseconds. Defaults to `4000`.
-* `--max-block-time-ms`: Binary search upper bound, in milliseconds. Defaults to `5000`, which is also the protocol's maximum allowed ledger target close time — setting this higher will cause the mission to fail at startup, since validators reject upgrades above the protocol cap. Must be strictly greater than `--min-block-time-ms`.
+* `--max-block-time-ms`: Binary search upper bound, in milliseconds. Defaults to `5000`, which is also the protocol's maximum allowed ledger target close time — setting this higher will cause the mission to fail at startup, since validators reject upgrades above the protocol cap. Must not be less than `--min-block-time-ms`; when the two are equal the mission evaluates exactly that close time once, with no search.
 * `--num-pregenerated-txs`: Number of pre-generated signed classic transactions to create per loadgen node. `MinBlockTimeClassic` uses these on small networks (≤30 nodes) when it automatically switches classic payment load to `PayPregenerated`; `MinBlockTimeMixed` always uses them for the classic stream in its `MIXED_PREGEN_*` mode. Defaults to `2500000`
 * `--pubnet-data`: Network topology to use. Defaults to a topology of tier 1 validators. See [Specifying network topologies](#specifying-network-topologies) for details on how to specify a custom topology.
+* `--tier-1-orgs-to-add`: Organizations (three validators each) to add to that default tier 1 topology of 10 organizations, from `0` (the default) to `30`. They are added in a fixed order (`x01`, `x02`, ...), spread over further cloud regions in North America, Europe, Asia, South America, Oceania, Africa and the Middle East; the simulated network delay between two validators grows with their distance, so larger counts also raise the network's latency floor. With `--pubnet-data`, the flag instead adds tier 1 organizations to that topology, as in `SimulatePubnet`.
 * `--netdelay-image`: Helper image providing simulated network delay for latency simulation. SDF provides a public image on dockerhub at `stellar/sdf-netdelay`.
 
 ### Additional options for mixed pre-generated classic and synthetic Soroban traffic
@@ -50,6 +53,8 @@ In addition to the parameters in the previous section, `MinBlockTimeMixed` suppo
 * `--min-block-time-mixed-mode`: Exact stellar-core loadgen mode. Must be one of `mixed_pregen_sac_payment`, `mixed_pregen_oz_token_transfer`, or `mixed_pregen_soroswap_swap`. Defaults to `mixed_pregen_sac_payment`.
 * `--classic-tx-rate`: Classic payment TPS for the pre-generated classic stream.
 * `--soroban-tx-rate`: Soroban TPS for the selected synthetic Soroban stream.
+
+The load runs on every validator of the load-generating organizations, each with its own slice of the genesis accounts, at an equal share of the offered rate for the whole load window.
 
 If neither stream-specific TPS is set, `--tx-rate` is split evenly between classic and Soroban traffic. If either stream-specific TPS is set, any omitted stream defaults to `0`, and the fixed TPS for the mission is the sum of `--classic-tx-rate` and `--soroban-tx-rate`.
 

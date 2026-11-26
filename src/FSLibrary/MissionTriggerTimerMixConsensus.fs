@@ -112,6 +112,16 @@ let private parseDrift (context: MissionContext) : ClockDriftDistribution =
     | u, [] -> failwith (sprintf "--uniform-drift requires exactly 2 values (lower,upper), got %d" u.Length)
     | [], b -> failwith (sprintf "--bimodal-drift requires exactly 4 values (min1,max1,min2,max2), got %d" b.Length)
 
+let private withOverlayOnlyMode (formation: StellarFormation) (coreSets: CoreSet list) (f: unit -> unit) =
+    LogInfo "Enabling overlay-only mode"
+    toggleOverlayOnlyMode formation coreSets
+
+    try
+        f ()
+    finally
+        LogInfo "Disabling overlay-only mode"
+        toggleOverlayOnlyMode formation coreSets
+
 let triggerTimerMixConsensus (baseContext: MissionContext) =
     // This mission assigns the trigger timer per node; a blanket setting for
     // all nodes would defeat its purpose.
